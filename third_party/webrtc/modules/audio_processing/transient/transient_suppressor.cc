@@ -17,16 +17,14 @@
 #include <deque>
 #include <set>
 
+#include "webrtc/base/scoped_ptr.h"
+#include "webrtc/common_audio/fft4g.h"
 #include "webrtc/common_audio/include/audio_util.h"
 #include "webrtc/common_audio/signal_processing/include/signal_processing_library.h"
 #include "webrtc/modules/audio_processing/transient/common.h"
 #include "webrtc/modules/audio_processing/transient/transient_detector.h"
 #include "webrtc/modules/audio_processing/ns/windows_private.h"
-extern "C" {
-#include "webrtc/modules/audio_processing/utility/fft4g.h"
-}
 #include "webrtc/system_wrappers/interface/logging.h"
-#include "webrtc/system_wrappers/interface/scoped_ptr.h"
 #include "webrtc/typedefs.h"
 
 namespace webrtc {
@@ -39,10 +37,12 @@ static const size_t kMinVoiceBin = 3;
 static const size_t kMaxVoiceBin = 60;
 
 namespace {
+
 float ComplexMagnitude(float a, float b) {
   return std::abs(a) + std::abs(b);
 }
-}
+
+}  // namespace
 
 TransientSuppressor::TransientSuppressor()
     : data_length_(0),

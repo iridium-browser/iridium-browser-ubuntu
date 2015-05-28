@@ -35,6 +35,7 @@ enum FieldTypeGroupForMetrics {
   GROUP_CREDIT_CARD_TYPE,
   GROUP_PASSWORD,
   GROUP_ADDRESS_LINE_3,
+  GROUP_USERNAME,
   NUM_FIELD_TYPE_GROUPS_FOR_METRICS
 };
 
@@ -151,6 +152,10 @@ int GetFieldTypeGroupMetric(ServerFieldType field_type,
 
     case PASSWORD_FIELD:
       group = GROUP_PASSWORD;
+      break;
+
+    case USERNAME_FIELD:
+      group = GROUP_USERNAME;
       break;
 
     case TRANSACTION:
@@ -275,6 +280,16 @@ void AutofillMetrics::LogScanCreditCardPromptMetric(
 }
 
 // static
+void AutofillMetrics::LogScanCreditCardCompleted(
+    const base::TimeDelta& duration,
+    bool completed) {
+  std::string suffix = completed ? "Completed" : "Cancelled";
+  LogUMAHistogramLongTimes("Autofill.ScanCreditCard.Duration_" + suffix,
+                           duration);
+  UMA_HISTOGRAM_BOOLEAN("Autofill.ScanCreditCard.Completed", completed);
+}
+
+// static
 void AutofillMetrics::LogDialogDismissalState(DialogDismissalState state) {
   UMA_HISTOGRAM_ENUMERATION("RequestAutocomplete.DismissalState",
                             state, NUM_DIALOG_DISMISSAL_STATES);
@@ -328,6 +343,125 @@ void AutofillMetrics::LogDialogUiDuration(
 void AutofillMetrics::LogDialogUiEvent(DialogUiEvent event) {
   UMA_HISTOGRAM_ENUMERATION("RequestAutocomplete.UiEvents", event,
                             NUM_DIALOG_UI_EVENTS);
+}
+
+// static
+void AutofillMetrics::LogUnmaskPromptEvent(UnmaskPromptEvent event) {
+  UMA_HISTOGRAM_ENUMERATION("Autofill.UnmaskPrompt.Events", event,
+                            NUM_UNMASK_PROMPT_EVENTS);
+}
+
+// static
+void AutofillMetrics::LogUnmaskPromptEventDuration(
+    const base::TimeDelta& duration,
+    UnmaskPromptEvent close_event) {
+  std::string suffix;
+  switch (close_event) {
+    case UNMASK_PROMPT_CLOSED_NO_ATTEMPTS:
+      suffix = "NoAttempts";
+      break;
+    case UNMASK_PROMPT_CLOSED_FAILED_TO_UNMASK_RETRIABLE_FAILURE:
+    case UNMASK_PROMPT_CLOSED_FAILED_TO_UNMASK_NON_RETRIABLE_FAILURE:
+      suffix = "Failure";
+      break;
+    case UNMASK_PROMPT_CLOSED_ABANDON_UNMASKING:
+      suffix = "AbandonUnmasking";
+      break;
+    case UNMASK_PROMPT_UNMASKED_CARD_FIRST_ATTEMPT:
+    case UNMASK_PROMPT_UNMASKED_CARD_AFTER_FAILED_ATTEMPTS:
+      suffix = "Success";
+      break;
+    default:
+      NOTREACHED();
+      return;
+  }
+  LogUMAHistogramLongTimes("Autofill.UnmaskPrompt.Duration", duration);
+  LogUMAHistogramLongTimes("Autofill.UnmaskPrompt.Duration." + suffix,
+                           duration);
+}
+
+// static
+void AutofillMetrics::LogTimeBeforeAbandonUnmasking(
+    const base::TimeDelta& duration) {
+  UMA_HISTOGRAM_LONG_TIMES("Autofill.UnmaskPrompt.TimeBeforeAbandonUnmasking",
+                           duration);
+}
+
+// static
+void AutofillMetrics::LogRealPanResult(
+    AutofillClient::GetRealPanResult result) {
+  GetRealPanResult metric_result;
+  switch (result) {
+    case AutofillClient::SUCCESS:
+      metric_result = GET_REAL_PAN_RESULT_SUCCESS;
+      break;
+    case AutofillClient::TRY_AGAIN_FAILURE:
+      metric_result = GET_REAL_PAN_RESULT_TRY_AGAIN_FAILURE;
+      break;
+    case AutofillClient::PERMANENT_FAILURE:
+      metric_result = GET_REAL_PAN_RESULT_PERMANENT_FAILURE;
+      break;
+    case AutofillClient::NETWORK_ERROR:
+      metric_result = GET_REAL_PAN_RESULT_NETWORK_ERROR;
+      break;
+    default:
+      NOTREACHED();
+      return;
+  }
+  UMA_HISTOGRAM_ENUMERATION("Autofill.UnmaskPrompt.GetRealPanResult",
+                            metric_result,
+                            NUM_GET_REAL_PAN_RESULTS);
+}
+
+// static
+void AutofillMetrics::LogRealPanDuration(
+    const base::TimeDelta& duration,
+    AutofillClient::GetRealPanResult result) {
+  std::string suffix;
+  switch (result) {
+    case AutofillClient::SUCCESS:
+      suffix = "Success";
+      break;
+    case AutofillClient::TRY_AGAIN_FAILURE:
+    case AutofillClient::PERMANENT_FAILURE:
+      suffix = "Failure";
+      break;
+    case AutofillClient::NETWORK_ERROR:
+      suffix = "NetworkError";
+      break;
+    default:
+      NOTREACHED();
+      return;
+  }
+  LogUMAHistogramLongTimes("Autofill.UnmaskPrompt.GetRealPanDuration",
+                           duration);
+  LogUMAHistogramLongTimes("Autofill.UnmaskPrompt.GetRealPanDuration." + suffix,
+                           duration);
+}
+
+// static
+void AutofillMetrics::LogUnmaskingDuration(
+    const base::TimeDelta& duration,
+    AutofillClient::GetRealPanResult result) {
+  std::string suffix;
+  switch (result) {
+    case AutofillClient::SUCCESS:
+      suffix = "Success";
+      break;
+    case AutofillClient::TRY_AGAIN_FAILURE:
+    case AutofillClient::PERMANENT_FAILURE:
+      suffix = "Failure";
+      break;
+    case AutofillClient::NETWORK_ERROR:
+      suffix = "NetworkError";
+      break;
+    default:
+      NOTREACHED();
+      return;
+  }
+  LogUMAHistogramLongTimes("Autofill.UnmaskPrompt.UnmaskingDuration", duration);
+  LogUMAHistogramLongTimes("Autofill.UnmaskPrompt.UnmaskingDuration." + suffix,
+                           duration);
 }
 
 // static
@@ -461,8 +595,173 @@ void AutofillMetrics::LogStoredProfileCount(size_t num_profiles) {
 }
 
 // static
+void AutofillMetrics::LogNumberOfProfilesAtAutofillableFormSubmission(
+    size_t num_profiles) {
+  UMA_HISTOGRAM_COUNTS(
+      "Autofill.StoredProfileCountAtAutofillableFormSubmission", num_profiles);
+}
+
+// static
 void AutofillMetrics::LogAddressSuggestionsCount(size_t num_suggestions) {
   UMA_HISTOGRAM_COUNTS("Autofill.AddressSuggestionsCount", num_suggestions);
+}
+
+void AutofillMetrics::LogPasswordFormQueryVolume(
+    PasswordFormQueryVolumeMetric metric) {
+  UMA_HISTOGRAM_ENUMERATION("Autofill.PasswordFormQueryVolume", metric,
+                            NUM_PASSWORD_FORM_QUERY_VOLUME_METRIC);
+}
+
+AutofillMetrics::FormEventLogger::FormEventLogger(bool is_for_credit_card)
+    : is_for_credit_card_(is_for_credit_card),
+      is_server_data_available_(false),
+      is_local_data_available_(false),
+      has_logged_interacted_(false),
+      has_logged_suggestions_shown_(false),
+      has_logged_masked_server_card_suggestion_selected_(false),
+      has_logged_suggestion_filled_(false),
+      has_logged_will_submit_(false),
+      has_logged_submitted_(false),
+      logged_suggestion_filled_was_server_data_(false),
+      logged_suggestion_filled_was_masked_server_card_(false) {
+}
+
+void AutofillMetrics::FormEventLogger::OnDidInteractWithAutofillableForm() {
+  if (!has_logged_interacted_) {
+    has_logged_interacted_ = true;
+    Log(AutofillMetrics::FORM_EVENT_INTERACTED_ONCE);
+  }
+}
+
+void AutofillMetrics::FormEventLogger::OnDidShowSuggestions() {
+  Log(AutofillMetrics::FORM_EVENT_SUGGESTIONS_SHOWN);
+  if (!has_logged_suggestions_shown_) {
+    has_logged_suggestions_shown_ = true;
+    Log(AutofillMetrics::FORM_EVENT_SUGGESTIONS_SHOWN_ONCE);
+  }
+}
+
+void AutofillMetrics::FormEventLogger::OnDidSelectMaskedServerCardSuggestion() {
+  DCHECK(is_for_credit_card_);
+  Log(AutofillMetrics::FORM_EVENT_MASKED_SERVER_CARD_SUGGESTION_SELECTED);
+  if (!has_logged_masked_server_card_suggestion_selected_) {
+    has_logged_masked_server_card_suggestion_selected_ = true;
+    Log(AutofillMetrics
+            ::FORM_EVENT_MASKED_SERVER_CARD_SUGGESTION_SELECTED_ONCE);
+  }
+}
+
+void AutofillMetrics::FormEventLogger::OnDidFillSuggestion(
+    const CreditCard& credit_card) {
+  DCHECK(is_for_credit_card_);
+  if (credit_card.record_type() == CreditCard::MASKED_SERVER_CARD)
+    Log(AutofillMetrics::FORM_EVENT_MASKED_SERVER_CARD_SUGGESTION_FILLED);
+  else if (credit_card.record_type() == CreditCard::FULL_SERVER_CARD)
+    Log(AutofillMetrics::FORM_EVENT_SERVER_SUGGESTION_FILLED);
+  else
+    Log(AutofillMetrics::FORM_EVENT_LOCAL_SUGGESTION_FILLED);
+
+  if (!has_logged_suggestion_filled_) {
+    has_logged_suggestion_filled_ = true;
+    logged_suggestion_filled_was_server_data_ =
+        credit_card.record_type() == CreditCard::MASKED_SERVER_CARD ||
+        credit_card.record_type() == CreditCard::FULL_SERVER_CARD;
+    logged_suggestion_filled_was_masked_server_card_ =
+        credit_card.record_type() == CreditCard::MASKED_SERVER_CARD;
+    if (credit_card.record_type() == CreditCard::MASKED_SERVER_CARD) {
+      Log(AutofillMetrics
+              ::FORM_EVENT_MASKED_SERVER_CARD_SUGGESTION_FILLED_ONCE);
+    } else if (credit_card.record_type() == CreditCard::FULL_SERVER_CARD) {
+      Log(AutofillMetrics::FORM_EVENT_SERVER_SUGGESTION_FILLED_ONCE);
+    } else {
+      Log(AutofillMetrics::FORM_EVENT_LOCAL_SUGGESTION_FILLED_ONCE);
+    }
+  }
+}
+
+void AutofillMetrics::FormEventLogger::OnDidFillSuggestion(
+    const AutofillProfile& profile) {
+  DCHECK(!is_for_credit_card_);
+  if (profile.record_type() == AutofillProfile::SERVER_PROFILE)
+    Log(AutofillMetrics::FORM_EVENT_SERVER_SUGGESTION_FILLED);
+  else
+    Log(AutofillMetrics::FORM_EVENT_LOCAL_SUGGESTION_FILLED);
+
+  if (!has_logged_suggestion_filled_) {
+    has_logged_suggestion_filled_ = true;
+    logged_suggestion_filled_was_server_data_ =
+        profile.record_type() == AutofillProfile::SERVER_PROFILE;
+    Log(profile.record_type() == AutofillProfile::SERVER_PROFILE
+        ? AutofillMetrics::FORM_EVENT_SERVER_SUGGESTION_FILLED_ONCE
+        : AutofillMetrics::FORM_EVENT_LOCAL_SUGGESTION_FILLED_ONCE);
+  }
+}
+
+void AutofillMetrics::FormEventLogger::OnWillSubmitForm() {
+  // Not logging this kind of form if we haven't logged a user interaction.
+  if (!has_logged_interacted_)
+    return;
+
+  // Not logging twice.
+  if (has_logged_will_submit_)
+    return;
+  has_logged_will_submit_ = true;
+
+  if (!has_logged_suggestion_filled_) {
+    Log(AutofillMetrics::FORM_EVENT_NO_SUGGESTION_WILL_SUBMIT_ONCE);
+  } else if (logged_suggestion_filled_was_masked_server_card_) {
+    Log(AutofillMetrics::
+            FORM_EVENT_MASKED_SERVER_CARD_SUGGESTION_WILL_SUBMIT_ONCE);
+  } else if (logged_suggestion_filled_was_server_data_) {
+    Log(AutofillMetrics::FORM_EVENT_SERVER_SUGGESTION_WILL_SUBMIT_ONCE);
+  } else {
+    Log(AutofillMetrics::FORM_EVENT_LOCAL_SUGGESTION_WILL_SUBMIT_ONCE);
+  }
+}
+
+void AutofillMetrics::FormEventLogger::OnFormSubmitted() {
+  // Not logging this kind of form if we haven't logged a user interaction.
+  if (!has_logged_interacted_)
+    return;
+
+  // Not logging twice.
+  if (has_logged_submitted_)
+    return;
+  has_logged_submitted_ = true;
+
+  if (!has_logged_suggestion_filled_) {
+    Log(AutofillMetrics::FORM_EVENT_NO_SUGGESTION_SUBMITTED_ONCE);
+  } else if (logged_suggestion_filled_was_masked_server_card_) {
+    Log(AutofillMetrics
+            ::FORM_EVENT_MASKED_SERVER_CARD_SUGGESTION_SUBMITTED_ONCE);
+  } else if (logged_suggestion_filled_was_server_data_) {
+    Log(AutofillMetrics::FORM_EVENT_SERVER_SUGGESTION_SUBMITTED_ONCE);
+  } else {
+    Log(AutofillMetrics::FORM_EVENT_LOCAL_SUGGESTION_SUBMITTED_ONCE);
+  }
+}
+
+void AutofillMetrics::FormEventLogger::Log(FormEvent event) const {
+  DCHECK_LT(event, NUM_FORM_EVENTS);
+  std::string name("Autofill.FormEvents.");
+  if (is_for_credit_card_)
+    name += "CreditCard";
+  else
+    name += "Address";
+  LogUMAHistogramEnumeration(name, event, NUM_FORM_EVENTS);
+
+  // Logging again in a different histogram for segmentation purposes.
+  // TODO(waltercacau): Re-evaluate if we still need such fine grained
+  // segmentation. http://crbug.com/454018
+  if (!is_server_data_available_ && !is_local_data_available_)
+    name += ".WithNoData";
+  else if (is_server_data_available_ && !is_local_data_available_)
+    name += ".WithOnlyServerData";
+  else if (!is_server_data_available_ && is_local_data_available_)
+    name += ".WithOnlyLocalData";
+  else
+    name += ".WithBothServerAndLocalData";
+  LogUMAHistogramEnumeration(name, event, NUM_FORM_EVENTS);
 }
 
 }  // namespace autofill

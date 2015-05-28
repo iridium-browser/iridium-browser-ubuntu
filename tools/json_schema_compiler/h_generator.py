@@ -74,9 +74,9 @@ class _Generator(object):
         .Append('//')
         .Append()
       )
-      for property in self._namespace.properties.values():
+      for prop in self._namespace.properties.values():
         property_code = self._type_helper.GeneratePropertyValues(
-            property,
+            prop,
             'extern const %(type)s %(name)s;')
         if property_code:
           c.Cblock(property_code)
@@ -289,7 +289,7 @@ class _Generator(object):
       .Append()
       .Concat(self._GenerateEventNameConstant(event))
       .Concat(self._GenerateCreateCallbackArguments(event))
-      .Eblock('}  // namespace %s' % event_namespace)
+      .Append('}  // namespace %s' % event_namespace)
     )
     return c
 

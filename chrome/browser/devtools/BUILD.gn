@@ -47,11 +47,8 @@ static_library("devtools") {
   ]
   sources += get_target_outputs(":devtools_protocol_constants")
 
-  if (is_win) {
-    # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
-    cflags = [ "/wd4267" ]
-  }
   configs += [
+    "//build/config/compiler:no_size_t_to_int_warning",
     "//build/config/compiler:wexit_time_destructors",
     "//third_party/WebKit/public:debug_devtools",
   ]
@@ -85,10 +82,9 @@ static_library("devtools") {
       "chrome_devtools_manager_delegate.h",
       "device/adb/adb_client_socket.cc",
       "device/adb/adb_client_socket.h",
-      "device/adb/adb_device_info_query.cc",
-      "device/adb/adb_device_info_query.h",
       "device/adb/adb_device_provider.cc",
       "device/adb/adb_device_provider.h",
+      "device/android_device_info_query.cc",
       "device/android_device_manager.cc",
       "device/android_device_manager.h",
       "device/android_web_socket.cc",

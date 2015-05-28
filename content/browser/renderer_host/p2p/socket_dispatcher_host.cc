@@ -13,9 +13,9 @@
 #include "net/base/address_list.h"
 #include "net/base/completion_callback.h"
 #include "net/base/net_errors.h"
-#include "net/base/net_log.h"
 #include "net/base/sys_addrinfo.h"
 #include "net/dns/single_request_host_resolver.h"
+#include "net/log/net_log.h"
 #include "net/url_request/url_request_context_getter.h"
 
 using content::BrowserMessageFilter;
@@ -158,7 +158,7 @@ void P2PSocketDispatcherHost::StartRtpDump(
     bool incoming,
     bool outgoing,
     const RenderProcessHost::WebRtcRtpPacketCallback& packet_callback) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
 
   if ((!dump_incoming_rtp_packet_ && incoming) ||
       (!dump_outgoing_rtp_packet_ && outgoing)) {
@@ -176,7 +176,7 @@ void P2PSocketDispatcherHost::StartRtpDump(
 
 void P2PSocketDispatcherHost::StopRtpDumpOnUIThread(bool incoming,
                                                     bool outgoing) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   BrowserThread::PostTask(
       BrowserThread::IO,
       FROM_HERE,

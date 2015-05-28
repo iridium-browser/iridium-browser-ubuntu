@@ -30,6 +30,8 @@ enum CryptoKeyAlgorithmTag {
     RsaPssTag = 13,
     EcdsaTag = 14,
     EcdhTag = 15,
+    HkdfTag = 16,
+    Pbkdf2Tag = 17,
     // Maximum allowed value is 2^32-1
 };
 
@@ -61,6 +63,7 @@ enum CryptoKeySubTag {
     // ID 3 was used by RsaKeyTag, while still behind experimental flag.
     RsaHashedKeyTag = 4,
     EcKeyTag = 5,
+    NoParamsKeyTag = 6,
     // Maximum allowed value is 255
 };
 
@@ -76,7 +79,7 @@ ScriptValueSerializerForModules::ScriptValueSerializerForModules(SerializedScrip
 {
 }
 
-ScriptValueSerializer::StateBase* ScriptValueSerializerForModules::writeDOMFileSystem(v8::Handle<v8::Value> value, ScriptValueSerializer::StateBase* next)
+ScriptValueSerializer::StateBase* ScriptValueSerializerForModules::writeDOMFileSystem(v8::Local<v8::Value> value, ScriptValueSerializer::StateBase* next)
 {
     DOMFileSystem* fs = V8DOMFileSystem::toImpl(value.As<v8::Object>());
     if (!fs)
@@ -88,7 +91,7 @@ ScriptValueSerializer::StateBase* ScriptValueSerializerForModules::writeDOMFileS
     return 0;
 }
 
-bool ScriptValueSerializerForModules::writeCryptoKey(v8::Handle<v8::Value> value)
+bool ScriptValueSerializerForModules::writeCryptoKey(v8::Local<v8::Value> value)
 {
     CryptoKey* key = V8CryptoKey::toImpl(value.As<v8::Object>());
     if (!key)
@@ -122,8 +125,8 @@ bool SerializedScriptValueWriterForModules::writeCryptoKey(const WebCryptoKey& k
         doWriteEcKey(key);
         break;
     case WebCryptoKeyAlgorithmParamsTypeNone:
-        ASSERT_NOT_REACHED();
-        return false;
+        doWriteKeyWithoutParams(key);
+        break;
     }
 
     doWriteKeyUsages(key.usages(), key.extractable());
@@ -184,6 +187,14 @@ void SerializedScriptValueWriterForModules::doWriteEcKey(const WebCryptoKey& key
     doWriteNamedCurve(key.algorithm().ecParams()->namedCurve());
 }
 
+void SerializedScriptValueWriterForModules::doWriteKeyWithoutParams(const WebCryptoKey& key)
+{
+    ASSERT(WebCryptoAlgorithm::isKdf(key.algorithm().id()));
+    append(static_cast<uint8_t>(NoParamsKeyTag));
+
+    doWriteAlgorithmId(key.algorithm().id());
+}
+
 void SerializedScriptValueWriterForModules::doWriteAlgorithmId(WebCryptoAlgorithmId id)
 {
     switch (id) {
@@ -215,6 +226,10 @@ void SerializedScriptValueWriterForModules::doWriteAlgorithmId(WebCryptoAlgorith
         return doWriteUint32(EcdsaTag);
     case WebCryptoAlgorithmIdEcdh:
         return doWriteUint32(EcdhTag);
+    case WebCryptoAlgorithmIdHkdf:
+        return doWriteUint32(HkdfTag);
+    case WebCryptoAlgorithmIdPbkdf2:
+        return doWriteUint32(Pbkdf2Tag);
     }
     ASSERT_NOT_REACHED();
 }
@@ -276,11 +291,11 @@ void SerializedScriptValueWriterForModules::doWriteKeyUsages(const WebCryptoKeyU
     doWriteUint32(value);
 }
 
-ScriptValueSerializer::StateBase* ScriptValueSerializerForModules::doSerializeValue(v8::Handle<v8::Value> value, ScriptValueSerializer::StateBase* next)
+ScriptValueSerializer::StateBase* ScriptValueSerializerForModules::doSerializeValue(v8::Local<v8::Value> value, ScriptValueSerializer::StateBase* next)
 {
     bool isDOMFileSystem = V8DOMFileSystem::hasInstance(value, isolate());
     if (isDOMFileSystem || V8CryptoKey::hasInstance(value, isolate())) {
-        v8::Handle<v8::Object> jsObject = value.As<v8::Object>();
+        v8::Local<v8::Object> jsObject = value.As<v8::Object>();
         if (jsObject.IsEmpty())
             return handleError(DataCloneError, "An object could not be cloned.", next);
         greyObject(jsObject);
@@ -295,7 +310,7 @@ ScriptValueSerializer::StateBase* ScriptValueSerializerForModules::doSerializeVa
     return ScriptValueSerializer::doSerializeValue(value, next);
 }
 
-bool SerializedScriptValueReaderForModules::read(v8::Handle<v8::Value>* value, ScriptValueCompositeCreator& creator)
+bool SerializedScriptValueReaderForModules::read(v8::Local<v8::Value>* value, ScriptValueCompositeCreator& creator)
 {
     SerializationTag tag;
     if (!readTag(&tag))
@@ -317,7 +332,7 @@ bool SerializedScriptValueReaderForModules::read(v8::Handle<v8::Value>* value, S
     return !value->IsEmpty();
 }
 
-bool SerializedScriptValueReaderForModules::readDOMFileSystem(v8::Handle<v8::Value>* value)
+bool SerializedScriptValueReaderForModules::readDOMFileSystem(v8::Local<v8::Value>* value)
 {
     uint32_t type;
     String name;
@@ -333,7 +348,7 @@ bool SerializedScriptValueReaderForModules::readDOMFileSystem(v8::Handle<v8::Val
     return true;
 }
 
-bool SerializedScriptValueReaderForModules::readCryptoKey(v8::Handle<v8::Value>* value)
+bool SerializedScriptValueReaderForModules::readCryptoKey(v8::Local<v8::Value>* value)
 {
     uint32_t rawKeyType;
     if (!doReadUint32(&rawKeyType))
@@ -357,6 +372,10 @@ bool SerializedScriptValueReaderForModules::readCryptoKey(v8::Handle<v8::Value>*
         break;
     case EcKeyTag:
         if (!doReadEcKey(algorithm, type))
+            return false;
+        break;
+    case NoParamsKeyTag:
+        if (!doReadKeyWithoutParams(algorithm, type))
             return false;
         break;
     default:
@@ -458,6 +477,16 @@ bool SerializedScriptValueReaderForModules::doReadEcKey(WebCryptoKeyAlgorithm& a
     return !algorithm.isNull();
 }
 
+bool SerializedScriptValueReaderForModules::doReadKeyWithoutParams(WebCryptoKeyAlgorithm& algorithm, WebCryptoKeyType& type)
+{
+    WebCryptoAlgorithmId id;
+    if (!doReadAlgorithmId(id))
+        return false;
+    algorithm = WebCryptoKeyAlgorithm::createWithoutParams(id);
+    type = WebCryptoKeyTypeSecret;
+    return !algorithm.isNull();
+}
+
 bool SerializedScriptValueReaderForModules::doReadAlgorithmId(WebCryptoAlgorithmId& id)
 {
     uint32_t rawId;
@@ -506,6 +535,12 @@ bool SerializedScriptValueReaderForModules::doReadAlgorithmId(WebCryptoAlgorithm
         return true;
     case EcdhTag:
         id = WebCryptoAlgorithmIdEcdh;
+        return true;
+    case HkdfTag:
+        id = WebCryptoAlgorithmIdHkdf;
+        return true;
+    case Pbkdf2Tag:
+        id = WebCryptoAlgorithmIdPbkdf2;
         return true;
     }
 

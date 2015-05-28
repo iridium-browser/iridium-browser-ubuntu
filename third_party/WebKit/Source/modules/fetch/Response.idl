@@ -6,8 +6,8 @@
 
 enum ResponseType { "basic", "cors", "default", "error", "opaque" };
 
-// FIXME: Add union types: FormData and URLSearchParams
-typedef (Blob or ArrayBuffer or ArrayBufferView or USVString) BodyInit;
+// FIXME: Add union type: URLSearchParams
+typedef (Blob or ArrayBuffer or ArrayBufferView or FormData or USVString) BodyInit;
 
 [
     Constructor(optional BodyInit body, optional Dictionary responseInitDict),
@@ -18,14 +18,18 @@ typedef (Blob or ArrayBuffer or ArrayBufferView or USVString) BodyInit;
     GarbageCollected,
     TypeChecking=Interface,
 ] interface Response {
+    [CallWith=ExecutionContext] static Response error();
     // FIXME: Implement redirect().
     readonly attribute ResponseType type;
     readonly attribute USVString url;
     readonly attribute unsigned short status;
+    readonly attribute boolean ok;
     readonly attribute ByteString statusText;
     readonly attribute Headers headers;
 
     [RaisesException] Response clone();
+
+    readonly attribute ReadableByteStream body;
 };
 
 Response implements Body;

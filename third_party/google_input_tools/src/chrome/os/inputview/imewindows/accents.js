@@ -14,12 +14,16 @@
 goog.provide('i18n.input.chrome.inputview.Accents');
 
 goog.require('goog.dom');
-goog.require('goog.math.Coordinate');
+goog.require('goog.dom.TagName');
+goog.require('goog.dom.classlist');
 goog.require('goog.style');
+goog.require('i18n.input.chrome.inputview.Css');
+goog.require('i18n.input.chrome.inputview.util');
 
 
 goog.scope(function() {
 var Accents = i18n.input.chrome.inputview.Accents;
+var Css = i18n.input.chrome.inputview.Css;
 
 
 /**
@@ -38,7 +42,8 @@ Accents.highlightedItem_ = null;
  * @private
  */
 Accents.getHighlightedAccent_ = function() {
-  return Accents.highlightedItem_ ? Accents.highlightedItem_.textContent : '';
+  return Accents.highlightedItem_ ?
+      Accents.highlightedItem_.textContent.trim() : '';
 };
 
 
@@ -54,11 +59,14 @@ Accents.highlightItem_ = function(x, y, offset) {
   var highlightedItem = Accents.getHighlightedItem_(x, y, offset);
   if (Accents.highlightedItem_ != highlightedItem) {
     if (Accents.highlightedItem_) {
-      Accents.highlightedItem_.classList.remove('highlight');
+      goog.dom.classlist.remove(Accents.highlightedItem_,
+          i18n.input.chrome.inputview.Css.ELEMENT_HIGHLIGHT);
     }
     Accents.highlightedItem_ = highlightedItem;
-    if (Accents.highlightedItem_) {
-      Accents.highlightedItem_.classList.add('highlight');
+    if (Accents.highlightedItem_ &&
+        Accents.highlightedItem_.textContent.trim()) {
+      goog.dom.classlist.add(Accents.highlightedItem_,
+          i18n.input.chrome.inputview.Css.ELEMENT_HIGHLIGHT);
     }
   }
 };
@@ -69,12 +77,13 @@ Accents.highlightItem_ = function(x, y, offset) {
  * @param {number} x The x position of finger in screen coordinate system.
  * @param {number} y The y position of finger in screen coordinate system.
  * @param {number} offset The offset to cancel highlight.
+ * @return {Element} .
  * @private
  */
 Accents.getHighlightedItem_ = function(x, y, offset) {
   var dom = goog.dom.getDomHelper();
   var row = null;
-  var rows = dom.getElementsByClass('accent-row');
+  var rows = dom.getElementsByClass(i18n.input.chrome.inputview.Css.ACCENT_ROW);
   for (var i = 0; i < rows.length; i++) {
     var coordinate = goog.style.getClientPosition(rows[i]);
     var size = goog.style.getSize(rows[i]);
@@ -118,36 +127,42 @@ Accents.getHighlightedItem_ = function(x, y, offset) {
  */
 Accents.setAccents_ = function(accents, numOfColumns, numOfRows, width,
     height, startKeyIndex) {
-  var container = document.createElement('div');
+  var TagName = goog.dom.TagName;
+  var dom = goog.dom.getDomHelper();
+  var container = dom.createDom(TagName.DIV, Css.ACCENT_CONTAINER);
   container.id = 'container';
-  container.classList.add('accent-container');
 
   var orderedAccents = Accents.reorderAccents_(accents, numOfColumns, numOfRows,
       startKeyIndex);
   var row = null;
   for (var i = 0; i < orderedAccents.length; i++) {
-    var keyElem = document.createElement('div');
+    var keyElem = dom.createDom(TagName.DIV, Css.ACCENT_KEY);
     // Even if this is an empty key, we still need to add textDiv. Otherwise,
     // the keys have layout issues.
-    var textDiv = document.createElement('div');
-    textDiv.textContent = orderedAccents[i];
-    keyElem.appendChild(textDiv);
+    var textDiv = dom.createElement(TagName.DIV);
+    var text = i18n.input.chrome.inputview.util.getVisibleCharacter(
+        orderedAccents[i]);
+    textDiv.textContent = text;
+    // If accent is a word use a smaller font size.
+    goog.dom.classlist.add(textDiv, text.length > 1 ? Css.FONT_SMALL :
+        Css.FONT);
+
+    goog.style.setStyle(textDiv, 'lineHeight', height + 'px');
+    dom.appendChild(keyElem, textDiv);
     if (!orderedAccents[i]) {
-      keyElem.classList.add('empty-key');
+      goog.dom.classlist.add(keyElem, Css.ACCENT_EMPTY_KEY);
     }
-    keyElem.style.width = width;
-    keyElem.style.height = height;
+    goog.style.setSize(keyElem, width, height);
     if (i % numOfColumns == 0) {
       if (row) {
         container.appendChild(row);
       }
-      row = document.createElement('div');
-      row.classList.add('accent-row');
+      row = dom.createDom(TagName.DIV, Css.ACCENT_ROW);
     }
-    row.appendChild(keyElem);
+    dom.appendChild(row, keyElem);
   }
-  container.appendChild(row);
-  document.body.appendChild(container);
+  dom.appendChild(container, row);
+  dom.appendChild(document.body, container);
 };
 
 
@@ -161,6 +176,7 @@ Accents.setAccents_ = function(accents, numOfColumns, numOfRows, width,
  * @param {!number} numOfColumns The number of colums of this accents window.
  * @param {!number} numOfRows The number of rows of this accents window.
  * @param {number} startKeyIndex The index of the start key in bottom row.
+ * @return {!Array.<string>} .
  * @private
  */
 Accents.reorderAccents_ = function(accents, numOfColumns, numOfRows,

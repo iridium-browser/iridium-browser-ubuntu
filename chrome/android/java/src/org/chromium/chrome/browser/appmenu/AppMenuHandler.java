@@ -16,7 +16,8 @@ import android.view.View;
 import android.widget.PopupMenu;
 
 import org.chromium.base.VisibleForTesting;
-import org.chromium.chrome.browser.UmaBridge;
+import org.chromium.chrome.R;
+import org.chromium.chrome.browser.metrics.UmaBridge;
 
 import java.util.ArrayList;
 
@@ -50,6 +51,17 @@ public class AppMenuHandler {
     }
 
     /**
+     * Notifies the menu that the contents of the menu item specified by {@code menuRowId} have
+     * changed.  This should be called if icons, titles, etc. are changing for a particular menu
+     * item while the menu is open.
+     * @param menuRowId The id of the menu item to change.  This must be a row id and not a child
+     *                  id.
+     */
+    public void menuItemContentChanged(int menuRowId) {
+        if (mAppMenu != null) mAppMenu.menuItemContentChanged(menuRowId);
+    }
+
+    /**
      * Show the app menu.
      * @param anchorView         Anchor view (usually a menu button) to be used for the popup.
      * @param isByHardwareButton True if hardware button triggered it. (oppose to software
@@ -76,8 +88,7 @@ public class AppMenuHandler {
         }
         mDelegate.prepareMenu(mMenu);
 
-        ContextThemeWrapper wrapper = new ContextThemeWrapper(mActivity,
-                mDelegate.getMenuThemeResourceId());
+        ContextThemeWrapper wrapper = new ContextThemeWrapper(mActivity, R.style.OverflowMenuTheme);
 
         if (mAppMenu == null) {
             TypedArray a = wrapper.obtainStyledAttributes(new int[]

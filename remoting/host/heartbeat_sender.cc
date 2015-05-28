@@ -7,15 +7,16 @@
 #include <math.h>
 
 #include "base/bind.h"
-#include "base/message_loop/message_loop_proxy.h"
 #include "base/rand_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringize_macros.h"
+#include "base/thread_task_runner_handle.h"
 #include "base/time/time.h"
 #include "remoting/base/constants.h"
 #include "remoting/base/logging.h"
 #include "remoting/host/server_log_entry_host.h"
 #include "remoting/signaling/iq_sender.h"
+#include "remoting/signaling/jid_util.h"
 #include "remoting/signaling/server_log_entry.h"
 #include "remoting/signaling/signal_strategy.h"
 #include "third_party/webrtc/libjingle/xmllite/xmlelement.h"
@@ -54,13 +55,13 @@ HeartbeatSender::HeartbeatSender(
     const base::Closure& on_unknown_host_id_error,
     const std::string& host_id,
     SignalStrategy* signal_strategy,
-    scoped_refptr<RsaKeyPair> key_pair,
+    const scoped_refptr<const RsaKeyPair>& host_key_pair,
     const std::string& directory_bot_jid)
     : on_heartbeat_successful_callback_(on_heartbeat_successful_callback),
       on_unknown_host_id_error_(on_unknown_host_id_error),
       host_id_(host_id),
       signal_strategy_(signal_strategy),
-      key_pair_(key_pair),
+      host_key_pair_(host_key_pair),
       directory_bot_jid_(directory_bot_jid),
       interval_ms_(kDefaultHeartbeatIntervalMs),
       sequence_id_(0),
@@ -69,7 +70,7 @@ HeartbeatSender::HeartbeatSender(
       heartbeat_succeeded_(false),
       failed_startup_heartbeat_count_(0) {
   DCHECK(signal_strategy_);
-  DCHECK(key_pair_.get());
+  DCHECK(host_key_pair_.get());
   DCHECK(thread_checker_.CalledOnValidThread());
 
   signal_strategy_->AddListener(this);
@@ -102,13 +103,43 @@ bool HeartbeatSender::OnSignalStrategyIncomingStanza(
   return false;
 }
 
+void HeartbeatSender::OnHostOfflineReasonTimeout() {
+  DCHECK(!host_offline_reason_ack_callback_.is_null());
+
+  base::Callback<void(bool)> local_callback = host_offline_reason_ack_callback_;
+  host_offline_reason_ack_callback_.Reset();
+  local_callback.Run(false);
+}
+
+void HeartbeatSender::OnHostOfflineReasonAck() {
+  if (host_offline_reason_ack_callback_.is_null()) {
+    DCHECK(!host_offline_reason_timeout_timer_.IsRunning());
+    return;
+  }
+
+  DCHECK(host_offline_reason_timeout_timer_.IsRunning());
+  host_offline_reason_timeout_timer_.Stop();
+
+  // Run the ACK callback under a clean stack via PostTask() (because the
+  // callback can end up deleting |this| HeartbeatSender [i.e. when used from
+  // HostSignalingManager]).
+  base::Closure fully_bound_ack_callback =
+      base::Bind(host_offline_reason_ack_callback_, true);
+  host_offline_reason_ack_callback_.Reset();
+  base::ThreadTaskRunnerHandle::Get()->PostTask(FROM_HERE,
+                                                fully_bound_ack_callback);
+}
+
 void HeartbeatSender::SetHostOfflineReason(
     const std::string& host_offline_reason,
-    const base::Closure& ack_callback) {
+    const base::TimeDelta& timeout,
+    const base::Callback<void(bool success)>& ack_callback) {
   DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK(host_offline_reason_ack_callback_.is_null());
   host_offline_reason_ = host_offline_reason;
   host_offline_reason_ack_callback_ = ack_callback;
+  host_offline_reason_timeout_timer_.Start(
+      FROM_HERE, timeout, this, &HeartbeatSender::OnHostOfflineReasonTimeout);
   if (signal_strategy_->GetState() == SignalStrategy::CONNECTED) {
     DoSendStanza();
   }
@@ -230,12 +261,7 @@ void HeartbeatSender::ProcessResponse(
 
       // Notify caller of SetHostOfflineReason that we got an ack.
       if (is_offline_heartbeat_response) {
-        if (!host_offline_reason_ack_callback_.is_null()) {
-          base::MessageLoop::current()->PostTask(
-              FROM_HERE,
-              host_offline_reason_ack_callback_);
-          host_offline_reason_ack_callback_.Reset();
-        }
+        OnHostOfflineReasonAck();
       }
     }
   }
@@ -308,9 +334,9 @@ scoped_ptr<XmlElement> HeartbeatSender::CreateSignature() {
   scoped_ptr<XmlElement> signature_tag(new XmlElement(
       QName(kChromotingXmlNamespace, kHeartbeatSignatureTag)));
 
-  std::string message = signal_strategy_->GetLocalJid() + ' ' +
-      base::IntToString(sequence_id_);
-  std::string signature(key_pair_->SignMessage(message));
+  std::string message = NormalizeJid(signal_strategy_->GetLocalJid()) + ' ' +
+                        base::IntToString(sequence_id_);
+  std::string signature(host_key_pair_->SignMessage(message));
   signature_tag->AddText(signature);
 
   return signature_tag.Pass();

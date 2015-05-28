@@ -1,9 +1,11 @@
 <?xml version="1.0" ?><!DOCTYPE translationbundle><translationbundle lang="ja">
 <translation id="1408730541890277710">画像の代わりに代替テキストを表示します。</translation>
+<translation id="6017514345406065928">緑</translation>
 <translation id="595639123821853262">反転グレースケール</translation>
 <translation id="8260673944985561857">カーソル ブラウジングのオプション</translation>
 <translation id="3410969471888629217">サイトのカスタマイズを無視</translation>
 <translation id="6050189528197190982">グレースケール</translation>
+<translation id="8261559421026395104">認識を改善する:</translation>
 <translation id="5094574508723441140">コントラスト大</translation>
 <translation id="8609925175482059018">&lt;span class='key'&gt;F7&lt;/span&gt; を押すとカーソル ブラウジングがオンになり、もう一度押すとオフになります。</translation>
 <translation id="3435896845095436175">有効にする</translation>
@@ -14,6 +16,8 @@
 <translation id="2394933097471027016">お試しください - このページではカーソル ブラウジングが常に有効になっています。</translation>
 <translation id="3622586652998721735">既定の配色として設定</translation>
 <translation id="2179565792157161713">詳しい説明を新しいタブで開く</translation>
+<translation id="7942349550061667556">赤</translation>
+<translation id="1555130319947370107">青</translation>
 <translation id="2471847333270902538"><ph name="SITE"/> の配色:</translation>
 <translation id="381767806621926835">「longdesc」または「aria-describedat」属性が指定された要素を右クリックすると、詳しい説明が表示されます。</translation>
 <translation id="786423340267544509">aria-describedat または longdesc 属性が指定された要素を枠線付きで表示する</translation>
@@ -31,6 +35,7 @@
 <translation id="4896660567607030658">効果なしでカーソルのみを表示する。</translation>
 <translation id="5631241868147802353">既定の配色:</translation>
 <translation id="5173942593318174089">カーソルの位置をアニメーションで強調表示する。</translation>
+<translation id="7379645913608427028">適用度</translation>
 <translation id="894241283505723656">Long Descriptions in Context Menu</translation>
 <translation id="5555153510860501336">ハイ コントラストは無効です</translation>
 <translation id="1703735871906654364">カーソル ブラウジング</translation>
@@ -38,6 +43,7 @@
 <translation id="6550675742724504774">オプション</translation>
 <translation id="5650358096585648000">視覚効果</translation>
 <translation id="4388820049312272371">カーソルの位置を短い点滅で強調表示する。</translation>
+<translation id="2223143012868735942">カスタマイズ可能なカラーフィルタをウェブページに適用して色を認識しやすくします。</translation>
 <translation id="4023902424053835668">矢印キーを使ってウェブページのテキストを閲覧します。</translation>
 <translation id="2795227192542594043">この拡張機能を使用すると、ウェブページでカーソルを移動でき、キーボードを使ってテキストを選択できます。</translation>
 <translation id="4394049700291259645">無効にする</translation>

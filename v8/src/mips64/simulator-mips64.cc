@@ -13,6 +13,7 @@
 
 #include "src/assembler.h"
 #include "src/base/bits.h"
+#include "src/codegen.h"
 #include "src/disasm.h"
 #include "src/mips64/constants-mips64.h"
 #include "src/mips64/simulator-mips64.h"
@@ -808,7 +809,7 @@ void Simulator::FlushICache(v8::internal::HashMap* i_cache,
     FlushOnePage(i_cache, start, bytes_to_flush);
     start += bytes_to_flush;
     size -= bytes_to_flush;
-    DCHECK_EQ((uint64_t)0, start & CachePage::kPageMask);
+    DCHECK_EQ((int64_t)0, start & CachePage::kPageMask);
     offset = 0;
   }
   if (size != 0) {
@@ -1994,7 +1995,7 @@ void Simulator::ConfigureTypeRegister(Instruction* instr,
           *return_addr_reg = instr->RdValue();
           break;
         case SLL:
-          *alu_out = (int32_t)rt << sa;
+          *alu_out = static_cast<int32_t>(rt) << sa;
           break;
         case DSLL:
           *alu_out = rt << sa;
@@ -2006,12 +2007,14 @@ void Simulator::ConfigureTypeRegister(Instruction* instr,
           if (rs_reg == 0) {
             // Regular logical right shift of a word by a fixed number of
             // bits instruction. RS field is always equal to 0.
-            *alu_out = (uint32_t)rt_u >> sa;
+            // Sign-extend the 32-bit result.
+            *alu_out = static_cast<int32_t>(static_cast<uint32_t>(rt_u) >> sa);
           } else {
             // Logical right-rotate of a word by a fixed number of bits. This
             // is special case of SRL instruction, added in MIPS32 Release 2.
             // RS field is equal to 00001.
-            *alu_out = ((uint32_t)rt_u >> sa) | ((uint32_t)rt_u << (32 - sa));
+            *alu_out = static_cast<int32_t>(
+                base::bits::RotateRight32((uint32_t)rt_u, sa));
           }
           break;
         case DSRL:
@@ -2039,13 +2042,13 @@ void Simulator::ConfigureTypeRegister(Instruction* instr,
           if (sa == 0) {
             // Regular logical right-shift of a word by a variable number of
             // bits instruction. SA field is always equal to 0.
-            *alu_out = (uint32_t)rt_u >> rs;
+            *alu_out = static_cast<int32_t>((uint32_t)rt_u >> rs);
           } else {
             // Logical right-rotate of a word by a variable number of bits.
             // This is special case od SRLV instruction, added in MIPS32
             // Release 2. SA field is equal to 00001.
-            *alu_out =
-                ((uint32_t)rt_u >> rs_u) | ((uint32_t)rt_u << (32 - rs_u));
+            *alu_out = static_cast<int32_t>(
+                base::bits::RotateRight32((uint32_t)rt_u, rs_u));
           }
           break;
         case DSRLV:
@@ -2057,7 +2060,7 @@ void Simulator::ConfigureTypeRegister(Instruction* instr,
             // Logical right-rotate of a word by a variable number of bits.
             // This is special case od SRLV instruction, added in MIPS32
             // Release 2. SA field is equal to 00001.
-            *alu_out = (rt_u >> rs_u) | (rt_u << (32 - rs_u));
+            *alu_out = base::bits::RotateRight32(rt_u, rs_u);
           }
           break;
         case SRAV:
@@ -2391,7 +2394,7 @@ void Simulator::DecodeTypeRegister(Instruction* instr) {
               set_fpu_register_double(fd_reg, -fs);
               break;
             case SQRT_D:
-              set_fpu_register_double(fd_reg, sqrt(fs));
+              set_fpu_register_double(fd_reg, fast_sqrt(fs));
               break;
             case C_UN_D:
               set_fcsr_bit(fcsr_cc, std::isnan(fs) || std::isnan(ft));
@@ -2973,7 +2976,7 @@ void Simulator::DecodeTypeImmediate(Instruction* instr) {
       alu_out = (rs < se_imm16) ? 1 : 0;
       break;
     case SLTIU:
-      alu_out = (rs_u < static_cast<uint32_t>(se_imm16)) ? 1 : 0;
+      alu_out = (rs_u < static_cast<uint64_t>(se_imm16)) ? 1 : 0;
       break;
     case ANDI:
         alu_out = rs & oe_imm16;

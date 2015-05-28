@@ -26,8 +26,8 @@ namespace extensions {
 
 class Extension;
 class ExtensionAPI;
-class ExtensionMessageFilter;
 class InfoMap;
+class IOThreadExtensionMessageFilter;
 class ProcessMap;
 class WindowController;
 
@@ -85,7 +85,7 @@ class ExtensionFunctionDispatcher
       InfoMap* extension_info_map,
       void* profile_id,
       int render_process_id,
-      base::WeakPtr<ExtensionMessageFilter> ipc_sender,
+      base::WeakPtr<IOThreadExtensionMessageFilter> ipc_sender,
       int routing_id,
       const ExtensionHostMsg_Request_Params& params);
 
@@ -146,7 +146,8 @@ class ExtensionFunctionDispatcher
   // Helper to run the response callback with an access denied error. Can be
   // called on any thread.
   static void SendAccessDenied(
-      const ExtensionFunction::ResponseCallback& callback);
+      const ExtensionFunction::ResponseCallback& callback,
+      functions::HistogramValue histogram_value);
 
   void DispatchWithCallbackInternal(
       const ExtensionHostMsg_Request_Params& params,

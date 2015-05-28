@@ -10,11 +10,7 @@ import constants
 import getpass
 import json
 import os
-import sys
 import time
-
-if __name__ == '__main__':
-  sys.path.insert(0, constants.SOURCE_ROOT)
 
 from chromite.cbuildbot import repository
 from chromite.cbuildbot import manifest_version
@@ -242,11 +238,6 @@ class RemoteTryJob(object):
         self._Submit(ref.path, testjob, dryrun)
     else:
       self._Submit(workdir, testjob, dryrun)
-
-  def GetTrybotConsoleLink(self):
-    """Get link to the console for the user."""
-    return ('%s/console?name=%s' % (constants.TRYBOT_DASHBOARD,
-                                    self.user_email))
 
   def GetTrybotWaterfallLink(self):
     """Get link to the waterfall for the user."""

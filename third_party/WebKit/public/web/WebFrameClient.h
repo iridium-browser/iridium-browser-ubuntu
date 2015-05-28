@@ -41,11 +41,12 @@
 #include "WebIconURL.h"
 #include "WebNavigationPolicy.h"
 #include "WebNavigationType.h"
-#include "WebSecurityOrigin.h"
+#include "WebSandboxFlags.h"
 #include "WebTextDirection.h"
 #include "public/platform/WebCommon.h"
 #include "public/platform/WebFileSystem.h"
 #include "public/platform/WebFileSystemType.h"
+#include "public/platform/WebSecurityOrigin.h"
 #include "public/platform/WebStorageQuotaCallbacks.h"
 #include "public/platform/WebStorageQuotaType.h"
 #include "public/platform/WebURLError.h"
@@ -71,10 +72,12 @@ class WebMediaPlayer;
 class WebMediaPlayerClient;
 class WebMIDIClient;
 class WebNotificationPermissionCallback;
+class WebPermissionClient;
 class WebServiceWorkerProvider;
 class WebSocketHandle;
 class WebPlugin;
 class WebPluginPlaceholder;
+class WebPresentationClient;
 class WebPushClient;
 class WebRTCPeerConnectionHandler;
 class WebScreenOrientationClient;
@@ -82,7 +85,7 @@ class WebString;
 class WebURL;
 class WebURLResponse;
 class WebUserMediaClient;
-class WebWorkerPermissionClientProxy;
+class WebWorkerContentSettingsClientProxy;
 struct WebColorSuggestion;
 struct WebConsoleMessage;
 struct WebContextMenuData;
@@ -107,17 +110,13 @@ public:
     virtual WebMediaPlayer* createMediaPlayer(WebLocalFrame*, const WebURL&, WebMediaPlayerClient*, WebContentDecryptionModule*) { return 0; }
 
     // May return null.
-    // FIXME: remove once encryptedMediaClient() is used.
-    virtual WebContentDecryptionModule* createContentDecryptionModule(WebLocalFrame*, const WebSecurityOrigin&, const WebString& keySystem) { return 0; }
-
-    // May return null.
     virtual WebApplicationCacheHost* createApplicationCacheHost(WebLocalFrame*, WebApplicationCacheHostClient*) { return 0; }
 
     // May return null.
     virtual WebServiceWorkerProvider* createServiceWorkerProvider(WebLocalFrame* frame) { return 0; }
 
     // May return null.
-    virtual WebWorkerPermissionClientProxy* createWorkerPermissionClientProxy(WebLocalFrame*) { return 0; }
+    virtual WebWorkerContentSettingsClientProxy* createWorkerContentSettingsClientProxy(WebLocalFrame* frame) { return 0; }
 
     // Create a new WebPopupMenu. In the "createExternalPopupMenu" form, the
     // client is responsible for rendering the contents of the popup menu.
@@ -148,7 +147,7 @@ public:
     // until frameDetached() is called on it.
     // Note: If you override this, you should almost certainly be overriding
     // frameDetached().
-    virtual WebFrame* createChildFrame(WebLocalFrame* parent, const WebString& frameName) { return 0; }
+    virtual WebFrame* createChildFrame(WebLocalFrame* parent, const WebString& frameName, WebSandboxFlags sandboxFlags) { return nullptr; }
 
     // This frame set its opener to null, disowning it.
     // See http://html.spec.whatwg.org/#dom-opener.
@@ -166,6 +165,9 @@ public:
 
     // This frame's name has changed.
     virtual void didChangeName(WebLocalFrame*, const WebString&) { }
+
+    // The sandbox flags have changed for a child frame of this frame.
+    virtual void didChangeSandboxFlags(WebFrame* childFrame, WebSandboxFlags flags) { }
 
     // Called when a watched CSS selector matches or stops matching.
     virtual void didMatchCSS(WebLocalFrame*, const WebVector<WebString>& newlyMatchingSelectors, const WebVector<WebString>& stoppedMatchingSelectors) { }
@@ -261,8 +263,9 @@ public:
     // The provisional load was redirected via a HTTP 3xx response.
     virtual void didReceiveServerRedirectForProvisionalLoad(WebLocalFrame*) { }
 
-    // The provisional load failed.
-    virtual void didFailProvisionalLoad(WebLocalFrame*, const WebURLError&) { }
+    // The provisional load failed. The WebHistoryCommitType is the commit type
+    // that would have been used had the load succeeded.
+    virtual void didFailProvisionalLoad(WebLocalFrame*, const WebURLError&, WebHistoryCommitType) { }
 
     // The provisional datasource is now committed.  The first part of the
     // response body has been received, and the encoding of the response
@@ -292,8 +295,10 @@ public:
     // The 'load' event was dispatched.
     virtual void didHandleOnloadEvents(WebLocalFrame*) { }
 
-    // The frame's document or one of its subresources failed to load.
-    virtual void didFailLoad(WebLocalFrame*, const WebURLError&) { }
+    // The frame's document or one of its subresources failed to load. The
+    // WebHistoryCommitType is the commit type that would have been used had the
+    // load succeeded.
+    virtual void didFailLoad(WebLocalFrame*, const WebURLError&, WebHistoryCommitType) { }
 
     // The frame's document and all of its subresources succeeded to load.
     virtual void didFinishLoad(WebLocalFrame*) { }
@@ -311,8 +316,15 @@ public:
     // The frame's manifest has changed.
     virtual void didChangeManifest(WebLocalFrame*) { }
 
+    // The frame's presentation URL has changed.
+    virtual void didChangeDefaultPresentation(WebLocalFrame*) { }
+
     // The frame's theme color has changed.
     virtual void didChangeThemeColor() { }
+
+    // Called to dispatch a load event for this frame in the FrameOwner of an
+    // out-of-process parent frame.
+    virtual void dispatchLoad() { }
 
 
     // Transition navigations -----------------------------------------------
@@ -330,6 +342,12 @@ public:
 
     // Used to access the embedder for the Push API.
     virtual WebPushClient* pushClient() { return 0; }
+
+
+    // Presentation API ----------------------------------------------------
+
+    // Used to access the embedder for the Presentation API.
+    virtual WebPresentationClient* presentationClient() { return 0; }
 
 
     // Editing -------------------------------------------------------------
@@ -548,7 +566,7 @@ public:
     // WebGL ------------------------------------------------------
 
     // Asks the embedder whether WebGL is allowed for the given WebFrame.
-    // This call is placed here instead of WebPermissionClient because this
+    // This call is placed here instead of WebContentSettingsClient because this
     // class is implemented in content/, and putting it here avoids adding
     // more public content/ APIs.
     virtual bool allowWebGL(WebLocalFrame*, bool defaultValue) { return defaultValue; }
@@ -596,13 +614,33 @@ public:
 
     // Fullscreen ----------------------------------------------------------
 
-    // Called to enter/exit fullscreen mode. If enterFullScreen returns true,
-    // then WebWidget::{will,Did}EnterFullScreen should bound resizing the
-    // WebWidget into fullscreen mode. Similarly, when exitFullScreen is
-    // called, WebWidget::{will,Did}ExitFullScreen should bound resizing the
-    // WebWidget out of fullscreen mode.
+    // Called to enter/exit fullscreen mode.
+    // After calling enterFullscreen, WebWidget::{will,Did}EnterFullScreen
+    // should bound resizing the WebWidget into fullscreen mode.
+    // Similarly, when exitFullScreen is called,
+    // WebWidget::{will,Did}ExitFullScreen should bound resizing the WebWidget
+    // out of fullscreen mode.
+    // Note: the return value is ignored.
     virtual bool enterFullscreen() { return false; }
     virtual bool exitFullscreen() { return false; }
+
+
+    // Sudden termination --------------------------------------------------
+
+    // Called when elements preventing the sudden termination of the frame
+    // become present or stop being present. |type| is the type of element
+    // (BeforeUnload handler, Unload handler).
+    enum SuddenTerminationDisablerType {
+        BeforeUnloadHandler,
+        UnloadHandler,
+    };
+    virtual void suddenTerminationDisablerChanged(bool present, SuddenTerminationDisablerType) { }
+
+
+    // Permissions ---------------------------------------------------------
+
+    // Access the embedder API for permission client.
+    virtual WebPermissionClient* permissionClient() { return 0; }
 
 protected:
     virtual ~WebFrameClient() { }

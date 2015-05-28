@@ -54,6 +54,7 @@ class HostContentSettingsMap
     // TODO(mukai): find the solution.
     INTERNAL_EXTENSION_PROVIDER = 0,
     POLICY_PROVIDER,
+    SUPERVISED_PROVIDER,
     CUSTOM_EXTENSION_PROVIDER,
     OVERRIDE_PROVIDER,
     PREF_PROVIDER,
@@ -184,6 +185,9 @@ class HostContentSettingsMap
   static bool IsSettingAllowedForType(PrefService* prefs,
                                       ContentSetting setting,
                                       ContentSettingsType content_type);
+  static bool IsDefaultSettingAllowedForType(PrefService* prefs,
+                                             ContentSetting setting,
+                                             ContentSettingsType content_type);
 
   // Returns true if the values for content type are of type dictionary/map.
   static bool ContentTypeHasCompoundValue(ContentSettingsType type);

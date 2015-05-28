@@ -21,6 +21,7 @@
 #include "chrome/test/chromedriver/chrome/geoposition.h"
 #include "chrome/test/chromedriver/chrome/javascript_dialog_manager.h"
 #include "chrome/test/chromedriver/chrome/js.h"
+#include "chrome/test/chromedriver/chrome/network_conditions.h"
 #include "chrome/test/chromedriver/chrome/status.h"
 #include "chrome/test/chromedriver/chrome/ui_events.h"
 #include "chrome/test/chromedriver/chrome/web_view.h"
@@ -470,22 +471,15 @@ Status ExecuteMouseMoveTo(
 
   WebPoint location;
   if (has_element) {
-    Status status = ScrollElementIntoView(
-        session, web_view, element_id, &location);
+    WebPoint offset(x_offset, y_offset);
+    Status status = ScrollElementIntoView(session, web_view, element_id,
+        has_offset ? &offset : nullptr, &location);
     if (status.IsError())
       return status;
   } else {
     location = session->mouse_position;
-  }
-
-  if (has_offset) {
-    location.Offset(x_offset, y_offset);
-  } else {
-    WebSize size;
-    Status status = GetElementSize(session, web_view, element_id, &size);
-    if (status.IsError())
-      return status;
-    location.Offset(size.width / 2, size.height / 2);
+    if (has_offset)
+      location.Offset(x_offset, y_offset);
   }
 
   std::list<MouseEvent> events;
@@ -873,6 +867,89 @@ Status ExecuteSetLocation(
   Status status = web_view->OverrideGeolocation(geoposition);
   if (status.IsOk())
     session->overridden_geoposition.reset(new Geoposition(geoposition));
+  return status;
+}
+
+Status ExecuteSetNetworkConditions(
+    Session* session,
+    WebView* web_view,
+    const base::DictionaryValue& params,
+    scoped_ptr<base::Value>* value) {
+  std::string network_name;
+  const base::DictionaryValue* conditions = NULL;
+  scoped_ptr<NetworkConditions> network_conditions(new NetworkConditions());
+  if (params.GetString("network_name", &network_name)) {
+    // Get conditions from preset list.
+    Status status = FindPresetNetwork(network_name, network_conditions.get());
+    if (status.IsError())
+      return status;
+  } else if (params.GetDictionary("network_conditions", &conditions)) {
+    // |latency| is required.
+    if (!conditions->GetDouble("latency", &network_conditions->latency))
+      return Status(kUnknownError,
+                    "invalid 'network_conditions' is missing 'latency'");
+
+    // Either |throughput| or the pair |download_throughput| and
+    // |upload_throughput| is required.
+    if (conditions->HasKey("throughput")) {
+      if (!conditions->GetDouble("throughput",
+                                 &network_conditions->download_throughput))
+        return Status(kUnknownError, "invalid 'throughput'");
+      conditions->GetDouble("throughput",
+                            &network_conditions->upload_throughput);
+    } else if (conditions->HasKey("download_throughput") &&
+               conditions->HasKey("upload_throughput")) {
+      if (!conditions->GetDouble("download_throughput",
+                                 &network_conditions->download_throughput) ||
+          !conditions->GetDouble("upload_throughput",
+                                 &network_conditions->upload_throughput))
+        return Status(kUnknownError,
+                      "invalid 'download_throughput' or 'upload_throughput'");
+    } else {
+      return Status(kUnknownError,
+                    "invalid 'network_conditions' is missing 'throughput' or "
+                    "'download_throughput'/'upload_throughput' pair");
+    }
+
+    // |offline| is optional.
+    if (conditions->HasKey("offline")) {
+      if (!conditions->GetBoolean("offline", &network_conditions->offline))
+        return Status(kUnknownError, "invalid 'offline'");
+    } else {
+      network_conditions->offline = false;
+    }
+  } else {
+    return Status(kUnknownError,
+                  "either 'network_conditions' or 'network_name' must be "
+                  "supplied");
+  }
+
+  session->overridden_network_conditions.reset(
+      network_conditions.release());
+  return web_view->OverrideNetworkConditions(
+      *session->overridden_network_conditions);
+}
+
+Status ExecuteDeleteNetworkConditions(
+    Session* session,
+    WebView* web_view,
+    const base::DictionaryValue& params,
+    scoped_ptr<base::Value>* value) {
+  // Chrome does not have any command to stop overriding network conditions, so
+  // we just override the network conditions with the "No throttling" preset.
+  NetworkConditions network_conditions;
+  // Get conditions from preset list.
+  Status status = FindPresetNetwork("No throttling", &network_conditions);
+  if (status.IsError())
+    return status;
+
+  status = web_view->OverrideNetworkConditions(network_conditions);
+  if (status.IsError())
+    return status;
+
+  // After we've successfully overridden the network conditions with
+  // "No throttling", we can delete them from |session|.
+  session->overridden_network_conditions.reset();
   return status;
 }
 

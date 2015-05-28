@@ -194,6 +194,8 @@ std::string RoleToString(blink::WebAXRole role)
       return result.append("SeamlessWebArea");
     case blink::WebAXRoleSearch:
       return result.append("Search");
+    case blink::WebAXRoleSearchBox:
+      return result.append("SearchBox");
     case blink::WebAXRoleSlider:
       return result.append("Slider");
     case blink::WebAXRoleSliderThumb:
@@ -208,6 +210,8 @@ std::string RoleToString(blink::WebAXRole role)
       return result.append("StaticText");
     case blink::WebAXRoleStatus:
       return result.append("Status");
+    case blink::WebAXRoleSwitch:
+      return result.append("Switch");
     case blink::WebAXRoleTabGroup:
       return result.append("TabGroup");
     case blink::WebAXRoleTabList:
@@ -509,7 +513,9 @@ WebAXObjectProxy::GetObjectTemplateBuilder(v8::Isolate* isolate) {
       .SetProperty("clickPointX", &WebAXObjectProxy::ClickPointX)
       .SetProperty("clickPointY", &WebAXObjectProxy::ClickPointY)
       .SetProperty("rowCount", &WebAXObjectProxy::RowCount)
+      .SetProperty("rowHeadersCount", &WebAXObjectProxy::RowHeadersCount)
       .SetProperty("columnCount", &WebAXObjectProxy::ColumnCount)
+      .SetProperty("columnHeadersCount", &WebAXObjectProxy::ColumnHeadersCount)
       .SetProperty("isClickable", &WebAXObjectProxy::IsClickable)
       .SetProperty("isButtonStateMixed", &WebAXObjectProxy::IsButtonStateMixed)
       .SetMethod("allAttributes", &WebAXObjectProxy::AllAttributes)
@@ -809,9 +815,24 @@ int32_t WebAXObjectProxy::RowCount() {
   return static_cast<int32_t>(accessibility_object_.rowCount());
 }
 
+int32_t WebAXObjectProxy::RowHeadersCount() {
+  accessibility_object_.updateLayoutAndCheckValidity();
+  blink::WebVector<blink::WebAXObject> headers;
+  accessibility_object_.rowHeaders(headers);
+  return static_cast<int32_t>(headers.size());
+}
+
 int32_t WebAXObjectProxy::ColumnCount() {
   accessibility_object_.updateLayoutAndCheckValidity();
   return static_cast<int32_t>(accessibility_object_.columnCount());
+}
+
+int32_t WebAXObjectProxy::ColumnHeadersCount()
+{
+  accessibility_object_.updateLayoutAndCheckValidity();
+  blink::WebVector<blink::WebAXObject> headers;
+  accessibility_object_.columnHeaders(headers);
+  return static_cast<int32_t>(headers.size());
 }
 
 bool WebAXObjectProxy::IsClickable() {

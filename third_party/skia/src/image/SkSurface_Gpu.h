@@ -21,13 +21,13 @@ public:
     SkSurface_Gpu(SkGpuDevice*);
     virtual ~SkSurface_Gpu();
 
-    virtual SkCanvas* onNewCanvas() SK_OVERRIDE;
-    virtual SkSurface* onNewSurface(const SkImageInfo&) SK_OVERRIDE;
-    virtual SkImage* onNewImageSnapshot() SK_OVERRIDE;
+    SkCanvas* onNewCanvas() override;
+    SkSurface* onNewSurface(const SkImageInfo&) override;
+    SkImage* onNewImageSnapshot(Budgeted) override;
     virtual void onDraw(SkCanvas*, SkScalar x, SkScalar y,
-                        const SkPaint*) SK_OVERRIDE;
-    virtual void onCopyOnWrite(ContentChangeMode) SK_OVERRIDE;
-    virtual void onDiscard() SK_OVERRIDE;
+                        const SkPaint*) override;
+    void onCopyOnWrite(ContentChangeMode) override;
+    void onDiscard() override;
 
     SkGpuDevice* getDevice() { return fDevice; }
 

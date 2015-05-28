@@ -26,7 +26,8 @@
 #include "core/svg/SVGFilterElement.h"
 
 #include "core/XLinkNames.h"
-#include "core/rendering/svg/RenderSVGResourceFilter.h"
+#include "core/frame/UseCounter.h"
+#include "core/layout/svg/LayoutSVGResourceFilter.h"
 #include "core/svg/SVGParserUtilities.h"
 
 namespace blink {
@@ -34,10 +35,10 @@ namespace blink {
 inline SVGFilterElement::SVGFilterElement(Document& document)
     : SVGElement(SVGNames::filterTag, document)
     , SVGURIReference(this)
-    , m_x(SVGAnimatedLength::create(this, SVGNames::xAttr, SVGLength::create(LengthModeWidth), AllowNegativeLengths))
-    , m_y(SVGAnimatedLength::create(this, SVGNames::yAttr, SVGLength::create(LengthModeHeight), AllowNegativeLengths))
-    , m_width(SVGAnimatedLength::create(this, SVGNames::widthAttr, SVGLength::create(LengthModeWidth), ForbidNegativeLengths))
-    , m_height(SVGAnimatedLength::create(this, SVGNames::heightAttr, SVGLength::create(LengthModeHeight), ForbidNegativeLengths))
+    , m_x(SVGAnimatedLength::create(this, SVGNames::xAttr, SVGLength::create(SVGLengthMode::Width), AllowNegativeLengths))
+    , m_y(SVGAnimatedLength::create(this, SVGNames::yAttr, SVGLength::create(SVGLengthMode::Height), AllowNegativeLengths))
+    , m_width(SVGAnimatedLength::create(this, SVGNames::widthAttr, SVGLength::create(SVGLengthMode::Width), ForbidNegativeLengths))
+    , m_height(SVGAnimatedLength::create(this, SVGNames::heightAttr, SVGLength::create(SVGLengthMode::Height), ForbidNegativeLengths))
     , m_filterUnits(SVGAnimatedEnumeration<SVGUnitTypes::SVGUnitType>::create(this, SVGNames::filterUnitsAttr, SVGUnitTypes::SVG_UNIT_TYPE_OBJECTBOUNDINGBOX))
     , m_primitiveUnits(SVGAnimatedEnumeration<SVGUnitTypes::SVGUnitType>::create(this, SVGNames::primitiveUnitsAttr, SVGUnitTypes::SVG_UNIT_TYPE_USERSPACEONUSE))
     , m_filterRes(SVGAnimatedIntegerOptionalInteger::create(this, SVGNames::filterResAttr))
@@ -60,7 +61,7 @@ inline SVGFilterElement::SVGFilterElement(Document& document)
 
 DEFINE_NODE_FACTORY(SVGFilterElement)
 
-void SVGFilterElement::trace(Visitor* visitor)
+DEFINE_TRACE(SVGFilterElement)
 {
 #if ENABLE(OILPAN)
     visitor->trace(m_x);
@@ -101,11 +102,6 @@ bool SVGFilterElement::isSupportedAttribute(const QualifiedName& attrName)
     return supportedAttributes.contains<SVGAttributeHashTranslator>(attrName);
 }
 
-void SVGFilterElement::parseAttribute(const QualifiedName& name, const AtomicString& value)
-{
-    parseAttributeNew(name, value);
-}
-
 void SVGFilterElement::svgAttributeChanged(const QualifiedName& attrName)
 {
     if (!isSupportedAttribute(attrName)) {
@@ -115,13 +111,16 @@ void SVGFilterElement::svgAttributeChanged(const QualifiedName& attrName)
 
     SVGElement::InvalidationGuard invalidationGuard(this);
 
-    if (attrName == SVGNames::xAttr
+    bool isXYWH = attrName == SVGNames::xAttr
         || attrName == SVGNames::yAttr
         || attrName == SVGNames::widthAttr
-        || attrName == SVGNames::heightAttr)
+        || attrName == SVGNames::heightAttr;
+    if (isXYWH)
         updateRelativeLengthsInformation();
+    else if (attrName == SVGNames::filterResAttr)
+        UseCounter::count(document(), UseCounter::SVGFilterRes);
 
-    RenderSVGResourceContainer* renderer = toRenderSVGResourceContainer(this->renderer());
+    LayoutSVGResourceContainer* renderer = toLayoutSVGResourceContainer(this->layoutObject());
     if (renderer)
         renderer->invalidateCacheAndMarkForLayout();
 }
@@ -133,16 +132,16 @@ void SVGFilterElement::childrenChanged(const ChildrenChange& change)
     if (change.byParser)
         return;
 
-    if (RenderObject* object = renderer())
-        object->setNeedsLayoutAndFullPaintInvalidation();
+    if (LayoutObject* object = layoutObject())
+        object->setNeedsLayoutAndFullPaintInvalidation(LayoutInvalidationReason::ChildChanged);
 }
 
-RenderObject* SVGFilterElement::createRenderer(RenderStyle*)
+LayoutObject* SVGFilterElement::createLayoutObject(const ComputedStyle&)
 {
-    RenderSVGResourceFilter* renderer = new RenderSVGResourceFilter(this);
+    LayoutSVGResourceFilter* renderer = new LayoutSVGResourceFilter(this);
 
     for (const RefPtrWillBeMember<Node>& node : m_clientsToAdd)
-        renderer->addClientRenderLayer(node.get());
+        renderer->addClientLayer(node.get());
     m_clientsToAdd.clear();
 
     return renderer;

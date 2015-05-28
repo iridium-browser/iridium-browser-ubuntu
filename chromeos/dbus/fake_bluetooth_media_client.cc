@@ -4,9 +4,33 @@
 
 #include "chromeos/dbus/fake_bluetooth_media_client.h"
 
+#include <string>
+
+#include "base/stl_util.h"
+#include "chromeos/dbus/dbus_thread_manager.h"
+#include "chromeos/dbus/fake_bluetooth_adapter_client.h"
+#include "chromeos/dbus/fake_bluetooth_media_endpoint_service_provider.h"
+#include "chromeos/dbus/fake_bluetooth_media_transport_client.h"
+
+using dbus::ObjectPath;
+
+namespace {
+
+// Except for |kFailedError|, the other error is defined in BlueZ D-Bus Media
+// API.
+const char kFailedError[] = "org.chromium.Error.Failed";
+const char kInvalidArgumentsError[] = "org.chromium.Error.InvalidArguments";
+
+}  // namespace
+
 namespace chromeos {
 
-FakeBluetoothMediaClient::FakeBluetoothMediaClient() {
+// static
+const uint8_t FakeBluetoothMediaClient::kDefaultCodec = 0x00;
+
+FakeBluetoothMediaClient::FakeBluetoothMediaClient()
+    : visible_(true),
+      object_path_(ObjectPath(FakeBluetoothAdapterClient::kAdapterPath)) {
 }
 
 FakeBluetoothMediaClient::~FakeBluetoothMediaClient() {
@@ -27,23 +51,87 @@ void FakeBluetoothMediaClient::RemoveObserver(
   observers_.RemoveObserver(observer);
 }
 
-// TODO(mcchou): Add method definition for |RegisterEndpoint|,
-// |UnregisterEndpoint|, |RegisterPlayer| and |UnregisterPlayer|.
 void FakeBluetoothMediaClient::RegisterEndpoint(
-    const dbus::ObjectPath& object_path,
-    const dbus::ObjectPath& endpoint_path,
+    const ObjectPath& object_path,
+    const ObjectPath& endpoint_path,
     const EndpointProperties& properties,
     const base::Closure& callback,
     const ErrorCallback& error_callback) {
-  error_callback.Run("org.bluez.NotImplemented", "");
+  if (!visible_)
+    return;
+
+  VLOG(1) << "RegisterEndpoint: " << endpoint_path.value();
+
+  // The media client and adapter client should have the same object path.
+  if (object_path != object_path_ ||
+      properties.uuid != BluetoothMediaClient::kBluetoothAudioSinkUUID ||
+      properties.codec != kDefaultCodec || properties.capabilities.empty()) {
+    error_callback.Run(kInvalidArgumentsError, "");
+    return;
+  }
+
+  callback.Run();
 }
 
 void FakeBluetoothMediaClient::UnregisterEndpoint(
-    const dbus::ObjectPath& object_path,
-    const dbus::ObjectPath& endpoint_path,
+    const ObjectPath& object_path,
+    const ObjectPath& endpoint_path,
     const base::Closure& callback,
     const ErrorCallback& error_callback) {
-  error_callback.Run("org.bluez.NotImplemented", "");
+  // TODO(mcchou): Come up with some corresponding actions.
+  VLOG(1) << "UnregisterEndpoint: " << endpoint_path.value();
+
+  if (!ContainsKey(endpoints_, endpoint_path)) {
+    error_callback.Run(kFailedError, "Unknown media endpoint");
+    return;
+  }
+
+  SetEndpointRegistered(endpoints_[endpoint_path], false);
+  callback.Run();
+}
+
+void FakeBluetoothMediaClient::SetVisible(bool visible) {
+  visible_ = visible;
+
+  if (visible_)
+    return;
+
+  // If the media object becomes invisible, an update chain will unregister all
+  // endpoints and set the associated transport objects to be invalid.
+  // SetEndpointRegistered will remove the endpoint entry from |endpoints_|.
+  while (endpoints_.begin() != endpoints_.end())
+    SetEndpointRegistered(endpoints_.begin()->second, false);
+
+  // Notifies observers about the change on |visible_|.
+  FOR_EACH_OBSERVER(BluetoothMediaClient::Observer, observers_,
+                    MediaRemoved(object_path_));
+}
+
+void FakeBluetoothMediaClient::SetEndpointRegistered(
+    FakeBluetoothMediaEndpointServiceProvider* endpoint,
+    bool registered) {
+  if (registered) {
+    endpoints_[endpoint->object_path()] = endpoint;
+    return;
+  }
+
+  if (!IsRegistered(endpoint->object_path()))
+    return;
+
+  // Once a media endpoint object becomes invalid, invalidate the associated
+  // transport.
+  FakeBluetoothMediaTransportClient* transport =
+      static_cast<FakeBluetoothMediaTransportClient*>(
+          DBusThreadManager::Get()->GetBluetoothMediaTransportClient());
+  transport->SetValid(endpoint, false);
+
+  endpoints_.erase(endpoint->object_path());
+  endpoint->Released();
+}
+
+bool FakeBluetoothMediaClient::IsRegistered(
+    const dbus::ObjectPath& endpoint_path) {
+  return ContainsKey(endpoints_, endpoint_path);
 }
 
 }  // namespace chromeos

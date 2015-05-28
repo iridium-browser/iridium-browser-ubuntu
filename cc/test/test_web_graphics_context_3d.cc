@@ -64,13 +64,14 @@ TestWebGraphicsContext3D::TestWebGraphicsContext3D()
       height_(0),
       scale_factor_(-1.f),
       test_support_(NULL),
-      last_update_type_(NoUpdate),
+      last_update_type_(NO_UPDATE),
       next_insert_sync_point_(1),
       last_waited_sync_point_(0),
       unpack_alignment_(4),
       bound_buffer_(0),
       weak_ptr_factory_(this) {
   CreateNamespace();
+  set_support_image(true);
 }
 
 TestWebGraphicsContext3D::~TestWebGraphicsContext3D() {
@@ -356,6 +357,13 @@ scoped_refptr<TestTexture> TestWebGraphicsContext3D::BoundTexture(
   return namespace_->textures.TextureForId(BoundTextureId(target));
 }
 
+scoped_refptr<TestTexture> TestWebGraphicsContext3D::UnboundTexture(
+    GLuint texture) {
+  // The caller is expected to lock the namespace for texture access.
+  namespace_->lock.AssertAcquired();
+  return namespace_->textures.TextureForId(texture);
+}
+
 void TestWebGraphicsContext3D::CheckTextureIsBound(GLenum target) {
   DCHECK(BoundTextureId(target));
 }
@@ -466,7 +474,9 @@ void TestWebGraphicsContext3D::genMailboxCHROMIUM(GLbyte* mailbox) {
 GLuint TestWebGraphicsContext3D::createAndConsumeTextureCHROMIUM(
     GLenum target,
     const GLbyte* mailbox) {
-  return createTexture();
+  GLuint texture_id = createTexture();
+  consumeTextureCHROMIUM(target, mailbox);
+  return texture_id;
 }
 
 void TestWebGraphicsContext3D::loseContextCHROMIUM(GLenum current,

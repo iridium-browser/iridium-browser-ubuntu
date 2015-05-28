@@ -43,7 +43,8 @@ class ServiceWorkerControlleeRequestHandlerTest : public testing::Test {
       : browser_thread_bundle_(TestBrowserThreadBundle::IO_MAINLOOP) {}
 
   void SetUp() override {
-    helper_.reset(new EmbeddedWorkerTestHelper(kMockRenderProcessId));
+    helper_.reset(
+        new EmbeddedWorkerTestHelper(base::FilePath(), kMockRenderProcessId));
 
     // A new unstored registration/version.
     scope_ = GURL("http://host/scope/");
@@ -56,7 +57,7 @@ class ServiceWorkerControlleeRequestHandlerTest : public testing::Test {
     // An empty host.
     scoped_ptr<ServiceWorkerProviderHost> host(new ServiceWorkerProviderHost(
         kMockRenderProcessId, MSG_ROUTING_NONE, kMockProviderId,
-        context()->AsWeakPtr(), NULL));
+        SERVICE_WORKER_PROVIDER_FOR_WINDOW, context()->AsWeakPtr(), NULL));
     provider_host_ = host->AsWeakPtr();
     context()->AddProviderHost(host.Pass());
 
@@ -112,7 +113,7 @@ TEST_F(ServiceWorkerControlleeRequestHandlerTest, DisallowServiceWorker) {
   // Conduct a main resource load.
   const GURL kDocUrl("http://host/scope/doc");
   scoped_ptr<net::URLRequest> request = url_request_context_.CreateRequest(
-      kDocUrl, net::DEFAULT_PRIORITY, &url_request_delegate_, NULL);
+      kDocUrl, net::DEFAULT_PRIORITY, &url_request_delegate_);
   scoped_ptr<ServiceWorkerControlleeRequestHandler> handler(
       new ServiceWorkerControlleeRequestHandler(
           context()->AsWeakPtr(),
@@ -155,10 +156,7 @@ TEST_F(ServiceWorkerControlleeRequestHandlerTest, ActivateWaitingVersion) {
   // Conduct a main resource load.
   const GURL kDocUrl("http://host/scope/doc");
   scoped_ptr<net::URLRequest> request = url_request_context_.CreateRequest(
-      kDocUrl,
-      net::DEFAULT_PRIORITY,
-      &url_request_delegate_,
-      NULL);
+      kDocUrl, net::DEFAULT_PRIORITY, &url_request_delegate_);
   scoped_ptr<ServiceWorkerControlleeRequestHandler> handler(
       new ServiceWorkerControlleeRequestHandler(
           context()->AsWeakPtr(),
@@ -209,10 +207,7 @@ TEST_F(ServiceWorkerControlleeRequestHandlerTest, DeletedProviderHost) {
   // Conduct a main resource load.
   const GURL kDocUrl("http://host/scope/doc");
   scoped_ptr<net::URLRequest> request = url_request_context_.CreateRequest(
-      kDocUrl,
-      net::DEFAULT_PRIORITY,
-      &url_request_delegate_,
-      NULL);
+      kDocUrl, net::DEFAULT_PRIORITY, &url_request_delegate_);
   scoped_ptr<ServiceWorkerControlleeRequestHandler> handler(
       new ServiceWorkerControlleeRequestHandler(
           context()->AsWeakPtr(),

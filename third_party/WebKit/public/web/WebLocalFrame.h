@@ -9,9 +9,15 @@
 
 namespace blink {
 
+enum class WebAppBannerPromptReply;
+enum class WebSandboxFlags;
 class WebAutofillClient;
+class WebContentSettingsClient;
+class WebDevToolsAgent;
+class WebDevToolsAgentClient;
 class WebFrameClient;
 class WebScriptExecutionCallback;
+class WebSuspendableTask;
 struct WebPrintPresetOptions;
 
 // Interface for interacting with in process frames. This contains methods that
@@ -31,7 +37,7 @@ public:
     // Returns the frame corresponding to the given context. This can return 0
     // if the context is detached from the frame, or if the context doesn't
     // correspond to a frame (e.g., workers).
-    BLINK_EXPORT static WebLocalFrame* frameForContext(v8::Handle<v8::Context>);
+    BLINK_EXPORT static WebLocalFrame* frameForContext(v8::Local<v8::Context>);
 
     // Returns the frame inside a given frame or iframe element. Returns 0 if
     // the given element is not a frame, iframe or if the frame is empty.
@@ -42,11 +48,12 @@ public:
     // Used when we might swap from a remote frame to a local frame.
     // Creates a provisional, semi-attached frame that will be fully
     // swapped into the frame tree if it commits.
-    virtual void initializeToReplaceRemoteFrame(WebRemoteFrame*) = 0;
+    virtual void initializeToReplaceRemoteFrame(WebRemoteFrame*, const WebString& name, WebSandboxFlags) = 0;
 
     virtual void setAutofillClient(WebAutofillClient*) = 0;
     virtual WebAutofillClient* autofillClient() = 0;
-
+    virtual void setDevToolsAgentClient(WebDevToolsAgentClient*) = 0;
+    virtual WebDevToolsAgent* devToolsAgent() = 0;
 
     // Navigation Ping --------------------------------------------------------
     virtual void sendPings(const WebNode& linkNode, const WebURL& destinationURL) = 0;
@@ -61,6 +68,11 @@ public:
     // primarily for use in layout tests. You probably want isLoading()
     // instead.
     virtual bool isResourceLoadInProgress() const = 0;
+
+    // Override the normal rules for whether a load has successfully committed
+    // in this frame. Used to propagate state when this frame has navigated
+    // cross process.
+    virtual void setCommittedFirstRealLoad() = 0;
 
 
     // Navigation Transitions -------------------------------------------------
@@ -93,9 +105,10 @@ public:
         int worldID, const WebScriptSource* sourceIn, unsigned numSources,
         int extensionGroup, bool userGesture, WebScriptExecutionCallback*) = 0;
 
-    // ONLY FOR TESTS: Forwards to executeScriptAndReturnValue, but sets a fake
-    // UserGestureIndicator before execution.
-    virtual v8::Handle<v8::Value> executeScriptAndReturnValueForTests(const WebScriptSource&) = 0;
+    // Run the task when the context of the current page is not suspended
+    // otherwise run it on context resumed.
+    // Method takes ownership of the passed task.
+    virtual void requestRunTask(WebSuspendableTask*) const = 0;
 
     // Associates an isolated world with human-readable name which is useful for
     // extension debugging.
@@ -107,9 +120,21 @@ public:
     // Moves the selection extent point. This function does not allow the
     // selection to collapse. If the new extent is set to the same position as
     // the current base, this function will do nothing.
-    virtual void moveRangeSelectionExtent(const WebPoint&) = 0;
+    virtual void moveRangeSelectionExtent(const WebPoint&, TextGranularity = CharacterGranularity) = 0;
+
+    // Content Settings -------------------------------------------------------
+
+    virtual void setContentSettingsClient(WebContentSettingsClient*) = 0;
+
+    // App banner -------------------------------------------------------------
+
+    // Request to show an application install banner for the given |platform|.
+    // The implementation can request the embedder to cancel the call by setting
+    // |cancel| to true.
+    virtual void willShowInstallBannerPrompt(const WebString& platform, WebAppBannerPromptReply*) = 0;
 };
 
 } // namespace blink
 
 #endif // WebLocalFrame_h
+

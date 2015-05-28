@@ -14,6 +14,12 @@
 goog.provide('i18n.input.chrome.message');
 goog.provide('i18n.input.chrome.message.Type');
 
+goog.require('i18n.input.chrome.message.Source');
+
+
+goog.scope(function() {
+var Source = i18n.input.chrome.message.Source;
+
 
 /**
  * The message type. "Background->Inputview" don't allow to share the same
@@ -28,9 +34,9 @@ i18n.input.chrome.message.Type = {
   CONTEXT_FOCUS: 'context_focus',
   FRONT_TOGGLE_LANGUAGE_STATE: 'front_toggle_language_state',
   HWT_NETWORK_ERROR: 'hwt_network_error',
-  HWT_PRIVACY_INFO: 'hwt_privacy_info',
   SURROUNDING_TEXT_CHANGED: 'surrounding_text_changed',
   UPDATE_SETTINGS: 'update_settings',
+  VOICE_STATE_CHANGE: 'voice_state_change',
 
   // Inputview -> Background
   COMMIT_TEXT: 'commit_text',
@@ -40,7 +46,6 @@ i18n.input.chrome.message.Type = {
   DISCONNECT: 'disconnect',
   DOUBLE_CLICK_ON_SPACE_KEY: 'double_click_on_space_key',
   EXEC_ALL: 'exec_all',
-  HWT_PRIVACY_GOT_IT: 'hwt_privacy_got_it',
   HWT_REQUEST: 'hwt_request',
   KEY_CLICK: 'key_click',
   KEY_EVENT: 'key_event',
@@ -55,6 +60,12 @@ i18n.input.chrome.message.Type = {
   VISIBILITY_CHANGE: 'visibility_change',
   SET_CONTROLLER: 'set_controller',
   UNSET_CONTROLLER: 'unset_controller',
+  VOICE_VIEW_STATE_CHANGE: 'voice_view_state_change',
+
+
+  // Inputview -> Elements
+  HWT_PRIVACY_GOT_IT: 'hwt_privacy_got_it',
+  VOICE_PRIVACY_GOT_IT: 'voice_privacy_got_it',
 
   // Options -> Background
   USER_DICT_ADD_ENTRY: 'user_dict_add_entry',
@@ -71,6 +82,7 @@ i18n.input.chrome.message.Type = {
   // Background->Background
   HEARTBEAT: 'heart_beat'
 };
+var Type = i18n.input.chrome.message.Type;
 
 
 /**
@@ -80,19 +92,80 @@ i18n.input.chrome.message.Type = {
  * @return {boolean} .
  */
 i18n.input.chrome.message.isFromBackground = function(type) {
-  var Type = i18n.input.chrome.message.Type;
+  var source = i18n.input.chrome.message.getMessageSource(type);
+  return source == Source.BG_BG || source == Source.BG_OP ||
+      source == Source.BG_VK;
+};
+
+
+/**
+ * Returns whether the message type belong to "Background->Inputview" group;
+ *
+ * @param {string} type The message type.
+ * @return {i18n.input.chrome.message.Source} The source.
+ */
+i18n.input.chrome.message.getMessageSource = function(type) {
   switch (type) {
+    // Background -> Inputview
     case Type.CANDIDATES_BACK:
     case Type.CONTEXT_BLUR:
     case Type.CONTEXT_FOCUS:
     case Type.FRONT_TOGGLE_LANGUAGE_STATE:
     case Type.HWT_NETWORK_ERROR:
-    case Type.HWT_PRIVACY_INFO:
     case Type.SURROUNDING_TEXT_CHANGED:
     case Type.UPDATE_SETTINGS:
+    case Type.VOICE_STATE_CHANGE:
+      return Source.BG_VK;
+
+    // Inputview -> Background
+    case Type.COMMIT_TEXT:
+    case Type.COMPLETION:
+    case Type.CONNECT:
+    case Type.DATASOURCE_READY:
+    case Type.DISCONNECT:
+    case Type.DOUBLE_CLICK_ON_SPACE_KEY:
+    case Type.EXEC_ALL:
+    case Type.HWT_REQUEST:
+    case Type.KEY_CLICK:
+    case Type.KEY_EVENT:
+    case Type.OPTION_CHANGE:
+    case Type.PREDICTION:
+    case Type.SELECT_CANDIDATE:
+    case Type.SEND_KEY_EVENT:
+    case Type.SET_COMPOSITION:
+    case Type.SET_LANGUAGE:
+    case Type.SWITCH_KEYSET:
+    case Type.TOGGLE_LANGUAGE_STATE:
+    case Type.VISIBILITY_CHANGE:
+    case Type.SET_CONTROLLER:
+    case Type.UNSET_CONTROLLER:
+    case Type.VOICE_VIEW_STATE_CHANGE:
+      return Source.VK_BG;
+
+    // Inputview -> Elements
+    case Type.HWT_PRIVACY_GOT_IT:
+    case Type.VOICE_PRIVACY_GOT_IT:
+      return Source.VK_VK;
+
+    // Options -> Background
+    case Type.USER_DICT_ADD_ENTRY:
+    case Type.USER_DICT_CLEAR:
+    case Type.USER_DICT_LIST:
+    case Type.USER_DICT_SET_THRESHOLD:
+    case Type.USER_DICT_START:
+    case Type.USER_DICT_STOP:
+    case Type.USER_DICT_REMOVE_ENTRY:
+      return Source.OP_BG;
+
+    // Background -> Options
     case Type.USER_DICT_ENTRIES:
-      return true;
+      return Source.BG_OP;
+
+    // Background->Background
+    case Type.HEARTBEAT:
+      return Source.BG_BG;
     default:
-      return false;
+      return Source.UNKNOWN;
   }
 };
+});  // goog.scope

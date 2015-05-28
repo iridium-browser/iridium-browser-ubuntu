@@ -60,7 +60,7 @@ namespace {
 const int kDragBufferPx = 20;
 
 // Padding space in pixels for fixed layout.
-const int kBottomPadding = 3;
+const int kBottomPadding = 2;
 const int kLeftRightPadding = 24;
 
 // Padding space in pixels between pages.
@@ -70,12 +70,13 @@ const int kPagePadding = 40;
 const int kPreferredTileWidth = 88;
 const int kPreferredTileHeight = 98;
 
-const int kExperimentalPreferredTileWidth = 90;
-const int kExperimentalPreferredTileHeight = 90;
+const int kExperimentalPreferredTileWidth = 100;
+const int kExperimentalPreferredTileHeight = 100;
 
 // Padding on each side of a tile.
-const int kExperimentalTileLeftRightPadding = 15;
-const int kExperimentalTileTopBottomPadding = 11;
+const int kExperimentalTileLeftRightPadding = 10;
+const int kExperimentalTileBottomPadding = 6;
+const int kExperimentalTileTopPadding = 6;
 
 // Width in pixels of the area on the sides that triggers a page flip.
 const int kPageFlipZoneSize = 40;
@@ -109,6 +110,16 @@ gfx::Size GetTileViewSize() {
              ? gfx::Size(kExperimentalPreferredTileWidth,
                          kExperimentalPreferredTileHeight)
              : gfx::Size(kPreferredTileWidth, kPreferredTileHeight);
+}
+
+// Returns the padding around a tile view.
+gfx::Insets GetTilePadding() {
+  if (!switches::IsExperimentalAppListEnabled())
+    return gfx::Insets();
+
+  return gfx::Insets(
+      -kExperimentalTileTopPadding, -kExperimentalTileLeftRightPadding,
+      -kExperimentalTileBottomPadding, -kExperimentalTileLeftRightPadding);
 }
 
 // RowMoveAnimationDelegate is used when moving an item into a different row.
@@ -258,7 +269,7 @@ class SynchronousDrag : public ui::DragSourceWin {
 
     // Prevent the synchronous dragger being destroyed while the drag is
     // running.
-    scoped_refptr<SynchronousDrag> this_ref = this;
+    Microsoft::WRL::ComPtr<SynchronousDrag> this_ref = this;
     running_ = true;
 
     ui::OSExchangeData data;
@@ -407,7 +418,7 @@ void AppsGridView::SetLayout(int cols, int rows_per_page) {
 
   if (switches::IsExperimentalAppListEnabled()) {
     SetBorder(views::Border::CreateEmptyBorder(
-        0, kExperimentalWindowPadding, 0, kExperimentalWindowPadding));
+        0, kExperimentalAppsGridPadding, 0, kExperimentalAppsGridPadding));
   } else {
     SetBorder(views::Border::CreateEmptyBorder(
         0, kLeftRightPadding, kBottomPadding, kLeftRightPadding));
@@ -416,12 +427,9 @@ void AppsGridView::SetLayout(int cols, int rows_per_page) {
 
 // static
 gfx::Size AppsGridView::GetTotalTileSize() {
-  gfx::Size size = GetTileViewSize();
-  if (switches::IsExperimentalAppListEnabled()) {
-    size.Enlarge(2 * kExperimentalTileLeftRightPadding,
-                 2 * kExperimentalTileTopBottomPadding);
-  }
-  return size;
+  gfx::Rect rect(GetTileViewSize());
+  rect.Inset(GetTilePadding());
+  return rect.size();
 }
 
 void AppsGridView::ResetForShowApps() {
@@ -519,7 +527,8 @@ void AppsGridView::StartSettingUpSynchronousDrag() {
   if (IsDraggingForReparentInRootLevelGridView())
     return;
 
-  synchronous_drag_ = new SynchronousDrag(this, drag_view_, drag_view_offset_);
+  synchronous_drag_ = Microsoft::WRL::Make<SynchronousDrag>(this, drag_view_,
+                                                            drag_view_offset_);
   delegate_->GetShortcutPathForApp(drag_view_->item()->id(),
                                    base::Bind(&AppsGridView::OnGotShortcutPath,
                                               base::Unretained(this),
@@ -529,14 +538,14 @@ void AppsGridView::StartSettingUpSynchronousDrag() {
 
 bool AppsGridView::RunSynchronousDrag() {
 #if defined(OS_WIN)
-  if (!synchronous_drag_.get())
+  if (!synchronous_drag_.Get())
     return false;
 
   if (synchronous_drag_->CanRun()) {
     if (IsDraggingForReparentInHiddenGridView())
       folder_delegate_->SetRootLevelDragViewVisible(false);
     synchronous_drag_->Run();
-    synchronous_drag_ = NULL;
+    synchronous_drag_ = nullptr;
     return true;
   } else if (!synchronous_drag_->running()) {
     // The OS drag is not ready yet. If the root grid has a drag view because
@@ -550,16 +559,16 @@ bool AppsGridView::RunSynchronousDrag() {
 
 void AppsGridView::CleanUpSynchronousDrag() {
 #if defined(OS_WIN)
-  if (synchronous_drag_.get())
+  if (synchronous_drag_.Get())
     synchronous_drag_->EndDragExternally();
 
-  synchronous_drag_ = NULL;
+  synchronous_drag_ = nullptr;
 #endif
 }
 
 #if defined(OS_WIN)
 void AppsGridView::OnGotShortcutPath(
-    scoped_refptr<SynchronousDrag> synchronous_drag,
+    Microsoft::WRL::ComPtr<SynchronousDrag> synchronous_drag,
     const base::FilePath& path) {
   // Drag may have ended before we get the shortcut path or a new drag may have
   // begun.
@@ -935,7 +944,8 @@ bool AppsGridView::OnKeyPressed(const ui::KeyEvent& event) {
         MoveSelected(0, forward_dir, 0);
         return true;
       case ui::VKEY_UP:
-        MoveSelected(0, 0, -1);
+        if (selected_view_)  // Don't initiate selection with UP
+          MoveSelected(0, 0, -1);
         return true;
       case ui::VKEY_DOWN:
         MoveSelected(0, 0, 1);
@@ -947,6 +957,15 @@ bool AppsGridView::OnKeyPressed(const ui::KeyEvent& event) {
       case ui::VKEY_NEXT: {
         MoveSelected(1, 0, 0);
         return true;
+      }
+      case ui::VKEY_TAB: {
+        if (event.IsShiftDown()) {
+          ClearAnySelectedView();  // ContentsView will move focus back.
+        } else {
+          MoveSelected(0, 0, 0);  // Ensure but don't change selection.
+          handled = true;         // TABing internally doesn't move focus.
+        }
+        break;
       }
       default:
         break;
@@ -1091,6 +1110,7 @@ void AppsGridView::SetSelectedItemByIndex(const Index& index) {
 
   EnsureViewVisible(index);
   selected_view_ = new_selection;
+  selected_view_->SetTitleSubpixelAA();
   selected_view_->SchedulePaint();
   selected_view_->NotifyAccessibilityEvent(
       ui::AX_EVENT_FOCUS, true);
@@ -1168,12 +1188,6 @@ void AppsGridView::MoveSelected(int page_delta,
 }
 
 void AppsGridView::CalculateIdealBounds() {
-  // TODO(mgiuca): This is a work-around for http://crbug.com/422604. See
-  // comment in ContentsView::Layout for details. This should be removed once
-  // http://crbug.com/446407 is resolved.
-  if (GetContentsBounds().IsEmpty())
-    return;
-
   gfx::Size grid_size = GetTileGridSize();
 
   // Page size including padding pixels. A tile.x + page_width means the same
@@ -1330,12 +1344,12 @@ void AppsGridView::AnimationBetweenRows(AppListItemView* view,
 
 void AppsGridView::ExtractDragLocation(const ui::LocatedEvent& event,
                                        gfx::Point* drag_point) {
-#if defined(USE_AURA)
   // Use root location of |event| instead of location in |drag_view_|'s
   // coordinates because |drag_view_| has a scale transform and location
   // could have integer round error and causes jitter.
   *drag_point = event.root_location();
 
+#if defined(USE_AURA)
   // GetWidget() could be NULL for tests.
   if (GetWidget()) {
     aura::Window::ConvertPointToTarget(
@@ -1343,15 +1357,9 @@ void AppsGridView::ExtractDragLocation(const ui::LocatedEvent& event,
         GetWidget()->GetNativeWindow(),
         drag_point);
   }
+#endif
 
   views::View::ConvertPointFromWidget(this, drag_point);
-#else
-  // For non-aura, root location is not clearly defined but |drag_view_| does
-  // not have the scale transform. So no round error would be introduced and
-  // it's okay to use View::ConvertPointToTarget.
-  *drag_point = event.location();
-  views::View::ConvertPointToTarget(drag_view_, this, drag_point);
-#endif
 }
 
 void AppsGridView::CalculateDropTarget() {
@@ -1467,7 +1475,7 @@ void AppsGridView::OnFolderItemReparentTimer() {
   if (drag_out_of_folder_container_ && drag_view_) {
     bool has_native_drag = drag_and_drop_host_ != nullptr;
 #if defined(OS_WIN)
-    has_native_drag = has_native_drag || synchronous_drag_.get();
+    has_native_drag = has_native_drag || synchronous_drag_.Get();
 #endif
     folder_delegate_->ReparentItem(
         drag_view_, last_drag_point_, has_native_drag);
@@ -1616,7 +1624,9 @@ void AppsGridView::EndDragForReparentInHiddenFolderGridView() {
 
 void AppsGridView::OnFolderItemRemoved() {
   DCHECK(folder_delegate_);
-  item_list_ = NULL;
+  if (item_list_)
+    item_list_->RemoveObserver(this);
+  item_list_ = nullptr;
 }
 
 void AppsGridView::StartDragAndDropHostDrag(const gfx::Point& grid_location) {
@@ -2132,9 +2142,7 @@ AppsGridView::Index AppsGridView::GetNearestTileIndexForPoint(
 gfx::Size AppsGridView::GetTileGridSize() const {
   gfx::Rect bounds = GetExpectedTileBounds(0, 0);
   bounds.Union(GetExpectedTileBounds(rows_per_page_ - 1, cols_ - 1));
-  if (switches::IsExperimentalAppListEnabled())
-    bounds.Inset(-kExperimentalTileLeftRightPadding,
-                 -kExperimentalTileTopBottomPadding);
+  bounds.Inset(GetTilePadding());
   return bounds.size();
 }
 
@@ -2148,7 +2156,7 @@ gfx::Rect AppsGridView::GetExpectedTileBounds(int row, int col) const {
   gfx::Rect tile_bounds(gfx::Point(bounds.x() + col * total_tile_size.width(),
                                    bounds.y() + row * total_tile_size.height()),
                         total_tile_size);
-  tile_bounds.ClampToCenteredSize(GetTileViewSize());
+  tile_bounds.Inset(-GetTilePadding());
   return tile_bounds;
 }
 

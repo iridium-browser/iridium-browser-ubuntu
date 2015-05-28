@@ -3,9 +3,9 @@
 // found in the LICENSE file.
 
 #include <fcntl.h>
-#include <freetype/ftoutln.h>
 #include <ft2build.h>
 #include FT_FREETYPE_H
+#include FT_OUTLINE_H
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
@@ -223,8 +223,6 @@ int SideBySide(FT_Library library, const char *file_name,
 }  // namespace
 
 int main(int argc, char **argv) {
-  ots::DisableDebugOutput();  // turn off ERROR and WARNING outputs.
-
   if (argc != 2) {
     std::fprintf(stderr, "Usage: %s ttf_or_otf_filename\n", argv[0]);
     return 1;
@@ -267,8 +265,9 @@ int main(int argc, char **argv) {
   static const size_t kPadLen = 20 * 1024;
   uint8_t *trans_font = new uint8_t[orig_len + kPadLen];
   ots::MemoryStream output(trans_font, orig_len + kPadLen);
+  ots::OTSContext context;
 
-  bool result = ots::Process(&output, orig_font, orig_len);
+  bool result = context.Process(&output, orig_font, orig_len);
   if (!result) {
     std::fprintf(stderr, "Failed to sanitise file! %s\n", argv[1]);
     return 1;

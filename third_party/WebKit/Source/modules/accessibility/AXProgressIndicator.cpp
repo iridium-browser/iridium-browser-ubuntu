@@ -22,7 +22,7 @@
 #include "modules/accessibility/AXProgressIndicator.h"
 
 #include "core/html/HTMLProgressElement.h"
-#include "core/rendering/RenderProgress.h"
+#include "core/layout/LayoutProgress.h"
 #include "modules/accessibility/AXObjectCacheImpl.h"
 #include "platform/FloatConversion.h"
 
@@ -30,14 +30,22 @@ namespace blink {
 
 using namespace HTMLNames;
 
-AXProgressIndicator::AXProgressIndicator(RenderProgress* renderer, AXObjectCacheImpl* axObjectCache)
-    : AXRenderObject(renderer, axObjectCache)
+AXProgressIndicator::AXProgressIndicator(LayoutProgress* layoutObject, AXObjectCacheImpl* axObjectCache)
+    : AXLayoutObject(layoutObject, axObjectCache)
 {
 }
 
-PassRefPtr<AXProgressIndicator> AXProgressIndicator::create(RenderProgress* renderer, AXObjectCacheImpl* axObjectCache)
+PassRefPtr<AXProgressIndicator> AXProgressIndicator::create(LayoutProgress* layoutObject, AXObjectCacheImpl* axObjectCache)
 {
-    return adoptRef(new AXProgressIndicator(renderer, axObjectCache));
+    return adoptRef(new AXProgressIndicator(layoutObject, axObjectCache));
+}
+
+AccessibilityRole AXProgressIndicator::roleValue() const
+{
+    AccessibilityRole ariaRole = ariaRoleAttribute();
+    if (ariaRole != UnknownRole)
+        return ariaRole;
+    return ProgressIndicatorRole;
 }
 
 bool AXProgressIndicator::computeAccessibilityIsIgnored() const
@@ -74,7 +82,7 @@ float AXProgressIndicator::minValueForRange() const
 
 HTMLProgressElement* AXProgressIndicator::element() const
 {
-    return toRenderProgress(m_renderer)->progressElement();
+    return toLayoutProgress(m_layoutObject)->progressElement();
 }
 
 

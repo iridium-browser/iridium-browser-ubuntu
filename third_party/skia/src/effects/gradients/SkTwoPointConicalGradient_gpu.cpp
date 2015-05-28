@@ -66,13 +66,13 @@ public:
 
     virtual ~Edge2PtConicalEffect() {}
 
-    virtual const char* name() const SK_OVERRIDE {
+    const char* name() const override {
         return "Two-Point Conical Gradient Edge Touching";
     }
 
-    virtual void getGLProcessorKey(const GrGLCaps&, GrProcessorKeyBuilder*) const SK_OVERRIDE;
+    void getGLProcessorKey(const GrGLCaps&, GrProcessorKeyBuilder*) const override;
 
-    virtual GrGLFragmentProcessor* createGLInstance() const SK_OVERRIDE;
+    GrGLFragmentProcessor* createGLInstance() const override;
 
     // The radial gradient parameters can collapse to a linear (instead of quadratic) equation.
     SkScalar center() const { return fCenterX1; }
@@ -80,7 +80,7 @@ public:
     SkScalar radius() const { return fRadius0; }
 
 private:
-    virtual bool onIsEqual(const GrFragmentProcessor& sBase) const SK_OVERRIDE {
+    bool onIsEqual(const GrFragmentProcessor& sBase) const override {
         const Edge2PtConicalEffect& s = sBase.cast<Edge2PtConicalEffect>();
         return (INHERITED::onIsEqual(sBase) &&
                 this->fCenterX1 == s.fCenterX1 &&
@@ -146,8 +146,8 @@ public:
                           const char* outputColor,
                           const char* inputColor,
                           const TransformedCoordsArray&,
-                          const TextureSamplerArray&) SK_OVERRIDE;
-    virtual void setData(const GrGLProgramDataManager&, const GrProcessor&) SK_OVERRIDE;
+                          const TextureSamplerArray&) override;
+    void setData(const GrGLProgramDataManager&, const GrProcessor&) override;
 
     static void GenKey(const GrProcessor&, const GrGLCaps& caps, GrProcessorKeyBuilder* b);
 
@@ -388,19 +388,19 @@ public:
 
     virtual ~FocalOutside2PtConicalEffect() { }
 
-    virtual const char* name() const SK_OVERRIDE {
+    const char* name() const override {
         return "Two-Point Conical Gradient Focal Outside";
     }
 
-    virtual void getGLProcessorKey(const GrGLCaps&, GrProcessorKeyBuilder*) const SK_OVERRIDE;
+    void getGLProcessorKey(const GrGLCaps&, GrProcessorKeyBuilder*) const override;
 
-    virtual GrGLFragmentProcessor* createGLInstance() const SK_OVERRIDE;
+    GrGLFragmentProcessor* createGLInstance() const override;
 
     bool isFlipped() const { return fIsFlipped; }
     SkScalar focal() const { return fFocalX; }
 
 private:
-    virtual bool onIsEqual(const GrFragmentProcessor& sBase) const SK_OVERRIDE {
+    bool onIsEqual(const GrFragmentProcessor& sBase) const override {
         const FocalOutside2PtConicalEffect& s = sBase.cast<FocalOutside2PtConicalEffect>();
         return (INHERITED::onIsEqual(sBase) &&
                 this->fFocalX == s.fFocalX &&
@@ -434,8 +434,8 @@ public:
                           const char* outputColor,
                           const char* inputColor,
                           const TransformedCoordsArray&,
-                          const TextureSamplerArray&) SK_OVERRIDE;
-    virtual void setData(const GrGLProgramDataManager&, const GrProcessor&) SK_OVERRIDE;
+                          const TextureSamplerArray&) override;
+    void setData(const GrGLProgramDataManager&, const GrProcessor&) override;
 
     static void GenKey(const GrProcessor&, const GrGLCaps& caps, GrProcessorKeyBuilder* b);
 
@@ -610,20 +610,20 @@ public:
 
     virtual ~FocalInside2PtConicalEffect() {}
 
-    virtual const char* name() const SK_OVERRIDE {
+    const char* name() const override {
         return "Two-Point Conical Gradient Focal Inside";
     }
 
-    virtual void getGLProcessorKey(const GrGLCaps&, GrProcessorKeyBuilder*) const SK_OVERRIDE;
+    void getGLProcessorKey(const GrGLCaps&, GrProcessorKeyBuilder*) const override;
 
-    virtual GrGLFragmentProcessor* createGLInstance() const SK_OVERRIDE;
+    GrGLFragmentProcessor* createGLInstance() const override;
 
     SkScalar focal() const { return fFocalX; }
 
     typedef GLFocalInside2PtConicalEffect GLProcessor;
 
 private:
-    virtual bool onIsEqual(const GrFragmentProcessor& sBase) const SK_OVERRIDE {
+    bool onIsEqual(const GrFragmentProcessor& sBase) const override {
         const FocalInside2PtConicalEffect& s = sBase.cast<FocalInside2PtConicalEffect>();
         return (INHERITED::onIsEqual(sBase) &&
                 this->fFocalX == s.fFocalX);
@@ -655,8 +655,8 @@ public:
                           const char* outputColor,
                           const char* inputColor,
                           const TransformedCoordsArray&,
-                          const TextureSamplerArray&) SK_OVERRIDE;
-    virtual void setData(const GrGLProgramDataManager&, const GrProcessor&) SK_OVERRIDE;
+                          const TextureSamplerArray&) override;
+    void setData(const GrGLProgramDataManager&, const GrProcessor&) override;
 
     static void GenKey(const GrProcessor&, const GrGLCaps& caps, GrProcessorKeyBuilder* b);
 
@@ -857,12 +857,12 @@ public:
 
     virtual ~CircleInside2PtConicalEffect() {}
 
-    virtual const char* name() const SK_OVERRIDE { return "Two-Point Conical Gradient Inside"; }
+    const char* name() const override { return "Two-Point Conical Gradient Inside"; }
 
     virtual void getGLProcessorKey(const GrGLCaps& caps,
-                                   GrProcessorKeyBuilder* b) const SK_OVERRIDE;
+                                   GrProcessorKeyBuilder* b) const override;
 
-    virtual GrGLFragmentProcessor* createGLInstance() const SK_OVERRIDE;
+    GrGLFragmentProcessor* createGLInstance() const override;
 
     SkScalar centerX() const { return fInfo.fCenterEnd.fX; }
     SkScalar centerY() const { return fInfo.fCenterEnd.fY; }
@@ -871,7 +871,7 @@ public:
     SkScalar C() const { return fInfo.fC; }
 
 private:
-    virtual bool onIsEqual(const GrFragmentProcessor& sBase) const SK_OVERRIDE {
+    bool onIsEqual(const GrFragmentProcessor& sBase) const override {
         const CircleInside2PtConicalEffect& s = sBase.cast<CircleInside2PtConicalEffect>();
         return (INHERITED::onIsEqual(sBase) &&
                 this->fInfo.fCenterEnd == s.fInfo.fCenterEnd &&
@@ -906,8 +906,8 @@ public:
                           const char* outputColor,
                           const char* inputColor,
                           const TransformedCoordsArray&,
-                          const TextureSamplerArray&) SK_OVERRIDE;
-    virtual void setData(const GrGLProgramDataManager&, const GrProcessor&) SK_OVERRIDE;
+                          const TextureSamplerArray&) override;
+    void setData(const GrGLProgramDataManager&, const GrProcessor&) override;
 
     static void GenKey(const GrProcessor&, const GrGLCaps& caps, GrProcessorKeyBuilder* b);
 
@@ -1081,11 +1081,11 @@ public:
 
     virtual ~CircleOutside2PtConicalEffect() {}
 
-    virtual const char* name() const SK_OVERRIDE { return "Two-Point Conical Gradient Outside"; }
+    const char* name() const override { return "Two-Point Conical Gradient Outside"; }
 
-    virtual void getGLProcessorKey(const GrGLCaps&, GrProcessorKeyBuilder*) const SK_OVERRIDE;
+    void getGLProcessorKey(const GrGLCaps&, GrProcessorKeyBuilder*) const override;
 
-    virtual GrGLFragmentProcessor* createGLInstance() const SK_OVERRIDE;
+    GrGLFragmentProcessor* createGLInstance() const override;
 
     SkScalar centerX() const { return fInfo.fCenterEnd.fX; }
     SkScalar centerY() const { return fInfo.fCenterEnd.fY; }
@@ -1096,7 +1096,7 @@ public:
     bool isFlipped() const { return fIsFlipped; }
 
 private:
-    virtual bool onIsEqual(const GrFragmentProcessor& sBase) const SK_OVERRIDE {
+    bool onIsEqual(const GrFragmentProcessor& sBase) const override {
         const CircleOutside2PtConicalEffect& s = sBase.cast<CircleOutside2PtConicalEffect>();
         return (INHERITED::onIsEqual(sBase) &&
                 this->fInfo.fCenterEnd == s.fInfo.fCenterEnd &&
@@ -1143,8 +1143,8 @@ public:
                           const char* outputColor,
                           const char* inputColor,
                           const TransformedCoordsArray&,
-                          const TextureSamplerArray&) SK_OVERRIDE;
-    virtual void setData(const GrGLProgramDataManager&, const GrProcessor&) SK_OVERRIDE;
+                          const TextureSamplerArray&) override;
+    void setData(const GrGLProgramDataManager&, const GrProcessor&) override;
 
     static void GenKey(const GrProcessor&, const GrGLCaps& caps, GrProcessorKeyBuilder* b);
 

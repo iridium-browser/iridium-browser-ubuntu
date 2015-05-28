@@ -352,7 +352,7 @@ var AutomationAttributeTypes = [
 /**
  * Maps an attribute name to another attribute who's value is an id or an array
  * of ids referencing an AutomationNode.
- * @param {!Object.<string, string>}
+ * @param {!Object<string, string>}
  * @const
  */
 var ATTRIBUTE_NAME_TO_ID_ATTRIBUTE = {
@@ -366,7 +366,7 @@ var ATTRIBUTE_NAME_TO_ID_ATTRIBUTE = {
 
 /**
  * A set of attributes ignored in the automation API.
- * @param {!Object.<string, boolean>}
+ * @param {!Object<string, boolean>}
  * @const
  */
 var ATTRIBUTE_BLACKLIST = {'activedescendantId': true,
@@ -485,6 +485,13 @@ var TableCellMixinAttributes = {
   tableCellRowSpan: defaultIntAttribute(1)
 };
 
+var LiveRegionMixinAttributes = {
+  containerLiveAtomic: defaultBoolAttribute(),
+  containerLiveBusy: defaultBoolAttribute(),
+  containerLiveRelevant: defaultStringAttribute(),
+  containerLiveStatus: defaultStringAttribute(),
+};
+
 /**
  * AutomationRootNode.
  *
@@ -569,6 +576,28 @@ AutomationRootNodeImpl.prototype = {
                     chrome);
       return false;
     }
+
+    // Notify tree change observers of new nodes.
+    // TODO(dmazzoni): Notify tree change observers of changed nodes,
+    // and handle subtreeCreated and nodeCreated properly.
+    var observers = automationUtil.treeChangeObservers;
+    if (observers.length > 0) {
+      for (var nodeId in updateState.newNodes) {
+        var node = updateState.newNodes[nodeId];
+        var treeChange =
+            {target: node, type: schema.TreeChangeType.nodeCreated};
+        for (var i = 0; i < observers.length; i++) {
+          try {
+            observers[i](treeChange);
+          } catch (e) {
+            console.error('Error in tree change observer for ' +
+                treeChange.type + ': ' + e.message +
+                '\nStack trace: ' + e.stack);
+          }
+        }
+      }
+    }
+
     return true;
   },
 
@@ -618,6 +647,21 @@ AutomationRootNodeImpl.prototype = {
   invalidate_: function(node) {
     if (!node)
       return;
+
+    // Notify tree change observers of the removed node.
+    var observers = automationUtil.treeChangeObservers;
+    if (observers.length > 0) {
+      var treeChange = {target: node, type: schema.TreeChangeType.nodeRemoved};
+      for (var i = 0; i < observers.length; i++) {
+        try {
+          observers[i](treeChange);
+        } catch (e) {
+          console.error('Error in tree change observer for ' + treeChange.type +
+              ': ' + e.message + '\nStack trace: ' + e.stack);
+        }
+      }
+    }
+
     var children = node.children;
 
     for (var i = 0, child; child = children[i]; i++) {
@@ -728,18 +772,20 @@ AutomationRootNodeImpl.prototype = {
 
     // TODO(dtseng): Make into set listing all hosting node roles.
     if (nodeData.role == schema.RoleType.webView) {
-      if (nodeImpl.pendingChildFrame === undefined)
+      if (nodeImpl.childTreeID !== nodeData.intAttributes.childTreeId)
         nodeImpl.pendingChildFrame = true;
 
       if (nodeImpl.pendingChildFrame) {
         nodeImpl.childTreeID = nodeData.intAttributes.childTreeId;
-        automationInternal.enableFrame(nodeImpl.childTreeID);
         automationUtil.storeTreeCallback(nodeImpl.childTreeID, function(root) {
           nodeImpl.pendingChildFrame = false;
           nodeImpl.childTree = root;
           privates(root).impl.hostTree = node;
+          if (root.attributes.docLoadingProgress == 1)
+            privates(root).impl.dispatchEvent(schema.EventType.loadComplete);
           nodeImpl.dispatchEvent(schema.EventType.childrenChanged);
         });
+        automationInternal.enableFrame(nodeImpl.childTreeID);
       }
     }
     for (var key in AutomationAttributeDefaults) {
@@ -765,6 +811,13 @@ AutomationRootNodeImpl.prototype = {
         this.mixinAttributes_(nodeImpl, ScrollableMixinAttributes, nodeData);
         break;
       }
+    }
+
+    // If this is inside a live region, set live region mixins.
+    var attr = 'containerLiveStatus';
+    var spec = LiveRegionMixinAttributes[attr];
+    if (this.findAttribute_(attr, spec, nodeData) !== undefined) {
+      this.mixinAttributes_(nodeImpl, LiveRegionMixinAttributes, nodeData);
     }
 
     // If this is a link, set link attributes
@@ -968,8 +1021,10 @@ var AutomationNode = utils.expose('AutomationNode',
                                                 'setSelection',
                                                 'addEventListener',
                                                 'removeEventListener',
+                                                'addTreeChangeObserver',
+                                                'removeTreeChangeObserver',
                                                 'domQuerySelector',
-                                                'toJSON' ],
+                                                'toString' ],
                                     readonly: ['parent',
                                                'firstChild',
                                                'lastChild',

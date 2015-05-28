@@ -128,17 +128,35 @@ bool isValidProtocol(const String& protocol)
     return true;
 }
 
+void KURL::initialize()
+{
+    // This must be called before we create other threads to
+    // avoid racy static local initialization.
+    blankURL();
+}
+
 String KURL::strippedForUseAsReferrer() const
 {
     if (!protocolIsInHTTPFamily())
         return String();
 
-    if (m_parsed.username.is_nonempty() || m_parsed.password.is_nonempty() || m_parsed.ref.is_nonempty()) {
+    if (m_parsed.username.is_nonempty() || m_parsed.password.is_nonempty() || m_parsed.ref.is_valid()) {
         KURL referrer(*this);
         referrer.setUser(String());
         referrer.setPass(String());
         referrer.removeFragmentIdentifier();
         return referrer.string();
+    }
+    return string();
+}
+
+String KURL::strippedForUseAsHref() const
+{
+    if (m_parsed.username.is_nonempty() || m_parsed.password.is_nonempty()) {
+        KURL href(*this);
+        href.setUser(String());
+        href.setPass(String());
+        return href.string();
     }
     return string();
 }

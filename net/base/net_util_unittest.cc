@@ -61,9 +61,18 @@ namespace net {
 namespace {
 
 struct HeaderCase {
-  const char* header_name;
-  const char* expected;
+  const char* const header_name;
+  const char* const expected;
 };
+
+#if defined(OS_LINUX) || defined(OS_ANDROID) || defined(OS_CHROMEOS)
+const char kWiFiSSID[] = "TestWiFi";
+const char kInterfaceWithDifferentSSID[] = "wlan999";
+
+std::string TestGetInterfaceSSID(const std::string& ifname) {
+  return (ifname == kInterfaceWithDifferentSSID) ? "AnotherSSID" : kWiFiSSID;
+}
+#endif
 
 // Fills in sockaddr for the given 32-bit address (IPv4.)
 // |bytes| should be an array of length 4.
@@ -154,9 +163,9 @@ bool FillIfaddrs(ifaddrs* interfaces,
 
 TEST(NetUtilTest, GetIdentityFromURL) {
   struct {
-    const char* input_url;
-    const char* expected_username;
-    const char* expected_password;
+    const char* const input_url;
+    const char* const expected_username;
+    const char* const expected_password;
   } tests[] = {
     {
       "http://username:password@google.com",
@@ -224,7 +233,7 @@ TEST(NetUtilTest, GetIdentityFromURL_UTF8) {
 }
 
 // Just a bunch of fake headers.
-const char* google_headers =
+const char google_headers[] =
     "HTTP/1.1 200 OK\n"
     "Content-TYPE: text/html; charset=utf-8\n"
     "Content-disposition: attachment; filename=\"download.pdf\"\n"
@@ -271,7 +280,7 @@ TEST(NetUtilTest, GetSpecificHeader) {
 
 TEST(NetUtilTest, CompliantHost) {
   struct CompliantHostCase {
-    const char* host;
+    const char* const host;
     bool expected_output;
   };
 
@@ -308,9 +317,9 @@ TEST(NetUtilTest, CompliantHost) {
 
 TEST(NetUtilTest, ParseHostAndPort) {
   const struct {
-    const char* input;
+    const char* const input;
     bool success;
-    const char* expected_host;
+    const char* const expected_host;
     int expected_port;
   } tests[] = {
     // Valid inputs:
@@ -367,7 +376,7 @@ TEST(NetUtilTest, ParseHostAndPort) {
 TEST(NetUtilTest, GetHostAndPort) {
   const struct {
     GURL url;
-    const char* expected_host_and_port;
+    const char* const expected_host_and_port;
   } tests[] = {
     { GURL("http://www.foo.com/x"), "www.foo.com:80"},
     { GURL("http://www.foo.com:21/x"), "www.foo.com:21"},
@@ -385,7 +394,7 @@ TEST(NetUtilTest, GetHostAndPort) {
 TEST(NetUtilTest, GetHostAndOptionalPort) {
   const struct {
     GURL url;
-    const char* expected_host_and_port;
+    const char* const expected_host_and_port;
   } tests[] = {
     { GURL("http://www.foo.com/x"), "www.foo.com"},
     { GURL("http://www.foo.com:21/x"), "www.foo.com:21"},
@@ -427,7 +436,7 @@ TEST(NetUtilTest, IPAddressToStringWithPort) {
 TEST(NetUtilTest, NetAddressToString_IPv4) {
   const struct {
     uint8 addr[4];
-    const char* result;
+    const char* const result;
   } tests[] = {
     {{0, 0, 0, 0}, "0.0.0.0"},
     {{127, 0, 0, 1}, "127.0.0.1"},
@@ -445,7 +454,7 @@ TEST(NetUtilTest, NetAddressToString_IPv4) {
 TEST(NetUtilTest, NetAddressToString_IPv6) {
   const struct {
     uint8 addr[16];
-    const char* result;
+    const char* const result;
   } tests[] = {
     {{0xFE, 0xDC, 0xBA, 0x98, 0x76, 0x54, 0x32, 0x10, 0xFE, 0xDC, 0xBA,
       0x98, 0x76, 0x54, 0x32, 0x10},
@@ -494,8 +503,8 @@ TEST(NetUtilTest, GetHostName) {
 
 TEST(NetUtilTest, SimplifyUrlForRequest) {
   struct {
-    const char* input_url;
-    const char* expected_simplified_url;
+    const char* const input_url;
+    const char* const expected_simplified_url;
   } tests[] = {
     {
       // Reference section should be stripped.
@@ -661,7 +670,7 @@ TEST(NetUtilTest, ConvertIPv4MappedToIPv4) {
 
 // Test parsing invalid CIDR notation literals.
 TEST(NetUtilTest, ParseCIDRBlock_Invalid) {
-  const char* bad_literals[] = {
+  const char* const bad_literals[] = {
       "foobar",
       "",
       "192.168.0.1",
@@ -702,8 +711,8 @@ TEST(NetUtilTest, ParseCIDRBlock_Valid) {
 
 TEST(NetUtilTest, IPNumberMatchesPrefix) {
   struct {
-    const char* cidr_literal;
-    const char* ip_literal;
+    const char* const cidr_literal;
+    const char* const ip_literal;
     bool expected_to_match;
   } tests[] = {
     // IPv4 prefix with IPv4 inputs.
@@ -794,6 +803,7 @@ TEST(NetUtilTest, IsLocalhost) {
   EXPECT_TRUE(net::IsLocalhost("127.255.0.0"));
   EXPECT_TRUE(net::IsLocalhost("::1"));
   EXPECT_TRUE(net::IsLocalhost("0:0:0:0:0:0:0:1"));
+  EXPECT_TRUE(net::IsLocalhost("foo.localhost"));
 
   EXPECT_FALSE(net::IsLocalhost("localhostx"));
   EXPECT_FALSE(net::IsLocalhost("foo.localdomain"));
@@ -807,6 +817,16 @@ TEST(NetUtilTest, IsLocalhost) {
   EXPECT_FALSE(net::IsLocalhost("0:0:0:0:1:0:0:1"));
   EXPECT_FALSE(net::IsLocalhost("::1:1"));
   EXPECT_FALSE(net::IsLocalhost("0:0:0:0:0:0:0:0:1"));
+  EXPECT_FALSE(net::IsLocalhost("foo.localhost.com"));
+  EXPECT_FALSE(net::IsLocalhost("foo.localhoste"));
+}
+
+TEST(NetUtilTest, IsLocalhostTLD) {
+  EXPECT_TRUE(net::IsLocalhostTLD("foo.localhost"));
+  EXPECT_TRUE(net::IsLocalhostTLD("foo.localhost."));
+  EXPECT_FALSE(net::IsLocalhostTLD("foo.localhos"));
+  EXPECT_FALSE(net::IsLocalhostTLD("foo.localhost.com"));
+  EXPECT_FALSE(net::IsLocalhost("foo.localhoste"));
 }
 
 // Verify GetNetworkList().
@@ -913,11 +933,11 @@ char* CopyInterfaceName(const char* ifname, int ifname_size, char* output) {
   return output;
 }
 
-char* GetInterfaceName(unsigned int interface_index, char* ifname) {
+char* GetInterfaceName(int interface_index, char* ifname) {
   return CopyInterfaceName(ifname_em1, arraysize(ifname_em1), ifname);
 }
 
-char* GetInterfaceNameVM(unsigned int interface_index, char* ifname) {
+char* GetInterfaceNameVM(int interface_index, char* ifname) {
   return CopyInterfaceName(ifname_vm, arraysize(ifname_vm), ifname);
 }
 
@@ -1306,6 +1326,56 @@ TEST(NetUtilTest, GetNetworkListTrimming) {
 
 #endif  // !OS_MACOSX && !OS_WIN && !OS_NACL
 
+TEST(NetUtilTest, GetWifiSSID) {
+  // We can't check the result of GetWifiSSID() directly, since the result
+  // will differ across machines. Simply exercise the code path and hope that it
+  // doesn't crash.
+  EXPECT_NE((const char*)NULL, GetWifiSSID().c_str());
+}
+
+#if defined(OS_LINUX) || defined(OS_ANDROID) || defined(OS_CHROMEOS)
+TEST(NetUtilTest, GetWifiSSIDFromInterfaceList) {
+  NetworkInterfaceList list;
+  EXPECT_EQ(std::string(), net::internal::GetWifiSSIDFromInterfaceListInternal(
+                               list, TestGetInterfaceSSID));
+
+  NetworkInterface interface1;
+  interface1.name = "wlan0";
+  interface1.type = NetworkChangeNotifier::CONNECTION_WIFI;
+  list.push_back(interface1);
+  ASSERT_EQ(1u, list.size());
+  EXPECT_EQ(std::string(kWiFiSSID),
+            net::internal::GetWifiSSIDFromInterfaceListInternal(
+                list, TestGetInterfaceSSID));
+
+  NetworkInterface interface2;
+  interface2.name = "wlan1";
+  interface2.type = NetworkChangeNotifier::CONNECTION_WIFI;
+  list.push_back(interface2);
+  ASSERT_EQ(2u, list.size());
+  EXPECT_EQ(std::string(kWiFiSSID),
+            net::internal::GetWifiSSIDFromInterfaceListInternal(
+                list, TestGetInterfaceSSID));
+
+  NetworkInterface interface3;
+  interface3.name = kInterfaceWithDifferentSSID;
+  interface3.type = NetworkChangeNotifier::CONNECTION_WIFI;
+  list.push_back(interface3);
+  ASSERT_EQ(3u, list.size());
+  EXPECT_EQ(std::string(), net::internal::GetWifiSSIDFromInterfaceListInternal(
+                               list, TestGetInterfaceSSID));
+
+  list.pop_back();
+  NetworkInterface interface4;
+  interface4.name = "eth0";
+  interface4.type = NetworkChangeNotifier::CONNECTION_ETHERNET;
+  list.push_back(interface4);
+  ASSERT_EQ(3u, list.size());
+  EXPECT_EQ(std::string(), net::internal::GetWifiSSIDFromInterfaceListInternal(
+                               list, TestGetInterfaceSSID));
+}
+#endif  // OS_LINUX
+
 namespace {
 
 #if defined(OS_WIN)
@@ -1417,7 +1487,7 @@ TEST(NetUtilTest, SetWifiOptionsTest) {
 
 struct NonUniqueNameTestData {
   bool is_unique;
-  const char* hostname;
+  const char* const hostname;
 };
 
 // Google Test pretty-printer.
@@ -1462,7 +1532,6 @@ const NonUniqueNameTestData kNonUniqueNameTestData[] = {
     { false, "host.intranet.example" },
     // gTLDs under discussion, but not yet assigned.
     { false, "intranet.corp" },
-    { false, "example.tech" },
     { false, "intranet.internal" },
     // Invalid host names are treated as unique - but expected to be
     // filtered out before then.

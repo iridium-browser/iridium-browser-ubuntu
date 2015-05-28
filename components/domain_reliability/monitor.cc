@@ -21,13 +21,14 @@ namespace domain_reliability {
 
 DomainReliabilityMonitor::DomainReliabilityMonitor(
     const std::string& upload_reporter_string,
-    scoped_refptr<base::SingleThreadTaskRunner> pref_thread,
-    scoped_refptr<base::SingleThreadTaskRunner> network_thread)
+    const scoped_refptr<base::SingleThreadTaskRunner>& pref_thread,
+    const scoped_refptr<base::SingleThreadTaskRunner>& network_thread)
     : time_(new ActualTime()),
       upload_reporter_string_(upload_reporter_string),
       scheduler_params_(
           DomainReliabilityScheduler::Params::GetFromFieldTrialsOrDefaults()),
       dispatcher_(time_.get()),
+      context_manager_(this),
       pref_task_runner_(pref_thread),
       network_task_runner_(network_thread),
       moved_to_network_thread_(false),
@@ -39,14 +40,15 @@ DomainReliabilityMonitor::DomainReliabilityMonitor(
 
 DomainReliabilityMonitor::DomainReliabilityMonitor(
     const std::string& upload_reporter_string,
-    scoped_refptr<base::SingleThreadTaskRunner> pref_thread,
-    scoped_refptr<base::SingleThreadTaskRunner> network_thread,
+    const scoped_refptr<base::SingleThreadTaskRunner>& pref_thread,
+    const scoped_refptr<base::SingleThreadTaskRunner>& network_thread,
     scoped_ptr<MockableTime> time)
     : time_(time.Pass()),
       upload_reporter_string_(upload_reporter_string),
       scheduler_params_(
           DomainReliabilityScheduler::Params::GetFromFieldTrialsOrDefaults()),
       dispatcher_(time_.get()),
+      context_manager_(this),
       pref_task_runner_(pref_thread),
       network_task_runner_(network_thread),
       moved_to_network_thread_(false),
@@ -62,7 +64,6 @@ DomainReliabilityMonitor::~DomainReliabilityMonitor() {
   else
     DCHECK(OnPrefThread());
 
-  ClearContexts();
   net::NetworkChangeNotifier::RemoveNetworkChangeObserver(this);
 }
 
@@ -90,7 +91,8 @@ void DomainReliabilityMonitor::InitURLRequestContext(
 }
 
 void DomainReliabilityMonitor::InitURLRequestContext(
-    scoped_refptr<net::URLRequestContextGetter> url_request_context_getter) {
+    const scoped_refptr<net::URLRequestContextGetter>&
+        url_request_context_getter) {
   DCHECK(OnNetworkThread());
   DCHECK(moved_to_network_thread_);
 
@@ -114,15 +116,17 @@ void DomainReliabilityMonitor::AddBakedInConfigs() {
 
   base::Time now = base::Time::Now();
   for (size_t i = 0; kBakedInJsonConfigs[i]; ++i) {
-    std::string json(kBakedInJsonConfigs[i]);
+    base::StringPiece json(kBakedInJsonConfigs[i]);
     scoped_ptr<const DomainReliabilityConfig> config =
         DomainReliabilityConfig::FromJSON(json);
-    if (config && config->IsExpired(now)) {
+    if (!config) {
+      continue;
+    } else if (config->IsExpired(now)) {
       LOG(WARNING) << "Baked-in Domain Reliability config for "
                    << config->domain << " is expired.";
       continue;
     }
-    AddContext(config.Pass());
+    context_manager_.AddContextForConfig(config.Pass());
   }
 }
 
@@ -169,14 +173,11 @@ void DomainReliabilityMonitor::ClearBrowsingData(
   DCHECK(OnNetworkThread());
 
   switch (mode) {
-    case CLEAR_BEACONS: {
-      ContextMap::const_iterator it;
-      for (it = contexts_.begin(); it != contexts_.end(); ++it)
-        it->second->ClearBeacons();
+    case CLEAR_BEACONS:
+      context_manager_.ClearBeaconsInAllContexts();
       break;
-    };
     case CLEAR_CONTEXTS:
-      ClearContexts();
+      context_manager_.RemoveAllContexts();
       break;
     case MAX_CLEAR_MODE:
       NOTREACHED();
@@ -186,24 +187,38 @@ void DomainReliabilityMonitor::ClearBrowsingData(
 scoped_ptr<base::Value> DomainReliabilityMonitor::GetWebUIData() const {
   DCHECK(OnNetworkThread());
 
-  base::ListValue* contexts_value = new base::ListValue();
-  for (ContextMap::const_iterator it = contexts_.begin();
-       it != contexts_.end();
-       ++it) {
-    contexts_value->Append(it->second->GetWebUIData().release());
-  }
-
-  base::DictionaryValue* data_value = new base::DictionaryValue();
-  data_value->Set("contexts", contexts_value);
-
-  return scoped_ptr<base::Value>(data_value);
+  scoped_ptr<base::DictionaryValue> data_value(new base::DictionaryValue());
+  data_value->Set("contexts", context_manager_.GetWebUIData());
+  return data_value.Pass();
 }
 
 DomainReliabilityContext* DomainReliabilityMonitor::AddContextForTesting(
     scoped_ptr<const DomainReliabilityConfig> config) {
   DCHECK(OnNetworkThread());
 
-  return AddContext(config.Pass());
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/436671 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "436671 DomainReliabilityConfig::AddContextForConfig"));
+
+  return context_manager_.AddContextForConfig(config.Pass());
+}
+
+scoped_ptr<DomainReliabilityContext>
+DomainReliabilityMonitor::CreateContextForConfig(
+    scoped_ptr<const DomainReliabilityConfig> config) {
+  DCHECK(OnNetworkThread());
+  DCHECK(config);
+  DCHECK(config->IsValid());
+
+  return make_scoped_ptr(new DomainReliabilityContext(
+      time_.get(),
+      scheduler_params_,
+      upload_reporter_string_,
+      &last_network_change_time_,
+      &dispatcher_,
+      uploader_.get(),
+      config.Pass()));
 }
 
 DomainReliabilityMonitor::RequestInfo::RequestInfo() {}
@@ -225,38 +240,6 @@ bool DomainReliabilityMonitor::RequestInfo::AccessedNetwork() const {
      response_info.network_accessed;
 }
 
-DomainReliabilityContext* DomainReliabilityMonitor::AddContext(
-    scoped_ptr<const DomainReliabilityConfig> config) {
-  DCHECK(OnNetworkThread());
-  DCHECK(config);
-  DCHECK(config->IsValid());
-
-  // Grab a copy of the domain before transferring ownership of |config|.
-  std::string domain = config->domain;
-
-  DomainReliabilityContext* context =
-      new DomainReliabilityContext(time_.get(),
-                                   scheduler_params_,
-                                   upload_reporter_string_,
-                                   &last_network_change_time_,
-                                   &dispatcher_,
-                                   uploader_.get(),
-                                   config.Pass());
-
-  std::pair<ContextMap::iterator, bool> map_it =
-      contexts_.insert(make_pair(domain, context));
-  // Make sure the domain wasn't already in the map.
-  DCHECK(map_it.second);
-
-  return map_it.first->second;
-}
-
-void DomainReliabilityMonitor::ClearContexts() {
-  STLDeleteContainerPairSecondPointers(
-      contexts_.begin(), contexts_.end());
-  contexts_.clear();
-}
-
 void DomainReliabilityMonitor::OnRequestLegComplete(
     const RequestInfo& request) {
   // Check these again because unit tests call this directly.
@@ -274,18 +257,14 @@ void DomainReliabilityMonitor::OnRequestLegComplete(
   if (request.status.status() == net::URLRequestStatus::FAILED)
     error_code = request.status.error();
 
-  DomainReliabilityContext* context = GetContextForHost(request.url.host());
-
   // Ignore requests where:
-  // 1. There is no context for the request host.
-  // 2. The request did not access the network.
-  // 3. The request is not supposed to send cookies (to avoid associating the
+  // 1. The request did not access the network.
+  // 2. The request is not supposed to send cookies (to avoid associating the
   //    request with any potentially unique data in the config).
-  // 4. The request was itself a Domain Reliability upload (to avoid loops).
-  // 5. There is no defined beacon status for the error or HTTP response code
+  // 3. The request was itself a Domain Reliability upload (to avoid loops).
+  // 4. There is no matching beacon status for the error or HTTP response code
   //    (to avoid leaking network-local errors).
-  if (!context ||
-      !request.AccessedNetwork() ||
+  if (!request.AccessedNetwork() ||
       (request.load_flags & net::LOAD_DO_NOT_SEND_COOKIES) ||
       request.is_upload ||
       !GetDomainReliabilityBeaconStatus(
@@ -312,38 +291,7 @@ void DomainReliabilityMonitor::OnRequestLegComplete(
   beacon.start_time = request.load_timing_info.request_start;
   beacon.elapsed = time_->NowTicks() - beacon.start_time;
   beacon.domain = request.url.host();
-  context->OnBeacon(request.url, beacon);
-}
-
-// TODO(ttuttle): Keep a separate wildcard_contexts_ map to avoid having to
-// prepend '*.' to domains.
-DomainReliabilityContext* DomainReliabilityMonitor::GetContextForHost(
-    const std::string& host) const {
-  DCHECK(OnNetworkThread());
-
-  ContextMap::const_iterator context_it;
-
-  context_it = contexts_.find(host);
-  if (context_it != contexts_.end())
-    return context_it->second;
-
-  std::string host_with_asterisk = "*." + host;
-  context_it = contexts_.find(host_with_asterisk);
-  if (context_it != contexts_.end())
-    return context_it->second;
-
-  size_t dot_pos = host.find('.');
-  if (dot_pos == std::string::npos)
-    return NULL;
-
-  // TODO(ttuttle): Make sure parent is not in PSL before using.
-
-  std::string parent_with_asterisk = "*." + host.substr(dot_pos + 1);
-  context_it = contexts_.find(parent_with_asterisk);
-  if (context_it != contexts_.end())
-    return context_it->second;
-
-  return NULL;
+  context_manager_.RouteBeacon(request.url, beacon);
 }
 
 base::WeakPtr<DomainReliabilityMonitor>

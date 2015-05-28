@@ -9,10 +9,10 @@
 #include "core/CSSValueKeywords.h"
 #include "core/css/CSSPrimitiveValue.h"
 #include "core/frame/Settings.h"
-#include "core/rendering/RenderText.h"
-#include "core/rendering/RenderingTestHelper.h"
-#include "core/rendering/style/ShadowData.h"
-#include "core/rendering/style/ShadowList.h"
+#include "core/layout/LayoutTestHelper.h"
+#include "core/layout/LayoutText.h"
+#include "core/style/ShadowData.h"
+#include "core/style/ShadowList.h"
 #include <gtest/gtest.h>
 
 namespace blink {
@@ -23,19 +23,19 @@ public:
     TextPainterTest() : m_renderText(nullptr) { }
 
 protected:
-    RenderText* renderText() { return m_renderText; }
+    LayoutText* renderText() { return m_renderText; }
 
 private:
     virtual void SetUp() override
     {
         RenderingTest::SetUp();
         setBodyInnerHTML("Hello world");
-        m_renderText = toRenderText(document().body()->firstChild()->renderer());
+        m_renderText = toLayoutText(document().body()->firstChild()->layoutObject());
         ASSERT_TRUE(m_renderText);
         ASSERT_EQ("Hello world", m_renderText->text());
     }
 
-    RenderText* m_renderText;
+    LayoutText* m_renderText;
 };
 
 TEST_F(TextPainterTest, TextPaintingStyle_Simple)
@@ -44,7 +44,7 @@ TEST_F(TextPainterTest, TextPaintingStyle_Simple)
     document().view()->updateLayoutAndStyleIfNeededRecursive();
 
     TextPainter::Style textStyle = TextPainter::textPaintingStyle(
-        *renderText(), renderText()->style(), false /* forceBlackText */, false /* isPrinting */);
+        *renderText(), renderText()->styleRef(), false /* forceBlackText */, false /* isPrinting */);
     EXPECT_EQ(Color(0, 0, 255), textStyle.fillColor);
     EXPECT_EQ(Color(0, 0, 255), textStyle.strokeColor);
     EXPECT_EQ(Color(0, 0, 255), textStyle.emphasisMarkColor);
@@ -62,7 +62,7 @@ TEST_F(TextPainterTest, TextPaintingStyle_AllProperties)
     document().view()->updateLayoutAndStyleIfNeededRecursive();
 
     TextPainter::Style textStyle = TextPainter::textPaintingStyle(
-        *renderText(), renderText()->style(), false /* forceBlackText */, false /* isPrinting */);
+        *renderText(), renderText()->styleRef(), false /* forceBlackText */, false /* isPrinting */);
     EXPECT_EQ(Color(255, 0, 0), textStyle.fillColor);
     EXPECT_EQ(Color(0, 255, 0), textStyle.strokeColor);
     EXPECT_EQ(Color(0, 0, 255), textStyle.emphasisMarkColor);
@@ -85,7 +85,7 @@ TEST_F(TextPainterTest, TextPaintingStyle_ForceBlackText)
     document().view()->updateLayoutAndStyleIfNeededRecursive();
 
     TextPainter::Style textStyle = TextPainter::textPaintingStyle(
-        *renderText(), renderText()->style(), true /* forceBlackText */, false /* isPrinting */);
+        *renderText(), renderText()->styleRef(), true /* forceBlackText */, false /* isPrinting */);
     EXPECT_EQ(Color::black, textStyle.fillColor);
     EXPECT_EQ(Color::black, textStyle.strokeColor);
     EXPECT_EQ(Color::black, textStyle.emphasisMarkColor);
@@ -103,7 +103,7 @@ TEST_F(TextPainterTest, TextPaintingStyle_ForceBackgroundToWhite_NoAdjustmentNee
     document().view()->updateLayoutAndStyleIfNeededRecursive();
 
     TextPainter::Style textStyle = TextPainter::textPaintingStyle(
-        *renderText(), renderText()->style(), false /* forceBlackText */, true /* isPrinting */);
+        *renderText(), renderText()->styleRef(), false /* forceBlackText */, true /* isPrinting */);
     EXPECT_EQ(Color(255, 0, 0), textStyle.fillColor);
     EXPECT_EQ(Color(0, 255, 0), textStyle.strokeColor);
     EXPECT_EQ(Color(0, 0, 255), textStyle.emphasisMarkColor);
@@ -119,7 +119,7 @@ TEST_F(TextPainterTest, TextPaintingStyle_ForceBackgroundToWhite_Darkened)
     document().view()->updateLayoutAndStyleIfNeededRecursive();
 
     TextPainter::Style textStyle = TextPainter::textPaintingStyle(
-        *renderText(), renderText()->style(), false /* forceBlackText */, true /* isPrinting */);
+        *renderText(), renderText()->styleRef(), false /* forceBlackText */, true /* isPrinting */);
     EXPECT_EQ(Color(255, 220, 220).dark(), textStyle.fillColor);
     EXPECT_EQ(Color(220, 255, 220).dark(), textStyle.strokeColor);
     EXPECT_EQ(Color(220, 220, 255).dark(), textStyle.emphasisMarkColor);

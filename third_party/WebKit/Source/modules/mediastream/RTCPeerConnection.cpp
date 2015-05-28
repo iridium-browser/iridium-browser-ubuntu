@@ -116,8 +116,22 @@ RTCConfiguration* RTCPeerConnection::parseConfiguration(const Dictionary& config
         return 0;
     }
 
+    RTCBundlePolicy bundlePolicy = RTCBundlePolicyBalanced;
+    String bundlePolicyString;
+    if (DictionaryHelper::get(configuration, "bundlePolicy", bundlePolicyString)) {
+        if (bundlePolicyString == "max-compat") {
+            bundlePolicy = RTCBundlePolicyMaxCompat;
+        } else if (bundlePolicyString == "max-bundle") {
+            bundlePolicy = RTCBundlePolicyMaxBundle;
+        } else if (bundlePolicyString != "balanced") {
+            exceptionState.throwTypeError("Malformed RTCBundlePolicy");
+            return 0;
+        }
+    }
+
     RTCConfiguration* rtcConfiguration = RTCConfiguration::create();
     rtcConfiguration->setIceTransports(iceTransports);
+    rtcConfiguration->setBundlePolicy(bundlePolicy);
 
     for (size_t i = 0; i < numberOfServers; ++i) {
         Dictionary iceServer;
@@ -741,7 +755,7 @@ void RTCPeerConnection::stop()
     m_iceConnectionState = ICEConnectionStateClosed;
     m_signalingState = SignalingStateClosed;
 
-    HeapVector<Member<RTCDataChannel> >::iterator i = m_dataChannels.begin();
+    HeapVector<Member<RTCDataChannel>>::iterator i = m_dataChannels.begin();
     for (; i != m_dataChannels.end(); ++i)
         (*i)->stop();
     m_dataChannels.clear();
@@ -795,17 +809,17 @@ void RTCPeerConnection::dispatchScheduledEvent()
     if (m_stopped)
         return;
 
-    WillBeHeapVector<RefPtrWillBeMember<Event> > events;
+    WillBeHeapVector<RefPtrWillBeMember<Event>> events;
     events.swap(m_scheduledEvents);
 
-    WillBeHeapVector<RefPtrWillBeMember<Event> >::iterator it = events.begin();
+    WillBeHeapVector<RefPtrWillBeMember<Event>>::iterator it = events.begin();
     for (; it != events.end(); ++it)
         dispatchEvent((*it).release());
 
     events.clear();
 }
 
-void RTCPeerConnection::trace(Visitor* visitor)
+DEFINE_TRACE(RTCPeerConnection)
 {
     visitor->trace(m_localStreams);
     visitor->trace(m_remoteStreams);

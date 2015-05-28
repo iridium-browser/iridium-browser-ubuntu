@@ -37,14 +37,14 @@ class SVGUseElement final : public SVGGraphicsElement,
                             public SVGURIReference,
                             public DocumentResourceClient {
     DEFINE_WRAPPERTYPEINFO();
-    WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(SVGUseElement);
+    WILL_BE_USING_GARBAGE_COLLECTED_MIXIN_NESTED(SVGUseElement, SVGGraphicsElement);
 public:
     static PassRefPtrWillBeRawPtr<SVGUseElement> create(Document&);
     virtual ~SVGUseElement();
 
     void invalidateShadowTree();
 
-    RenderObject* rendererClipChild() const;
+    LayoutObject* layoutObjectClipChild() const;
 
     SVGAnimatedLength* x() const { return m_x.get(); }
     SVGAnimatedLength* y() const { return m_y.get(); }
@@ -53,10 +53,14 @@ public:
 
     virtual void buildPendingResource() override;
 
-    virtual void trace(Visitor*) override;
+    DECLARE_VIRTUAL_TRACE();
 
 private:
     explicit SVGUseElement(Document&);
+
+    virtual bool isPresentationAttribute(const QualifiedName&) const override;
+    virtual void collectStyleForPresentationAttribute(const QualifiedName&, const AtomicString&, MutableStylePropertySet*) override;
+    virtual bool isPresentationAttributeWithSVGDOM(const QualifiedName&) const override;
 
     virtual bool isStructurallyExternal() const override { return !hrefString().isNull() && isExternalURIReference(hrefString(), document()); }
 
@@ -64,10 +68,9 @@ private:
     virtual void removedFrom(ContainerNode*) override;
 
     bool isSupportedAttribute(const QualifiedName&);
-    virtual void parseAttribute(const QualifiedName&, const AtomicString&) override;
     virtual void svgAttributeChanged(const QualifiedName&) override;
 
-    virtual RenderObject* createRenderer(RenderStyle*) override;
+    virtual LayoutObject* createLayoutObject(const ComputedStyle&) override;
     virtual void toClipPath(Path&) override;
 
     void clearResourceReferences();

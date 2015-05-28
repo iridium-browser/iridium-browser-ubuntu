@@ -15,6 +15,19 @@
 namespace gl
 {
 
+bool operator==(const Rectangle &a, const Rectangle &b)
+{
+    return a.x == b.x &&
+           a.y == b.y &&
+           a.width == b.width &&
+           a.height == b.height;
+}
+
+bool operator!=(const Rectangle &a, const Rectangle &b)
+{
+    return !(a == b);
+}
+
 SamplerState::SamplerState()
     : minFilter(GL_NEAREST_MIPMAP_LINEAR),
       magFilter(GL_LINEAR),
@@ -38,6 +51,31 @@ bool SamplerState::swizzleRequired() const
 {
     return swizzleRed != GL_RED || swizzleGreen != GL_GREEN ||
            swizzleBlue != GL_BLUE || swizzleAlpha != GL_ALPHA;
+}
+
+bool SamplerState::operator==(const SamplerState &other) const
+{
+    return minFilter == other.minFilter &&
+           magFilter == other.magFilter &&
+           wrapS == other.wrapS &&
+           wrapT == other.wrapT &&
+           wrapR == other.wrapR &&
+           maxAnisotropy == other.maxAnisotropy &&
+           baseLevel == other.baseLevel &&
+           maxLevel == other.maxLevel &&
+           minLod == other.minLod &&
+           maxLod == other.maxLod &&
+           compareMode == other.compareMode &&
+           compareFunc == other.compareFunc &&
+           swizzleRed == other.swizzleRed &&
+           swizzleGreen == other.swizzleGreen &&
+           swizzleBlue == other.swizzleBlue &&
+           swizzleAlpha == other.swizzleAlpha;
+}
+
+bool SamplerState::operator!=(const SamplerState &other) const
+{
+    return !(*this == other);
 }
 
 static void MinMax(int a, int b, int *minimum, int *maximum)
@@ -152,8 +190,8 @@ void VertexFormat::GetInputLayout(VertexFormat *inputLayout,
                                   Program *program,
                                   const State &state)
 {
-    const VertexAttribute *vertexAttributes = state.getVertexArray()->getVertexAttributes();
-    for (unsigned int attributeIndex = 0; attributeIndex < MAX_VERTEX_ATTRIBS; attributeIndex++)
+    const std::vector<VertexAttribute> &vertexAttributes = state.getVertexArray()->getVertexAttributes();
+    for (unsigned int attributeIndex = 0; attributeIndex < vertexAttributes.size(); attributeIndex++)
     {
         int semanticIndex = program->getSemanticIndex(attributeIndex);
 

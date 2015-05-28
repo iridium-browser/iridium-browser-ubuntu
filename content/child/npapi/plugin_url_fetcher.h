@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef CONTENT_CHILD_NPAPI_URL_FETCHER_H_
-#define CONTENT_CHILD_NPAPI_URL_FETCHER_H_
+#ifndef CONTENT_CHILD_NPAPI_PLUGIN_URL_FETCHER_H_
+#define CONTENT_CHILD_NPAPI_PLUGIN_URL_FETCHER_H_
 
 #include <string>
 
@@ -15,7 +15,6 @@
 namespace content {
 class MultipartResponseDelegate;
 class PluginStreamUrl;
-class ResourceLoaderBridge;
 
 // Fetches URLS for a plugin using ResourceDispatcher.
 class PluginURLFetcher : public RequestPeer {
@@ -83,14 +82,13 @@ class PluginURLFetcher : public RequestPeer {
   bool copy_stream_data_;
   int64 data_offset_;
   bool pending_failure_notification_;
+  int request_id_;
 
   scoped_ptr<MultipartResponseDelegate> multipart_delegate_;
-
-  scoped_ptr<ResourceLoaderBridge> bridge_;
 
   DISALLOW_COPY_AND_ASSIGN(PluginURLFetcher);
 };
 
 }  // namespace content
 
-#endif  // CONTENT_CHILD_NPAPI_URL_FETCHER_H_
+#endif  // CONTENT_CHILD_NPAPI_PLUGIN_URL_FETCHER_H_

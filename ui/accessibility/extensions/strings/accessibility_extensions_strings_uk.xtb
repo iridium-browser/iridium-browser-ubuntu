@@ -1,9 +1,11 @@
 <?xml version="1.0" ?><!DOCTYPE translationbundle><translationbundle lang="uk">
 <translation id="1408730541890277710">Заміна зображень альтернативним текстом.</translation>
+<translation id="6017514345406065928">Зелений</translation>
 <translation id="595639123821853262">Інвертовані відтінки сірого</translation>
 <translation id="8260673944985561857">Параметри клавішної навігації</translation>
 <translation id="3410969471888629217">Видалити налаштування сайтів</translation>
 <translation id="6050189528197190982">Відтінки сірого</translation>
+<translation id="8261559421026395104">Покращити сприйняття:</translation>
 <translation id="5094574508723441140">Збільшений контраст</translation>
 <translation id="8609925175482059018">Натисніть &lt;span class='key'&gt;F7&lt;/span&gt;, щоб увімкнути клавішну навігацію. Натисніть її знову, щоб вимкнути цю функцію.</translation>
 <translation id="3435896845095436175">Увімкнути</translation>
@@ -14,6 +16,8 @@
 <translation id="2394933097471027016">Спробуйте. На цій сторінці клавішну навігацію завжди ввімкнено.</translation>
 <translation id="3622586652998721735">Зробити схемою за умовчанням</translation>
 <translation id="2179565792157161713">Відкрити докладний опис у новій вкладці</translation>
+<translation id="7942349550061667556">Червоний</translation>
+<translation id="1555130319947370107">Синій</translation>
 <translation id="2471847333270902538">Схема кольорів для веб-сайту <ph name="SITE"/>:</translation>
 <translation id="381767806621926835">Натисніть правою кнопкою миші будь-який вміст з атрибутом &quot;longdesc&quot; або &quot;aria-describedat&quot;, щоб перейти до його докладного опису.</translation>
 <translation id="786423340267544509">Додавайте контур до елементів за допомогою атрибутів &quot;aria-describedat&quot; або &quot;longdesc&quot;.</translation>
@@ -31,6 +35,7 @@
 <translation id="4896660567607030658">Просто показати курсор.</translation>
 <translation id="5631241868147802353">Схема кольорів за умовчанням:</translation>
 <translation id="5173942593318174089">Виділити положення курсора анімацією.</translation>
+<translation id="7379645913608427028">Градус</translation>
 <translation id="894241283505723656">Докладні описи в контекстному меню</translation>
 <translation id="5555153510860501336">Високий контраст вимкнено</translation>
 <translation id="1703735871906654364">Клавішна навігація</translation>
@@ -38,6 +43,7 @@
 <translation id="6550675742724504774">Параметри</translation>
 <translation id="5650358096585648000">Візуальна реакція</translation>
 <translation id="4388820049312272371">Виділити положення курсора швидким блиманням.</translation>
+<translation id="2223143012868735942">До сторінок застосовується спеціальний фільтр, щоб покращити сприйняття кольорів.</translation>
 <translation id="4023902424053835668">Перегляд тексту веб-сторінок за допомогою клавіш зі стрілками.</translation>
 <translation id="2795227192542594043">Завдяки цьому розширенню можна використовувати курсор, щоб виділяти текст на веб-сторінках за допомогою клавіатури.</translation>
 <translation id="4394049700291259645">Вимкнути</translation>

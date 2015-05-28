@@ -33,6 +33,7 @@
 #define EventTarget_h
 
 #include "bindings/core/v8/ScriptWrappable.h"
+#include "core/CoreExport.h"
 #include "core/events/EventListenerMap.h"
 #include "core/events/ThreadLocalEventNames.h"
 #include "platform/heap/Handle.h"
@@ -60,7 +61,7 @@ struct FiringEventIterator {
 typedef Vector<FiringEventIterator, 1> FiringEventIteratorVector;
 
 struct EventTargetData {
-    WTF_MAKE_NONCOPYABLE(EventTargetData); WTF_MAKE_FAST_ALLOCATED;
+    WTF_MAKE_NONCOPYABLE(EventTargetData); WTF_MAKE_FAST_ALLOCATED(EventTargetData);
 public:
     EventTargetData();
     ~EventTargetData();
@@ -101,7 +102,7 @@ public:
 //
 // Optionally, add a FooEvent.idl class, but that's outside the scope of this
 // comment (and much more straightforward).
-class EventTarget : public NoBaseWillBeGarbageCollectedFinalized<EventTarget>, public ScriptWrappable {
+class CORE_EXPORT EventTarget : public NoBaseWillBeGarbageCollectedFinalized<EventTarget>, public ScriptWrappable {
     DEFINE_WRAPPERTYPEINFO();
 public:
     virtual ~EventTarget();
@@ -122,10 +123,8 @@ public:
     // be required (per spec), but throwing TypeError breaks legacy content.
     // http://crbug.com/353484
     bool addEventListener();
-    bool addEventListener(const AtomicString& eventType);
     virtual bool addEventListener(const AtomicString& eventType, PassRefPtr<EventListener>, bool useCapture = false);
     bool removeEventListener();
-    bool removeEventListener(const AtomicString& eventType);
     virtual bool removeEventListener(const AtomicString& eventType, PassRefPtr<EventListener>, bool useCapture = false);
     virtual void removeAllEventListeners();
     virtual bool dispatchEvent(PassRefPtrWillBeRawPtr<Event>);
@@ -144,7 +143,7 @@ public:
 
     bool fireEventListeners(Event*);
 
-    virtual void trace(Visitor*) { }
+    DEFINE_INLINE_VIRTUAL_TRACE() { }
 
     virtual bool keepEventInNode(Event*) { return false; };
 
@@ -179,7 +178,7 @@ private:
     friend class EventListenerIterator;
 };
 
-class EventTargetWithInlineData : public EventTarget {
+class CORE_EXPORT EventTargetWithInlineData : public EventTarget {
 protected:
     virtual EventTargetData* eventTargetData() override final { return &m_eventTargetData; }
     virtual EventTargetData& ensureEventTargetData() override final { return m_eventTargetData; }
@@ -202,7 +201,7 @@ class RefCountedGarbageCollectedEventTargetWithInlineData : public EventTargetWi
 template <typename T>
 class RefCountedGarbageCollectedEventTargetWithInlineData : public RefCountedGarbageCollected<T>, public EventTargetWithInlineData {
 public:
-    virtual void trace(Visitor* visitor) override { EventTargetWithInlineData::trace(visitor); }
+    DEFINE_INLINE_VIRTUAL_TRACE() { EventTargetWithInlineData::trace(visitor); }
 };
 #endif
 

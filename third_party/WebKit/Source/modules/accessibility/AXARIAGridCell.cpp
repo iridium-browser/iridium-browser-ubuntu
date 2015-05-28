@@ -36,8 +36,8 @@
 
 namespace blink {
 
-AXARIAGridCell::AXARIAGridCell(RenderObject* renderer, AXObjectCacheImpl* axObjectCache)
-    : AXTableCell(renderer, axObjectCache)
+AXARIAGridCell::AXARIAGridCell(LayoutObject* layoutObject, AXObjectCacheImpl* axObjectCache)
+    : AXTableCell(layoutObject, axObjectCache)
 {
 }
 
@@ -45,9 +45,21 @@ AXARIAGridCell::~AXARIAGridCell()
 {
 }
 
-PassRefPtr<AXARIAGridCell> AXARIAGridCell::create(RenderObject* renderer, AXObjectCacheImpl* axObjectCache)
+PassRefPtr<AXARIAGridCell> AXARIAGridCell::create(LayoutObject* layoutObject, AXObjectCacheImpl* axObjectCache)
 {
-    return adoptRef(new AXARIAGridCell(renderer, axObjectCache));
+    return adoptRef(new AXARIAGridCell(layoutObject, axObjectCache));
+}
+
+bool AXARIAGridCell::isAriaColumnHeader() const
+{
+    const AtomicString& role = getAttribute(HTMLNames::roleAttr);
+    return equalIgnoringCase(role, "columnheader");
+}
+
+bool AXARIAGridCell::isAriaRowHeader() const
+{
+    const AtomicString& role = getAttribute(HTMLNames::roleAttr);
+    return equalIgnoringCase(role, "rowheader");
 }
 
 AXObject* AXARIAGridCell::parentTable() const
@@ -85,7 +97,7 @@ void AXARIAGridCell::rowIndexRange(pair<unsigned, unsigned>& rowRange)
         if (!columnCount)
             return;
 
-        AccessibilityChildrenVector siblings = parent->children();
+        const auto& siblings = parent->children();
         unsigned childrenSize = siblings.size();
         for (unsigned k = 0; k < childrenSize; ++k) {
             if (siblings[k].get() == this) {
@@ -108,7 +120,7 @@ void AXARIAGridCell::columnIndexRange(pair<unsigned, unsigned>& columnRange)
     if (!parent->isTableRow() && !parent->isAXTable())
         return;
 
-    AccessibilityChildrenVector siblings = parent->children();
+    const auto& siblings = parent->children();
     unsigned childrenSize = siblings.size();
     for (unsigned k = 0; k < childrenSize; ++k) {
         if (siblings[k].get() == this) {
@@ -119,6 +131,17 @@ void AXARIAGridCell::columnIndexRange(pair<unsigned, unsigned>& columnRange)
 
     // as far as I can tell, grid cells cannot span columns
     columnRange.second = 1;
+}
+
+AccessibilityRole AXARIAGridCell::scanToDecideHeaderRole()
+{
+    if (isAriaRowHeader())
+        return RowHeaderRole;
+
+    if (isAriaColumnHeader())
+        return ColumnHeaderRole;
+
+    return CellRole;
 }
 
 } // namespace blink

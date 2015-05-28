@@ -28,7 +28,7 @@ class Image9 : public ImageD3D
     Image9(Renderer9 *renderer);
     ~Image9();
 
-    static Image9 *makeImage9(Image *img);
+    static Image9 *makeImage9(ImageD3D *img);
 
     static gl::Error generateMipmap(Image9 *dest, Image9 *source);
     static gl::Error generateMip(IDirect3DSurface9 *destSurface, IDirect3DSurface9 *sourceSurface);
@@ -44,16 +44,14 @@ class Image9 : public ImageD3D
     virtual gl::Error setManagedSurfaceCube(TextureStorage *storage, int face, int level);
     virtual gl::Error copyToStorage(TextureStorage *storage, const gl::ImageIndex &index, const gl::Box &region);
 
-    virtual gl::Error loadData(const gl::Box &area, GLint unpackAlignment, GLenum type, const void *input);
+    virtual gl::Error loadData(const gl::Box &area, const gl::PixelUnpackState &unpack, GLenum type, const void *input);
     virtual gl::Error loadCompressedData(const gl::Box &area, const void *input);
 
-    virtual gl::Error copy(const gl::Offset &destOffset, const gl::Rectangle &sourceArea, RenderTarget *source);
-    virtual gl::Error copy(const gl::Offset &destOffset, const gl::Rectangle &sourceArea,
+    virtual gl::Error copy(const gl::Offset &destOffset, const gl::Rectangle &sourceArea, RenderTargetD3D *source);
+    virtual gl::Error copy(const gl::Offset &destOffset, const gl::Box &sourceArea,
                            const gl::ImageIndex &sourceIndex, TextureStorage *source);
 
   private:
-    DISALLOW_COPY_AND_ASSIGN(Image9);
-
     gl::Error getSurface(IDirect3DSurface9 **outSurface);
 
     gl::Error createSurface();

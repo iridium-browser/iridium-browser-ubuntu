@@ -32,109 +32,37 @@ var remoting = remoting || {};
 remoting.ACCESS_TOKEN_RESEND_INTERVAL_MS = 15 * 60 * 1000;
 
 /**
- * True if Cast capability is supported.
- *
- * @type {boolean}
- */
-remoting.enableCast = false;
-
-/**
- * True to enable mouse lock.
- * This is currently disabled because the current client plugin does not
- * properly handle mouse lock and delegated large cursors at the same time.
- * This should be re-enabled (by removing this flag) once a version of
- * the plugin that supports both has reached Chrome Stable channel.
- * (crbug.com/429322).
- *
- * @type {boolean}
- */
-remoting.enableMouseLock = false;
-
-/**
+ * @param {remoting.ClientPlugin} plugin
+ * @param {remoting.Host} host The host to connect to.
  * @param {remoting.SignalStrategy} signalStrategy Signal strategy.
- * @param {HTMLElement} container Container element for the client view.
- * @param {string} hostDisplayName A human-readable name for the host.
- * @param {string} accessCode The IT2Me access code. Blank for Me2Me.
- * @param {function(boolean, function(string): void): void} fetchPin
- *     Called by Me2Me connections when a PIN needs to be obtained
- *     interactively.
- * @param {function(string, string, string,
- *                  function(string, string): void): void}
- *     fetchThirdPartyToken Called by Me2Me connections when a third party
- *     authentication token must be obtained.
- * @param {string} authenticationMethods Comma-separated list of
- *     authentication methods the client should attempt to use.
- * @param {string} hostId The host identifier for Me2Me, or empty for IT2Me.
- *     Mixed into authentication hashes for some authentication methods.
- * @param {string} hostJid The jid of the host to connect to.
- * @param {string} hostPublicKey The base64 encoded version of the host's
- *     public key.
- * @param {remoting.ClientSession.Mode} mode The mode of this connection.
- * @param {string} clientPairingId For paired Me2Me connections, the
- *     pairing id for this client, as issued by the host.
- * @param {string} clientPairedSecret For paired Me2Me connections, the
- *     paired secret for this client, as issued by the host.
- * @param {string} defaultRemapKeys The default set of remap keys, to use
- *     when the client doesn't define any.
+ * @param {function(string, string):boolean} onExtensionMessage The handler for
+ *     protocol extension messages. Returns true if a message is recognized;
+ *     false otherwise.
+ *
  * @constructor
- * @extends {base.EventSource}
+ * @extends {base.EventSourceImpl}
+ * @implements {base.Disposable}
+ * @implements {remoting.ClientPlugin.ConnectionEventHandler}
  */
-remoting.ClientSession = function(signalStrategy, container, hostDisplayName,
-                                  accessCode, fetchPin, fetchThirdPartyToken,
-                                  authenticationMethods, hostId, hostJid,
-                                  hostPublicKey, mode, clientPairingId,
-                                  clientPairedSecret, defaultRemapKeys) {
-  /** @private */
-  this.state_ = remoting.ClientSession.State.CREATED;
+remoting.ClientSession = function(plugin, host, signalStrategy,
+                                  onExtensionMessage) {
+  base.inherits(this, base.EventSourceImpl);
 
   /** @private */
-  this.error_ = remoting.Error.NONE;
+  this.state_ = remoting.ClientSession.State.INITIALIZING;
 
-  /** @type {HTMLElement}
-    * @private */
-  this.container_ = container;
+  /** @private {!remoting.Error} */
+  this.error_ = remoting.Error.none();
 
   /** @private */
-  this.hostDisplayName_ = hostDisplayName;
-  /** @private */
-  this.hostJid_ = hostJid;
-  /** @private */
-  this.hostPublicKey_ = hostPublicKey;
-  /** @private */
-  this.accessCode_ = accessCode;
-  /** @private */
-  this.fetchPin_ = fetchPin;
-  /** @private */
-  this.fetchThirdPartyToken_ = fetchThirdPartyToken;
-  /** @private */
-  this.authenticationMethods_ = authenticationMethods;
-  /** @private */
-  this.hostId_ = hostId;
-  /** @private */
-  this.mode_ = mode;
-  /** @private */
-  this.clientPairingId_ = clientPairingId;
-  /** @private */
-  this.clientPairedSecret_ = clientPairedSecret;
-  /** @private */
-  this.defaultRemapKeys_ = defaultRemapKeys;
+  this.host_ = host;
 
   /** @private */
   this.sessionId_ = '';
-  /** @type {remoting.ClientPlugin}
-    * @private */
-  this.plugin_ = null;
-  /** @private */
-  this.shrinkToFit_ = true;
-  /** @private */
-  this.resizeToClient_ = true;
-  /** @private */
-  this.desktopScale_ = 1.0;
-  /** @private */
-  this.remapKeys_ = '';
+
   /** @private */
   this.hasReceivedFrame_ = false;
-  this.logToServer = new remoting.LogToServer(signalStrategy, mode);
+  this.logToServer = new remoting.LogToServer(signalStrategy);
 
   /** @private */
   this.signalStrategy_ = signalStrategy;
@@ -142,20 +70,7 @@ remoting.ClientSession = function(signalStrategy, container, hostDisplayName,
                     remoting.SignalStrategy.State.CONNECTED);
   this.signalStrategy_.setIncomingStanzaCallback(
       this.onIncomingMessage_.bind(this));
-  remoting.formatIq.setJids(this.signalStrategy_.getJid(), hostJid);
-
-  /** @type {number?} @private */
-  this.notifyClientResolutionTimer_ = null;
-  /** @type {number?} @private */
-  this.bumpScrollTimer_ = null;
-
-  // Bump-scroll test variables. Override to use a fake value for the width
-  // and height of the client plugin so that bump-scrolling can be tested
-  // without relying on the actual size of the host desktop.
-  /** @type {number} @private */
-  this.pluginWidthForBumpScrollTesting = 0;
-  /** @type {number} @private */
-  this.pluginHeightForBumpScrollTesting = 0;
+  remoting.formatIq.setJids(this.signalStrategy_.getJid(), host.jabberId);
 
   /**
    * Allow host-offline error reporting to be suppressed in situations where it
@@ -165,128 +80,44 @@ remoting.ClientSession = function(signalStrategy, container, hostDisplayName,
    */
   this.logHostOfflineErrors_ = true;
 
-  /** @private */
-  this.callPluginLostFocus_ = this.pluginLostFocus_.bind(this);
-  /** @private */
-  this.callPluginGotFocus_ = this.pluginGotFocus_.bind(this);
-  /** @private */
-  this.callOnFullScreenChanged_ = this.onFullScreenChanged_.bind(this)
+  /** @private {function(string, string):boolean} */
+  this.onExtensionMessageHandler_ = onExtensionMessage;
 
-  /** @type {Element} @private */
-  this.mouseCursorOverlay_ =
-      this.container_.querySelector('.mouse-cursor-overlay');
-
-  /** @type {Element} */
-  var img = this.mouseCursorOverlay_;
-  /** @param {Event} event @private */
-  this.updateMouseCursorPosition_ = function(event) {
-    img.style.top = event.y + 'px';
-    img.style.left = event.x + 'px';
-  };
-
-  /** @type {remoting.GnubbyAuthHandler} @private */
-  this.gnubbyAuthHandler_ = null;
-
-  /** @type {remoting.CastExtensionHandler} @private */
-  this.castExtensionHandler_ = null;
-
-  /** @type {remoting.VideoFrameRecorder} @private */
-  this.videoFrameRecorder_ = null;
+  /** @private {remoting.ClientPlugin} */
+  this.plugin_ = plugin;
+  plugin.setConnectionEventHandler(this);
 
   this.defineEvents(Object.keys(remoting.ClientSession.Events));
 };
-
-base.extend(remoting.ClientSession, base.EventSource);
 
 /** @enum {string} */
 remoting.ClientSession.Events = {
   stateChanged: 'stateChanged',
   videoChannelStateChanged: 'videoChannelStateChanged',
-  bumpScrollStarted: 'bumpScrollStarted',
-  bumpScrollStopped: 'bumpScrollStopped'
-};
-
-/**
- * Get host display name.
- *
- * @return {string}
- */
-remoting.ClientSession.prototype.getHostDisplayName = function() {
-  return this.hostDisplayName_;
-};
-
-/**
- * Called when the window or desktop size or the scaling settings change,
- * to set the scroll-bar visibility.
- *
- * TODO(jamiewalch): crbug.com/252796: Remove this once crbug.com/240772 is
- * fixed.
- */
-remoting.ClientSession.prototype.updateScrollbarVisibility = function() {
-  var scroller = document.getElementById('scroller');
-  if (!scroller) {
-    return;
-  }
-
-  var needsVerticalScroll = false;
-  var needsHorizontalScroll = false;
-  if (!this.shrinkToFit_) {
-    // Determine whether or not horizontal or vertical scrollbars are
-    // required, taking into account their width.
-    var clientArea = this.getClientArea_();
-    needsVerticalScroll = clientArea.height < this.plugin_.getDesktopHeight();
-    needsHorizontalScroll = clientArea.width < this.plugin_.getDesktopWidth();
-    var kScrollBarWidth = 16;
-    if (needsHorizontalScroll && !needsVerticalScroll) {
-      needsVerticalScroll =
-          clientArea.height - kScrollBarWidth < this.plugin_.getDesktopHeight();
-    } else if (!needsHorizontalScroll && needsVerticalScroll) {
-      needsHorizontalScroll =
-          clientArea.width - kScrollBarWidth < this.plugin_.getDesktopWidth();
-    }
-  }
-
-  if (needsHorizontalScroll) {
-    scroller.classList.remove('no-horizontal-scroll');
-  } else {
-    scroller.classList.add('no-horizontal-scroll');
-  }
-  if (needsVerticalScroll) {
-    scroller.classList.remove('no-vertical-scroll');
-  } else {
-    scroller.classList.add('no-vertical-scroll');
-  }
-};
-
-/**
- * @return {boolean} True if shrink-to-fit is enabled; false otherwise.
- */
-remoting.ClientSession.prototype.getShrinkToFit = function() {
-  return this.shrinkToFit_;
-};
-
-/**
- * @return {boolean} True if resize-to-client is enabled; false otherwise.
- */
-remoting.ClientSession.prototype.getResizeToClient = function() {
-  return this.resizeToClient_;
 };
 
 // Note that the positive values in both of these enums are copied directly
-// from chromoting_scriptable_object.h and must be kept in sync. The negative
-// values represent state transitions that occur within the web-app that have
-// no corresponding plugin state transition.
+// from connection_to_host.h and must be kept in sync. Code in
+// chromoting_instance.cc converts the C++ enums into strings that must match
+// the names given here.
+// The negative values represent state transitions that occur within the
+// web-app that have no corresponding plugin state transition.
 /** @enum {number} */
 remoting.ClientSession.State = {
   CONNECTION_CANCELED: -3,  // Connection closed (gracefully) before connecting.
   CONNECTION_DROPPED: -2,  // Succeeded, but subsequently closed with an error.
   CREATED: -1,
   UNKNOWN: 0,
-  CONNECTING: 1,
-  INITIALIZING: 2,
-  CONNECTED: 3,
-  CLOSED: 4,
-  FAILED: 5
+  INITIALIZING: 1,
+  CONNECTING: 2,
+  // We don't currently receive AUTHENTICATED from the host - it comes through
+  // as 'CONNECTING' instead.
+  // TODO(garykac) Update chromoting_instance.cc to send this once we've
+  // shipped a webapp release with support for AUTHENTICATED.
+  AUTHENTICATED: 3,
+  CONNECTED: 4,
+  CLOSED: 5,
+  FAILED: 6
 };
 
 /**
@@ -301,9 +132,9 @@ remoting.ClientSession.State.fromString = function(state) {
 };
 
 /**
-  @constructor
   @param {remoting.ClientSession.State} current
   @param {remoting.ClientSession.State} previous
+  @constructor
 */
 remoting.ClientSession.StateEvent = function(current, previous) {
   /** @type {remoting.ClientSession.State} */
@@ -336,14 +167,6 @@ remoting.ClientSession.ConnectionError.fromString = function(error) {
   return remoting.ClientSession.ConnectionError[error];
 }
 
-// The mode of this session.
-/** @enum {number} */
-remoting.ClientSession.Mode = {
-  IT2ME: 0,
-  ME2ME: 1,
-  APP_REMOTING: 2
-};
-
 /**
  * Type used for performance statistics collected by the plugin.
  * @constructor
@@ -373,14 +196,8 @@ remoting.ClientSession.STATS_KEY_DECODE_LATENCY = 'decodeLatency';
 remoting.ClientSession.STATS_KEY_RENDER_LATENCY = 'renderLatency';
 remoting.ClientSession.STATS_KEY_ROUNDTRIP_LATENCY = 'roundtripLatency';
 
-// Keys for per-host settings.
-remoting.ClientSession.KEY_REMAP_KEYS = 'remapKeys';
-remoting.ClientSession.KEY_RESIZE_TO_CLIENT = 'resizeToClient';
-remoting.ClientSession.KEY_SHRINK_TO_FIT = 'shrinkToFit';
-remoting.ClientSession.KEY_DESKTOP_SCALE = 'desktopScale';
-
 /**
- * Set of capabilities for which hasCapability_() can be used to test.
+ * Set of capabilities for which hasCapability() can be used to test.
  *
  * @enum {string}
  */
@@ -392,6 +209,8 @@ remoting.ClientSession.Capability = {
 
   // Let the host know that we're interested in knowing whether or not it
   // rate limits desktop-resize requests.
+  // TODO(kelvinp): This has been supported since M-29.  Currently we only have
+  // <1000 users on M-29 or below. Remove this and the capability on the host.
   RATE_LIMIT_RESIZE_REQUESTS: 'rateLimitResizeRequests',
 
   // Indicates that host/client supports Google Drive integration, and that the
@@ -409,7 +228,7 @@ remoting.ClientSession.Capability = {
 
 /**
  * The set of capabilities negotiated between the client and host.
- * @type {Array.<string>}
+ * @type {Array<string>}
  * @private
  */
 remoting.ClientSession.prototype.capabilities_ = null;
@@ -419,9 +238,8 @@ remoting.ClientSession.prototype.capabilities_ = null;
  *     for.
  * @return {boolean} True if the capability has been negotiated between
  *     the client and host.
- * @private
  */
-remoting.ClientSession.prototype.hasCapability_ = function(capability) {
+remoting.ClientSession.prototype.hasCapability = function(capability) {
   if (this.capabilities_ == null)
     return false;
 
@@ -429,249 +247,18 @@ remoting.ClientSession.prototype.hasCapability_ = function(capability) {
 };
 
 /**
- * Callback function called when the plugin element gets focus.
- */
-remoting.ClientSession.prototype.pluginGotFocus_ = function() {
-  remoting.clipboard.initiateToHost();
-};
-
-/**
- * Callback function called when the plugin element loses focus.
- */
-remoting.ClientSession.prototype.pluginLostFocus_ = function() {
-  if (this.plugin_) {
-    // Release all keys to prevent them becoming 'stuck down' on the host.
-    this.plugin_.releaseAllKeys();
-    if (this.plugin_.element()) {
-      // Focus should stay on the element, not (for example) the toolbar.
-      // Due to crbug.com/246335, we can't restore the focus immediately,
-      // otherwise the plugin gets confused about whether or not it has focus.
-      window.setTimeout(
-          this.plugin_.element().focus.bind(this.plugin_.element()), 0);
-    }
-  }
-};
-
-/**
- * Adds <embed> element to |container| and readies the sesion object.
- *
- * @param {function(string, string):boolean} onExtensionMessage The handler for
- *     protocol extension messages. Returns true if a message is recognized;
- *     false otherwise.
- * @param {Array.<string>} requiredCapabilities A list of capabilities
- *     required by this application.
- */
-remoting.ClientSession.prototype.createPluginAndConnect =
-    function(onExtensionMessage, requiredCapabilities) {
-  this.plugin_ = remoting.ClientPlugin.factory.createPlugin(
-      this.container_.querySelector('.client-plugin-container'),
-      onExtensionMessage, requiredCapabilities);
-  remoting.HostSettings.load(this.hostId_,
-                             this.onHostSettingsLoaded_.bind(this));
-};
-
-/**
- * @param {Object.<string>} options The current options for the host, or {}
- *     if this client has no saved settings for the host.
- * @private
- */
-remoting.ClientSession.prototype.onHostSettingsLoaded_ = function(options) {
-  if (remoting.ClientSession.KEY_REMAP_KEYS in options &&
-      typeof(options[remoting.ClientSession.KEY_REMAP_KEYS]) ==
-          'string') {
-    this.remapKeys_ = /** @type {string} */
-        options[remoting.ClientSession.KEY_REMAP_KEYS];
-  }
-  if (remoting.ClientSession.KEY_RESIZE_TO_CLIENT in options &&
-      typeof(options[remoting.ClientSession.KEY_RESIZE_TO_CLIENT]) ==
-          'boolean') {
-    this.resizeToClient_ = /** @type {boolean} */
-        options[remoting.ClientSession.KEY_RESIZE_TO_CLIENT];
-  }
-  if (remoting.ClientSession.KEY_SHRINK_TO_FIT in options &&
-      typeof(options[remoting.ClientSession.KEY_SHRINK_TO_FIT]) ==
-          'boolean') {
-    this.shrinkToFit_ = /** @type {boolean} */
-        options[remoting.ClientSession.KEY_SHRINK_TO_FIT];
-  }
-  if (remoting.ClientSession.KEY_DESKTOP_SCALE in options &&
-      typeof(options[remoting.ClientSession.KEY_DESKTOP_SCALE]) ==
-          'number') {
-    this.desktopScale_ = /** @type {number} */
-        options[remoting.ClientSession.KEY_DESKTOP_SCALE];
-  }
-
-  /** @param {boolean} result */
-  this.plugin_.initialize(this.onPluginInitialized_.bind(this));
-};
-
-/**
- * Constrains the focus to the plugin element.
- * @private
- */
-remoting.ClientSession.prototype.setFocusHandlers_ = function() {
-  this.plugin_.element().addEventListener(
-      'focus', this.callPluginGotFocus_, false);
-  this.plugin_.element().addEventListener(
-      'blur', this.callPluginLostFocus_, false);
-  this.plugin_.element().focus();
-};
-
-/**
- * @param {remoting.Error} error
- */
-remoting.ClientSession.prototype.resetWithError_ = function(error) {
-  this.signalStrategy_.setIncomingStanzaCallback(null);
-  this.plugin_.dispose();
-  this.plugin_ = null;
-  this.error_ = error;
-  this.setState_(remoting.ClientSession.State.FAILED);
-}
-
-/**
- * @param {boolean} initialized
- */
-remoting.ClientSession.prototype.onPluginInitialized_ = function(initialized) {
-  if (!initialized) {
-    console.error('ERROR: remoting plugin not loaded');
-    this.resetWithError_(remoting.Error.MISSING_PLUGIN);
-    return;
-  }
-
-  if (!this.plugin_.isSupportedVersion()) {
-    this.resetWithError_(remoting.Error.BAD_PLUGIN_VERSION);
-    return;
-  }
-
-  // Show the Send Keys menu only if the plugin has the injectKeyEvent feature,
-  // and the Ctrl-Alt-Del button only in Me2Me mode.
-  if (!this.plugin_.hasFeature(
-          remoting.ClientPlugin.Feature.INJECT_KEY_EVENT)) {
-    var sendKeysElement = document.getElementById('send-keys-menu');
-    sendKeysElement.hidden = true;
-  } else if (this.mode_ != remoting.ClientSession.Mode.ME2ME &&
-      this.mode_ != remoting.ClientSession.Mode.APP_REMOTING) {
-    var sendCadElement = document.getElementById('send-ctrl-alt-del');
-    sendCadElement.hidden = true;
-  }
-
-  // Apply customized key remappings if the plugin supports remapKeys.
-  if (this.plugin_.hasFeature(remoting.ClientPlugin.Feature.REMAP_KEY)) {
-    this.applyRemapKeys_(true);
-  }
-
-  // TODO(wez): Only allow mouse lock if the app has the pointerLock permission.
-  // Enable automatic mouse-lock.
-  if (remoting.enableMouseLock &&
-      this.plugin_.hasFeature(remoting.ClientPlugin.Feature.ALLOW_MOUSE_LOCK)) {
-    this.plugin_.allowMouseLock();
-  }
-
-  this.plugin_.setOnOutgoingIqHandler(this.sendIq_.bind(this));
-  this.plugin_.setOnDebugMessageHandler(this.onDebugMessage_.bind(this));
-
-  this.plugin_.setConnectionStatusUpdateHandler(
-      this.onConnectionStatusUpdate_.bind(this));
-  this.plugin_.setRouteChangedHandler(this.onRouteChanged_.bind(this));
-  this.plugin_.setConnectionReadyHandler(this.onConnectionReady_.bind(this));
-  this.plugin_.setDesktopShapeUpdateHandler(
-      this.onDesktopShapeChanged_.bind(this));
-  this.plugin_.setDesktopSizeUpdateHandler(
-      this.onDesktopSizeChanged_.bind(this));
-  this.plugin_.setCapabilitiesHandler(this.onSetCapabilities_.bind(this));
-  this.plugin_.setGnubbyAuthHandler(
-      this.processGnubbyAuthMessage_.bind(this));
-  this.plugin_.setMouseCursorHandler(this.updateMouseCursorImage_.bind(this));
-  this.plugin_.setCastExtensionHandler(
-      this.processCastExtensionMessage_.bind(this));
-  this.initiateConnection_();
-};
-
-/**
- * Deletes the <embed> element from the container, without sending a
- * session_terminate request.  This is to be called when the session was
- * disconnected by the Host.
- *
- * @return {void} Nothing.
- */
-remoting.ClientSession.prototype.removePlugin = function() {
-  if (this.plugin_) {
-    this.plugin_.element().removeEventListener(
-        'focus', this.callPluginGotFocus_, false);
-    this.plugin_.element().removeEventListener(
-        'blur', this.callPluginLostFocus_, false);
-    this.plugin_.dispose();
-    this.plugin_ = null;
-  }
-
-  // Leave full-screen mode, and stop listening for related events.
-  var listener = this.callOnFullScreenChanged_;
-  remoting.fullscreen.activate(
-      false,
-      function() {
-        remoting.fullscreen.removeListener(listener);
-      });
-  this.updateClientSessionUi_(null);
-
-  this.container_.removeEventListener('mousemove',
-                                      this.updateMouseCursorPosition_,
-                                      true);
-};
-
-/**
- * @param {remoting.ClientSession} clientSession The active session, or null if
- *     there is no connection.
- */
-remoting.ClientSession.prototype.updateClientSessionUi_ = function(
-    clientSession) {
-  if (remoting.windowFrame) {
-    remoting.windowFrame.setClientSession(clientSession);
-  }
-  if (remoting.toolbar) {
-    remoting.toolbar.setClientSession(clientSession);
-  }
-  if (remoting.optionsMenu) {
-    remoting.optionsMenu.setClientSession(clientSession);
-  }
-
-  if (clientSession == null) {
-    document.body.classList.remove('connected');
-  } else {
-    document.body.classList.add('connected');
-  }
-}
-
-/**
  * Disconnect the current session with a particular |error|.  The session will
  * raise a |stateChanged| event in response to it.  The caller should then call
- * |cleanup| to remove and destroy the <embed> element.
+ * dispose() to remove and destroy the <embed> element.
  *
- * @param {remoting.Error} error The reason for the disconnection.  Use
- *    remoting.Error.NONE if there is no error.
+ * @param {!remoting.Error} error The reason for the disconnection.  Use
+ *    remoting.Error.none() if there is no error.
  * @return {void} Nothing.
  */
 remoting.ClientSession.prototype.disconnect = function(error) {
-  var state = (error == remoting.Error.NONE) ?
-                  remoting.ClientSession.State.CLOSED :
-                  remoting.ClientSession.State.FAILED;
-
-  // The plugin won't send a state change notification, so we explicitly log
-  // the fact that the connection has closed.
-  this.logToServer.logClientSessionStateChange(state, error);
-  this.error_ = error;
-  this.setState_(state);
-  remoting.app.onDisconnected();
-};
-
-/**
- * Deletes the <embed> element from the container and disconnects.
- *
- * @return {void} Nothing.
- */
-remoting.ClientSession.prototype.cleanup = function() {
   this.sendIq_(
       '<cli:iq ' +
-          'to="' + this.hostJid_ + '" ' +
+          'to="' + this.host_.jabberId + '" ' +
           'type="set" ' +
           'id="session-terminate" ' +
           'xmlns:cli="jabber:client">' +
@@ -682,14 +269,25 @@ remoting.ClientSession.prototype.cleanup = function() {
           '<reason><success/></reason>' +
         '</jingle>' +
       '</cli:iq>');
-  this.removePlugin();
+
+  var state = error.isNone() ?
+                  remoting.ClientSession.State.CLOSED :
+                  remoting.ClientSession.State.FAILED;
+
+  // The plugin won't send a state change notification, so we explicitly log
+  // the fact that the connection has closed.
+  this.logToServer.logClientSessionStateChange(state, error);
+  this.error_ = error;
+  this.setState_(state);
 };
 
 /**
- * @return {remoting.ClientSession.Mode} The current state.
+ * Deletes the <embed> element from the container and disconnects.
+ *
+ * @return {void} Nothing.
  */
-remoting.ClientSession.prototype.getMode = function() {
-  return this.mode_;
+remoting.ClientSession.prototype.dispose = function() {
+  this.plugin_ = null;
 };
 
 /**
@@ -700,163 +298,11 @@ remoting.ClientSession.prototype.getState = function() {
 };
 
 /**
- * @return {remoting.Error} The current error code.
+ * @return {!remoting.Error} The current error code.
  */
 remoting.ClientSession.prototype.getError = function() {
   return this.error_;
 };
-
-/**
- * Sends a key combination to the remoting client, by sending down events for
- * the given keys, followed by up events in reverse order.
- *
- * @private
- * @param {[number]} keys Key codes to be sent.
- * @return {void} Nothing.
- */
-remoting.ClientSession.prototype.sendKeyCombination_ = function(keys) {
-  for (var i = 0; i < keys.length; i++) {
-    this.plugin_.injectKeyEvent(keys[i], true);
-  }
-  for (var i = 0; i < keys.length; i++) {
-    this.plugin_.injectKeyEvent(keys[i], false);
-  }
-}
-
-/**
- * Sends a Ctrl-Alt-Del sequence to the remoting client.
- *
- * @return {void} Nothing.
- */
-remoting.ClientSession.prototype.sendCtrlAltDel = function() {
-  console.log('Sending Ctrl-Alt-Del.');
-  this.sendKeyCombination_([0x0700e0, 0x0700e2, 0x07004c]);
-}
-
-/**
- * Sends a Print Screen keypress to the remoting client.
- *
- * @return {void} Nothing.
- */
-remoting.ClientSession.prototype.sendPrintScreen = function() {
-  console.log('Sending Print Screen.');
-  this.sendKeyCombination_([0x070046]);
-}
-
-/**
- * Sets and stores the scale factor to apply to host sizing requests.
- * The desktopScale applies to the dimensions reported to the host, not
- * to the client DPI reported to it.
- *
- * @param {number} desktopScale Scale factor to apply.
- */
-remoting.ClientSession.prototype.setDesktopScale = function(desktopScale) {
-  this.desktopScale_ = desktopScale;
-
-  // onResize() will update the plugin size and scrollbars for the new
-  // scaled plugin dimensions, and send a client resolution notification.
-  this.onResize();
-
-  // Save the new desktop scale setting.
-  var options = {};
-  options[remoting.ClientSession.KEY_DESKTOP_SCALE] = this.desktopScale_;
-  remoting.HostSettings.save(this.hostId_, options);
-}
-
-/**
- * Sets and stores the key remapping setting for the current host.
- *
- * @param {string} remappings Comma separated list of key remappings.
- */
-remoting.ClientSession.prototype.setRemapKeys = function(remappings) {
-  // Cancel any existing remappings and apply the new ones.
-  this.applyRemapKeys_(false);
-  this.remapKeys_ = remappings;
-  this.applyRemapKeys_(true);
-
-  // Save the new remapping setting.
-  var options = {};
-  options[remoting.ClientSession.KEY_REMAP_KEYS] = this.remapKeys_;
-  remoting.HostSettings.save(this.hostId_, options);
-}
-
-/**
- * Applies the configured key remappings to the session, or resets them.
- *
- * @param {boolean} apply True to apply remappings, false to cancel them.
- */
-remoting.ClientSession.prototype.applyRemapKeys_ = function(apply) {
-  var remapKeys = this.remapKeys_;
-  if (remapKeys == '') {
-    remapKeys = this.defaultRemapKeys_;
-    if (remapKeys == '') {
-      return;
-    }
-  }
-
-  var remappings = remapKeys.split(',');
-  for (var i = 0; i < remappings.length; ++i) {
-    var keyCodes = remappings[i].split('>');
-    if (keyCodes.length != 2) {
-      console.log('bad remapKey: ' + remappings[i]);
-      continue;
-    }
-    var fromKey = parseInt(keyCodes[0], 0);
-    var toKey = parseInt(keyCodes[1], 0);
-    if (!fromKey || !toKey) {
-      console.log('bad remapKey code: ' + remappings[i]);
-      continue;
-    }
-    if (apply) {
-      console.log('remapKey 0x' + fromKey.toString(16) +
-                  '>0x' + toKey.toString(16));
-      this.plugin_.remapKey(fromKey, toKey);
-    } else {
-      console.log('cancel remapKey 0x' + fromKey.toString(16));
-      this.plugin_.remapKey(fromKey, fromKey);
-    }
-  }
-}
-
-/**
- * Set the shrink-to-fit and resize-to-client flags and save them if this is
- * a Me2Me connection.
- *
- * @param {boolean} shrinkToFit True if the remote desktop should be scaled
- *     down if it is larger than the client window; false if scroll-bars
- *     should be added in this case.
- * @param {boolean} resizeToClient True if window resizes should cause the
- *     host to attempt to resize its desktop to match the client window size;
- *     false to disable this behaviour for subsequent window resizes--the
- *     current host desktop size is not restored in this case.
- * @return {void} Nothing.
- */
-remoting.ClientSession.prototype.setScreenMode =
-    function(shrinkToFit, resizeToClient) {
-  if (resizeToClient && !this.resizeToClient_) {
-    this.notifyClientResolution_();
-  }
-
-  // If enabling shrink, reset bump-scroll offsets.
-  var needsScrollReset = shrinkToFit && !this.shrinkToFit_;
-
-  this.shrinkToFit_ = shrinkToFit;
-  this.resizeToClient_ = resizeToClient;
-  this.updateScrollbarVisibility();
-
-  if (this.hostId_ != '') {
-    var options = {};
-    options[remoting.ClientSession.KEY_SHRINK_TO_FIT] = this.shrinkToFit_;
-    options[remoting.ClientSession.KEY_RESIZE_TO_CLIENT] = this.resizeToClient_;
-    remoting.HostSettings.save(this.hostId_, options);
-  }
-
-  this.updateDimensions();
-  if (needsScrollReset) {
-    this.resetScroll_();
-  }
-
-}
 
 /**
  * Called when the client receives its first frame.
@@ -877,9 +323,9 @@ remoting.ClientSession.prototype.hasReceivedFrame = function() {
 /**
  * Sends a signaling message.
  *
- * @private
  * @param {string} message XML string of IQ stanza to send to server.
  * @return {void} Nothing.
+ * @private
  */
 remoting.ClientSession.prototype.sendIq_ = function(message) {
   // Extract the session id, so we can close the session later.
@@ -904,16 +350,22 @@ remoting.ClientSession.prototype.sendIq_ = function(message) {
 };
 
 /**
- * @private
+ * @param {string} message XML string of IQ stanza to send to server.
+ */
+remoting.ClientSession.prototype.onOutgoingIq = function(message) {
+  this.sendIq_(message);
+}
+
+/**
  * @param {string} msg
  */
-remoting.ClientSession.prototype.onDebugMessage_ = function(msg) {
+remoting.ClientSession.prototype.onDebugMessage = function(msg) {
   console.log('plugin: ' + msg.trimRight());
 };
 
 /**
- * @private
  * @param {Element} message
+ * @private
  */
 remoting.ClientSession.prototype.onIncomingMessage_ = function(message) {
   if (!this.plugin_) {
@@ -923,122 +375,56 @@ remoting.ClientSession.prototype.onIncomingMessage_ = function(message) {
   console.log(remoting.timestamp(),
               remoting.formatIq.prettifyReceiveIq(formatted));
   this.plugin_.onIncomingIq(formatted);
-}
-
-/**
- * @private
- */
-remoting.ClientSession.prototype.initiateConnection_ = function() {
-  /** @type {remoting.ClientSession} */
-  var that = this;
-
-  /** @param {string} sharedSecret Shared secret. */
-  function onSharedSecretReceived(sharedSecret) {
-    that.plugin_.connect(
-        that.hostJid_, that.hostPublicKey_, that.signalStrategy_.getJid(),
-        sharedSecret, that.authenticationMethods_, that.hostId_,
-        that.clientPairingId_, that.clientPairedSecret_);
-  };
-
-  this.getSharedSecret_(onSharedSecretReceived);
-}
-
-/**
- * Gets shared secret to be used for connection.
- *
- * @param {function(string)} callback Callback called with the shared secret.
- * @return {void} Nothing.
- * @private
- */
-remoting.ClientSession.prototype.getSharedSecret_ = function(callback) {
-  /** @type remoting.ClientSession */
-  var that = this;
-  if (this.plugin_.hasFeature(remoting.ClientPlugin.Feature.THIRD_PARTY_AUTH)) {
-    /** @type{function(string, string, string): void} */
-    var fetchThirdPartyToken = function(tokenUrl, hostPublicKey, scope) {
-      that.fetchThirdPartyToken_(
-          tokenUrl, hostPublicKey, scope,
-          that.plugin_.onThirdPartyTokenFetched.bind(that.plugin_));
-    };
-    this.plugin_.setFetchThirdPartyTokenHandler(fetchThirdPartyToken);
-  }
-  if (this.accessCode_) {
-    // Shared secret was already supplied before connecting (It2Me case).
-    callback(this.accessCode_);
-  } else if (this.plugin_.hasFeature(
-      remoting.ClientPlugin.Feature.ASYNC_PIN)) {
-    // Plugin supports asynchronously asking for the PIN.
-    this.plugin_.useAsyncPinDialog();
-    /** @param {boolean} pairingSupported */
-    var fetchPin = function(pairingSupported) {
-      that.fetchPin_(pairingSupported,
-                     that.plugin_.onPinFetched.bind(that.plugin_));
-    };
-    this.plugin_.setFetchPinHandler(fetchPin);
-    callback('');
-  } else {
-    // Clients that don't support asking for a PIN asynchronously also don't
-    // support pairing, so request the PIN now without offering to remember it.
-    this.fetchPin_(false, callback);
-  }
 };
 
 /**
  * Callback that the plugin invokes to indicate that the connection
  * status has changed.
  *
- * @private
- * @param {number} status The plugin's status.
- * @param {number} error The plugin's error state, if any.
+ * @param {remoting.ClientSession.State} status The plugin's status.
+ * @param {remoting.ClientSession.ConnectionError} error The plugin's error
+ *        state, if any.
  */
-remoting.ClientSession.prototype.onConnectionStatusUpdate_ =
+remoting.ClientSession.prototype.onConnectionStatusUpdate =
     function(status, error) {
-  if (status == remoting.ClientSession.State.CONNECTED) {
-    this.setFocusHandlers_();
-    this.onDesktopSizeChanged_();
-    if (this.resizeToClient_) {
-      this.notifyClientResolution_();
-    }
-    // Activate full-screen related UX.
-    remoting.fullscreen.addListener(this.callOnFullScreenChanged_);
-    this.updateClientSessionUi_(this);
-    this.container_.addEventListener('mousemove',
-                                     this.updateMouseCursorPosition_,
-                                     true);
-
-  } else if (status == remoting.ClientSession.State.FAILED) {
+  if (status == remoting.ClientSession.State.FAILED) {
     switch (error) {
       case remoting.ClientSession.ConnectionError.HOST_IS_OFFLINE:
-        this.error_ = remoting.Error.HOST_IS_OFFLINE;
+        this.error_ = new remoting.Error(
+            remoting.Error.Tag.HOST_IS_OFFLINE);
         break;
       case remoting.ClientSession.ConnectionError.SESSION_REJECTED:
-        this.error_ = remoting.Error.INVALID_ACCESS_CODE;
+        this.error_ = new remoting.Error(
+            remoting.Error.Tag.INVALID_ACCESS_CODE);
         break;
       case remoting.ClientSession.ConnectionError.INCOMPATIBLE_PROTOCOL:
-        this.error_ = remoting.Error.INCOMPATIBLE_PROTOCOL;
+        this.error_ = new remoting.Error(
+            remoting.Error.Tag.INCOMPATIBLE_PROTOCOL);
         break;
       case remoting.ClientSession.ConnectionError.NETWORK_FAILURE:
-        this.error_ = remoting.Error.P2P_FAILURE;
+        this.error_ = new remoting.Error(
+            remoting.Error.Tag.P2P_FAILURE);
         break;
       case remoting.ClientSession.ConnectionError.HOST_OVERLOAD:
-        this.error_ = remoting.Error.HOST_OVERLOAD;
+        this.error_ = new remoting.Error(
+            remoting.Error.Tag.HOST_OVERLOAD);
         break;
       default:
-        this.error_ = remoting.Error.UNEXPECTED;
+        this.error_ = remoting.Error.unexpected();
     }
   }
-  this.setState_(/** @type {remoting.ClientSession.State} */ (status));
+  this.setState_(status);
 };
 
 /**
  * Callback that the plugin invokes to indicate that the connection type for
  * a channel has changed.
  *
- * @private
  * @param {string} channel The channel name.
  * @param {string} connectionType The new connection type.
+ * @private
  */
-remoting.ClientSession.prototype.onRouteChanged_ =
+remoting.ClientSession.prototype.onRouteChanged =
     function(channel, connectionType) {
   console.log('plugin: Channel ' + channel + ' using ' +
               connectionType + ' connection.');
@@ -1049,10 +435,9 @@ remoting.ClientSession.prototype.onRouteChanged_ =
  * Callback that the plugin invokes to indicate when the connection is
  * ready.
  *
- * @private
  * @param {boolean} ready True if the connection is ready.
  */
-remoting.ClientSession.prototype.onConnectionReady_ = function(ready) {
+remoting.ClientSession.prototype.onConnectionReady = function(ready) {
   // TODO(jamiewalch): Currently, the logic for determining whether or not the
   // connection is available is based solely on whether or not any video frames
   // have been received recently. which leads to poor UX on slow connections.
@@ -1063,58 +448,54 @@ remoting.ClientSession.prototype.onConnectionReady_ = function(ready) {
     return;
   }
 
-  if (!ready) {
-    this.container_.classList.add('session-client-inactive');
-  } else {
-    this.container_.classList.remove('session-client-inactive');
-  }
-
   this.raiseEvent(remoting.ClientSession.Events.videoChannelStateChanged,
                   ready);
 };
 
 /**
  * Called when the client-host capabilities negotiation is complete.
+ * TODO(kelvinp): Move this function out of ClientSession.
  *
- * @param {!Array.<string>} capabilities The set of capabilities negotiated
+ * @param {!Array<string>} capabilities The set of capabilities negotiated
  *     between the client and host.
  * @return {void} Nothing.
  * @private
  */
-remoting.ClientSession.prototype.onSetCapabilities_ = function(capabilities) {
+remoting.ClientSession.prototype.onSetCapabilities = function(capabilities) {
   if (this.capabilities_ != null) {
     console.error('onSetCapabilities_() is called more than once');
     return;
   }
 
   this.capabilities_ = capabilities;
-  if (this.hasCapability_(
-      remoting.ClientSession.Capability.SEND_INITIAL_RESOLUTION)) {
-    this.notifyClientResolution_();
-  }
-  if (this.hasCapability_(remoting.ClientSession.Capability.GOOGLE_DRIVE)) {
+  if (this.hasCapability(remoting.ClientSession.Capability.GOOGLE_DRIVE)) {
     this.sendGoogleDriveAccessToken_();
-  }
-  if (this.hasCapability_(
-      remoting.ClientSession.Capability.VIDEO_RECORDER)) {
-    this.videoFrameRecorder_ = new remoting.VideoFrameRecorder(this.plugin_);
   }
 };
 
 /**
- * @private
+ * @param {string} type
+ * @param {string} data
+ */
+remoting.ClientSession.prototype.onExtensionMessage = function(type, data) {
+  this.onExtensionMessageHandler_(type, data);
+};
+
+/**
  * @param {remoting.ClientSession.State} newState The new state for the session.
  * @return {void} Nothing.
+ * @private
  */
 remoting.ClientSession.prototype.setState_ = function(newState) {
   var oldState = this.state_;
   this.state_ = newState;
   var state = this.state_;
-  if (oldState == remoting.ClientSession.State.CONNECTING) {
+  if (oldState == remoting.ClientSession.State.CONNECTING ||
+      oldState == remoting.ClientSession.State.AUTHENTICATED) {
     if (this.state_ == remoting.ClientSession.State.CLOSED) {
       state = remoting.ClientSession.State.CONNECTION_CANCELED;
     } else if (this.state_ == remoting.ClientSession.State.FAILED &&
-        this.error_ == remoting.Error.HOST_IS_OFFLINE &&
+        this.error_.hasTag(remoting.Error.Tag.HOST_IS_OFFLINE) &&
         !this.logHostOfflineErrors_) {
       // The application requested host-offline errors to be suppressed, for
       // example, because this connection attempt is using a cached host JID.
@@ -1126,203 +507,10 @@ remoting.ClientSession.prototype.setState_ = function(newState) {
     state = remoting.ClientSession.State.CONNECTION_DROPPED;
   }
   this.logToServer.logClientSessionStateChange(state, this.error_);
-  if (this.state_ == remoting.ClientSession.State.CONNECTED) {
-    this.createGnubbyAuthHandler_();
-    this.createCastExtensionHandler_();
-  }
 
   this.raiseEvent(remoting.ClientSession.Events.stateChanged,
     new remoting.ClientSession.StateEvent(newState, oldState)
   );
-};
-
-/**
- * This is a callback that gets called when the window is resized.
- *
- * @return {void} Nothing.
- */
-remoting.ClientSession.prototype.onResize = function() {
-  this.updateDimensions();
-
-  if (this.notifyClientResolutionTimer_) {
-    window.clearTimeout(this.notifyClientResolutionTimer_);
-    this.notifyClientResolutionTimer_ = null;
-  }
-
-  // Defer notifying the host of the change until the window stops resizing, to
-  // avoid overloading the control channel with notifications.
-  if (this.resizeToClient_) {
-    var kResizeRateLimitMs = 1000;
-    if (this.hasCapability_(
-        remoting.ClientSession.Capability.RATE_LIMIT_RESIZE_REQUESTS)) {
-      kResizeRateLimitMs = 250;
-    }
-    var clientArea = this.getClientArea_();
-    this.notifyClientResolutionTimer_ = window.setTimeout(
-        this.notifyClientResolution_.bind(this),
-        kResizeRateLimitMs);
-  }
-
-  // If bump-scrolling is enabled, adjust the plugin margins to fully utilize
-  // the new window area.
-  this.resetScroll_();
-
-  this.updateScrollbarVisibility();
-};
-
-/**
- * Requests that the host pause or resume video updates.
- *
- * @param {boolean} pause True to pause video, false to resume.
- * @return {void} Nothing.
- */
-remoting.ClientSession.prototype.pauseVideo = function(pause) {
-  if (this.plugin_) {
-    this.plugin_.pauseVideo(pause);
-  }
-};
-
-/**
- * Requests that the host pause or resume audio.
- *
- * @param {boolean} pause True to pause audio, false to resume.
- * @return {void} Nothing.
- */
-remoting.ClientSession.prototype.pauseAudio = function(pause) {
-  if (this.plugin_) {
-    this.plugin_.pauseAudio(pause)
-  }
-}
-
-/**
- * This is a callback that gets called when the plugin notifies us of a change
- * in the size of the remote desktop.
- *
- * @private
- * @return {void} Nothing.
- */
-remoting.ClientSession.prototype.onDesktopSizeChanged_ = function() {
-  console.log('desktop size changed: ' +
-              this.plugin_.getDesktopWidth() + 'x' +
-              this.plugin_.getDesktopHeight() +' @ ' +
-              this.plugin_.getDesktopXDpi() + 'x' +
-              this.plugin_.getDesktopYDpi() + ' DPI');
-  this.updateDimensions();
-  this.updateScrollbarVisibility();
-};
-
-/**
- * Sets the non-click-through area of the client in response to notifications
- * from the plugin of desktop shape changes.
- *
- * @private
- * @param {Array.<Array.<number>>} rects List of rectangles comprising the
- *     desktop shape.
- * @return {void} Nothing.
- */
-remoting.ClientSession.prototype.onDesktopShapeChanged_ = function(rects) {
-  // Build the list of rects for the input region.
-  var inputRegion = [];
-  for (var i = 0; i < rects.length; ++i) {
-    var rect = {};
-    rect.left = rects[i][0];
-    rect.top = rects[i][1];
-    rect.width = rects[i][2];
-    rect.height = rects[i][3];
-    inputRegion.push(rect);
-  }
-
-  remoting.windowShape.setDesktopRects(inputRegion);
-};
-
-/**
- * Refreshes the plugin's dimensions, taking into account the sizes of the
- * remote desktop and client window, and the current scale-to-fit setting.
- *
- * @return {void} Nothing.
- */
-remoting.ClientSession.prototype.updateDimensions = function() {
-  if (this.plugin_.getDesktopWidth() == 0 ||
-      this.plugin_.getDesktopHeight() == 0) {
-    return;
-  }
-
-  var clientArea = this.getClientArea_();
-  var desktopWidth = this.plugin_.getDesktopWidth();
-  var desktopHeight = this.plugin_.getDesktopHeight();
-
-  // When configured to display a host at its original size, we aim to display
-  // it as close to its physical size as possible, without losing data:
-  // - If client and host have matching DPI, render the host pixel-for-pixel.
-  // - If the host has higher DPI then still render pixel-for-pixel.
-  // - If the host has lower DPI then let Chrome up-scale it to natural size.
-
-  // We specify the plugin dimensions in Density-Independent Pixels, so to
-  // render pixel-for-pixel we need to down-scale the host dimensions by the
-  // devicePixelRatio of the client. To match the host pixel density, we choose
-  // an initial scale factor based on the client devicePixelRatio and host DPI.
-
-  // Determine the effective device pixel ratio of the host, based on DPI.
-  var hostPixelRatioX = Math.ceil(this.plugin_.getDesktopXDpi() / 96);
-  var hostPixelRatioY = Math.ceil(this.plugin_.getDesktopYDpi() / 96);
-  var hostPixelRatio = Math.min(hostPixelRatioX, hostPixelRatioY);
-
-  // Include the desktopScale in the hostPixelRatio before comparing it with
-  // the client devicePixelRatio to determine the "natural" scale to use.
-  hostPixelRatio *= this.desktopScale_;
-
-  // Down-scale by the smaller of the client and host ratios.
-  var scale = 1.0 / Math.min(window.devicePixelRatio, hostPixelRatio);
-
-  if (this.shrinkToFit_) {
-    // Reduce the scale, if necessary, to fit the whole desktop in the window.
-    var scaleFitWidth = Math.min(scale, 1.0 * clientArea.width / desktopWidth);
-    var scaleFitHeight =
-        Math.min(scale, 1.0 * clientArea.height / desktopHeight);
-    scale = Math.min(scaleFitHeight, scaleFitWidth);
-
-    // If we're running full-screen then try to handle common side-by-side
-    // multi-monitor combinations more intelligently.
-    if (remoting.fullscreen.isActive()) {
-      // If the host has two monitors each the same size as the client then
-      // scale-to-fit will have the desktop occupy only 50% of the client area,
-      // in which case it would be preferable to down-scale less and let the
-      // user bump-scroll around ("scale-and-pan").
-      // Triggering scale-and-pan if less than 65% of the client area would be
-      // used adds enough fuzz to cope with e.g. 1280x800 client connecting to
-      // a (2x1280)x1024 host nicely.
-      // Note that we don't need to account for scrollbars while fullscreen.
-      if (scale <= scaleFitHeight * 0.65) {
-        scale = scaleFitHeight;
-      }
-      if (scale <= scaleFitWidth * 0.65) {
-        scale = scaleFitWidth;
-      }
-    }
-  }
-
-  var pluginWidth = Math.round(desktopWidth * scale);
-  var pluginHeight = Math.round(desktopHeight * scale);
-
-  // Resize the plugin if necessary.
-  // TODO(wez): Handle high-DPI to high-DPI properly (crbug.com/135089).
-  this.plugin_.element().style.width = pluginWidth + 'px';
-  this.plugin_.element().style.height = pluginHeight + 'px';
-
-  // Position the container.
-  // Note that clientWidth/Height take into account scrollbars.
-  var clientWidth = document.documentElement.clientWidth;
-  var clientHeight = document.documentElement.clientHeight;
-  var parentNode = this.plugin_.element().parentNode;
-
-  console.log('plugin dimensions: ' +
-              parentNode.style.left + ',' +
-              parentNode.style.top + '-' +
-              pluginWidth + 'x' + pluginHeight + '.');
-
-  // When we receive the first plugin dimensions from the host, we know that
-  // remote host has started.
-  remoting.app.onVideoStreamingStarted();
 };
 
 /**
@@ -1369,147 +557,6 @@ remoting.ClientSession.prototype.requestPairing = function(clientName, onDone) {
 };
 
 /**
- * Called when the full-screen status has changed, either via the
- * remoting.Fullscreen class, or via a system event such as the Escape key
- *
- * @param {boolean} fullscreen True if the app is entering full-screen mode;
- *     false if it is leaving it.
- * @private
- */
-remoting.ClientSession.prototype.onFullScreenChanged_ = function (fullscreen) {
-  this.enableBumpScroll_(fullscreen);
-};
-
-/**
- * Scroll the client plugin by the specified amount, keeping it visible.
- * Note that this is only used in content full-screen mode (not windowed or
- * browser full-screen modes), where window.scrollBy and the scrollTop and
- * scrollLeft properties don't work.
- * @param {number} dx The amount by which to scroll horizontally. Positive to
- *     scroll right; negative to scroll left.
- * @param {number} dy The amount by which to scroll vertically. Positive to
- *     scroll down; negative to scroll up.
- * @return {boolean} True if the requested scroll had no effect because both
- *     vertical and horizontal edges of the screen have been reached.
- * @private
- */
-remoting.ClientSession.prototype.scroll_ = function(dx, dy) {
-  /**
-   * Helper function for x- and y-scrolling
-   * @param {number|string} curr The current margin, eg. "10px".
-   * @param {number} delta The requested scroll amount.
-   * @param {number} windowBound The size of the window, in pixels.
-   * @param {number} pluginBound The size of the plugin, in pixels.
-   * @param {{stop: boolean}} stop Reference parameter used to indicate when
-   *     the scroll has reached one of the edges and can be stopped in that
-   *     direction.
-   * @return {string} The new margin value.
-   */
-  var adjustMargin = function(curr, delta, windowBound, pluginBound, stop) {
-    var minMargin = Math.min(0, windowBound - pluginBound);
-    var result = (curr ? parseFloat(curr) : 0) - delta;
-    result = Math.min(0, Math.max(minMargin, result));
-    stop.stop = (result == 0 || result == minMargin);
-    return result + 'px';
-  };
-
-  var plugin = this.plugin_.element();
-  var style = this.container_.style;
-
-  var stopX = { stop: false };
-  var clientArea = this.getClientArea_();
-  style.marginLeft = adjustMargin(style.marginLeft, dx, clientArea.width,
-      this.pluginWidthForBumpScrollTesting || plugin.clientWidth, stopX);
-
-  var stopY = { stop: false };
-  style.marginTop = adjustMargin(
-      style.marginTop, dy, clientArea.height,
-      this.pluginHeightForBumpScrollTesting || plugin.clientHeight, stopY);
-  return stopX.stop && stopY.stop;
-};
-
-remoting.ClientSession.prototype.resetScroll_ = function() {
-  this.container_.style.marginTop = '0px';
-  this.container_.style.marginLeft = '0px';
-};
-
-/**
- * Enable or disable bump-scrolling. When disabling bump scrolling, also reset
- * the scroll offsets to (0, 0).
- * @private
- * @param {boolean} enable True to enable bump-scrolling, false to disable it.
- */
-remoting.ClientSession.prototype.enableBumpScroll_ = function(enable) {
-  var element = /*@type{HTMLElement} */ document.documentElement;
-  if (enable) {
-    /** @type {null|function(Event):void} */
-    this.onMouseMoveRef_ = this.onMouseMove_.bind(this);
-    element.addEventListener('mousemove', this.onMouseMoveRef_, false);
-  } else {
-    element.removeEventListener('mousemove', this.onMouseMoveRef_, false);
-    this.onMouseMoveRef_ = null;
-    this.resetScroll_();
-  }
-};
-
-/**
- * @param {Event} event The mouse event.
- * @private
- */
-remoting.ClientSession.prototype.onMouseMove_ = function(event) {
-  if (this.bumpScrollTimer_) {
-    window.clearTimeout(this.bumpScrollTimer_);
-    this.bumpScrollTimer_ = null;
-  }
-
-  /**
-   * Compute the scroll speed based on how close the mouse is to the edge.
-   * @param {number} mousePos The mouse x- or y-coordinate
-   * @param {number} size The width or height of the content area.
-   * @return {number} The scroll delta, in pixels.
-   */
-  var computeDelta = function(mousePos, size) {
-    var threshold = 10;
-    if (mousePos >= size - threshold) {
-      return 1 + 5 * (mousePos - (size - threshold)) / threshold;
-    } else if (mousePos <= threshold) {
-      return -1 - 5 * (threshold - mousePos) / threshold;
-    }
-    return 0;
-  };
-
-  var clientArea = this.getClientArea_();
-  var dx = computeDelta(event.x, clientArea.width);
-  var dy = computeDelta(event.y, clientArea.height);
-
-  if (dx != 0 || dy != 0) {
-    this.raiseEvent(remoting.ClientSession.Events.bumpScrollStarted);
-    /** @type {remoting.ClientSession} */
-    var that = this;
-    /**
-     * Scroll the view, and schedule a timer to do so again unless we've hit
-     * the edges of the screen. This timer is cancelled when the mouse moves.
-     * @param {number} expected The time at which we expect to be called.
-     */
-    var repeatScroll = function(expected) {
-      /** @type {number} */
-      var now = new Date().getTime();
-      /** @type {number} */
-      var timeout = 10;
-      var lateAdjustment = 1 + (now - expected) / timeout;
-      if (that.scroll_(lateAdjustment * dx, lateAdjustment * dy)) {
-        that.raiseEvent(remoting.ClientSession.Events.bumpScrollStopped);
-      } else {
-        that.bumpScrollTimer_ = window.setTimeout(
-            function() { repeatScroll(now + timeout); },
-            timeout);
-      }
-    };
-    repeatScroll(new Date().getTime());
-  }
-};
-
-/**
  * Sends a clipboard item to the host.
  *
  * @param {string} mimeType The MIME type of the clipboard item.
@@ -1534,47 +581,6 @@ remoting.ClientSession.prototype.sendClientMessage = function(type, message) {
 };
 
 /**
- * Send a gnubby-auth extension message to the host.
- * @param {Object} data The gnubby-auth message data.
- */
-remoting.ClientSession.prototype.sendGnubbyAuthMessage = function(data) {
-  if (!this.plugin_)
-    return;
-  this.plugin_.sendClientMessage('gnubby-auth', JSON.stringify(data));
-};
-
-/**
- * Process a remote gnubby auth request.
- * @param {string} data Remote gnubby request data.
- * @private
- */
-remoting.ClientSession.prototype.processGnubbyAuthMessage_ = function(data) {
-  if (this.gnubbyAuthHandler_) {
-    try {
-      this.gnubbyAuthHandler_.onMessage(data);
-    } catch (err) {
-      console.error('Failed to process gnubby message: ',
-          /** @type {*} */ (err));
-    }
-  } else {
-    console.error('Received unexpected gnubby message');
-  }
-};
-
-/**
- * Create a gnubby auth handler and inform the host that gnubby auth is
- * supported.
- * @private
- */
-remoting.ClientSession.prototype.createGnubbyAuthHandler_ = function() {
-  if (this.mode_ == remoting.ClientSession.Mode.ME2ME) {
-    this.gnubbyAuthHandler_ = new remoting.GnubbyAuthHandler(this);
-    // TODO(psj): Move to more generic capabilities mechanism.
-    this.sendGnubbyAuthMessage({'type': 'control', 'option': 'auth-v1'});
-  }
-};
-
-/**
  * Timer callback to send the access token to the host.
  * @private
  */
@@ -1589,142 +595,18 @@ remoting.ClientSession.prototype.sendGoogleDriveAccessToken_ = function() {
   var sendToken = function(token) {
     remoting.clientSession.sendClientMessage('accessToken', token);
   };
-  /** @param {remoting.Error} error */
+  /** @param {!remoting.Error} error */
   var sendError = function(error) {
-    console.log('Failed to refresh access token: ' + error);
-  }
-  remoting.identity.callWithNewToken(sendToken, sendError);
+    console.log('Failed to refresh access token: ' + error.toString());
+  };
+  var googleDriveScopes = [
+    'https://docs.google.com/feeds/',
+    'https://www.googleapis.com/auth/drive'
+  ];
+  remoting.identity.getNewToken(googleDriveScopes).
+      then(sendToken).
+      catch(remoting.Error.handler(sendError));
   window.setTimeout(this.sendGoogleDriveAccessToken_.bind(this),
                     remoting.ACCESS_TOKEN_RESEND_INTERVAL_MS);
 };
 
-/**
- * @return {{width: number, height: number}} The height of the window's client
- *     area. This differs between apps v1 and apps v2 due to the custom window
- *     borders used by the latter.
- * @private
- */
-remoting.ClientSession.prototype.getClientArea_ = function() {
-  return remoting.windowFrame ?
-      remoting.windowFrame.getClientArea() :
-      { 'width': window.innerWidth, 'height': window.innerHeight };
-};
-
-/**
- * Notifies the host of the client's current dimensions and DPI.
- * Also takes into account per-host scaling factor, if configured.
- * @private
- */
-remoting.ClientSession.prototype.notifyClientResolution_ = function() {
-  var clientArea = this.getClientArea_();
-  this.plugin_.notifyClientResolution(clientArea.width * this.desktopScale_,
-                                      clientArea.height * this.desktopScale_,
-                                      window.devicePixelRatio);
-}
-
-/**
- * @param {string} url
- * @param {number} hotspotX
- * @param {number} hotspotY
- */
-remoting.ClientSession.prototype.updateMouseCursorImage_ =
-    function(url, hotspotX, hotspotY) {
-  this.mouseCursorOverlay_.hidden = !url;
-  if (url) {
-    this.mouseCursorOverlay_.style.marginLeft = '-' + hotspotX + 'px';
-    this.mouseCursorOverlay_.style.marginTop = '-' + hotspotY + 'px';
-    this.mouseCursorOverlay_.src = url;
-  }
-};
-
-/**
- * @return {{top: number, left:number}} The top-left corner of the plugin.
- */
-remoting.ClientSession.prototype.getPluginPositionForTesting = function() {
-  var style = this.container_.style;
-  return {
-    top: parseFloat(style.marginTop),
-    left: parseFloat(style.marginLeft)
-  };
-};
-
-/**
- * Send a Cast extension message to the host.
- * @param {Object} data The cast message data.
- */
-remoting.ClientSession.prototype.sendCastExtensionMessage = function(data) {
-  if (!this.plugin_)
-    return;
-  this.plugin_.sendClientMessage('cast_message', JSON.stringify(data));
-};
-
-/**
- * Process a remote Cast extension message from the host.
- * @param {string} data Remote cast extension data message.
- * @private
- */
-remoting.ClientSession.prototype.processCastExtensionMessage_ = function(data) {
-  if (this.castExtensionHandler_) {
-    try {
-      this.castExtensionHandler_.onMessage(data);
-    } catch (err) {
-      console.error('Failed to process cast message: ',
-          /** @type {*} */ (err));
-    }
-  } else {
-    console.error('Received unexpected cast message');
-  }
-};
-
-/**
- * Create a CastExtensionHandler and inform the host that cast extension
- * is supported.
- * @private
- */
-remoting.ClientSession.prototype.createCastExtensionHandler_ = function() {
-  if (remoting.enableCast && this.mode_ == remoting.ClientSession.Mode.ME2ME) {
-    this.castExtensionHandler_ = new remoting.CastExtensionHandler(this);
-  }
-};
-
-/**
- * Returns true if the ClientSession can record video frames to a file.
- * @return {boolean}
- */
-remoting.ClientSession.prototype.canRecordVideo = function() {
-  return !!this.videoFrameRecorder_;
-}
-
-/**
- * Returns true if the ClientSession is currently recording video frames.
- * @return {boolean}
- */
-remoting.ClientSession.prototype.isRecordingVideo = function() {
-  if (!this.videoFrameRecorder_) {
-    return false;
-  }
-  return this.videoFrameRecorder_.isRecording();
-}
-
-/**
- * Starts or stops recording of video frames.
- */
-remoting.ClientSession.prototype.startStopRecording = function() {
-  if (this.videoFrameRecorder_) {
-    this.videoFrameRecorder_.startStopRecording();
-  }
-}
-
-/**
- * Handles protocol extension messages.
- * @param {string} type Type of extension message.
- * @param {Object} message The parsed extension message data.
- * @return {boolean} True if the message was recognized, false otherwise.
- */
-remoting.ClientSession.prototype.handleExtensionMessage =
-    function(type, message) {
-  if (this.videoFrameRecorder_) {
-    return this.videoFrameRecorder_.handleMessage(type, message);
-  }
-  return false;
-}

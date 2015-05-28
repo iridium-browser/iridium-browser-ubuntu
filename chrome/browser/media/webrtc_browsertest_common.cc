@@ -32,8 +32,8 @@ static const char kAdviseOnGclientSolution[] =
     "You need to add this solution to your .gclient to run this test:\n"
     "{\n"
     "  \"name\"        : \"webrtc.DEPS\",\n"
-    "  \"url\"         : \"svn://svn.chromium.org/chrome/trunk/deps/"
-    "third_party/webrtc/webrtc.DEPS\",\n"
+    "  \"url\"         : \"https://chromium.googlesource.com/chromium/deps/"
+    "webrtc/webrtc.DEPS\",\n"
     "}";
 
 const int kDefaultPollIntervalMsec = 250;
@@ -43,6 +43,24 @@ base::FilePath GetReferenceFilesDir() {
   PathService::Get(chrome::DIR_TEST_DATA, &test_data_dir);
 
   return test_data_dir.Append(kReferenceFilesDirName);
+}
+
+base::FilePath GetToolForPlatform(const std::string& tool_name) {
+  base::FilePath tools_dir =
+      GetReferenceFilesDir().Append(FILE_PATH_LITERAL("tools"));
+#if defined(OS_WIN)
+  return tools_dir
+      .Append(FILE_PATH_LITERAL("win"))
+      .AppendASCII(tool_name)
+      .AddExtension(FILE_PATH_LITERAL("exe"));
+#elif defined(OS_MACOSX)
+  return tools_dir.Append(FILE_PATH_LITERAL("mac")).AppendASCII(tool_name);
+#elif defined(OS_LINUX)
+  return tools_dir.Append(FILE_PATH_LITERAL("linux")).AppendASCII(tool_name);
+#else
+  CHECK(false) << "Can't retrieve tool " << tool_name << " on this platform.";
+  return base::FilePath();
+#endif
 }
 
 bool HasReferenceFilesInCheckout() {

@@ -12,6 +12,12 @@ cr.define('hotword.constants', function() {
 var AUDIO_LOG_SECONDS = 2;
 
 /**
+ * Timeout in seconds, for detecting false positives with a hotword stream.
+ * @const {number}
+ */
+var HOTWORD_STREAM_TIMEOUT_SECONDS = 2;
+
+/**
  * Hotword data shared module extension's ID.
  * @const {string}
  */
@@ -34,6 +40,38 @@ var CLIENT_PORT_NAME = 'chwcpn';
  * @const {string}
  */
 var COMMAND_FIELD_NAME = 'cmd';
+
+/**
+ * The speaker model file name.
+ * @const {string}
+ */
+var SPEAKER_MODEL_FILE_NAME = 'speaker_model.data';
+
+/**
+ * The training utterance file name prefix.
+ * @const {string}
+ */
+var UTTERANCE_FILE_PREFIX = 'utterance-';
+
+/**
+ * The training utterance file extension.
+ * @const {string}
+ */
+var UTTERANCE_FILE_EXTENSION = '.raw';
+
+/**
+ * The number of training utterances required to train the speaker model.
+ * @const {number}
+ */
+var NUM_TRAINING_UTTERANCES = 3;
+
+/**
+ * The size of the file system requested for reading the speaker model and
+ * utterances. This number should always be larger than the combined file size,
+ * currently 576338 bytes as of February 2015.
+ * @const {number}
+ */
+var FILE_SYSTEM_SIZE_BYTES = 1048576;
 
 /**
  * Time to wait for expected messages, in milliseconds.
@@ -71,6 +109,7 @@ var Event = {
   TRIGGER: 'trigger',
   SPEAKER_MODEL_SAVED: 'speaker model saved',
   ERROR: 'error',
+  TIMEOUT: 'timeout',
 };
 
 /**
@@ -84,6 +123,7 @@ var NaClPlugin = {
   MODEL_PREFIX: 'm',
   STOP: 's',
   LOG: 'l',
+  DSP: 'd',
   BEGIN_SPEAKER_MODEL: 'b',
   ADAPT_SPEAKER_MODEL: 'a',
   FINISH_SPEAKER_MODEL: 'f',
@@ -93,7 +133,8 @@ var NaClPlugin = {
   READY_FOR_AUDIO: 'audio',
   STOPPED: 'stopped',
   HOTWORD_DETECTED: 'hotword',
-  MS_CONFIGURED: 'ms_configured'
+  MS_CONFIGURED: 'ms_configured',
+  TIMEOUT: 'timeout'
 };
 
 /**
@@ -109,8 +150,8 @@ var CommandToPage = {
 };
 
 /**
- * Messages sent from the Google page to the injected scripts
- * and then passed to the extension.
+ * Messages sent from the Google page to the extension or to the
+ * injected script and then passed to the extension.
  * @enum {string}
  */
 var CommandFromPage = {
@@ -123,7 +164,14 @@ var CommandFromPage = {
   CLICKED_RESUME: 'hcc',
   CLICKED_RESTART: 'hcr',
   CLICKED_DEBUG: 'hcd',
-  WAKE_UP_HELPER: 'wuh'
+  WAKE_UP_HELPER: 'wuh',
+  // Command specifically for the opt-in promo below this line.
+  // User has explicitly clicked 'no'.
+  CLICKED_NO_OPTIN: 'hcno',
+  // User has opted in.
+  CLICKED_OPTIN: 'hco',
+  // User clicked on the microphone.
+  PAGE_WAKEUP: 'wu'
 };
 
 /**
@@ -234,9 +282,15 @@ return {
   AUDIO_LOG_SECONDS: AUDIO_LOG_SECONDS,
   CLIENT_PORT_NAME: CLIENT_PORT_NAME,
   COMMAND_FIELD_NAME: COMMAND_FIELD_NAME,
+  FILE_SYSTEM_SIZE_BYTES: FILE_SYSTEM_SIZE_BYTES,
+  HOTWORD_STREAM_TIMEOUT_SECONDS: HOTWORD_STREAM_TIMEOUT_SECONDS,
+  NUM_TRAINING_UTTERANCES: NUM_TRAINING_UTTERANCES,
   SHARED_MODULE_ID: SHARED_MODULE_ID,
   SHARED_MODULE_ROOT: SHARED_MODULE_ROOT,
+  SPEAKER_MODEL_FILE_NAME: SPEAKER_MODEL_FILE_NAME,
   UI_LANGUAGE: UI_LANGUAGE,
+  UTTERANCE_FILE_EXTENSION: UTTERANCE_FILE_EXTENSION,
+  UTTERANCE_FILE_PREFIX: UTTERANCE_FILE_PREFIX,
   CommandToPage: CommandToPage,
   CommandFromPage: CommandFromPage,
   Error: Error,

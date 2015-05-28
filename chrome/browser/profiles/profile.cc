@@ -37,7 +37,9 @@
 Profile::Profile()
     : restored_last_session_(false),
       sent_destroyed_notification_(false),
-      accessibility_pause_level_(0) {
+      accessibility_pause_level_(0),
+      is_guest_profile_(false),
+      is_system_profile_(false) {
 }
 
 Profile::~Profile() {
@@ -111,6 +113,13 @@ void Profile::RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry) {
       false,
       user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
 #endif
+  // This pref is intentionally outside the above #if. That flag corresponds
+  // to the Notifier extension and does not gate the launcher page.
+  // TODO(skare): Remove or rename ENABLE_GOOGLE_NOW: http://crbug.com/459827.
+  registry->RegisterBooleanPref(
+      prefs::kGoogleNowLauncherEnabled,
+      true,
+      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
   registry->RegisterBooleanPref(
       prefs::kDisableExtensions,
       false,
@@ -210,8 +219,12 @@ bool Profile::IsGuestSession() const {
           chromeos::switches::kGuestSession);
   return is_guest_session;
 #else
-  return GetPath() == ProfileManager::GetGuestProfilePath();
+  return is_guest_profile_;
 #endif
+}
+
+bool Profile::IsSystemProfile() const {
+  return is_system_profile_;
 }
 
 bool Profile::IsNewProfile() {

@@ -73,7 +73,11 @@ WebInspector.SearchableView = function(searchable, settingName)
     // Column 1
     var searchControlElementColumn = this._firstRowElement.createChild("td");
     this._searchControlElement = searchControlElementColumn.createChild("span", "toolbar-search-control");
-    this._searchInputElement = this._searchControlElement.createChild("input", "search-replace");
+
+    this._searchInputElement = WebInspector.HistoryInput.create();
+    this._searchInputElement.classList.add("search-replace");
+    this._searchControlElement.appendChild(this._searchInputElement);
+
     this._searchInputElement.id = "search-input-field";
     this._searchInputElement.placeholder = WebInspector.UIString("Find");
 
@@ -448,7 +452,7 @@ WebInspector.SearchableView.prototype = {
 
         var queryCandidate;
         if (WebInspector.currentFocusElement() !== this._searchInputElement) {
-            var selection = this._searchInputElement.window().getSelection();
+            var selection = this._searchInputElement.getComponentSelection();
             if (selection.rangeCount)
                 queryCandidate = selection.toString().replace(/\r?\n.*/, "");
         }
@@ -700,4 +704,36 @@ WebInspector.SearchableView.SearchConfig = function(query, caseSensitive, isRege
     this.query = query;
     this.caseSensitive = caseSensitive;
     this.isRegex = isRegex;
+}
+
+WebInspector.SearchableView.SearchConfig.prototype = {
+    /**
+     * @param {boolean=} global
+     * @return {!RegExp}
+     */
+    toSearchRegex: function(global)
+    {
+        var modifiers = this.caseSensitive ? "" : "i";
+        if (global)
+            modifiers += "g";
+        var query = this.isRegex ? "/" + this.query + "/" : this.query;
+
+        var regex;
+
+        // First try creating regex if user knows the / / hint.
+        try {
+            if (/^\/.+\/$/.test(query)) {
+                regex = new RegExp(query.substring(1, query.length - 1), modifiers);
+                regex.__fromRegExpQuery = true;
+            }
+        } catch (e) {
+            // Silent catch.
+        }
+
+        // Otherwise just do a plain text search.
+        if (!regex)
+            regex = createPlainTextSearchRegex(query, modifiers);
+
+        return regex;
+    }
 }

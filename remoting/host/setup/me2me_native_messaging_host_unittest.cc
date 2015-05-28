@@ -140,7 +140,6 @@ class MockDaemonControllerDelegate : public DaemonController::Delegate {
   // DaemonController::Delegate interface.
   DaemonController::State GetState() override;
   scoped_ptr<base::DictionaryValue> GetConfig() override;
-  void InstallHost(const DaemonController::CompletionCallback& done) override;
   void SetConfigAndStart(
       scoped_ptr<base::DictionaryValue> config,
       bool consent,
@@ -148,8 +147,6 @@ class MockDaemonControllerDelegate : public DaemonController::Delegate {
   void UpdateConfig(scoped_ptr<base::DictionaryValue> config,
                     const DaemonController::CompletionCallback& done) override;
   void Stop(const DaemonController::CompletionCallback& done) override;
-  void SetWindow(void* window_handle) override;
-  std::string GetVersion() override;
   DaemonController::UsageStatsConsent GetUsageStatsConsent() override;
 
  private:
@@ -166,11 +163,6 @@ DaemonController::State MockDaemonControllerDelegate::GetState() {
 
 scoped_ptr<base::DictionaryValue> MockDaemonControllerDelegate::GetConfig() {
   return make_scoped_ptr(new base::DictionaryValue());
-}
-
-void MockDaemonControllerDelegate::InstallHost(
-    const DaemonController::CompletionCallback& done) {
-  done.Run(DaemonController::RESULT_OK);
 }
 
 void MockDaemonControllerDelegate::SetConfigAndStart(
@@ -199,15 +191,6 @@ void MockDaemonControllerDelegate::UpdateConfig(
 void MockDaemonControllerDelegate::Stop(
     const DaemonController::CompletionCallback& done) {
   done.Run(DaemonController::RESULT_OK);
-}
-
-void MockDaemonControllerDelegate::SetWindow(void* window_handle) {}
-
-std::string MockDaemonControllerDelegate::GetVersion() {
-  // Unused - Me2MeNativeMessagingHost returns the compiled-in version string
-  // instead of calling this method.
-  NOTREACHED();
-  return std::string();
 }
 
 DaemonController::UsageStatsConsent

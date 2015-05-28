@@ -4,16 +4,18 @@
 
 package org.chromium.android_webview.test;
 
+import android.os.Build;
 import android.test.suitebuilder.annotation.SmallTest;
 
 import org.chromium.android_webview.AwContentsStatics;
 import org.chromium.android_webview.AwWebContentsObserver;
 import org.chromium.base.test.util.Feature;
-import org.chromium.net.NetError;
+import org.chromium.base.test.util.MinAndroidSdkLevel;
 
 /**
  * Tests for the AwWebContentsObserver class.
  */
+@MinAndroidSdkLevel(Build.VERSION_CODES.KITKAT)
 public class AwWebContentsObserverTest extends AwTestBase  {
     private TestAwContentsClient mContentsClient;
     private AwTestContainerView mTestContainerView;
@@ -34,7 +36,8 @@ public class AwWebContentsObserverTest extends AwTestBase  {
             @Override
             public void run() {
                 mWebContentsObserver = new AwWebContentsObserver(
-                        mTestContainerView.getContentViewCore().getWebContents(), mContentsClient);
+                        mTestContainerView.getContentViewCore().getWebContents(),
+                        mTestContainerView.getAwContents(), mContentsClient);
             }
         });
     }
@@ -61,66 +64,21 @@ public class AwWebContentsObserverTest extends AwTestBase  {
         assertEquals("onPageFinished should be called for main frame navigations.", callCount + 1,
                 mContentsClient.getOnPageFinishedHelper().getCallCount());
 
-        boolean provisionalLoad = true;
-
-        callCount = mContentsClient.getOnPageFinishedHelper().getCallCount();
-        mWebContentsObserver.didFailLoad(!provisionalLoad, mainFrame,
-                NetError.ERR_ABORTED, ERROR_DESCRIPTION, EXAMPLE_URL);
-        assertEquals("onPageFinished should be called for main frame errors.", callCount + 1,
-                mContentsClient.getOnPageFinishedHelper().getCallCount());
-
-        callCount = mContentsClient.getOnPageFinishedHelper().getCallCount();
-        mWebContentsObserver.didFailLoad(!provisionalLoad, subFrame,
-                NetError.ERR_ABORTED, ERROR_DESCRIPTION, EXAMPLE_URL);
-        assertEquals("onPageFinished should only be called for main frame errors.", callCount,
-                mContentsClient.getOnPageFinishedHelper().getCallCount());
-
-        callCount = mContentsClient.getOnPageFinishedHelper().getCallCount();
-        mWebContentsObserver.didFailLoad(!provisionalLoad, mainFrame,
-                NetError.ERR_ABORTED, ERROR_DESCRIPTION, mUnreachableWebDataUrl);
-        assertEquals("onPageFinished should not be called on unrechable url errors.", callCount,
-                mContentsClient.getOnPageFinishedHelper().getCallCount());
-
         String baseUrl = null;
         boolean navigationToDifferentPage = true;
         boolean fragmentNavigation = true;
+        int httpStatusCode = 200;
         callCount = mContentsClient.getOnPageFinishedHelper().getCallCount();
         mWebContentsObserver.didNavigateMainFrame(EXAMPLE_URL, baseUrl,
-                !navigationToDifferentPage, fragmentNavigation);
+                !navigationToDifferentPage, fragmentNavigation, httpStatusCode);
         assertEquals("onPageFinished should be called for main frame fragment navigations.",
                 callCount + 1, mContentsClient.getOnPageFinishedHelper().getCallCount());
 
         callCount = mContentsClient.getOnPageFinishedHelper().getCallCount();
         mWebContentsObserver.didNavigateMainFrame(EXAMPLE_URL, baseUrl,
-                !navigationToDifferentPage, !fragmentNavigation);
+                !navigationToDifferentPage, !fragmentNavigation, httpStatusCode);
         assertEquals("onPageFinished should be called only for main frame fragment navigations.",
                 callCount, mContentsClient.getOnPageFinishedHelper().getCallCount());
-    }
-
-    @SmallTest
-    @Feature({"AndroidWebView"})
-    public void testOnReceivedError() {
-        boolean provisionalLoad = true;
-        boolean mainFrame = true;
-        boolean subFrame = false;
-
-        int callCount = mContentsClient.getOnReceivedErrorHelper().getCallCount();
-        mWebContentsObserver.didFailLoad(!provisionalLoad, subFrame,
-                NetError.ERR_TIMED_OUT, ERROR_DESCRIPTION, EXAMPLE_URL);
-        assertEquals("onReceivedError should only be called for the main frame", callCount,
-                mContentsClient.getOnReceivedErrorHelper().getCallCount());
-
-        callCount = mContentsClient.getOnReceivedErrorHelper().getCallCount();
-        mWebContentsObserver.didFailLoad(!provisionalLoad, mainFrame,
-                NetError.ERR_TIMED_OUT, ERROR_DESCRIPTION, EXAMPLE_URL);
-        assertEquals("onReceivedError should be called for the main frame", callCount + 1,
-                mContentsClient.getOnReceivedErrorHelper().getCallCount());
-
-        callCount = mContentsClient.getOnReceivedErrorHelper().getCallCount();
-        mWebContentsObserver.didFailLoad(!provisionalLoad, mainFrame,
-                NetError.ERR_ABORTED, ERROR_DESCRIPTION, EXAMPLE_URL);
-        assertEquals("onReceivedError should not be called for aborted navigations", callCount,
-                mContentsClient.getOnReceivedErrorHelper().getCallCount());
     }
 
     @SmallTest

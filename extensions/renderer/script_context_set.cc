@@ -61,8 +61,7 @@ ScriptContext* ScriptContextSet::GetCalling() const {
 ScriptContext* ScriptContextSet::GetByV8Context(
     v8::Handle<v8::Context> v8_context) const {
   for (ContextSet::const_iterator iter = contexts_.begin();
-       iter != contexts_.end();
-       ++iter) {
+       iter != contexts_.end(); ++iter) {
     if ((*iter)->v8_context() == v8_context)
       return *iter;
   }

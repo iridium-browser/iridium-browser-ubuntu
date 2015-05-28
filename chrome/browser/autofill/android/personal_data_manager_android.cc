@@ -6,18 +6,23 @@
 
 #include "base/android/jni_array.h"
 #include "base/android/jni_string.h"
+#include "base/command_line.h"
 #include "base/format_macros.h"
 #include "base/prefs/pref_service.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "chrome/browser/autofill/options_util.h"
 #include "chrome/browser/autofill/personal_data_manager_factory.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/pref_names.h"
 #include "components/autofill/core/browser/autofill_country.h"
 #include "components/autofill/core/browser/autofill_type.h"
 #include "components/autofill/core/browser/field_types.h"
 #include "components/autofill/core/browser/personal_data_manager.h"
+#include "components/autofill/core/common/autofill_pref_names.h"
+#include "components/autofill/core/common/autofill_switches.h"
 #include "jni/PersonalDataManager_jni.h"
 
 using base::android::ConvertJavaStringToUTF8;
@@ -28,18 +33,21 @@ using base::android::ScopedJavaLocalRef;
 namespace autofill {
 namespace {
 
+Profile* GetProfile() {
+  return ProfileManager::GetActiveUserProfile()->GetOriginalProfile();
+}
+
 PrefService* GetPrefs() {
-  return
-      ProfileManager::GetActiveUserProfile()->GetOriginalProfile()->GetPrefs();
+  return GetProfile()->GetPrefs();
 }
 
 ScopedJavaLocalRef<jobject> CreateJavaProfileFromNative(
     JNIEnv* env,
     const AutofillProfile& profile) {
   return Java_AutofillProfile_create(
-      env,
-      ConvertUTF8ToJavaString(env, profile.guid()).obj(),
+      env, ConvertUTF8ToJavaString(env, profile.guid()).obj(),
       ConvertUTF8ToJavaString(env, profile.origin()).obj(),
+      profile.record_type() == AutofillProfile::LOCAL_PROFILE,
       ConvertUTF16ToJavaString(env, profile.GetRawInfo(NAME_FULL)).obj(),
       ConvertUTF16ToJavaString(env, profile.GetRawInfo(COMPANY_NAME)).obj(),
       ConvertUTF16ToJavaString(
@@ -131,18 +139,17 @@ ScopedJavaLocalRef<jobject> CreateJavaCreditCardFromNative(
     JNIEnv* env,
     const CreditCard& card) {
   return Java_CreditCard_create(
-      env,
-      ConvertUTF8ToJavaString(env, card.guid()).obj(),
+      env, ConvertUTF8ToJavaString(env, card.guid()).obj(),
       ConvertUTF8ToJavaString(env, card.origin()).obj(),
+      card.record_type() == CreditCard::LOCAL_CARD,
+      card.record_type() == CreditCard::FULL_SERVER_CARD,
       ConvertUTF16ToJavaString(env, card.GetRawInfo(CREDIT_CARD_NAME)).obj(),
       ConvertUTF16ToJavaString(env, card.GetRawInfo(CREDIT_CARD_NUMBER)).obj(),
       ConvertUTF16ToJavaString(env, card.TypeAndLastFourDigits()).obj(),
+      ConvertUTF16ToJavaString(env, card.GetRawInfo(CREDIT_CARD_EXP_MONTH))
+          .obj(),
       ConvertUTF16ToJavaString(
-          env,
-          card.GetRawInfo(CREDIT_CARD_EXP_MONTH)).obj(),
-      ConvertUTF16ToJavaString(
-          env,
-          card.GetRawInfo(CREDIT_CARD_EXP_4_DIGIT_YEAR)).obj());
+          env, card.GetRawInfo(CREDIT_CARD_EXP_4_DIGIT_YEAR)).obj());
 }
 
 void PopulateNativeCreditCardFromJava(
@@ -228,6 +235,17 @@ ScopedJavaLocalRef<jstring> PersonalDataManagerAndroid::SetProfile(
   return ConvertUTF8ToJavaString(env, profile.guid());
 }
 
+ScopedJavaLocalRef<jobjectArray> PersonalDataManagerAndroid::GetProfileLabels(
+    JNIEnv* env,
+    jobject unused_obj) {
+  std::vector<base::string16> labels;
+  AutofillProfile::CreateInferredLabels(
+      personal_data_manager_->GetProfiles(), NULL, NAME_FULL, 2,
+      g_browser_process->GetApplicationLocale(), &labels);
+
+  return base::android::ToJavaArrayOfStrings(env, labels);
+}
+
 jint PersonalDataManagerAndroid::GetCreditCardCount(JNIEnv* unused_env,
                                                     jobject unused_obj) {
   return personal_data_manager_->GetCreditCards().size();
@@ -276,25 +294,17 @@ ScopedJavaLocalRef<jstring> PersonalDataManagerAndroid::SetCreditCard(
   return ConvertUTF8ToJavaString(env, card.guid());
 }
 
-ScopedJavaLocalRef<jobjectArray> PersonalDataManagerAndroid::GetProfileLabels(
-    JNIEnv* env,
-    jobject unused_obj) {
-  std::vector<base::string16> labels;
-  AutofillProfile::CreateInferredLabels(
-      personal_data_manager_->GetProfiles(),
-      NULL,
-      NAME_FULL,
-      2,
-      g_browser_process->GetApplicationLocale(),
-      &labels);
-
-  return base::android::ToJavaArrayOfStrings(env, labels);
-}
-
 void PersonalDataManagerAndroid::RemoveByGUID(JNIEnv* env,
                                               jobject unused_obj,
                                               jstring jguid) {
   personal_data_manager_->RemoveByGUID(ConvertJavaStringToUTF8(env, jguid));
+}
+
+void PersonalDataManagerAndroid::ClearUnmaskedCache(JNIEnv* env,
+                                                    jobject unused_obj,
+                                                    jstring guid) {
+  personal_data_manager_->ResetFullServerCard(
+      ConvertJavaStringToUTF8(env, guid));
 }
 
 void PersonalDataManagerAndroid::OnPersonalDataChanged() {
@@ -321,9 +331,24 @@ static void SetAutofillEnabled(JNIEnv* env, jclass clazz, jboolean enable) {
   GetPrefs()->SetBoolean(autofill::prefs::kAutofillEnabled, enable);
 }
 
-// Returns whether Autofill feature is managed.
+// Returns whether the Autofill feature is managed.
 static jboolean IsAutofillManaged(JNIEnv* env, jclass clazz) {
   return GetPrefs()->IsManagedPreference(autofill::prefs::kAutofillEnabled);
+}
+
+// Returns whether the Wallet import feature is available.
+static jboolean IsWalletImportFeatureAvailable(JNIEnv* env, jclass clazz) {
+  return WalletIntegrationAvailableForProfile(GetProfile());
+}
+
+// Returns whether the Wallet import feature is enabled.
+static jboolean IsWalletImportEnabled(JNIEnv* env, jclass clazz) {
+  return GetPrefs()->GetBoolean(autofill::prefs::kAutofillWalletImportEnabled);
+}
+
+// Enables or disables the Wallet import feature.
+static void SetWalletImportEnabled(JNIEnv* env, jclass clazz, jboolean enable) {
+  GetPrefs()->SetBoolean(autofill::prefs::kAutofillWalletImportEnabled, enable);
 }
 
 // Returns an ISO 3166-1-alpha-2 country code for a |jcountry_name| using

@@ -11,9 +11,9 @@
 #include "media/base/bind_to_current_loop.h"
 #include "media/base/demuxer_stream_provider.h"
 #include "media/mojo/services/mojo_demuxer_stream_impl.h"
-#include "mojo/public/cpp/application/connect.h"
-#include "mojo/public/cpp/bindings/interface_impl.h"
-#include "mojo/public/interfaces/application/service_provider.mojom.h"
+#include "third_party/mojo/src/mojo/public/cpp/application/connect.h"
+#include "third_party/mojo/src/mojo/public/cpp/bindings/interface_impl.h"
+#include "third_party/mojo/src/mojo/public/interfaces/application/service_provider.mojom.h"
 
 namespace media {
 
@@ -21,7 +21,8 @@ MojoRendererImpl::MojoRendererImpl(
     const scoped_refptr<base::SingleThreadTaskRunner>& task_runner,
     mojo::MediaRendererPtr remote_media_renderer)
     : task_runner_(task_runner),
-      remote_media_renderer_pipe_(remote_media_renderer.PassMessagePipe()),
+      remote_media_renderer_(remote_media_renderer.Pass()),
+      binding_(this),
       weak_factory_(this) {
   DVLOG(1) << __FUNCTION__;
 }
@@ -32,30 +33,22 @@ MojoRendererImpl::~MojoRendererImpl() {
   // Connection to |remote_media_renderer_| will error-out here.
 }
 
-// TODO(xhwang): Support |paint_cb| if needed.
+// TODO(xhwang): Support |paint_cb| and |waiting_for_decryption_key_cb|,
+// if needed.
 void MojoRendererImpl::Initialize(
     DemuxerStreamProvider* demuxer_stream_provider,
-    const base::Closure& init_cb,
+    const PipelineStatusCB& init_cb,
     const StatisticsCB& statistics_cb,
     const BufferingStateCB& buffering_state_cb,
     const PaintCB& /* paint_cb */,
     const base::Closure& ended_cb,
-    const PipelineStatusCB& error_cb) {
+    const PipelineStatusCB& error_cb,
+    const base::Closure& /* waiting_for_decryption_key_cb */) {
   DVLOG(1) << __FUNCTION__;
   DCHECK(task_runner_->BelongsToCurrentThread());
   DCHECK(demuxer_stream_provider);
 
-  // Bind the mojo InterfacePtr to the message pipe on the
-  // current thread so we can use it. The MojoRendererImpl object
-  // is constructed on another thread so we can't do it in the
-  // constructor and must pass a message pipe around since
-  // InterfacePtr's are tied to the message loop they were created on.
-  remote_media_renderer_.Bind(remote_media_renderer_pipe_.Pass());
-  DCHECK(remote_media_renderer_);
-  remote_media_renderer_.set_client(this);
-
   demuxer_stream_provider_ = demuxer_stream_provider;
-  // |init_cb| can be called on other thread.
   init_cb_ = init_cb;
   ended_cb_ = ended_cb;
   error_cb_ = error_cb;
@@ -69,18 +62,17 @@ void MojoRendererImpl::Initialize(
       demuxer_stream_provider_->GetStream(DemuxerStream::VIDEO);
 
   mojo::DemuxerStreamPtr audio_stream;
-  if (audio) {
-    mojo::BindToProxy(new MojoDemuxerStreamImpl(audio), &audio_stream)
-        ->DidConnect();
-  }
+  if (audio)
+    mojo::BindToProxy(new MojoDemuxerStreamImpl(audio), &audio_stream);
 
   mojo::DemuxerStreamPtr video_stream;
-  if (video) {
-    mojo::BindToProxy(new MojoDemuxerStreamImpl(video), &video_stream)
-        ->DidConnect();
-  }
+  if (video)
+    mojo::BindToProxy(new MojoDemuxerStreamImpl(video), &video_stream);
 
+  mojo::MediaRendererClientPtr client_ptr;
+  binding_.Bind(GetProxy(&client_ptr));
   remote_media_renderer_->Initialize(
+      client_ptr.Pass(),
       audio_stream.Pass(),
       video_stream.Pass(),
       BindToCurrentLoop(base::Bind(&MojoRendererImpl::OnInitialized,
@@ -203,15 +195,14 @@ void MojoRendererImpl::OnError() {
   if (init_cb_.is_null())  // We have initialized already.
     error_cb_.Run(PIPELINE_ERROR_DECODE);
   else
-    error_cb_.Run(PIPELINE_ERROR_COULD_NOT_RENDER);
+    init_cb_.Run(PIPELINE_ERROR_COULD_NOT_RENDER);
 }
 
 void MojoRendererImpl::OnInitialized() {
   DVLOG(1) << __FUNCTION__;
   DCHECK(task_runner_->BelongsToCurrentThread());
-  DCHECK(!init_cb_.is_null());
-
-  base::ResetAndReturn(&init_cb_).Run();
+  if (!init_cb_.is_null())
+    base::ResetAndReturn(&init_cb_).Run(PIPELINE_OK);
 }
 
 }  // namespace media

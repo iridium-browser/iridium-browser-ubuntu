@@ -93,6 +93,12 @@ WebInspector.NetworkTimeCalculator.prototype = {
         this._boundaryChanged();
     },
 
+    setInitialUserFriendlyBoundaries: function()
+    {
+        this._minimumBoundary = 0;
+        this._maximumBoundary = 1;
+    },
+
     /**
      * @override
      * @return {number}
@@ -233,6 +239,15 @@ WebInspector.NetworkTimeCalculator.prototype = {
             return ((eventTime - this.minimumBoundary()) / this.boundarySpan()) * 100;
 
         return 0;
+    },
+
+    /**
+     * @param {number} percentage
+     * @return {number}
+     */
+    percentageToTime: function(percentage)
+    {
+        return percentage * this.boundarySpan() / 100 + this.minimumBoundary();
     },
 
     _boundaryChanged: function()

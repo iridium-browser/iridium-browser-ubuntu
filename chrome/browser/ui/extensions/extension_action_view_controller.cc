@@ -9,6 +9,8 @@
 #include "chrome/browser/extensions/api/commands/command_service.h"
 #include "chrome/browser/extensions/api/extension_action/extension_action_api.h"
 #include "chrome/browser/extensions/extension_action.h"
+#include "chrome/browser/extensions/extension_view.h"
+#include "chrome/browser/extensions/extension_view_host.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sessions/session_tab_helper.h"
 #include "chrome/browser/ui/browser.h"
@@ -16,6 +18,7 @@
 #include "chrome/browser/ui/extensions/extension_action_platform_delegate.h"
 #include "chrome/browser/ui/toolbar/toolbar_action_view_delegate.h"
 #include "chrome/common/extensions/api/extension_action/action_info.h"
+#include "extensions/browser/extension_host.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/manifest_constants.h"
@@ -32,12 +35,14 @@ ExtensionActionViewController::ExtensionActionViewController(
     : extension_(extension),
       browser_(browser),
       extension_action_(extension_action),
+      popup_host_(nullptr),
       view_delegate_(nullptr),
       platform_delegate_(ExtensionActionPlatformDelegate::Create(this)),
       icon_factory_(browser->profile(), extension, extension_action, this),
       icon_observer_(nullptr),
       extension_registry_(
-          extensions::ExtensionRegistry::Get(browser_->profile())) {
+          extensions::ExtensionRegistry::Get(browser_->profile())),
+      popup_host_observer_(this) {
   DCHECK(extension_action);
   DCHECK(extension_action->action_type() == ActionInfo::TYPE_PAGE ||
          extension_action->action_type() == ActionInfo::TYPE_BROWSER);
@@ -45,6 +50,7 @@ ExtensionActionViewController::ExtensionActionViewController(
 }
 
 ExtensionActionViewController::~ExtensionActionViewController() {
+  DCHECK(!is_showing_popup());
 }
 
 const std::string& ExtensionActionViewController::GetId() const {
@@ -58,6 +64,8 @@ void ExtensionActionViewController::SetDelegate(
     view_delegate_ = delegate;
     platform_delegate_->OnDelegateSet();
   } else {
+    if (is_showing_popup())
+      HidePopup();
     platform_delegate_.reset();
     view_delegate_ = nullptr;
   }
@@ -133,12 +141,28 @@ bool ExtensionActionViewController::HasPopup(
 }
 
 void ExtensionActionViewController::HidePopup() {
-  if (platform_delegate_->IsShowingPopup())
-    platform_delegate_->CloseOwnPopup();
+  if (is_showing_popup()) {
+    popup_host_->Close();
+    // We need to do these actions synchronously (instead of closing and then
+    // performing the rest of the cleanup in OnExtensionHostDestroyed()) because
+    // the extension host can close asynchronously, and we need to keep the view
+    // delegate up-to-date.
+    OnPopupClosed();
+  }
 }
 
 gfx::NativeView ExtensionActionViewController::GetPopupNativeView() {
-  return platform_delegate_->GetPopupNativeView();
+  return popup_host_ ? popup_host_->view()->GetNativeView() : nullptr;
+}
+
+ui::MenuModel* ExtensionActionViewController::GetContextMenu() {
+  if (!ExtensionIsValid() || !extension()->ShowConfigureContextMenus())
+    return nullptr;
+
+  // Reconstruct the menu every time because the menu's contents are dynamic.
+  context_menu_model_ = make_scoped_refptr(new ExtensionContextMenuModel(
+      extension(), browser_, this));
+  return context_menu_model_.get();
 }
 
 bool ExtensionActionViewController::IsMenuRunning() const {
@@ -208,6 +232,11 @@ void ExtensionActionViewController::OnIconUpdated() {
     view_delegate_->UpdateState();
 }
 
+void ExtensionActionViewController::OnExtensionHostDestroyed(
+    const extensions::ExtensionHost* host) {
+  OnPopupClosed();
+}
+
 bool ExtensionActionViewController::ExtensionIsValid() const {
   return extension_registry_->enabled_extensions().Contains(extension_->id());
 }
@@ -234,7 +263,7 @@ bool ExtensionActionViewController::ShowPopupWithUrl(
   if (!ExtensionIsValid())
     return false;
 
-  bool already_showing = platform_delegate_->IsShowingPopup();
+  bool already_showing = is_showing_popup();
 
   // Always hide the current popup, even if it's not owned by this extension.
   // Only one popup should be visible at a time.
@@ -246,6 +275,17 @@ bool ExtensionActionViewController::ShowPopupWithUrl(
   if (already_showing)
     return false;
 
-  return platform_delegate_->ShowPopupWithUrl(
+  popup_host_ = platform_delegate_->ShowPopupWithUrl(
       show_action, popup_url, grant_tab_permissions);
+  if (popup_host_) {
+    popup_host_observer_.Add(popup_host_);
+    view_delegate_->OnPopupShown(grant_tab_permissions);
+  }
+  return is_showing_popup();
+}
+
+void ExtensionActionViewController::OnPopupClosed() {
+  popup_host_observer_.Remove(popup_host_);
+  popup_host_ = nullptr;
+  view_delegate_->OnPopupClosed();
 }

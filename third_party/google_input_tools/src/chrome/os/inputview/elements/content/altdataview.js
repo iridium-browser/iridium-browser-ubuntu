@@ -17,18 +17,20 @@ goog.require('goog.array');
 goog.require('goog.dom');
 goog.require('goog.dom.TagName');
 goog.require('goog.dom.classlist');
-goog.require('goog.math.Box');
 goog.require('goog.math.Coordinate');
+goog.require('goog.object');
 goog.require('goog.style');
-goog.require('i18n.input.chrome.inputview.Accents');
 goog.require('i18n.input.chrome.inputview.Css');
+goog.require('i18n.input.chrome.inputview.content.constants');
 goog.require('i18n.input.chrome.inputview.elements.Element');
 goog.require('i18n.input.chrome.inputview.elements.ElementType');
 goog.require('i18n.input.chrome.inputview.util');
+goog.require('i18n.input.chrome.inputview.handler.Util');
 
 
 goog.scope(function() {
 var ElementType = i18n.input.chrome.inputview.elements.ElementType;
+var Util = i18n.input.chrome.inputview.handler.Util;
 
 
 /**
@@ -46,6 +48,7 @@ function convertToScreenCoordinate(coordinate) {
   screenCoordinate.y += screen.height - window.innerHeight;
   return screenCoordinate;
 };
+
 
 
 /**
@@ -86,7 +89,7 @@ var AltDataView = i18n.input.chrome.inputview.elements.content.AltDataView;
  * @type {number}
  * @private
  */
-AltDataView.PADDING_ = 6;
+AltDataView.PADDING_ = 8;
 
 
 /**
@@ -119,6 +122,15 @@ AltDataView.FINGER_DISTANCE_TO_CANCEL_ALTDATA_ = 100;
 
 
 /**
+ * The default maxium column to display accented characters.
+ *
+ * @type {number}
+ * @private
+ */
+AltDataView.DEFAULT_MAX_COLUMNS_ = 5;
+
+
+/**
  * The cover element.
  * Note: The reason we use a separate cover element instead of the view is
  * because of the opacity. We can not reassign the opacity in child element.
@@ -147,12 +159,20 @@ AltDataView.prototype.triggeredBy;
 
 
 /**
+ * The identifier of PointerEvent which makes this AltDataView visible.
+ *
+ * @type {number}
+ */
+AltDataView.prototype.identifier = Util.INVALID_EVENT_IDENTIFIER;
+
+
+/**
  * True if create IME window to show accented characters.
  *
  * @type {boolean}
  * @private
  */
-AltDataView.prototype.enableIMEWindow_ = false;
+AltDataView.prototype.useIMEWindow_ = false;
 
 
 /** @override */
@@ -185,26 +205,34 @@ AltDataView.prototype.enterDocument = function() {
  * @param {!i18n.input.chrome.inputview.elements.content.SoftKey} key The key
  *     triggerred this altdata view.
  * @param {boolean} isRTL Whether to show the key characters as RTL.
- * @param {boolean} enableIMEWindow Whether to enable IME window for accented
- *     characters.
+ * @param {number} identifier The identifer of event which trigger show.
  */
-AltDataView.prototype.show = function(key, isRTL, enableIMEWindow) {
+AltDataView.prototype.show = function(key, isRTL, identifier) {
   this.triggeredBy = key;
-  this.enableIMEWindow_ = enableIMEWindow;
+  this.identifier = identifier;
   var parentKeyLeftTop = goog.style.getClientPosition(key.getElement());
   var width = key.availableWidth;
   var height = key.availableHeight;
   var characters;
+  var fixedColumns = 0;
+  var isCompact = key.type == ElementType.COMPACT_KEY;
   if (key.type == ElementType.CHARACTER_KEY) {
     key = /** @type {!i18n.input.chrome.inputview.elements.content.
         CharacterKey} */ (key);
     characters = key.getAltCharacters();
-  } else if (key.type == ElementType.COMPACT_KEY) {
+  } else if (isCompact) {
     key = /** @type {!i18n.input.chrome.inputview.elements.content.
         CompactKey} */ (key);
     characters = key.getMoreCharacters();
+    fixedColumns = key.getFixedColumns();
     if (key.hintText) {
-      goog.array.insertAt(characters, key.hintText, 0);
+      var index = goog.array.indexOf(characters,
+          i18n.input.chrome.inputview.content.constants.HintTextPlaceHolder);
+      if (index != -1) {
+        goog.array.splice(characters, index, 1, key.hintText);
+      } else {
+        goog.array.insertAt(characters, key.hintText, 0);
+      }
     }
   }
   if (!characters || characters.length == 0) {
@@ -214,25 +242,27 @@ AltDataView.prototype.show = function(key, isRTL, enableIMEWindow) {
   goog.style.setElementShown(this.getElement(), true);
   this.getDomHelper().removeChildren(this.getElement());
 
-  if (this.enableIMEWindow_) {
+  var w = isCompact ? Math.round(width * 0.8) : Math.round(width * 0.9);
+  var h = isCompact ? Math.round(height * 0.8) : Math.round(height * 0.9);
+  this.useIMEWindow_ = !!(chrome.app.window && chrome.app.window.create);
+  if (this.useIMEWindow_) {
     if (this.altdataWindow_) {
       this.altdataWindow_.close();
     }
 
-    // TODO(bshe): For easier review, hardcode maxColumns to 3 here. A follow up
-    // CL will remove this hack.
-    var maxColumns = 3;
     var numOfKeys = characters.length;
+    var maxColumns =
+        fixedColumns ? fixedColumns : this.getOptimizedMaxColumns_(numOfKeys);
     var numOfColumns = Math.min(numOfKeys, maxColumns);
     var numOfRows = Math.ceil(numOfKeys / numOfColumns);
     var startKeyIndex = this.getStartKeyIndex_(parentKeyLeftTop.x, numOfColumns,
         width, screen.width);
 
-    var altDataWindowWidth = numOfColumns * width;
-    var altDataWindowHeight = numOfRows * height;
+    var altDataWindowWidth = numOfColumns * w;
+    var altDataWindowHeight = numOfRows * h;
     var windowTop = parentKeyLeftTop.y - altDataWindowHeight -
         AltDataView.PADDING_;
-    var windowLeft = parentKeyLeftTop.x - startKeyIndex * width;
+    var windowLeft = parentKeyLeftTop.x - startKeyIndex * w;
     var screenCoordinate = convertToScreenCoordinate(
         new goog.math.Coordinate(windowLeft, windowTop));
     var windowBounds = goog.object.create('left', screenCoordinate.x,
@@ -248,11 +278,11 @@ AltDataView.prototype.show = function(key, isRTL, enableIMEWindow) {
           var contentWindow = self.altdataWindow_.contentWindow;
           contentWindow.addEventListener('load', function() {
             contentWindow.accents.setAccents(characters, numOfColumns,
-                numOfRows, width, height, startKeyIndex);
-            contentWindow.accents.highlightItem(
-                Math.ceil(parentKeyLeftTop.x + width / 2),
-                Math.ceil(parentKeyLeftTop.y + height / 2),
-                AltDataView.FINGER_DISTANCE_TO_CANCEL_ALTDATA_);
+                numOfRows, w, h, startKeyIndex);
+            self.highlightItem(
+                Math.ceil(parentKeyLeftTop.x + w / 2),
+                Math.ceil(parentKeyLeftTop.y + h / 2),
+                identifier);
             var marginBox = goog.style.getMarginBox(
                 contentWindow.document.body);
             // Adjust the window bounds to compensate body's margin. The margin
@@ -269,33 +299,34 @@ AltDataView.prototype.show = function(key, isRTL, enableIMEWindow) {
   } else {
     // The total width of the characters + the separators, every separator has
     // width = 1.
-    var altDataWindowWidth = width * characters.length;
-    var altDataWindowHeight = height;
+    var altDataWindowWidth = w * characters.length;
+    var altDataWindowHeight = h;
     var left = parentKeyLeftTop.x;
 
     if ((left + altDataWindowWidth) > screen.width) {
       // If no enough space at the right, then make it to the left.
-      left = parentKeyLeftTop.x + width - altDataWindowWidth;
+      left = parentKeyLeftTop.x + w - altDataWindowWidth;
       characters.reverse();
     }
     var elemTop = parentKeyLeftTop.y - altDataWindowHeight -
         AltDataView.PADDING_;
     if (elemTop < 0) {
       // If no enough top space, then display below the key.
-      elemTop = parentKeyLeftTop.y + height + AltDataView.PADDING_;
+      elemTop = parentKeyLeftTop.y + h + AltDataView.PADDING_;
     }
 
     for (var i = 0; i < characters.length; i++) {
       var keyElem = this.addKey_(characters[i], isRTL);
-      goog.style.setSize(keyElem, width, height);
+      goog.style.setSize(keyElem, w, h);
       this.altdataElements_.push(keyElem);
       if (i != characters.length - 1) {
         this.addSeparator_(height);
       }
     }
     goog.style.setPosition(this.getElement(), left, elemTop);
-    this.highlightItem(Math.ceil(parentKeyLeftTop.x + width / 2),
-                       Math.ceil(parentKeyLeftTop.y + height / 2));
+    this.highlightItem(Math.ceil(parentKeyLeftTop.x + w / 2),
+                       Math.ceil(parentKeyLeftTop.y + h / 2),
+                       identifier);
   }
 
   goog.style.setElementShown(this.coverElement_, true);
@@ -339,16 +370,50 @@ AltDataView.prototype.getStartKeyIndex_ = function(parentKeyLeft, numOfColumns,
 
 
 /**
+ * Gets the number of empty keys in top row based on |numOfKeys| and
+ * |numOfColumns|.
+ * @param {number} numOfKeys The number of keys we have.
+ * @param {number} numOfColumns The number of keys in a column.
+ * @return {number} The number of empty keys in the top row.
+ * @private
+ */
+AltDataView.prototype.getTopRowEmptySlots_ = function(numOfKeys, numOfColumns) {
+  var remaining = numOfKeys % numOfColumns;
+  return remaining == 0 ? 0 : numOfColumns - remaining;
+};
+
+
+/**
+ * Gets the optimized number of keys in a column for |numOfKeys|; such that the
+ * empty keys in top row is minimized while keeping the number of rows the same
+ * as it is calculated from DEFAULT_MAX_COLUMNS_.
+ * @param {number} numOfKeys The number of keys we have.
+ * @return {number} The number of keys in the top row.
+ * @private
+ */
+AltDataView.prototype.getOptimizedMaxColumns_ = function(numOfKeys) {
+  var numOfColumns = Math.min(numOfKeys, AltDataView.DEFAULT_MAX_COLUMNS_);
+  var numOfRows = Math.ceil(numOfKeys / AltDataView.DEFAULT_MAX_COLUMNS_);
+  while (this.getTopRowEmptySlots_(numOfKeys, numOfColumns) >= numOfRows) {
+    numOfColumns--;
+  }
+  return numOfColumns;
+};
+
+
+/**
  * Hides the alt data view.
  */
 AltDataView.prototype.hide = function() {
-  if (this.enableIMEWindow_) {
+  if (this.useIMEWindow_ && this.altdataWindow_) {
     this.altdataWindow_.close();
     this.altdataWindow_ = null;
   } else {
     this.altdataElements_ = [];
   }
-  this.triggeredBy.setHighlighted(false);
+  if (this.triggeredBy) {
+    this.triggeredBy.setHighlighted(false);
+  }
   goog.style.setElementShown(this.getElement(), false);
   goog.style.setElementShown(this.coverElement_, false);
   this.highlightIndex_ = AltDataView.INVALIDINDEX_;
@@ -360,9 +425,13 @@ AltDataView.prototype.hide = function() {
  *
  * @param {number} x .
  * @param {number} y .
+ * @param {number} identifier The identifer of event which trigger show.
  */
-AltDataView.prototype.highlightItem = function(x, y) {
-  if (this.enableIMEWindow_) {
+AltDataView.prototype.highlightItem = function(x, y, identifier) {
+  if (this.identifier != identifier) {
+    return;
+  }
+  if (this.useIMEWindow_) {
     if (this.altdataWindow_) {
       var screenCoordinate = convertToScreenCoordinate(
           new goog.math.Coordinate(x, y));
@@ -430,7 +499,7 @@ AltDataView.prototype.setElementBackground_ =
  * @return {string} The character.
  */
 AltDataView.prototype.getHighlightedCharacter = function() {
-  if (this.enableIMEWindow_) {
+  if (this.useIMEWindow_) {
     return this.altdataWindow_.contentWindow.accents.highlightedAccent();
   } else {
     return goog.dom.getTextContent(this.altdataElements_[this.highlightIndex_]);
@@ -489,6 +558,7 @@ AltDataView.prototype.getCoverElement = function() {
 AltDataView.prototype.resize = function(width, height) {
   goog.base(this, 'resize', width, height);
 
+  this.hide();
   goog.style.setSize(this.coverElement_, width, height);
 };
 

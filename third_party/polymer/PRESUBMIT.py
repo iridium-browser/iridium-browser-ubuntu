@@ -5,7 +5,7 @@
 """Chromium presubmit script for third_party/polymer.
 
 See http://dev.chromium.org/developers/how-tos/depottools/presubmit-scripts
-for more details on the presubmit API built into gcl.
+for more details on the presubmit API built into depot_tools.
 """
 
 import os
@@ -27,6 +27,9 @@ def _CheckBowerDependencies(input_api, output_api):
   bower_dependencies = \
       set(json.load(open(bower_json_path))['dependencies'].keys())
   installed_components = set(p for p in os.listdir(components_dir))
+  # Add web-animations-js because we keep it in a separate directory
+  # '../third_party/web-animations-js'.
+  installed_components.add('web-animations-js')
 
   if bower_dependencies == installed_components:
     return []

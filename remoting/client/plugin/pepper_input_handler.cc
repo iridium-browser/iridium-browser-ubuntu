@@ -10,13 +10,62 @@
 #include "ppapi/cpp/module_impl.h"
 #include "ppapi/cpp/mouse_cursor.h"
 #include "ppapi/cpp/point.h"
+#include "ppapi/cpp/touch_point.h"
 #include "ppapi/cpp/var.h"
 #include "remoting/proto/event.pb.h"
+#include "remoting/protocol/input_event_tracker.h"
+#include "remoting/protocol/input_stub.h"
 #include "ui/events/keycodes/dom4/keycode_converter.h"
 
 namespace remoting {
 
 namespace {
+
+void SetTouchEventType(PP_InputEvent_Type pp_type,
+                       protocol::TouchEvent* touch_event) {
+  DCHECK(touch_event);
+  switch (pp_type) {
+    case PP_INPUTEVENT_TYPE_TOUCHSTART:
+      touch_event->set_event_type(protocol::TouchEvent::TOUCH_POINT_START);
+      return;
+    case PP_INPUTEVENT_TYPE_TOUCHMOVE:
+      touch_event->set_event_type(protocol::TouchEvent::TOUCH_POINT_MOVE);
+      return;
+    case PP_INPUTEVENT_TYPE_TOUCHEND:
+      touch_event->set_event_type(protocol::TouchEvent::TOUCH_POINT_END);
+      return;
+    case PP_INPUTEVENT_TYPE_TOUCHCANCEL:
+      touch_event->set_event_type(protocol::TouchEvent::TOUCH_POINT_CANCEL);
+      return;
+    default:
+      NOTREACHED() << "Unknown event type: " << pp_type;
+      return;
+  }
+}
+
+// Creates a protocol::TouchEvent instance from |pp_touch_event|.
+// Note that only the changed touches are added to the TouchEvent.
+protocol::TouchEvent MakeTouchEvent(const pp::TouchInputEvent& pp_touch_event) {
+  protocol::TouchEvent touch_event;
+  SetTouchEventType(pp_touch_event.GetType(), &touch_event);
+  DCHECK(touch_event.has_event_type());
+
+  for (uint32_t i = 0;
+       i < pp_touch_event.GetTouchCount(PP_TOUCHLIST_TYPE_CHANGEDTOUCHES);
+       ++i) {
+    pp::TouchPoint pp_point =
+        pp_touch_event.GetTouchByIndex(PP_TOUCHLIST_TYPE_CHANGEDTOUCHES, i);
+    protocol::TouchEventPoint* point = touch_event.add_touch_points();
+    point->set_id(pp_point.id());
+    point->set_x(pp_point.position().x());
+    point->set_y(pp_point.position().y());
+    point->set_radius_x(pp_point.radii().x());
+    point->set_radius_y(pp_point.radii().y());
+    point->set_angle(pp_point.rotation_angle());
+  }
+
+  return touch_event;
+}
 
 // Builds the Chromotocol lock states flags for the PPAPI |event|.
 uint32_t MakeLockStates(const pp::InputEvent& event) {
@@ -59,8 +108,10 @@ protocol::MouseEvent MakeMouseEvent(const pp::MouseInputEvent& pp_mouse_event,
 
 }  // namespace
 
-PepperInputHandler::PepperInputHandler()
+PepperInputHandler::PepperInputHandler(
+    protocol::InputEventTracker* input_tracker)
     : input_stub_(nullptr),
+      input_tracker_(input_tracker),
       has_focus_(false),
       send_mouse_input_when_unfocused_(false),
       send_mouse_move_deltas_(false),
@@ -71,7 +122,21 @@ PepperInputHandler::PepperInputHandler()
 }
 
 bool PepperInputHandler::HandleInputEvent(const pp::InputEvent& event) {
+  ReleaseAllIfModifiersStuck(event);
+
   switch (event.GetType()) {
+    // Touch input cases.
+    case PP_INPUTEVENT_TYPE_TOUCHSTART:
+    case PP_INPUTEVENT_TYPE_TOUCHMOVE:
+    case PP_INPUTEVENT_TYPE_TOUCHEND:
+    case PP_INPUTEVENT_TYPE_TOUCHCANCEL: {
+      if (!input_stub_)
+        return true;
+      pp::TouchInputEvent pp_touch_event(event);
+      input_stub_->InjectTouchEvent(MakeTouchEvent(pp_touch_event));
+      return true;
+    }
+
     case PP_INPUTEVENT_TYPE_CONTEXTMENU: {
       // We need to return true here or else we'll get a local (plugin) context
       // menu instead of the mouseup event for the right click.
@@ -198,6 +263,31 @@ bool PepperInputHandler::HandleInputEvent(const pp::InputEvent& event) {
 
 void PepperInputHandler::DidChangeFocus(bool has_focus) {
   has_focus_ = has_focus;
+}
+
+void PepperInputHandler::ReleaseAllIfModifiersStuck(
+    const pp::InputEvent& event) {
+  switch (event.GetType()) {
+    case PP_INPUTEVENT_TYPE_MOUSEMOVE:
+    case PP_INPUTEVENT_TYPE_MOUSEENTER:
+    case PP_INPUTEVENT_TYPE_MOUSELEAVE:
+      // Don't check modifiers on every mouse move event.
+      break;
+
+    case PP_INPUTEVENT_TYPE_KEYUP:
+      // PPAPI doesn't always set modifiers correctly on KEYUP events. See
+      // crbug.com/464791 for details.
+      break;
+
+    default: {
+      uint32_t modifiers = event.GetModifiers();
+      input_tracker_->ReleaseAllIfModifiersStuck(
+          (modifiers & PP_INPUTEVENT_MODIFIER_ALTKEY) != 0,
+          (modifiers & PP_INPUTEVENT_MODIFIER_CONTROLKEY) != 0,
+          (modifiers & PP_INPUTEVENT_MODIFIER_METAKEY) != 0,
+          (modifiers & PP_INPUTEVENT_MODIFIER_SHIFTKEY) != 0);
+    }
+  }
 }
 
 }  // namespace remoting

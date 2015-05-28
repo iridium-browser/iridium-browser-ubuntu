@@ -75,6 +75,8 @@ static const arg_def_t outputfile = ARG_DEF(
     "o", "output", 1, "Output file name pattern (see below)");
 static const arg_def_t threadsarg = ARG_DEF(
     "t", "threads", 1, "Max threads to use");
+static const arg_def_t frameparallelarg = ARG_DEF(
+    NULL, "frame-parallel", 0, "Frame parallel decode");
 static const arg_def_t verbosearg = ARG_DEF(
     "v", "verbose", 0, "Show version string");
 static const arg_def_t error_concealment = ARG_DEF(
@@ -95,7 +97,7 @@ static const arg_def_t outbitdeptharg = ARG_DEF(
 static const arg_def_t *all_args[] = {
   &codecarg, &use_yv12, &use_i420, &flipuvarg, &rawvideo, &noblitarg,
   &progressarg, &limitarg, &skiparg, &postprocarg, &summaryarg, &outputfile,
-  &threadsarg, &verbosearg, &scalearg, &fb_arg,
+  &threadsarg, &frameparallelarg, &verbosearg, &scalearg, &fb_arg,
   &md5arg, &error_concealment, &continuearg,
 #if CONFIG_VP9 && CONFIG_VP9_HIGHBITDEPTH
   &outbitdeptharg,
@@ -131,7 +133,7 @@ static const arg_def_t *vp8_pp_args[] = {
 #endif
 
 #if CONFIG_LIBYUV
-static INLINE int vpx_image_scale(vpx_image_t *src, vpx_image_t *dst,
+static INLINE int libyuv_scale(vpx_image_t *src, vpx_image_t *dst,
                                   FilterModeEnum mode) {
 #if CONFIG_VP9 && CONFIG_VP9_HIGHBITDEPTH
   if (src->fmt == VPX_IMG_FMT_I42016) {
@@ -519,7 +521,7 @@ static FILE *open_outfile(const char *name) {
   } else {
     FILE *file = fopen(name, "wb");
     if (!file)
-      fatal("Failed to output file %s", name);
+      fatal("Failed to open output file '%s'", name);
     return file;
   }
 }
@@ -542,7 +544,7 @@ int main_loop(int argc, const char **argv_) {
   size_t                 bytes_in_buffer = 0, buffer_size = 0;
   FILE                  *infile;
   int                    frame_in = 0, frame_out = 0, flipuv = 0, noblit = 0;
-  int                    do_md5 = 0, progress = 0;
+  int                    do_md5 = 0, progress = 0, frame_parallel = 0;
   int                    stop_after = 0, postproc = 0, summary = 0, quiet = 1;
   int                    arg_skip = 0;
   int                    ec_enabled = 0;
@@ -575,7 +577,7 @@ int main_loop(int argc, const char **argv_) {
 #if CONFIG_VP9 && CONFIG_VP9_HIGHBITDEPTH
   vpx_image_t             *img_shifted = NULL;
 #endif
-  int                     frame_avail, got_data;
+  int                     frame_avail, got_data, flush_decoder = 0;
   int                     num_external_frame_buffers = 0;
   struct ExternalFrameBufferList ext_fb_list = {0, NULL};
 
@@ -642,6 +644,10 @@ int main_loop(int argc, const char **argv_) {
       summary = 1;
     else if (arg_match(&arg, &threadsarg, argi))
       cfg.threads = arg_parse_uint(&arg);
+#if CONFIG_VP9_DECODER
+    else if (arg_match(&arg, &frameparallelarg, argi))
+      frame_parallel = 1;
+#endif
     else if (arg_match(&arg, &verbosearg, argi))
       quiet = 0;
     else if (arg_match(&arg, &scalearg, argi))
@@ -718,15 +724,15 @@ int main_loop(int argc, const char **argv_) {
   /* Handle non-option arguments */
   fn = argv[0];
 
-  if (!fn)
+  if (!fn) {
+    free(argv);
     usage_exit();
-
+  }
   /* Open file */
   infile = strcmp(fn, "-") ? fopen(fn, "rb") : set_binary_mode(stdin);
 
   if (!infile) {
-    fprintf(stderr, "Failed to open file '%s'", strcmp(fn, "-") ? fn : "stdin");
-    return EXIT_FAILURE;
+    fatal("Failed to open input file '%s'", strcmp(fn, "-") ? fn : "stdin");
   }
 #if CONFIG_OS_SUPPORT
   /* Make sure we don't dump to the terminal, unless forced to with -o - */
@@ -794,7 +800,8 @@ int main_loop(int argc, const char **argv_) {
     interface = get_vpx_decoder_by_index(0);
 
   dec_flags = (postproc ? VPX_CODEC_USE_POSTPROC : 0) |
-              (ec_enabled ? VPX_CODEC_USE_ERROR_CONCEALMENT : 0);
+              (ec_enabled ? VPX_CODEC_USE_ERROR_CONCEALMENT : 0) |
+              (frame_parallel ? VPX_CODEC_USE_FRAME_THREADING : 0);
   if (vpx_codec_dec_init(&decoder, interface->codec_interface(),
                          &cfg, dec_flags)) {
     fprintf(stderr, "Failed to initialize decoder: %s\n",
@@ -868,7 +875,7 @@ int main_loop(int argc, const char **argv_) {
     vpx_codec_iter_t  iter = NULL;
     vpx_image_t    *img;
     struct vpx_usec_timer timer;
-    int                   corrupted;
+    int                   corrupted = 0;
 
     frame_avail = 0;
     if (!stop_after || frame_in < stop_after) {
@@ -892,10 +899,21 @@ int main_loop(int argc, const char **argv_) {
 
         vpx_usec_timer_mark(&timer);
         dx_time += vpx_usec_timer_elapsed(&timer);
+      } else {
+        flush_decoder = 1;
       }
+    } else {
+      flush_decoder = 1;
     }
 
     vpx_usec_timer_start(&timer);
+
+    if (flush_decoder) {
+      // Flush the decoder in frame parallel decode.
+      if (vpx_codec_decode(&decoder, NULL, 0, NULL, 0)) {
+        warn("Failed to flush decoder: %s", vpx_codec_error(&decoder));
+      }
+    }
 
     got_data = 0;
     if ((img = vpx_codec_get_frame(&decoder, &iter))) {
@@ -906,9 +924,11 @@ int main_loop(int argc, const char **argv_) {
     vpx_usec_timer_mark(&timer);
     dx_time += (unsigned int)vpx_usec_timer_elapsed(&timer);
 
-    if (vpx_codec_control(&decoder, VP8D_GET_FRAME_CORRUPTED, &corrupted)) {
+    if (!frame_parallel &&
+        vpx_codec_control(&decoder, VP8D_GET_FRAME_CORRUPTED, &corrupted)) {
       warn("Failed VP8_GET_FRAME_CORRUPTED: %s", vpx_codec_error(&decoder));
-      goto fail;
+      if (!keep_going)
+        goto fail;
     }
     frames_corrupted += corrupted;
 
@@ -948,7 +968,7 @@ int main_loop(int argc, const char **argv_) {
 
         if (img->d_w != scaled_img->d_w || img->d_h != scaled_img->d_h) {
 #if CONFIG_LIBYUV
-          vpx_image_scale(img, scaled_img, kFilterBox);
+          libyuv_scale(img, scaled_img, kFilterBox);
           img = scaled_img;
 #else
           fprintf(stderr, "Failed  to scale output frame: %s.\n"

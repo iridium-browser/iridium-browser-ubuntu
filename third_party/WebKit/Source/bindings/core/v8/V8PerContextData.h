@@ -54,7 +54,6 @@ typedef WTF::Vector<V8NPObject*> V8NPObjectVector;
 typedef WTF::HashMap<int, V8NPObjectVector> V8NPObjectMap;
 
 enum V8ContextEmbedderDataField {
-    v8ContextDebugIdIndex = static_cast<int>(gin::kDebugIdIndex),
     v8ContextPerContextDataIndex = static_cast<int>(gin::kPerContextDataStartIndex + gin::kEmbedderBlink),
 };
 
@@ -66,7 +65,7 @@ public:
 
     ~V8PerContextData();
 
-    v8::Handle<v8::Context> context() { return m_context.newLocal(m_isolate); }
+    v8::Local<v8::Context> context() { return m_context.newLocal(m_isolate); }
 
     // To create JS Wrapper objects, we create a cache of a 'boiler plate'
     // object, and then simply Clone that object each time we need a new one.
@@ -118,19 +117,13 @@ private:
     ScopedPersistent<v8::Context> m_context;
     ScopedPersistent<v8::Value> m_errorPrototype;
 
-    typedef Vector<OwnPtr<CustomElementBinding> > CustomElementBindingList;
+    typedef Vector<OwnPtr<CustomElementBinding>> CustomElementBindingList;
     CustomElementBindingList m_customElementBindings;
 
     // This is owned by a static hash map in V8DOMActivityLogger.
     V8DOMActivityLogger* m_activityLogger;
 
     V8PersistentValueMap<String, v8::Value, false> m_compiledPrivateScript;
-};
-
-class V8PerContextDebugData {
-public:
-    static bool setContextDebugData(v8::Handle<v8::Context>, const char* worldName, int debugId);
-    static int contextDebugId(v8::Handle<v8::Context>);
 };
 
 } // namespace blink

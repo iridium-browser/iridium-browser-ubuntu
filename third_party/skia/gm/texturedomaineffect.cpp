@@ -30,23 +30,18 @@ public:
     }
 
 protected:
-    virtual SkString onShortName() SK_OVERRIDE {
+    SkString onShortName() override {
         return SkString("texture_domain_effect");
     }
 
-    virtual SkISize onISize() SK_OVERRIDE {
+    SkISize onISize() override {
         const SkScalar canvasWidth = kDrawPad +
                 (kTargetWidth + 2 * kDrawPad) * GrTextureDomain::kModeCount +
                 kTestPad * GrTextureDomain::kModeCount;
         return SkISize::Make(SkScalarCeilToInt(canvasWidth), 800);
     }
 
-    virtual uint32_t onGetFlags() const SK_OVERRIDE {
-        // This is a GPU-specific GM.
-        return kGPUOnly_Flag;
-    }
-
-    virtual void onOnceBeforeDraw() SK_OVERRIDE {
+    void onOnceBeforeDraw() override {
         fBmp.allocN32Pixels(kTargetWidth, kTargetHeight);
         SkCanvas canvas(fBmp);
         canvas.clear(0x00000000);
@@ -73,13 +68,14 @@ protected:
                                          fBmp.width() + 10.f, fBmp.height() + 10.f), paint);
     }
 
-    virtual void onDraw(SkCanvas* canvas) SK_OVERRIDE {
+    void onDraw(SkCanvas* canvas) override {
         GrRenderTarget* rt = canvas->internal_private_accessTopLayerRenderTarget();
         if (NULL == rt) {
             return;
         }
         GrContext* context = rt->getContext();
         if (NULL == context) {
+            this->drawGpuOnlyMessage(canvas);
             return;
         }
 
@@ -128,13 +124,15 @@ protected:
                     if (!fp) {
                         continue;
                     }
-                    SkMatrix viewMatrix;
-                    viewMatrix.setTranslate(x, y);
-                    GrDrawState drawState;
-                    drawState.setRenderTarget(rt);
-                    drawState.addColorProcessor(fp);
+                    const SkMatrix viewMatrix = SkMatrix::MakeTrans(x, y);
+                    GrPipelineBuilder pipelineBuilder;
+                    pipelineBuilder.setRenderTarget(rt);
+                    pipelineBuilder.addColorProcessor(fp);
 
-                    tt.target()->drawSimpleRect(&drawState, GrColor_WHITE, viewMatrix, renderRect);
+                    tt.target()->drawSimpleRect(&pipelineBuilder,
+                                                GrColor_WHITE,
+                                                viewMatrix,
+                                                renderRect);
                     x += renderRect.width() + kTestPad;
                 }
                 y += renderRect.height() + kTestPad;

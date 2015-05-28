@@ -199,6 +199,7 @@ void DescendantInvalidationSet::setWholeSubtreeInvalid()
         return;
 
     m_allDescendantsMightBeInvalid = true;
+    m_customPseudoInvalid = false;
     m_treeBoundaryCrossing = false;
     m_insertionPointCrossing = false;
     m_classes = nullptr;
@@ -207,7 +208,7 @@ void DescendantInvalidationSet::setWholeSubtreeInvalid()
     m_attributes = nullptr;
 }
 
-void DescendantInvalidationSet::trace(Visitor* visitor)
+DEFINE_TRACE(DescendantInvalidationSet)
 {
 #if ENABLE(OILPAN)
     visitor->trace(m_classes);

@@ -4,10 +4,12 @@
 
 #include "chrome/browser/search/local_ntp_source.h"
 
+#include "base/command_line.h"
 #include "base/json/json_string_value_serializer.h"
 #include "base/logging.h"
 #include "base/memory/ref_counted_memory.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/metrics/field_trial.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
@@ -24,6 +26,7 @@
 #include "net/url_request/url_request.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/base/ui_base_switches.h"
 #include "ui/base/webui/jstemplate_builder.h"
 #include "ui/base/webui/web_ui_util.h"
 #include "ui/resources/grit/ui_resources.h"
@@ -50,6 +53,7 @@ const struct Resource{
   { "images/close_2_active.png", IDR_CLOSE_2_P, "image/png" },
   { "images/close_2_white.png", IDR_CLOSE_2_MASK, "image/png" },
   { "images/close_3_mask.png", IDR_CLOSE_3_MASK, "image/png" },
+  { "images/close_4_button.png", IDR_CLOSE_4_BUTTON, "image/png" },
   { "images/google_logo.png", IDR_LOCAL_NTP_IMAGES_LOGO_PNG, "image/png" },
   { "images/white_google_logo.png",
     IDR_LOCAL_NTP_IMAGES_WHITE_LOGO_PNG, "image/png" },
@@ -76,6 +80,36 @@ bool DefaultSearchProviderIsGoogle(Profile* profile) {
       (TemplateURLPrepopulateData::GetEngineType(
           *default_provider, template_url_service->search_terms_data()) ==
        SEARCH_ENGINE_GOOGLE);
+}
+
+// Returns whether icon NTP is enabled by experiment.
+// TODO(huangs): Remove all 3 copies of this routine once Icon NTP launches.
+bool IsIconNTPEnabled() {
+  // Note: It's important to query the field trial state first, to ensure that
+  // UMA reports the correct group.
+  const std::string group_name = base::FieldTrialList::FindFullName("IconNTP");
+  using base::CommandLine;
+  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kDisableIconNtp))
+    return false;
+  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kEnableIconNtp))
+    return true;
+
+  return StartsWithASCII(group_name, "Enabled", true);
+}
+
+// Returns whether we are in the Fast NTP experiment or not.
+bool IsLocalNTPFastEnabled() {
+  return StartsWithASCII(base::FieldTrialList::FindFullName("LocalNTPFast"),
+                         "Enabled", true);
+}
+
+// Serves a particular resource.
+// Used for bypassing the default resources when we are in an experiment.
+void SendResource(int resource_id,
+                  const content::URLDataSource::GotDataCallback& callback) {
+  scoped_refptr<base::RefCountedStaticMemory> response(
+      ResourceBundle::GetSharedInstance().LoadDataResourceBytes(resource_id));
+  callback.Run(response.get());
 }
 
 // Adds a localized string keyed by resource id to the dictionary.
@@ -124,6 +158,7 @@ std::string GetConfigData(Profile* profile) {
   config_data.Set("translatedStrings",
                   GetTranslatedStrings(is_google).release());
   config_data.SetBoolean("isGooglePage", is_google);
+  config_data.SetBoolean("useIcons", IsIconNTPEnabled());
 
   // Serialize the dictionary.
   std::string js_text;
@@ -164,6 +199,15 @@ void LocalNtpSource::StartDataRequest(
     std::string config_data_js = GetConfigData(profile_);
     callback.Run(base::RefCountedString::TakeString(&config_data_js));
     return;
+  }
+  if (IsLocalNTPFastEnabled()) {
+    if (stripped_path == "local-ntp.html") {
+      return SendResource(IDR_LOCAL_NTP_FAST_HTML, callback);
+    } else if (stripped_path == "local-ntp.js") {
+      return SendResource(IDR_LOCAL_NTP_FAST_JS, callback);
+    } else if (stripped_path == "local-ntp.css") {
+      return SendResource(IDR_LOCAL_NTP_FAST_CSS, callback);
+    }
   }
   float scale = 1.0f;
   std::string filename;

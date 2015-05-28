@@ -123,6 +123,14 @@ class NaClBrowserTestPnacl : public NaClBrowserTestBase {
   bool IsAPnaclTest() override;
 };
 
+// TODO(jvoung): We can remove this and test the Subzero translator
+// with NaClBrowserTestPnacl once Subzero is automatically chosen
+// (not behind a flag).
+class NaClBrowserTestPnaclSubzero : public NaClBrowserTestPnacl {
+ public:
+  void SetUpCommandLine(base::CommandLine* command_line) override;
+};
+
 class NaClBrowserTestPnaclNonSfi : public NaClBrowserTestBase {
  public:
   void SetUpCommandLine(base::CommandLine* command_line) override;
@@ -200,11 +208,12 @@ class NaClBrowserTestGLibcExtension : public NaClBrowserTestGLibc {
 #  define MAYBE_NONSFI(test_case) DISABLED_##test_case
 #endif
 
-// Currently, we only support it on x86-32 architecture.
-// TODO(hidehiko,mazda): Enable this on ARM, too, when it is supported.
+// Currently, we only support it on x86-32 or ARM architecture.
+// TODO(hidehiko,mazda): Enable this on x86-64, too, when it is supported.
 #if defined(OS_LINUX) && !defined(ADDRESS_SANITIZER) && \
     !defined(THREAD_SANITIZER) && !defined(MEMORY_SANITIZER) && \
-  !defined(LEAK_SANITIZER) && defined(ARCH_CPU_X86)
+    !defined(LEAK_SANITIZER) && \
+    (defined(ARCH_CPU_X86) || defined(ARCH_CPU_ARMEL))
 #  define MAYBE_TRANSITIONAL_NONSFI(test_case) test_case
 #else
 #  define MAYBE_TRANSITIONAL_NONSFI(test_case) DISABLED_##test_case
@@ -218,10 +227,10 @@ class NaClBrowserTestGLibcExtension : public NaClBrowserTestGLibc {
 #  define MAYBE_PNACL_NONSFI(test_case) DISABLED_##test_case
 #endif
 
-// Similar to MAYBE_NACL_HELPER_NONSFI, this is not available on ARM yet.
-// TODO(hidehiko,mazda): Merge this to the MAYBE_PNACL_NONSFI when it is
-// supported on ARM.
-#if defined(OS_LINUX) && defined(ARCH_CPU_X86)
+// Similar to MAYBE_TRANSITIONAL_NONSFI, this is available only on x86-32,
+// x86-64 or ARM linux.
+#if defined(OS_LINUX) && \
+    (defined(ARCH_CPU_X86_FAMILY) || defined(ARCH_CPU_ARMEL))
 #  define MAYBE_PNACL_TRANSITIONAL_NONSFI(test_case) test_case
 #else
 #  define MAYBE_PNACL_TRANSITIONAL_NONSFI(test_case) DISABLED_##test_case

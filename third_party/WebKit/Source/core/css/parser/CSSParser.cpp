@@ -12,38 +12,34 @@
 #include "core/css/parser/CSSParserFastPaths.h"
 #include "core/css/parser/CSSParserImpl.h"
 #include "core/css/parser/CSSSelectorParser.h"
+#include "core/css/parser/CSSSupportsParser.h"
 #include "core/css/parser/CSSTokenizer.h"
+#include "core/layout/LayoutTheme.h"
 
 namespace blink {
 
-CSSParser::CSSParser(const CSSParserContext& context)
-    : m_bisonParser(context)
-{
-}
-
-bool CSSParser::parseDeclaration(MutableStylePropertySet* propertySet, const String& declaration, CSSParserObserver* observer, StyleSheetContents* styleSheet)
+bool CSSParser::parseDeclarationList(const CSSParserContext& context, MutableStylePropertySet* propertySet, const String& declaration, CSSParserObserver* observer, StyleSheetContents* styleSheet)
 {
     // FIXME: Add inspector observer support in the new CSS parser
     if (!observer && RuntimeEnabledFeatures::newCSSParserEnabled())
-        return CSSParserImpl::parseDeclaration(propertySet, declaration, m_bisonParser.m_context);
-    return m_bisonParser.parseDeclaration(propertySet, declaration, observer, styleSheet);
+        return CSSParserImpl::parseDeclarationList(propertySet, declaration, context);
+    return BisonCSSParser(context).parseDeclaration(propertySet, declaration, observer, styleSheet);
 }
 
-void CSSParser::parseSelector(const String& selector, CSSSelectorList& selectorList)
+void CSSParser::parseSelector(const CSSParserContext& context, const String& selector, CSSSelectorList& selectorList)
 {
     if (RuntimeEnabledFeatures::newCSSParserEnabled()) {
-        Vector<CSSParserToken> tokens;
-        CSSTokenizer::tokenize(selector, tokens);
-        CSSSelectorParser::parseSelector(tokens, m_bisonParser.m_context, starAtom, nullptr, selectorList);
+        CSSTokenizer::Scope scope(selector);
+        CSSSelectorParser::parseSelector(scope.tokenRange(), context, starAtom, nullptr, selectorList);
         return;
     }
-    m_bisonParser.parseSelector(selector, selectorList);
+    BisonCSSParser(context).parseSelector(selector, selectorList);
 }
 
 PassRefPtrWillBeRawPtr<StyleRuleBase> CSSParser::parseRule(const CSSParserContext& context, StyleSheetContents* styleSheet, const String& rule)
 {
     if (RuntimeEnabledFeatures::newCSSParserEnabled())
-        return CSSParserImpl::parseRule(rule, context, CSSParserImpl::RegularRules);
+        return CSSParserImpl::parseRule(rule, context, CSSParserImpl::AllowImportRules);
     return BisonCSSParser(context).parseRule(styleSheet, rule);
 }
 
@@ -103,7 +99,7 @@ PassRefPtrWillBeRawPtr<ImmutableStylePropertySet> CSSParser::parseInlineStyleDec
     return BisonCSSParser::parseInlineStyleDeclaration(styleString, element);
 }
 
-PassOwnPtr<Vector<double> > CSSParser::parseKeyframeKeyList(const String& keyList)
+PassOwnPtr<Vector<double>> CSSParser::parseKeyframeKeyList(const String& keyList)
 {
     if (RuntimeEnabledFeatures::newCSSParserEnabled())
         return CSSParserImpl::parseKeyframeKeyList(keyList);
@@ -121,22 +117,63 @@ PassRefPtrWillBeRawPtr<StyleRuleKeyframe> CSSParser::parseKeyframeRule(const CSS
 
 bool CSSParser::parseSupportsCondition(const String& condition)
 {
+    if (RuntimeEnabledFeatures::newCSSParserEnabled()) {
+        CSSTokenizer::Scope scope(condition);
+        CSSParserImpl parser(strictCSSParserContext());
+        return CSSSupportsParser::supportsCondition(scope.tokenRange(), parser) == CSSSupportsParser::Supported;
+    }
     return BisonCSSParser(CSSParserContext(HTMLStandardMode, 0)).parseSupportsCondition(condition);
 }
 
 bool CSSParser::parseColor(RGBA32& color, const String& string, bool strict)
 {
-    return BisonCSSParser::parseColor(color, string, strict);
+    if (string.isEmpty())
+        return false;
+
+    // First try creating a color specified by name, rgba(), rgb() or "#" syntax.
+    if (CSSPropertyParser::fastParseColor(color, string, strict))
+        return true;
+
+    // In case the fast-path parser didn't understand the color, try the full parser.
+    RefPtrWillBeRawPtr<MutableStylePropertySet> stylePropertySet = MutableStylePropertySet::create();
+    // FIXME: The old CSS parser is only working in strict mode ignoring the strict parameter.
+    // It needs to be investigated why.
+    if (!parseValue(stylePropertySet.get(), CSSPropertyColor, string, false, strictCSSParserContext()))
+        return false;
+
+    RefPtrWillBeRawPtr<CSSValue> value = stylePropertySet->getPropertyCSSValue(CSSPropertyColor);
+    if (!value || !value->isPrimitiveValue())
+        return false;
+
+    CSSPrimitiveValue* primitiveValue = toCSSPrimitiveValue(value.get());
+    if (!primitiveValue->isRGBColor())
+        return false;
+
+    color = primitiveValue->getRGBA32Value();
+    return true;
 }
 
 StyleColor CSSParser::colorFromRGBColorString(const String& string)
 {
-    return BisonCSSParser::colorFromRGBColorString(string);
+    // FIXME: Rework css parser so it is more SVG aware.
+    RGBA32 color;
+    if (parseColor(color, string.stripWhiteSpace()))
+        return StyleColor(color);
+    // FIXME: This branch catches the string currentColor, but we should error if we have an illegal color value.
+    return StyleColor::currentColor();
 }
 
 bool CSSParser::parseSystemColor(RGBA32& color, const String& colorString)
 {
-    return BisonCSSParser::parseSystemColor(color, colorString);
+    CSSParserString cssColor;
+    cssColor.init(colorString);
+    CSSValueID id = cssValueKeywordID(cssColor);
+    if (!CSSPropertyParser::isSystemColor(id))
+        return false;
+
+    Color parsedColor = LayoutTheme::theme().systemColor(id);
+    color = parsedColor.rgb();
+    return true;
 }
 
 } // namespace blink

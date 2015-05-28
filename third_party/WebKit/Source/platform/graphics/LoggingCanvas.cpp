@@ -39,22 +39,21 @@
 
 namespace blink {
 
-class AutoLogger {
+class AutoLogger : InterceptingCanvasBase::CanvasInterceptorBase<LoggingCanvas> {
 public:
-    explicit AutoLogger(LoggingCanvas*);
+    explicit AutoLogger(LoggingCanvas* canvas) : InterceptingCanvasBase::CanvasInterceptorBase<LoggingCanvas>(canvas) { }
+
     PassRefPtr<JSONObject> logItem(const String& name);
     PassRefPtr<JSONObject> logItemWithParams(const String& name);
-    ~AutoLogger();
+    ~AutoLogger()
+    {
+        if (topLevelCall())
+            canvas()->m_log->pushObject(m_logItem);
+    }
 
 private:
-    LoggingCanvas* m_canvas;
     RefPtr<JSONObject> m_logItem;
 };
-
-AutoLogger::AutoLogger(LoggingCanvas* loggingCanvas) : m_canvas(loggingCanvas)
-{
-    loggingCanvas->m_depthCount++;
-}
 
 PassRefPtr<JSONObject> AutoLogger::logItem(const String& name)
 {
@@ -72,15 +71,9 @@ PassRefPtr<JSONObject> AutoLogger::logItemWithParams(const String& name)
     return params.release();
 }
 
-AutoLogger::~AutoLogger()
-{
-    m_canvas->m_depthCount--;
-    if (!m_canvas->m_depthCount)
-        m_canvas->m_log->pushObject(m_logItem);
-}
 
 LoggingCanvas::LoggingCanvas(int width, int height)
-    : InterceptingCanvas(width, height)
+    : InterceptingCanvasBase(width, height)
     , m_log(JSONArray::create())
 {
 }
@@ -669,13 +662,13 @@ String LoggingCanvas::stringForSkPaintFlags(const SkPaint& paint)
     return flagsString;
 }
 
-String LoggingCanvas::filterLevelName(SkPaint::FilterLevel filterLevel)
+String LoggingCanvas::filterQualityName(SkFilterQuality filterQuality)
 {
-    switch (filterLevel) {
-    case SkPaint::kNone_FilterLevel: return "None";
-    case SkPaint::kLow_FilterLevel: return "Low";
-    case SkPaint::kMedium_FilterLevel: return "Medium";
-    case SkPaint::kHigh_FilterLevel: return "High";
+    switch (filterQuality) {
+    case kNone_SkFilterQuality: return "None";
+    case kLow_SkFilterQuality: return "Low";
+    case kMedium_SkFilterQuality: return "Medium";
+    case kHigh_SkFilterQuality: return "High";
     default:
         ASSERT_NOT_REACHED();
         return "?";
@@ -768,7 +761,7 @@ PassRefPtr<JSONObject> LoggingCanvas::objectForSkPaint(const SkPaint& paint)
     paintItem->setNumber("strokeWidth", paint.getStrokeWidth());
     paintItem->setNumber("strokeMiter", paint.getStrokeMiter());
     paintItem->setString("flags", stringForSkPaintFlags(paint));
-    paintItem->setString("filterLevel", filterLevelName(paint.getFilterLevel()));
+    paintItem->setString("filterLevel", filterQualityName(paint.getFilterQuality()));
     paintItem->setString("textAlign", textAlignName(paint.getTextAlign()));
     paintItem->setString("strokeCap", strokeCapName(paint.getStrokeCap()));
     paintItem->setString("strokeJoin", strokeJoinName(paint.getStrokeJoin()));

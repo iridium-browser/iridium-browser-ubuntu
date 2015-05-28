@@ -123,7 +123,7 @@ static int GetMP4AudioObjectType(const std::string& codec_id,
       return audio_object_type;
   }
 
-  MEDIA_LOG(log_cb) << "Malformed mimetype codec '" << codec_id << "'";
+  MEDIA_LOG(DEBUG, log_cb) << "Malformed mimetype codec '" << codec_id << "'";
   return -1;
 }
 
@@ -135,8 +135,9 @@ bool ValidateMP4ACodecID(const std::string& codec_id, const LogCB& log_cb) {
     return true;
   }
 
-  MEDIA_LOG(log_cb) << "Unsupported audio object type " << audio_object_type
-                    << " in codec '" << codec_id << "'";
+  MEDIA_LOG(DEBUG, log_cb) << "Unsupported audio object type "
+                           << audio_object_type << " in codec '" << codec_id
+                           << "'";
   return false;
 }
 
@@ -284,6 +285,11 @@ static bool VerifyCodec(
           base::android::BuildInfo::GetInstance()->sdk_int() < 19) {
         return false;
       }
+      // Opus is only supported on Lollipop+ (API Level 21).
+      if (codec_info->tag == CodecInfo::HISTOGRAM_OPUS &&
+          base::android::BuildInfo::GetInstance()->sdk_int() < 21) {
+        return false;
+      }
 #endif
       if (video_codecs)
         video_codecs->push_back(codec_info->tag);
@@ -332,8 +338,8 @@ static bool CheckTypeAndCodecs(
           return true;
         }
 
-        MEDIA_LOG(log_cb) << "A codecs parameter must be provided for '"
-                          << type << "'";
+        MEDIA_LOG(DEBUG, log_cb) << "A codecs parameter must be provided for '"
+                                 << type << "'";
         return false;
       }
 
@@ -354,8 +360,8 @@ static bool CheckTypeAndCodecs(
         }
 
         if (!found_codec) {
-          MEDIA_LOG(log_cb) << "Codec '" << codec_id
-                            << "' is not supported for '" << type << "'";
+          MEDIA_LOG(DEBUG, log_cb) << "Codec '" << codec_id
+                                   << "' is not supported for '" << type << "'";
           return false;
         }
       }

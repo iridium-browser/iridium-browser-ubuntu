@@ -9,21 +9,21 @@
 #include "net/url_request/url_request_interceptor.h"
 
 namespace data_reduction_proxy {
-class DataReductionProxyEventStore;
-class DataReductionProxyParams;
 class DataReductionProxyBypassProtocol;
-class DataReductionProxyUsageStats;
+class DataReductionProxyConfig;
+class DataReductionProxyEventStore;
+class DataReductionProxyBypassStats;
 
 // Used to intercept responses that contain explicit and implicit signals
-// to bypass the data reduction proxy. If the proxy should be bypassed,
+// to bypass the Data Reduction Proxy. If the proxy should be bypassed,
 // the interceptor returns a new URLRequestHTTPJob that fetches the resource
 // without use of the proxy.
 class DataReductionProxyInterceptor : public net::URLRequestInterceptor {
  public:
-  // Constructs the interceptor. |params|, |stats|, and |event_store| must
+  // Constructs the interceptor. |config|, |stats|, and |event_store| must
   // outlive |this|. |stats| may be NULL.
-  DataReductionProxyInterceptor(DataReductionProxyParams* params,
-                                DataReductionProxyUsageStats* stats,
+  DataReductionProxyInterceptor(DataReductionProxyConfig* config,
+                                DataReductionProxyBypassStats* stats,
                                 DataReductionProxyEventStore* event_store);
 
   // Destroys the interceptor.
@@ -34,23 +34,30 @@ class DataReductionProxyInterceptor : public net::URLRequestInterceptor {
       net::URLRequest* request,
       net::NetworkDelegate* network_delegate) const override;
 
-  // Returns a new URLRequestHTTPJob if the response indicates that the data
-  // reduction proxy should be bypassed according to the rules in |protocol_|.
-  // Returns NULL otherwise. If a job is returned, the interceptor's
-  // URLRequestInterceptingJobFactory will restart the request.
+  // Returns a new URLRequestHTTPJob if the redirect indicates that the Data
+  // Reduction Proxy should be bypassed. See |MaybeInterceptResponseOrRedirect|
+  // for more details.
+  net::URLRequestJob* MaybeInterceptRedirect(
+      net::URLRequest* request, net::NetworkDelegate* network_delegate,
+      const GURL& location) const override;
+
+  // Returns a new URLRequestHTTPJob if the response indicates that the Data
+  // Reduction Proxy should be bypassed. See |MaybeInterceptResponseOrRedirect|
+  // for more details.
   net::URLRequestJob* MaybeInterceptResponse(
       net::URLRequest* request,
       net::NetworkDelegate* network_delegate) const override;
 
  private:
-  // Must outlive |this|.
-  DataReductionProxyParams* params_;
+  // Returns a new URLRequestHTTPJob if the response or redirect indicates that
+  // the data reduction proxy should be bypassed according to the rules in
+  // |bypass_protocol_|. Returns NULL otherwise. If a job is returned, the
+  // interceptor's URLRequestInterceptingJobFactory will restart the request.
+  net::URLRequestJob* MaybeInterceptResponseOrRedirect(
+      net::URLRequest* request, net::NetworkDelegate* network_delegate) const;
 
   // Must outlive |this| if non-NULL.
-  DataReductionProxyUsageStats* usage_stats_;
-
-  // Must outlive |this|.
-  DataReductionProxyEventStore* event_store_;
+  DataReductionProxyBypassStats* bypass_stats_;
 
   // Object responsible for identifying cases when a response should cause the
   // data reduction proxy to be bypassed, and for triggering proxy bypasses in

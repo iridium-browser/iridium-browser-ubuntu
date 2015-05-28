@@ -7,6 +7,7 @@
 #include "base/strings/stringprintf.h"
 #include "ui/aura/window.h"
 #include "ui/base/hit_test.h"
+#include "ui/compositor/paint_context.h"
 #include "ui/events/event.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/path.h"
@@ -50,6 +51,10 @@ void TestWindowDelegate::OnBoundsChanged(const gfx::Rect& old_bounds,
                                          const gfx::Rect& new_bounds) {
 }
 
+ui::TextInputClient* TestWindowDelegate::GetFocusedTextInputClient() {
+  return &text_input_client_;
+}
+
 gfx::NativeCursor TestWindowDelegate::GetCursor(const gfx::Point& point) {
   return gfx::kNullCursor;
 }
@@ -71,7 +76,7 @@ bool TestWindowDelegate::CanFocus() {
 void TestWindowDelegate::OnCaptureLost() {
 }
 
-void TestWindowDelegate::OnPaint(gfx::Canvas* canvas) {
+void TestWindowDelegate::OnPaint(const ui::PaintContext& context) {
 }
 
 void TestWindowDelegate::OnDeviceScaleFactorChanged(
@@ -116,8 +121,8 @@ void ColorTestWindowDelegate::OnWindowDestroyed(Window* window) {
   delete this;
 }
 
-void ColorTestWindowDelegate::OnPaint(gfx::Canvas* canvas) {
-  canvas->DrawColor(color_, SkXfermode::kSrc_Mode);
+void ColorTestWindowDelegate::OnPaint(const ui::PaintContext& context) {
+  context.canvas()->DrawColor(color_, SkXfermode::kSrc_Mode);
 }
 
 ////////////////////////////////////////////////////////////////////////////////

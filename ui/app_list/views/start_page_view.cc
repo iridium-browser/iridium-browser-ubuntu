@@ -4,7 +4,12 @@
 
 #include "ui/app_list/views/start_page_view.h"
 
+#include <string>
+
+#include "base/i18n/rtl.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/strings/utf_string_conversions.h"
+#include "ui/accessibility/ax_view_state.h"
 #include "ui/app_list/app_list_constants.h"
 #include "ui/app_list/app_list_item.h"
 #include "ui/app_list/app_list_model.h"
@@ -13,8 +18,9 @@
 #include "ui/app_list/views/all_apps_tile_item_view.h"
 #include "ui/app_list/views/app_list_main_view.h"
 #include "ui/app_list/views/contents_view.h"
+#include "ui/app_list/views/custom_launcher_page_view.h"
 #include "ui/app_list/views/search_box_view.h"
-#include "ui/app_list/views/search_result_list_view.h"
+#include "ui/app_list/views/search_result_container_view.h"
 #include "ui/app_list/views/search_result_tile_item_view.h"
 #include "ui/app_list/views/tile_item_view.h"
 #include "ui/gfx/canvas.h"
@@ -30,18 +36,19 @@ namespace app_list {
 namespace {
 
 // Layout constants.
-const int kTopMargin = 84;
-const int kInstantContainerSpacing = 11;
-const int kSearchBoxAndTilesSpacing = 40;
+const int kInstantContainerSpacing = 24;
+const int kSearchBoxAndTilesSpacing = 35;
 const int kStartPageSearchBoxWidth = 480;
 
 // WebView constants.
-const int kWebViewWidth = 500;
-const int kWebViewHeight = 105;
+const int kWebViewWidth = 700;
+const int kWebViewHeight = 244;
 
 // Tile container constants.
 const size_t kNumStartPageTiles = 4;
-const int kTileSpacing = 10;
+const int kTileSpacing = 7;
+
+const int kLauncherPageBackgroundWidth = 400;
 
 // An invisible placeholder view which fills the space for the search box view
 // in a box layout. The search box view itself is a child of the AppListView
@@ -64,6 +71,154 @@ class SearchBoxSpacerView : public views::View {
 
 }  // namespace
 
+class CustomLauncherPageBackgroundView : public views::View {
+ public:
+  explicit CustomLauncherPageBackgroundView(
+      const std::string& custom_launcher_page_name)
+      : selected_(false),
+        custom_launcher_page_name_(custom_launcher_page_name) {
+    set_background(views::Background::CreateSolidBackground(kSelectedColor));
+  }
+  ~CustomLauncherPageBackgroundView() override {}
+
+  void SetSelected(bool selected) {
+    selected_ = selected;
+    SetVisible(selected);
+    if (selected)
+      NotifyAccessibilityEvent(ui::AX_EVENT_FOCUS, true);
+  }
+
+  bool selected() { return selected_; }
+
+  // Overridden from views::View:
+  void GetAccessibleState(ui::AXViewState* state) override {
+    state->role = ui::AX_ROLE_BUTTON;
+    state->name = base::UTF8ToUTF16(custom_launcher_page_name_);
+  }
+
+ private:
+  bool selected_;
+  std::string custom_launcher_page_name_;
+
+  DISALLOW_COPY_AND_ASSIGN(CustomLauncherPageBackgroundView);
+};
+
+// A container that holds the start page recommendation tiles and the all apps
+// tile.
+class StartPageView::StartPageTilesContainer
+    : public SearchResultContainerView {
+ public:
+  StartPageTilesContainer(ContentsView* contents_view,
+                          AllAppsTileItemView* all_apps_button);
+  ~StartPageTilesContainer() override;
+
+  TileItemView* GetTileItemView(int index);
+
+  const std::vector<SearchResultTileItemView*>& tile_views() const {
+    return search_result_tile_views_;
+  }
+
+  AllAppsTileItemView* all_apps_button() { return all_apps_button_; }
+
+  // Overridden from SearchResultContainerView:
+  int Update() override;
+  void UpdateSelectedIndex(int old_selected, int new_selected) override;
+  void OnContainerSelected(bool from_bottom,
+                           bool directional_movement) override;
+
+ private:
+  ContentsView* contents_view_;
+
+  std::vector<SearchResultTileItemView*> search_result_tile_views_;
+  AllAppsTileItemView* all_apps_button_;
+
+  DISALLOW_COPY_AND_ASSIGN(StartPageTilesContainer);
+};
+
+StartPageView::StartPageTilesContainer::StartPageTilesContainer(
+    ContentsView* contents_view,
+    AllAppsTileItemView* all_apps_button)
+    : contents_view_(contents_view), all_apps_button_(all_apps_button) {
+  views::BoxLayout* tiles_layout_manager =
+      new views::BoxLayout(views::BoxLayout::kHorizontal, 0, 0, kTileSpacing);
+  tiles_layout_manager->set_main_axis_alignment(
+      views::BoxLayout::MAIN_AXIS_ALIGNMENT_CENTER);
+  SetLayoutManager(tiles_layout_manager);
+  set_background(
+      views::Background::CreateSolidBackground(kLabelBackgroundColor));
+
+  // Add SearchResultTileItemViews to the container.
+  for (size_t i = 0; i < kNumStartPageTiles; ++i) {
+    SearchResultTileItemView* tile_item = new SearchResultTileItemView(this);
+    AddChildView(tile_item);
+    tile_item->SetParentBackgroundColor(kLabelBackgroundColor);
+    search_result_tile_views_.push_back(tile_item);
+  }
+
+  // Also add a special "all apps" button to the end of the container.
+  all_apps_button_->UpdateIcon();
+  all_apps_button_->SetParentBackgroundColor(kLabelBackgroundColor);
+  AddChildView(all_apps_button_);
+}
+
+StartPageView::StartPageTilesContainer::~StartPageTilesContainer() {
+}
+
+TileItemView* StartPageView::StartPageTilesContainer::GetTileItemView(
+    int index) {
+  DCHECK_GT(num_results(), index);
+  if (index == num_results() - 1)
+    return all_apps_button_;
+
+  return search_result_tile_views_[index];
+}
+
+int StartPageView::StartPageTilesContainer::Update() {
+  // Ignore updates and disable buttons when transitioning to a different
+  // state.
+  if (contents_view_->GetActiveState() != AppListModel::STATE_START) {
+    for (auto* view : search_result_tile_views_)
+      view->SetEnabled(false);
+
+    return num_results();
+  }
+
+  std::vector<SearchResult*> display_results =
+      AppListModel::FilterSearchResultsByDisplayType(
+          results(), SearchResult::DISPLAY_RECOMMENDATION, kNumStartPageTiles);
+
+  // Update the tile item results.
+  for (size_t i = 0; i < search_result_tile_views_.size(); ++i) {
+    SearchResult* item = NULL;
+    if (i < display_results.size())
+      item = display_results[i];
+    search_result_tile_views_[i]->SetSearchResult(item);
+    search_result_tile_views_[i]->SetEnabled(true);
+  }
+
+  Layout();
+  parent()->Layout();
+  // Add 1 to the results size to account for the all apps button.
+  return display_results.size() + 1;
+}
+
+void StartPageView::StartPageTilesContainer::UpdateSelectedIndex(
+    int old_selected,
+    int new_selected) {
+  if (old_selected >= 0)
+    GetTileItemView(old_selected)->SetSelected(false);
+
+  if (new_selected >= 0)
+    GetTileItemView(new_selected)->SetSelected(true);
+}
+
+void StartPageView::StartPageTilesContainer::OnContainerSelected(
+    bool /*from_bottom*/,
+    bool /*directional_movement*/) {
+}
+
+////////////////////////////////////////////////////////////////////////////////
+// StartPageView implementation:
 StartPageView::StartPageView(AppListMainView* app_list_main_view,
                              AppListViewDelegate* view_delegate)
     : app_list_main_view_(app_list_main_view),
@@ -71,16 +226,23 @@ StartPageView::StartPageView(AppListMainView* app_list_main_view,
       search_box_spacer_view_(new SearchBoxSpacerView(
           app_list_main_view->search_box_view()->GetPreferredSize())),
       instant_container_(new views::View),
-      tiles_container_(new views::View) {
+      custom_launcher_page_background_(new CustomLauncherPageBackgroundView(
+          view_delegate_->GetModel()->custom_launcher_page_name())),
+      tiles_container_(new StartPageTilesContainer(
+          app_list_main_view->contents_view(),
+          new AllAppsTileItemView(
+              app_list_main_view_->contents_view(),
+              view_delegate_->GetModel()->top_level_item_list()))) {
   // The view containing the start page WebContents and SearchBoxSpacerView.
   InitInstantContainer();
   AddChildView(instant_container_);
 
   // The view containing the start page tiles.
-  InitTilesContainer();
   AddChildView(tiles_container_);
 
-  SetResults(view_delegate_->GetModel()->results());
+  AddChildView(custom_launcher_page_background_);
+
+  tiles_container_->SetResults(view_delegate_->GetModel()->results());
   Reset();
 }
 
@@ -91,7 +253,7 @@ void StartPageView::InitInstantContainer() {
   views::BoxLayout* instant_layout_manager = new views::BoxLayout(
       views::BoxLayout::kVertical, 0, 0, kInstantContainerSpacing);
   instant_layout_manager->set_inside_border_insets(
-      gfx::Insets(kTopMargin, 0, kSearchBoxAndTilesSpacing, 0));
+      gfx::Insets(0, 0, kSearchBoxAndTilesSpacing, 0));
   instant_layout_manager->set_main_axis_alignment(
       views::BoxLayout::MAIN_AXIS_ALIGNMENT_END);
   instant_layout_manager->set_cross_axis_alignment(
@@ -108,54 +270,62 @@ void StartPageView::InitInstantContainer() {
   instant_container_->AddChildView(search_box_spacer_view_);
 }
 
-void StartPageView::InitTilesContainer() {
-  views::BoxLayout* tiles_layout_manager =
-      new views::BoxLayout(views::BoxLayout::kHorizontal, 0, 0, kTileSpacing);
-  tiles_layout_manager->set_main_axis_alignment(
-      views::BoxLayout::MAIN_AXIS_ALIGNMENT_CENTER);
-  tiles_container_->SetLayoutManager(tiles_layout_manager);
-  tiles_container_->set_background(
-      views::Background::CreateSolidBackground(kLabelBackgroundColor));
+void StartPageView::MaybeOpenCustomLauncherPage() {
+  // Switch to the custom page.
+  ContentsView* contents_view = app_list_main_view_->contents_view();
+  if (!app_list_main_view_->ShouldShowCustomLauncherPage())
+    return;
 
-  // Add SearchResultTileItemViews to the container.
-  for (size_t i = 0; i < kNumStartPageTiles; ++i) {
-    SearchResultTileItemView* tile_item = new SearchResultTileItemView();
-    tiles_container_->AddChildView(tile_item);
-    tile_item->SetParentBackgroundColor(kLabelBackgroundColor);
-    search_result_tile_views_.push_back(tile_item);
-  }
+  UMA_HISTOGRAM_ENUMERATION(kPageOpenedHistogram,
+                            AppListModel::STATE_CUSTOM_LAUNCHER_PAGE,
+                            AppListModel::STATE_LAST);
 
-  // Also add a special "all apps" button to the end of the container.
-  all_apps_button_ = new AllAppsTileItemView(
-      app_list_main_view_->contents_view(),
-      view_delegate_->GetModel()->top_level_item_list());
-  all_apps_button_->UpdateIcon();
-  all_apps_button_->SetParentBackgroundColor(kLabelBackgroundColor);
-  tiles_container_->AddChildView(all_apps_button_);
+  contents_view->SetActiveState(AppListModel::STATE_CUSTOM_LAUNCHER_PAGE);
 }
 
 void StartPageView::Reset() {
-  Update();
+  tiles_container_->Update();
 }
 
 void StartPageView::UpdateForTesting() {
-  Update();
+  tiles_container_->Update();
+}
+
+const std::vector<SearchResultTileItemView*>& StartPageView::tile_views()
+    const {
+  return tiles_container_->tile_views();
 }
 
 TileItemView* StartPageView::all_apps_button() const {
-  return all_apps_button_;
+  return tiles_container_->all_apps_button();
 }
 
-void StartPageView::OnShow() {
-  DCHECK(app_list_main_view_->contents_view()->ShouldShowCustomPageClickzone());
-  UpdateCustomPageClickzoneVisibility();
-  ClearSelectedIndex();
+void StartPageView::OnShown() {
+  // When the start page is shown, show or hide the custom launcher page
+  // based on whether it is enabled.
+  CustomLauncherPageView* custom_page_view =
+      app_list_main_view_->contents_view()->custom_page_view();
+  if (custom_page_view) {
+    custom_page_view->SetVisible(
+        app_list_main_view_->ShouldShowCustomLauncherPage());
+  }
+  tiles_container_->Update();
+  tiles_container_->ClearSelectedIndex();
+  custom_launcher_page_background_->SetSelected(false);
 }
 
-void StartPageView::OnHide() {
-  DCHECK(
-      !app_list_main_view_->contents_view()->ShouldShowCustomPageClickzone());
-  UpdateCustomPageClickzoneVisibility();
+gfx::Rect StartPageView::GetPageBoundsForState(
+    AppListModel::State state) const {
+  gfx::Rect onscreen_bounds(GetFullContentsBounds());
+  if (state == AppListModel::STATE_START)
+    return onscreen_bounds;
+
+  return GetAboveContentsOffscreenBounds(onscreen_bounds.size());
+}
+
+gfx::Rect StartPageView::GetSearchBoxBounds() const {
+  return search_box_spacer_view_->bounds() +
+         GetPageBoundsForState(AppListModel::STATE_START).OffsetFromOrigin();
 }
 
 void StartPageView::Layout() {
@@ -167,25 +337,63 @@ void StartPageView::Layout() {
   bounds.set_y(bounds.bottom());
   bounds.set_height(tiles_container_->GetHeightForWidth(bounds.width()));
   tiles_container_->SetBoundsRect(bounds);
+
+  CustomLauncherPageView* custom_launcher_page_view =
+      app_list_main_view_->contents_view()->custom_page_view();
+  if (!custom_launcher_page_view)
+    return;
+
+  bounds = app_list_main_view_->contents_view()
+               ->custom_page_view()
+               ->GetCollapsedLauncherPageBounds();
+  bounds.Intersect(GetContentsBounds());
+  bounds.ClampToCenteredSize(
+      gfx::Size(kLauncherPageBackgroundWidth, bounds.height()));
+  custom_launcher_page_background_->SetBoundsRect(bounds);
 }
 
 bool StartPageView::OnKeyPressed(const ui::KeyEvent& event) {
-  if (selected_index() >= 0 &&
-      tiles_container_->child_at(selected_index())->OnKeyPressed(event))
+  const int forward_dir = base::i18n::IsRTL() ? -1 : 1;
+  int selected_index = tiles_container_->selected_index();
+
+  if (custom_launcher_page_background_->selected()) {
+    selected_index = tiles_container_->num_results();
+    switch (event.key_code()) {
+      case ui::VKEY_RETURN:
+        MaybeOpenCustomLauncherPage();
+        return true;
+      default:
+        break;
+    }
+  } else if (selected_index >= 0 &&
+             tiles_container_->GetTileItemView(selected_index)
+                 ->OnKeyPressed(event)) {
     return true;
+  }
 
   int dir = 0;
   switch (event.key_code()) {
     case ui::VKEY_LEFT:
-      dir = -1;
+      dir = -forward_dir;
       break;
     case ui::VKEY_RIGHT:
-      dir = 1;
+      // Don't go to the custom launcher page from the All apps tile.
+      if (selected_index != tiles_container_->num_results() - 1)
+        dir = forward_dir;
+      break;
+    case ui::VKEY_UP:
+      // Up selects the first tile if the custom launcher is selected.
+      if (custom_launcher_page_background_->selected()) {
+        selected_index = -1;
+        dir = 1;
+      }
       break;
     case ui::VKEY_DOWN:
       // Down selects the first tile if nothing is selected.
-      if (!IsValidSelectionIndex(selected_index()))
-        dir = 1;
+      dir = 1;
+      // If something is selected, select the custom launcher page.
+      if (tiles_container_->IsValidSelectionIndex(selected_index))
+        selected_index = tiles_container_->num_results() - 1;
       break;
     case ui::VKEY_TAB:
       dir = event.IsShiftDown() ? -1 : 1;
@@ -197,76 +405,81 @@ bool StartPageView::OnKeyPressed(const ui::KeyEvent& event) {
   if (dir == 0)
     return false;
 
-  if (!IsValidSelectionIndex(selected_index())) {
-    SetSelectedIndex(dir == -1 ? num_results() - 1 : 0);
+  if (selected_index == -1) {
+    custom_launcher_page_background_->SetSelected(false);
+    tiles_container_->SetSelectedIndex(
+        dir == -1 ? tiles_container_->num_results() - 1 : 0);
     return true;
   }
 
-  int selection_index = selected_index() + dir;
-  if (IsValidSelectionIndex(selection_index)) {
-    SetSelectedIndex(selection_index);
+  int selection_index = selected_index + dir;
+  if (tiles_container_->IsValidSelectionIndex(selection_index)) {
+    custom_launcher_page_background_->SetSelected(false);
+    tiles_container_->SetSelectedIndex(selection_index);
+    return true;
+  }
+
+  if (selection_index == tiles_container_->num_results() &&
+      app_list_main_view_->ShouldShowCustomLauncherPage()) {
+    custom_launcher_page_background_->SetSelected(true);
+    tiles_container_->ClearSelectedIndex();
+    return true;
+  }
+
+  if (event.key_code() == ui::VKEY_TAB && selection_index == -1)
+    tiles_container_->ClearSelectedIndex();  // ContentsView will handle focus.
+
+  return false;
+}
+
+bool StartPageView::OnMousePressed(const ui::MouseEvent& event) {
+  ContentsView* contents_view = app_list_main_view_->contents_view();
+  if (contents_view->custom_page_view() &&
+      !contents_view->custom_page_view()
+           ->GetCollapsedLauncherPageBounds()
+           .Contains(event.location())) {
+    return false;
+  }
+
+  MaybeOpenCustomLauncherPage();
+  return true;
+}
+
+bool StartPageView::OnMouseWheel(const ui::MouseWheelEvent& event) {
+  // Negative y_offset is a downward scroll.
+  if (event.y_offset() < 0) {
+    MaybeOpenCustomLauncherPage();
     return true;
   }
 
   return false;
 }
 
-void StartPageView::OnContainerSelected(bool from_bottom) {
-}
-
-gfx::Rect StartPageView::GetSearchBoxBounds() const {
-  return search_box_spacer_view_->bounds();
-}
-
-void StartPageView::UpdateCustomPageClickzoneVisibility() {
-  // This can get called before InitWidgets(), so we cannot guarantee that
-  // custom_page_clickzone_ will not be null.
-  views::Widget* custom_page_clickzone =
-      app_list_main_view_->GetCustomPageClickzone();
-  if (!custom_page_clickzone)
-    return;
-
-  if (app_list_main_view_->contents_view()->ShouldShowCustomPageClickzone()) {
-    custom_page_clickzone->ShowInactive();
-    return;
+void StartPageView::OnGestureEvent(ui::GestureEvent* event) {
+  if (event->type() == ui::ET_GESTURE_SCROLL_BEGIN &&
+      event->details().scroll_y_hint() < 0) {
+    MaybeOpenCustomLauncherPage();
   }
 
-  custom_page_clickzone->Hide();
-}
-
-int StartPageView::Update() {
-  std::vector<SearchResult*> display_results =
-      AppListModel::FilterSearchResultsByDisplayType(
-          results(), SearchResult::DISPLAY_RECOMMENDATION, kNumStartPageTiles);
-
-  // Update the tile item results.
-  for (size_t i = 0; i < search_result_tile_views_.size(); ++i) {
-    SearchResult* item = NULL;
-    if (i < display_results.size())
-      item = display_results[i];
-    search_result_tile_views_[i]->SetSearchResult(item);
+  ContentsView* contents_view = app_list_main_view_->contents_view();
+  if (event->type() == ui::ET_GESTURE_TAP &&
+      contents_view->custom_page_view() &&
+      contents_view->custom_page_view()
+          ->GetCollapsedLauncherPageBounds()
+          .Contains(event->location())) {
+    MaybeOpenCustomLauncherPage();
   }
-
-  tiles_container_->Layout();
-  Layout();
-  // Add 1 to the results size to account for the all apps button.
-  return display_results.size() + 1;
 }
 
-void StartPageView::UpdateSelectedIndex(int old_selected, int new_selected) {
-  if (old_selected >= 0)
-    GetTileItemView(old_selected)->SetSelected(false);
-
-  if (new_selected >= 0)
-    GetTileItemView(new_selected)->SetSelected(true);
+void StartPageView::OnScrollEvent(ui::ScrollEvent* event) {
+  // Negative y_offset is a downward scroll (or upward, if Australian Scrolling
+  // is enabled).
+  if (event->type() == ui::ET_SCROLL && event->y_offset() < 0)
+    MaybeOpenCustomLauncherPage();
 }
 
 TileItemView* StartPageView::GetTileItemView(size_t index) {
-  DCHECK_GT(kNumStartPageTiles + 1, index);
-  if (index == kNumStartPageTiles)
-    return all_apps_button_;
-
-  return search_result_tile_views_[index];
+  return tiles_container_->GetTileItemView(index);
 }
 
 }  // namespace app_list

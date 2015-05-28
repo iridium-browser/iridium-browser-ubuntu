@@ -9,6 +9,7 @@
 #include <vector>
 
 #include "base/basictypes.h"
+#include "base/callback_forward.h"
 #include "base/compiler_specific.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
@@ -34,6 +35,8 @@ namespace policy {
 
 class DeviceCloudPolicyStoreChromeOS;
 class EnterpriseInstallAttributes;
+class HeartbeatScheduler;
+class StatusUploader;
 
 // CloudPolicyManager specialization for device policy on Chrome OS.
 class DeviceCloudPolicyManagerChromeOS : public CloudPolicyManager {
@@ -42,14 +45,19 @@ class DeviceCloudPolicyManagerChromeOS : public CloudPolicyManager {
    public:
     // Invoked when the device cloud policy manager connects.
     virtual void OnDeviceCloudPolicyManagerConnected() = 0;
+    // Invoked when the device cloud policy manager disconnects.
+    virtual void OnDeviceCloudPolicyManagerDisconnected() = 0;
   };
 
-  // |task_runner| is the runner for policy refresh tasks.
+  using UnregisterCallback = base::Callback<void(bool)>;
+
+  // |task_runner| is the runner for policy refresh, heartbeat, and status
+  // upload tasks.
   DeviceCloudPolicyManagerChromeOS(
       scoped_ptr<DeviceCloudPolicyStoreChromeOS> store,
       const scoped_refptr<base::SequencedTaskRunner>& task_runner,
       ServerBackedStateKeysBroker* state_keys_broker);
-  virtual ~DeviceCloudPolicyManagerChromeOS();
+  ~DeviceCloudPolicyManagerChromeOS() override;
 
   // Initializes state keys and requisition information.
   void Initialize(PrefService* local_state);
@@ -66,7 +74,7 @@ class DeviceCloudPolicyManagerChromeOS : public CloudPolicyManager {
   bool IsSharkRequisition() const;
 
   // CloudPolicyManager:
-  virtual void Shutdown() override;
+  void Shutdown() override;
 
   // Pref registration helper.
   static void RegisterPrefs(PrefRegistrySimple* registry);
@@ -86,9 +94,18 @@ class DeviceCloudPolicyManagerChromeOS : public CloudPolicyManager {
   void StartConnection(scoped_ptr<CloudPolicyClient> client_to_connect,
                        EnterpriseInstallAttributes* install_attributes);
 
+  // Sends the unregister request. |callback| is invoked with a boolean
+  // parameter indicating the result when done.
+  virtual void Unregister(const UnregisterCallback& callback);
+
+  // Disconnects the manager.
+  virtual void Disconnect();
+
   DeviceCloudPolicyStoreChromeOS* device_store() {
     return device_store_.get();
   }
+
+  bool HasStatusUploaderForTest() { return status_uploader_; }
 
  private:
   // Saves the state keys received from |session_manager_client_|.
@@ -98,11 +115,26 @@ class DeviceCloudPolicyManagerChromeOS : public CloudPolicyManager {
   void InitializeRequisition();
 
   void NotifyConnected();
+  void NotifyDisconnected();
+
+  // Factory function to create the StatusUploader.
+  void CreateStatusUploader();
 
   // Points to the same object as the base CloudPolicyManager::store(), but with
   // actual device policy specific type.
   scoped_ptr<DeviceCloudPolicyStoreChromeOS> device_store_;
   ServerBackedStateKeysBroker* state_keys_broker_;
+
+  // Helper object that handles updating the server with our current device
+  // state.
+  scoped_ptr<StatusUploader> status_uploader_;
+
+  // Helper object that handles sending heartbeats over the GCM channel to
+  // the server, to monitor connectivity.
+  scoped_ptr<HeartbeatScheduler> heartbeat_scheduler_;
+
+  // The TaskRunner used to do device status uploads.
+  scoped_refptr<base::SequencedTaskRunner> task_runner_;
 
   ServerBackedStateKeysBroker::Subscription state_keys_update_subscription_;
 

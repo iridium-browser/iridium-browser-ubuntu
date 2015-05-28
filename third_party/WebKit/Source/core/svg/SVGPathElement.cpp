@@ -21,7 +21,7 @@
 #include "config.h"
 #include "core/svg/SVGPathElement.h"
 
-#include "core/rendering/svg/RenderSVGPath.h"
+#include "core/layout/svg/LayoutSVGPath.h"
 #include "core/svg/SVGDocumentExtensions.h"
 #include "core/svg/SVGMPathElement.h"
 #include "core/svg/SVGPathSegArcAbs.h"
@@ -48,16 +48,39 @@
 
 namespace blink {
 
+class SVGAnimatedPathLength final : public SVGAnimatedNumber {
+public:
+    static PassRefPtrWillBeRawPtr<SVGAnimatedPathLength> create(SVGPathElement* contextElement)
+    {
+        return adoptRefWillBeNoop(new SVGAnimatedPathLength(contextElement));
+    }
+
+    void setBaseValueAsString(const String& value, SVGParsingError& parseError) override
+    {
+        SVGAnimatedNumber::setBaseValueAsString(value, parseError);
+
+        ASSERT(contextElement());
+        if (parseError == NoError && baseValue()->value() < 0)
+            contextElement()->document().accessSVGExtensions().reportError("A negative value for path attribute <pathLength> is not allowed");
+    }
+
+private:
+    explicit SVGAnimatedPathLength(SVGPathElement* contextElement)
+        : SVGAnimatedNumber(contextElement, SVGNames::pathLengthAttr, SVGNumber::create())
+    {
+    }
+};
+
 inline SVGPathElement::SVGPathElement(Document& document)
     : SVGGeometryElement(SVGNames::pathTag, document)
-    , m_pathLength(SVGAnimatedNumber::create(this, SVGNames::pathLengthAttr, SVGNumber::create()))
+    , m_pathLength(SVGAnimatedPathLength::create(this))
     , m_pathSegList(SVGAnimatedPath::create(this, SVGNames::dAttr))
 {
     addToPropertyMap(m_pathLength);
     addToPropertyMap(m_pathSegList);
 }
 
-void SVGPathElement::trace(Visitor* visitor)
+DEFINE_TRACE(SVGPathElement)
 {
     visitor->trace(m_pathLength);
     visitor->trace(m_pathSegList);
@@ -187,28 +210,6 @@ bool SVGPathElement::isSupportedAttribute(const QualifiedName& attrName)
     return supportedAttributes.contains<SVGAttributeHashTranslator>(attrName);
 }
 
-void SVGPathElement::parseAttribute(const QualifiedName& name, const AtomicString& value)
-{
-    if (!isSupportedAttribute(name)) {
-        SVGGeometryElement::parseAttribute(name, value);
-        return;
-    }
-
-    SVGParsingError parseError = NoError;
-
-    if (name == SVGNames::dAttr) {
-        m_pathSegList->setBaseValueAsString(value, parseError);
-    } else if (name == SVGNames::pathLengthAttr) {
-        m_pathLength->setBaseValueAsString(value, parseError);
-        if (parseError == NoError && m_pathLength->baseValue()->value() < 0)
-            document().accessSVGExtensions().reportError("A negative value for path attribute <pathLength> is not allowed");
-    } else {
-        ASSERT_NOT_REACHED();
-    }
-
-    reportAttributeParsingError(parseError, name, value);
-}
-
 void SVGPathElement::svgAttributeChanged(const QualifiedName& attrName)
 {
     if (!isSupportedAttribute(attrName)) {
@@ -218,7 +219,7 @@ void SVGPathElement::svgAttributeChanged(const QualifiedName& attrName)
 
     SVGElement::InvalidationGuard invalidationGuard(this);
 
-    RenderSVGShape* renderer = toRenderSVGShape(this->renderer());
+    LayoutSVGShape* renderer = toLayoutSVGShape(this->layoutObject());
 
     if (attrName == SVGNames::dAttr) {
         if (renderer)
@@ -262,7 +263,7 @@ void SVGPathElement::pathSegListChanged(ListModification listModification)
 
     invalidateSVGAttributes();
 
-    RenderSVGShape* renderer = toRenderSVGShape(this->renderer());
+    LayoutSVGShape* renderer = toLayoutSVGShape(this->layoutObject());
     if (!renderer)
         return;
 
@@ -278,10 +279,10 @@ FloatRect SVGPathElement::getBBox()
     document().updateLayoutIgnorePendingStylesheets();
 
     // FIXME: Eventually we should support getBBox for detached elements.
-    if (!renderer())
+    if (!layoutObject())
         return FloatRect();
 
-    RenderSVGShape* renderer = toRenderSVGShape(this->renderer());
+    LayoutSVGShape* renderer = toLayoutSVGShape(this->layoutObject());
     return renderer->path().boundingRect();
 }
 

@@ -59,12 +59,17 @@ namespace blink {
 namespace {
 
 class PageInspectorProxy final : public InspectorFrontendChannel {
-    WTF_MAKE_FAST_ALLOCATED;
+    WTF_MAKE_FAST_ALLOCATED(PageInspectorProxy);
 public:
     explicit PageInspectorProxy(WorkerGlobalScope* workerGlobalScope) : m_workerGlobalScope(workerGlobalScope) { }
     virtual ~PageInspectorProxy() { }
 private:
-    virtual void sendMessageToFrontend(PassRefPtr<JSONObject> message) override
+    virtual void sendProtocolResponse(int callId, PassRefPtr<JSONObject> message) override
+    {
+        // Worker messages are wrapped, no need to handle callId.
+        m_workerGlobalScope->thread()->workerReportingProxy().postMessageToPageInspector(message->toJSONString());
+    }
+    virtual void sendProtocolNotification(PassRefPtr<JSONObject> message) override
     {
         m_workerGlobalScope->thread()->workerReportingProxy().postMessageToPageInspector(message->toJSONString());
     }
@@ -73,7 +78,7 @@ private:
 };
 
 class WorkerStateClient final : public InspectorStateClient {
-    WTF_MAKE_FAST_ALLOCATED;
+    WTF_MAKE_FAST_ALLOCATED(WorkerStateClient);
 public:
     WorkerStateClient(WorkerGlobalScope* context) { }
     virtual ~WorkerStateClient() { }
@@ -90,10 +95,13 @@ WorkerInspectorController::WorkerInspectorController(WorkerGlobalScope* workerGl
     , m_state(adoptPtrWillBeNoop(new InspectorCompositeState(m_stateClient.get())))
     , m_instrumentingAgents(InstrumentingAgents::create())
     , m_injectedScriptManager(InjectedScriptManager::createForWorker())
-    , m_debugServer(adoptPtr(new WorkerScriptDebugServer(workerGlobalScope)))
+    , m_debugServer(WorkerScriptDebugServer::create(workerGlobalScope))
     , m_agents(m_instrumentingAgents.get(), m_state.get())
+    , m_paused(false)
 {
-    m_agents.append(WorkerRuntimeAgent::create(m_injectedScriptManager.get(), m_debugServer.get(), workerGlobalScope));
+    OwnPtrWillBeRawPtr<WorkerRuntimeAgent> workerRuntimeAgent = WorkerRuntimeAgent::create(m_injectedScriptManager.get(), m_debugServer.get(), workerGlobalScope, this);
+    m_workerRuntimeAgent = workerRuntimeAgent.get();
+    m_agents.append(workerRuntimeAgent.release());
 
     OwnPtrWillBeRawPtr<WorkerDebuggerAgent> workerDebuggerAgent = WorkerDebuggerAgent::create(m_debugServer.get(), workerGlobalScope, m_injectedScriptManager.get());
     m_workerDebuggerAgent = workerDebuggerAgent.get();
@@ -102,10 +110,14 @@ WorkerInspectorController::WorkerInspectorController(WorkerGlobalScope* workerGl
 
     m_agents.append(InspectorProfilerAgent::create(m_injectedScriptManager.get(), 0));
     m_agents.append(InspectorHeapProfilerAgent::create(m_injectedScriptManager.get()));
-    m_agents.append(WorkerConsoleAgent::create(m_injectedScriptManager.get(), workerGlobalScope));
-    m_agents.append(InspectorTimelineAgent::create(0, 0, 0, InspectorTimelineAgent::WorkerInspector, 0));
 
-    m_injectedScriptManager->injectedScriptHost()->init(m_instrumentingAgents.get(), m_debugServer.get());
+    OwnPtrWillBeRawPtr<WorkerConsoleAgent> workerConsoleAgent = WorkerConsoleAgent::create(m_injectedScriptManager.get(), workerGlobalScope);
+    WorkerConsoleAgent* workerConsoleAgentPtr = workerConsoleAgent.get();
+    m_agents.append(workerConsoleAgent.release());
+
+    m_agents.append(InspectorTimelineAgent::create());
+
+    m_injectedScriptManager->injectedScriptHost()->init(workerConsoleAgentPtr, m_workerDebuggerAgent, nullptr, m_debugServer.get());
 }
 
 WorkerInspectorController::~WorkerInspectorController()
@@ -159,14 +171,6 @@ void WorkerInspectorController::dispatchMessageFromFrontend(const String& messag
         m_backendDispatcher->dispatch(message);
 }
 
-void WorkerInspectorController::resume()
-{
-    if (WorkerRuntimeAgent* runtimeAgent = m_instrumentingAgents->workerRuntimeAgent()) {
-        ErrorString unused;
-        runtimeAgent->run(&unused);
-    }
-}
-
 void WorkerInspectorController::dispose()
 {
     m_instrumentingAgents->reset();
@@ -178,16 +182,40 @@ void WorkerInspectorController::interruptAndDispatchInspectorCommands()
     m_workerDebuggerAgent->interruptAndDispatchInspectorCommands();
 }
 
-void WorkerInspectorController::trace(Visitor* visitor)
+void WorkerInspectorController::resumeStartup()
+{
+    m_paused = false;
+}
+
+bool WorkerInspectorController::isRunRequired()
+{
+    return m_paused;
+}
+
+void WorkerInspectorController::pauseOnStart()
+{
+    m_paused = true;
+    MessageQueueWaitResult result;
+    m_workerGlobalScope->thread()->willEnterNestedLoop();
+    do {
+        result = m_workerGlobalScope->thread()->runDebuggerTask();
+    // Keep waiting until execution is resumed.
+    } while (result == MessageQueueMessageReceived && m_paused);
+    m_workerGlobalScope->thread()->didLeaveNestedLoop();
+}
+
+DEFINE_TRACE(WorkerInspectorController)
 {
     visitor->trace(m_workerGlobalScope);
     visitor->trace(m_state);
     visitor->trace(m_instrumentingAgents);
     visitor->trace(m_injectedScriptManager);
+    visitor->trace(m_debugServer);
     visitor->trace(m_backendDispatcher);
     visitor->trace(m_agents);
     visitor->trace(m_workerDebuggerAgent);
     visitor->trace(m_asyncCallTracker);
+    visitor->trace(m_workerRuntimeAgent);
 }
 
 } // namespace blink

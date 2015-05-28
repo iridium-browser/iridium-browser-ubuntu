@@ -14,11 +14,10 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
 #include "base/memory/weak_ptr.h"
-#include "net/base/bandwidth_metrics.h"
 #include "net/base/io_buffer.h"
 #include "net/base/net_export.h"
-#include "net/base/net_log.h"
 #include "net/base/request_priority.h"
+#include "net/log/net_log.h"
 #include "net/socket/ssl_client_socket.h"
 #include "net/spdy/spdy_buffer.h"
 #include "net/spdy/spdy_framer.h"
@@ -262,8 +261,8 @@ class NET_EXPORT_PRIVATE SpdyStream {
   // If stream flow control is turned off, this must not be called.
   void IncreaseRecvWindowSize(int32 delta_window_size);
 
-  // Called by OnDataReceived (which is in turn called by the session)
-  // to decrease this stream's receive window size by
+  // Called by OnDataReceived or OnPaddingConsumed (which are in turn called by
+  // the session) to decrease this stream's receive window size by
   // |delta_window_size|, which must be at least 1 and must not cause
   // this stream's receive window size to go negative.
   //
@@ -314,6 +313,10 @@ class NET_EXPORT_PRIVATE SpdyStream {
   // |length| is the number of bytes received (at most 2^24 - 1) or 0 if
   //          the stream is being closed.
   void OnDataReceived(scoped_ptr<SpdyBuffer> buffer);
+
+  // Called by the SpdySession when padding is consumed to allow for the stream
+  // receiving window to be updated.
+  void OnPaddingConsumed(size_t len);
 
   // Called by the SpdySession when a frame has been successfully and
   // completely written. |frame_size| is the total size of the frame
@@ -503,8 +506,6 @@ class NET_EXPORT_PRIVATE SpdyStream {
   int32 send_window_size_;
   int32 recv_window_size_;
   int32 unacked_recv_window_bytes_;
-
-  ScopedBandwidthMetrics metrics_;
 
   const base::WeakPtr<SpdySession> session_;
 

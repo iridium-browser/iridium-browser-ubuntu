@@ -16,20 +16,11 @@ var remoting = remoting || {};
 
 /** @constructor */
 remoting.WcsSandboxContent = function() {
-  /**
-   * @type {Window}
-   * @private
-   */
+  /** @private {Window} */
   this.parentWindow_ = null;
-  /**
-   * @type {number}
-   * @private
-   */
+  /** @private {number} */
   this.nextXhrId_ = 0;
-  /**
-   * @type {Object.<number, XMLHttpRequest>}
-   * @private
-   */
+  /** @private {Object<number, XMLHttpRequest>} */
   this.pendingXhrs_ = {};
 
   window.addEventListener('message', this.onMessage_.bind(this), false);
@@ -140,7 +131,7 @@ remoting.WcsSandboxContent.prototype.onLocalJid_ = function(localJid) {
 /**
  * Callback method to indicate that something went wrong loading the WCS driver.
  *
- * @param {remoting.Error} error Details of the error.
+ * @param {!remoting.Error} error Details of the error.
  * @private
  */
 remoting.WcsSandboxContent.prototype.onError_ = function(error) {
@@ -164,10 +155,10 @@ remoting.WcsSandboxContent.prototype.sendXhr = function(xhr) {
   var message = {
     'command': 'sendXhr',
     'id': id,
-    'parameters': xhr.sandbox_ipc
+    'parameters': xhr.sandboxIpc
   };
   this.parentWindow_.postMessage(message, '*');
-  delete xhr.sandbox_ipc;
+  delete xhr.sandboxIpc;
   return id;
 };
 

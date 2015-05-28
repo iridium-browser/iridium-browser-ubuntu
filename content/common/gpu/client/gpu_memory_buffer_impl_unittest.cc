@@ -85,9 +85,9 @@ TEST_P(GpuMemoryBufferImplTest, Map) {
     if (configuration.usage != gfx::GpuMemoryBuffer::MAP)
       continue;
 
-    size_t width_in_bytes =
-        GpuMemoryBufferImpl::BytesPerPixel(configuration.format) *
-        buffer_size.width();
+    size_t width_in_bytes = 0;
+    EXPECT_TRUE(GpuMemoryBufferImpl::StrideInBytes(
+        buffer_size.width(), configuration.format, &width_in_bytes));
     EXPECT_GT(width_in_bytes, 0u);
     scoped_ptr<char[]> data(new char[width_in_bytes]);
     memset(data.get(), 0x2a, width_in_bytes);
@@ -106,10 +106,12 @@ TEST_P(GpuMemoryBufferImplTest, Map) {
     ASSERT_TRUE(buffer);
     EXPECT_FALSE(buffer->IsMapped());
 
-    void* memory = buffer->Map();
-    ASSERT_TRUE(memory);
+    void* memory;
+    bool rv = buffer->Map(&memory);
+    ASSERT_TRUE(rv);
     EXPECT_TRUE(buffer->IsMapped());
-    uint32 stride = buffer->GetStride();
+    uint32 stride;
+    buffer->GetStride(&stride);
     EXPECT_GE(stride, width_in_bytes);
     memcpy(memory, data.get(), width_in_bytes);
     EXPECT_EQ(memcmp(memory, data.get(), width_in_bytes), 0);

@@ -7,6 +7,9 @@
 // Blit11.cpp: Texture copy utility class.
 
 #include "libANGLE/renderer/d3d/d3d11/Blit11.h"
+
+#include <float.h>
+
 #include "libANGLE/renderer/d3d/d3d11/Renderer11.h"
 #include "libANGLE/renderer/d3d/d3d11/renderer11_utils.h"
 #include "libANGLE/renderer/d3d/d3d11/formatutils11.h"
@@ -523,7 +526,7 @@ gl::Error Blit11::copyTexture(ID3D11ShaderResourceView *source, const gl::Box &s
     BlitParameters parameters = { 0 };
     parameters.mDestinationFormat = destFormat;
     parameters.mSignedInteger = (internalFormatInfo.componentType == GL_INT);
-    parameters.m3DBlit = sourceArea.depth > 1;
+    parameters.m3DBlit = sourceSRVDesc.ViewDimension == D3D11_SRV_DIMENSION_TEXTURE3D;
 
     BlitShaderMap::const_iterator i = mBlitShaderMap.find(parameters);
     if (i == mBlitShaderMap.end())

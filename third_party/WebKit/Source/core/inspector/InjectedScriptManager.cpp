@@ -34,6 +34,7 @@
 #include "bindings/core/v8/ScriptValue.h"
 #include "core/inspector/InjectedScript.h"
 #include "core/inspector/InjectedScriptHost.h"
+#include "core/inspector/InjectedScriptNative.h"
 #include "core/inspector/JSONParser.h"
 #include "platform/JSONValues.h"
 #include "public/platform/Platform.h"
@@ -64,9 +65,12 @@ InjectedScriptManager::~InjectedScriptManager()
 {
 }
 
-void InjectedScriptManager::trace(Visitor* visitor)
+DEFINE_TRACE(InjectedScriptManager)
 {
     visitor->trace(m_injectedScriptHost);
+#if ENABLE(OILPAN)
+    visitor->trace(m_callbackDataSet);
+#endif
 }
 
 void InjectedScriptManager::disconnect()
@@ -175,13 +179,35 @@ InjectedScript InjectedScriptManager::injectedScriptFor(ScriptState* inspectedSc
         return InjectedScript();
 
     int id = injectedScriptIdFor(inspectedScriptState);
-    ScriptValue injectedScriptValue = createInjectedScript(injectedScriptSource(), inspectedScriptState, id);
-    InjectedScript result(injectedScriptValue, m_inspectedStateAccessCheck);
+    RefPtr<InjectedScriptNative> injectedScriptNative = adoptRef(new InjectedScriptNative(inspectedScriptState->isolate()));
+    ScriptValue injectedScriptValue = createInjectedScript(injectedScriptSource(), inspectedScriptState, id, injectedScriptNative.get());
+    InjectedScript result(injectedScriptValue, m_inspectedStateAccessCheck, injectedScriptNative.release());
     if (m_customObjectFormatterEnabled)
         result.setCustomObjectFormatterEnabled(m_customObjectFormatterEnabled);
     m_idToInjectedScript.set(id, result);
     return result;
 }
 
-} // namespace blink
+PassOwnPtrWillBeRawPtr<InjectedScriptManager::CallbackData> InjectedScriptManager::CallbackData::create(InjectedScriptManager* manager)
+{
+    return adoptPtrWillBeNoop(new CallbackData(manager));
+}
 
+InjectedScriptManager::CallbackData::CallbackData(InjectedScriptManager* manager)
+    : injectedScriptManager(manager)
+{
+}
+
+void InjectedScriptManager::CallbackData::dispose()
+{
+    // Promptly release the ScopedPersistent<>.
+    handle.clear();
+}
+
+DEFINE_TRACE(InjectedScriptManager::CallbackData)
+{
+    visitor->trace(host);
+    visitor->trace(injectedScriptManager);
+}
+
+} // namespace blink

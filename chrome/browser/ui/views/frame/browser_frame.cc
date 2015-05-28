@@ -20,7 +20,6 @@
 #include "chrome/browser/ui/views/frame/native_browser_frame_factory.h"
 #include "chrome/browser/ui/views/frame/system_menu_model_builder.h"
 #include "chrome/browser/ui/views/frame/top_container_view.h"
-#include "chrome/common/pref_names.h"
 #include "ui/base/hit_test.h"
 #include "ui/base/theme_provider.h"
 #include "ui/events/event_handler.h"
@@ -34,8 +33,8 @@
 #include "ash/shell.h"
 #endif
 
-#if defined(USE_X11)
-#include "chrome/browser/ui/views/frame/browser_command_handler_x11.h"
+#if defined(OS_LINUX)
+#include "chrome/browser/ui/views/frame/browser_command_handler_linux.h"
 #endif
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -65,12 +64,6 @@ const gfx::FontList& BrowserFrame::GetTitleFontList() {
 }
 
 void BrowserFrame::InitBrowserFrame() {
-  use_custom_frame_pref_.Init(
-      prefs::kUseCustomChromeFrame,
-      browser_view_->browser()->profile()->GetPrefs(),
-      base::Bind(&BrowserFrame::OnUseCustomChromeFrameChanged,
-                 base::Unretained(this)));
-
   native_browser_frame_ =
       NativeBrowserFrameFactory::CreateNativeBrowserFrame(this, browser_view_);
   views::Widget::InitParams params = native_browser_frame_->GetWidgetParams();
@@ -89,8 +82,8 @@ void BrowserFrame::InitBrowserFrame() {
     non_client_view()->set_context_menu_controller(this);
   }
 
-#if defined(USE_X11)
-  browser_command_handler_.reset(new BrowserCommandHandlerX11(browser_view_));
+#if defined(OS_LINUX)
+  browser_command_handler_.reset(new BrowserCommandHandlerLinux(browser_view_));
 #endif
 }
 
@@ -134,8 +127,7 @@ views::View* BrowserFrame::GetFrameView() const {
 }
 
 bool BrowserFrame::UseCustomFrame() const {
-  return use_custom_frame_pref_.GetValue() &&
-      browser_view_->IsBrowserTypeNormal();
+  return native_browser_frame_->UseCustomFrame();
 }
 
 bool BrowserFrame::ShouldSaveWindowPlacement() const {
@@ -255,11 +247,4 @@ NewAvatarButton* BrowserFrame::GetNewAvatarMenuButton() {
 
 bool BrowserFrame::ShouldLeaveOffsetNearTopBorder() {
   return !IsMaximized();
-}
-
-void BrowserFrame::OnUseCustomChromeFrameChanged() {
-  // Tell the window manager to add or remove system borders.
-  set_frame_type(UseCustomFrame() ? Widget::FRAME_TYPE_FORCE_CUSTOM
-                                  : Widget::FRAME_TYPE_FORCE_NATIVE);
-  FrameTypeChanged();
 }

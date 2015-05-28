@@ -187,12 +187,6 @@
     'target_conditions': [
       ['win_target=="x64"', {
         'target_arch': 'x64',
-        'defines!': [
-          'NACL_BUILD_SUBARCH=32',
-        ],
-        'defines': [
-          'NACL_BUILD_SUBARCH=64',
-        ],
         'configurations': {
           'Common_Base': {
             'msvs_target_platform': 'x64',
@@ -201,31 +195,6 @@
       }],
     ],
     'conditions': [
-      # TODO(gregoryd): split target and build subarchs
-      ['target_arch=="ia32"', {
-        'defines': [
-          'NACL_BUILD_SUBARCH=32',
-          'NACL_BUILD_ARCH=x86',
-        ],
-      }],
-      ['target_arch=="x64"', {
-        'defines': [
-          'NACL_BUILD_SUBARCH=64',
-          'NACL_BUILD_ARCH=x86',
-        ],
-      }],
-      ['target_arch=="arm"', {
-        'defines': [
-          'NACL_BUILD_ARCH=arm',
-          'NACL_BUILD_SUBARCH=32',
-        ],
-      }],
-      ['target_arch=="mipsel"', {
-        'defines': [
-          'NACL_BUILD_ARCH=mips',
-          'NACL_BUILD_SUBARCH=32',
-        ],
-      }],
       ['linux2==1', {
         'defines': ['LINUX2=1'],
       }],
@@ -305,13 +274,10 @@
           ['OS=="android"', {
             'target_conditions': [
               ['_toolset=="target"', {
-                'defines': ['NACL_ANDROID=1'],
-              }, {
-                'defines': ['NACL_ANDROID=0'],
+                'defines': ['ANDROID'],
               }],
             ],
            }, {
-            'defines': ['NACL_ANDROID=0'],
             'link_settings': {
               'libraries': [
                 '-lrt',
@@ -449,9 +415,6 @@
           '-Wl,-z,noexecstack',
         ],
         'defines': [
-          'NACL_LINUX=1',
-          'NACL_OSX=0',
-          'NACL_WINDOWS=0',
           '_DEFAULT_SOURCE=1',
           '_BSD_SOURCE=1',
           '_POSIX_C_SOURCE=199506',
@@ -643,12 +606,6 @@
             ],
           }],
         ],
-        'defines': [
-          'NACL_LINUX=0',
-          'NACL_ANDROID=0',
-          'NACL_OSX=1',
-          'NACL_WINDOWS=0',
-        ],
       },
     }],
     ['OS=="win"', {
@@ -703,11 +660,6 @@
           '_SECURE_ATL',
           '__STDC_LIMIT_MACROS=1',
           '_HAS_EXCEPTIONS=0',
-
-          'NACL_LINUX=0',
-          'NACL_ANDROID=0',
-          'NACL_OSX=0',
-          'NACL_WINDOWS=1'
         ],
         'conditions': [
           ['MSVS_VERSION=="2008"', {

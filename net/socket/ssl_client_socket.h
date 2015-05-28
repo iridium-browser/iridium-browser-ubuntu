@@ -20,8 +20,6 @@ class CertPolicyEnforcer;
 class CertVerifier;
 class ChannelIDService;
 class CTVerifier;
-class HostPortPair;
-class ServerBoundCertService;
 class SSLCertRequestInfo;
 struct SSLConfig;
 class SSLInfo;
@@ -95,39 +93,6 @@ class NET_EXPORT SSLClientSocket : public SSLSocket {
   bool WasNpnNegotiated() const override;
   NextProto GetNegotiatedProtocol() const override;
 
-  // Computes a unique key string for the SSL session cache.
-  virtual std::string GetSessionCacheKey() const = 0;
-
-  // Returns true if there is a cache entry in the SSL session cache
-  // for the cache key of the SSL socket.
-  //
-  // The cache key consists of a host and port concatenated with a session
-  // cache shard. These two strings are passed to the constructor of most
-  // subclasses of SSLClientSocket.
-  virtual bool InSessionCache() const = 0;
-
-  // Sets |callback| to be run when the handshake has fully completed.
-  // For example, in the case of False Start, Connect() will return
-  // early, before the peer's TLS Finished message has been verified,
-  // in order to allow the caller to call Write() and send application
-  // data with the client's Finished message.
-  // In such situations, |callback| will be invoked sometime after
-  // Connect() - either during a Write() or Read() call, and before
-  // invoking the Read() or Write() callback.
-  // Otherwise, during a traditional TLS connection (i.e. no False
-  // Start), this will be called right before the Connect() callback
-  // is called.
-  //
-  // Note that it's not valid to mutate this socket during such
-  // callbacks, including deleting the socket.
-  //
-  // TODO(mshelley): Provide additional details about whether or not
-  // the handshake actually succeeded or not. This can be inferred
-  // from the result to Connect()/Read()/Write(), but may be useful
-  // to inform here as well.
-  virtual void SetHandshakeCompletionCallback(
-      const base::Closure& callback) = 0;
-
   // Gets the SSL CertificateRequest info of the socket after Connect failed
   // with ERR_SSL_CLIENT_AUTH_CERT_NEEDED.
   virtual void GetSSLCertRequestInfo(
@@ -148,6 +113,8 @@ class NET_EXPORT SSLClientSocket : public SSLSocket {
 
   static const char* NextProtoStatusToString(const NextProtoStatus status);
 
+  // Returns true if |error| is OK or |load_flags| ignores certificate errors
+  // and |error| is a certificate error.
   static bool IgnoreCertError(int error, int load_flags);
 
   // ClearSessionCache clears the SSL session cache, used to resume SSL
@@ -200,9 +167,6 @@ class NET_EXPORT SSLClientSocket : public SSLSocket {
       bool negotiated_channel_id,
       bool channel_id_enabled,
       bool supports_ecc);
-
-  // Records ConnectionType histograms for a successful SSL connection.
-  static void RecordConnectionTypeMetrics(int ssl_version);
 
   // Returns whether TLS channel ID is enabled.
   static bool IsChannelIDEnabled(

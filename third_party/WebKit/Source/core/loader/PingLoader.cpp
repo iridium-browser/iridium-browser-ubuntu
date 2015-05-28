@@ -32,16 +32,18 @@
 #include "config.h"
 #include "core/loader/PingLoader.h"
 
-#include "core/FetchInitiatorTypeNames.h"
 #include "core/dom/Document.h"
 #include "core/fetch/FetchContext.h"
+#include "core/fetch/FetchInitiatorTypeNames.h"
+#include "core/fetch/ResourceFetcher.h"
+#include "core/fetch/UniqueIdentifier.h"
 #include "core/frame/FrameConsole.h"
 #include "core/frame/LocalFrame.h"
 #include "core/inspector/InspectorInstrumentation.h"
 #include "core/inspector/InspectorTraceEvents.h"
 #include "core/loader/FrameLoader.h"
 #include "core/loader/FrameLoaderClient.h"
-#include "core/loader/UniqueIdentifier.h"
+#include "core/loader/MixedContentChecker.h"
 #include "core/page/Page.h"
 #include "platform/exported/WrappedResourceRequest.h"
 #include "platform/network/ResourceError.h"
@@ -67,8 +69,8 @@ void PingLoader::loadImage(LocalFrame* frame, const KURL& url)
     ResourceRequest request(url);
     request.setRequestContext(blink::WebURLRequest::RequestContextPing);
     request.setHTTPHeaderField("Cache-Control", "max-age=0");
-    frame->loader().fetchContext().addAdditionalRequestHeaders(frame->document(), request, FetchSubresource);
-    frame->loader().fetchContext().setFirstPartyForCookies(request);
+    frame->document()->fetcher()->context().addAdditionalRequestHeaders(request, FetchSubresource);
+    frame->document()->fetcher()->context().setFirstPartyForCookies(request);
 
     FetchInitiatorInfo initiatorInfo;
     initiatorInfo.name = FetchInitiatorTypeNames::ping;
@@ -84,8 +86,8 @@ void PingLoader::sendLinkAuditPing(LocalFrame* frame, const KURL& pingURL, const
     request.setHTTPContentType("text/ping");
     request.setHTTPBody(FormData::create("PING"));
     request.setHTTPHeaderField("Cache-Control", "max-age=0");
-    frame->loader().fetchContext().addAdditionalRequestHeaders(frame->document(), request, FetchSubresource);
-    frame->loader().fetchContext().setFirstPartyForCookies(request);
+    frame->document()->fetcher()->context().addAdditionalRequestHeaders(request, FetchSubresource);
+    frame->document()->fetcher()->context().setFirstPartyForCookies(request);
 
     RefPtr<SecurityOrigin> pingOrigin = SecurityOrigin::create(pingURL);
     // addAdditionalRequestHeaders() will have added a referrer for same origin requests,
@@ -112,8 +114,8 @@ void PingLoader::sendViolationReport(LocalFrame* frame, const KURL& reportURL, P
     request.setHTTPMethod("POST");
     request.setHTTPContentType(type == ContentSecurityPolicyViolationReport ? "application/csp-report" : "application/json");
     request.setHTTPBody(report);
-    frame->loader().fetchContext().addAdditionalRequestHeaders(frame->document(), request, FetchSubresource);
-    frame->loader().fetchContext().setFirstPartyForCookies(request);
+    frame->document()->fetcher()->context().addAdditionalRequestHeaders(request, FetchSubresource);
+    frame->document()->fetcher()->context().setFirstPartyForCookies(request);
 
     FetchInitiatorInfo initiatorInfo;
     initiatorInfo.name = FetchInitiatorTypeNames::violationreport;
@@ -139,7 +141,6 @@ PingLoader::PingLoader(LocalFrame* frame, ResourceRequest& request, const FetchI
     frame->loader().client()->didDispatchPingLoader(request.url());
 
     TRACE_EVENT_INSTANT1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline"), "ResourceSendRequest", "data", InspectorSendRequestEvent::data(m_identifier, frame, request));
-    // FIXME(361045): remove InspectorInstrumentation calls once DevTools Timeline migrates to tracing.
     InspectorInstrumentation::willSendRequest(frame, m_identifier, frame->loader().documentLoader(), request, ResourceResponse(), initiatorInfo);
 
     m_loader = adoptPtr(blink::Platform::current()->createURLLoader());
@@ -219,11 +220,10 @@ void PingLoader::didFailLoading(Page* page)
 {
     LocalFrame* frame = page->deprecatedLocalMainFrame();
     InspectorInstrumentation::didFailLoading(frame, m_identifier, ResourceError::cancelledError(m_url));
-    // Notification to FrameConsole should come AFTER Resource Agent notification, front-end relies on this.
     frame->console().didFailLoading(m_identifier, ResourceError::cancelledError(m_url));
 }
 
-void PingLoader::trace(Visitor* visitor)
+DEFINE_TRACE(PingLoader)
 {
     PageLifecycleObserver::trace(visitor);
 }

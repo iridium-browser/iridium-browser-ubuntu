@@ -29,6 +29,7 @@
 #include "core/workers/WorkerThread.h"
 
 #include "bindings/core/v8/ScriptSourceCode.h"
+#include "bindings/core/v8/V8GCController.h"
 #include "bindings/core/v8/V8Initializer.h"
 #include "core/dom/Microtask.h"
 #include "core/inspector/InspectorInstrumentation.h"
@@ -40,17 +41,15 @@
 #include "platform/PlatformThreadData.h"
 #include "platform/Task.h"
 #include "platform/ThreadTimers.h"
+#include "platform/heap/SafePoint.h"
 #include "platform/heap/ThreadState.h"
 #include "platform/weborigin/KURL.h"
 #include "public/platform/Platform.h"
 #include "public/platform/WebThread.h"
 #include "public/platform/WebWaitableEvent.h"
-#include "public/platform/WebWorkerRunLoop.h"
 #include "wtf/Noncopyable.h"
 #include "wtf/WeakPtr.h"
 #include "wtf/text/WTFString.h"
-
-#include <utility>
 
 namespace blink {
 
@@ -60,19 +59,32 @@ const int64_t kLongIdleHandlerDelayMs = 10*1000;
 
 class MicrotaskRunner : public WebThread::TaskObserver {
 public:
+    explicit MicrotaskRunner(WorkerThread* workerThread)
+        : m_workerThread(workerThread)
+    {
+    }
+
     virtual void willProcessTask() override { }
     virtual void didProcessTask() override
     {
         Microtask::performCheckpoint();
-        V8Initializer::reportRejectedPromises();
+        if (WorkerGlobalScope* globalScope = m_workerThread->workerGlobalScope()) {
+            if (WorkerScriptController* scriptController = globalScope->script())
+                scriptController->rejectedPromises()->processQueue();
+        }
     }
+
+private:
+    // Thread owns the microtask runner; reference remains
+    // valid for the lifetime of this object.
+    WorkerThread* m_workerThread;
 };
 
 } // namespace
 
 static Mutex& threadSetMutex()
 {
-    AtomicallyInitializedStatic(Mutex&, mutex = *new Mutex);
+    AtomicallyInitializedStaticReference(Mutex, mutex, new Mutex);
     return mutex;
 }
 
@@ -89,7 +101,7 @@ unsigned WorkerThread::workerThreadCount()
 }
 
 class WorkerThreadCancelableTask final : public ExecutionContextTask {
-    WTF_MAKE_NONCOPYABLE(WorkerThreadCancelableTask); WTF_MAKE_FAST_ALLOCATED;
+    WTF_MAKE_NONCOPYABLE(WorkerThreadCancelableTask); WTF_MAKE_FAST_ALLOCATED(WorkerThreadCancelableTask);
 public:
     static PassOwnPtr<WorkerThreadCancelableTask> create(PassOwnPtr<Closure> closure)
     {
@@ -123,7 +135,6 @@ class WorkerSharedTimer : public SharedTimer {
 public:
     explicit WorkerSharedTimer(WorkerThread* workerThread)
         : m_workerThread(workerThread)
-        , m_nextFireTime(0.0)
         , m_running(false)
     { }
 
@@ -131,8 +142,6 @@ public:
     virtual void setFiredFunction(SharedTimerFunction func)
     {
         m_sharedTimerFunction = func;
-        if (!m_sharedTimerFunction)
-            m_nextFireTime = 0.0;
     }
 
     virtual void setFireInterval(double interval)
@@ -145,11 +154,9 @@ public:
 
         if (delay < 0) {
             delay = 0;
-            m_nextFireTime = 0.0;
         }
 
         m_running = true;
-        m_nextFireTime = currentTime() + interval;
 
         if (m_lastQueuedTask.get())
             m_lastQueuedTask->cancelTask();
@@ -157,7 +164,7 @@ public:
         // Now queue the task as a cancellable one.
         OwnPtr<WorkerThreadCancelableTask> task = WorkerThreadCancelableTask::create(bind(&WorkerSharedTimer::OnTimeout, this));
         m_lastQueuedTask = task->createWeakPtr();
-        m_workerThread->postDelayedTask(task.release(), delay);
+        m_workerThread->postDelayedTask(FROM_HERE, task.release(), delay);
     }
 
     virtual void stop()
@@ -165,8 +172,6 @@ public:
         m_running = false;
         m_lastQueuedTask = nullptr;
     }
-
-    double nextFireTime() { return m_nextFireTime; }
 
 private:
     void OnTimeout()
@@ -181,7 +186,6 @@ private:
 
     WorkerThread* m_workerThread;
     SharedTimerFunction m_sharedTimerFunction;
-    double m_nextFireTime;
     bool m_running;
 
     // The task to run OnTimeout, if any. While OnTimeout resets
@@ -191,7 +195,7 @@ private:
 };
 
 class WorkerThreadTask : public blink::WebThread::Task {
-    WTF_MAKE_NONCOPYABLE(WorkerThreadTask); WTF_MAKE_FAST_ALLOCATED;
+    WTF_MAKE_NONCOPYABLE(WorkerThreadTask); WTF_MAKE_FAST_ALLOCATED(WorkerThreadTask);
 public:
     static PassOwnPtr<WorkerThreadTask> create(WorkerThread& workerThread, PassOwnPtr<ExecutionContextTask> task, bool isInstrumented)
     {
@@ -251,11 +255,12 @@ private:
     WorkerThread* m_thread;
 };
 
-WorkerThread::WorkerThread(WorkerLoaderProxy& workerLoaderProxy, WorkerReportingProxy& workerReportingProxy, PassOwnPtrWillBeRawPtr<WorkerThreadStartupData> startupData)
+WorkerThread::WorkerThread(PassRefPtr<WorkerLoaderProxy> workerLoaderProxy, WorkerReportingProxy& workerReportingProxy, PassOwnPtr<WorkerThreadStartupData> startupData)
     : m_terminated(false)
     , m_workerLoaderProxy(workerLoaderProxy)
     , m_workerReportingProxy(workerReportingProxy)
     , m_startupData(startupData)
+    , m_isolate(nullptr)
     , m_shutdownEvent(adoptPtr(blink::Platform::current()->createWaitableEvent()))
     , m_terminationEvent(adoptPtr(blink::Platform::current()->createWaitableEvent()))
 {
@@ -275,8 +280,8 @@ void WorkerThread::start()
     if (m_thread)
         return;
 
-    m_thread = WebThreadSupportingGC::create("WebCore: Worker");
-    m_thread->postTask(new Task(WTF::bind(&WorkerThread::initialize, this)));
+    m_thread = createWebThreadSupportingGC();
+    m_thread->postTask(FROM_HERE, new Task(WTF::bind(&WorkerThread::initialize, this)));
 }
 
 void WorkerThread::interruptAndDispatchInspectorCommands()
@@ -298,6 +303,8 @@ void WorkerThread::initialize()
     KURL scriptURL = m_startupData->m_scriptURL;
     String sourceCode = m_startupData->m_sourceCode;
     WorkerThreadStartMode startMode = m_startupData->m_startMode;
+    OwnPtr<Vector<char>> cachedMetaData = m_startupData->m_cachedMetaData.release();
+    V8CacheOptions v8CacheOptions = m_startupData->m_v8CacheOptions;
 
     {
         MutexLocker lock(m_threadCreationMutex);
@@ -310,18 +317,19 @@ void WorkerThread::initialize()
             return;
         }
 
-        m_microtaskRunner = adoptPtr(new MicrotaskRunner);
+        m_microtaskRunner = adoptPtr(new MicrotaskRunner(this));
         m_thread->addTaskObserver(m_microtaskRunner.get());
         m_thread->attachGC();
-        m_workerGlobalScope = createWorkerGlobalScope(m_startupData.release());
 
-        m_sharedTimer = adoptPtr(new WorkerSharedTimer(this));
-        PlatformThreadData::current().threadTimers().setSharedTimer(m_sharedTimer.get());
+        m_isolate = initializeIsolate();
+        m_workerGlobalScope = createWorkerGlobalScope(m_startupData.release());
+        m_workerGlobalScope->scriptLoaded(sourceCode.length(), cachedMetaData.get() ? cachedMetaData->size() : 0);
+
+        PlatformThreadData::current().threadTimers().setSharedTimer(adoptPtr(new WorkerSharedTimer(this)));
     }
 
-    // The corresponding call to didStopWorkerRunLoop is in
-    // ~WorkerScriptController.
-    blink::Platform::current()->didStartWorkerRunLoop(blink::WebWorkerRunLoop(this));
+    // The corresponding call to stopRunLoop() is in ~WorkerScriptController().
+    didStartRunLoop();
 
     // Notify proxy that a new WorkerGlobalScope has been created and started.
     m_workerReportingProxy.workerGlobalScopeStarted(m_workerGlobalScope.get());
@@ -329,19 +337,26 @@ void WorkerThread::initialize()
     WorkerScriptController* script = m_workerGlobalScope->script();
     if (!script->isExecutionForbidden())
         script->initializeContextIfNeeded();
-    InspectorInstrumentation::willEvaluateWorkerScript(workerGlobalScope(), startMode);
-    bool success = script->evaluate(ScriptSourceCode(sourceCode, scriptURL));
+    if (startMode == PauseWorkerGlobalScopeOnStart)
+        m_workerGlobalScope->workerInspectorController()->pauseOnStart();
+
+    OwnPtr<CachedMetadataHandler> handler(workerGlobalScope()->createWorkerScriptCachedMetadataHandler(scriptURL, cachedMetaData.get()));
+    bool success = script->evaluate(ScriptSourceCode(sourceCode, scriptURL), nullptr, handler.get(), v8CacheOptions);
     m_workerGlobalScope->didEvaluateWorkerScript();
     m_workerReportingProxy.didEvaluateWorkerScript(success);
 
     postInitialize();
 
-    postDelayedTask(createSameThreadTask(&WorkerThread::idleHandler, this), kShortIdleHandlerDelayMs);
+    postDelayedTask(FROM_HERE, createSameThreadTask(&WorkerThread::idleHandler, this), kShortIdleHandlerDelayMs);
+}
+
+PassOwnPtr<WebThreadSupportingGC> WorkerThread::createWebThreadSupportingGC()
+{
+    return WebThreadSupportingGC::create("WebCore: Worker");
 }
 
 void WorkerThread::cleanup()
 {
-
     // This should be called before we start the shutdown procedure.
     workerReportingProxy().willDestroyWorkerGlobalScope();
 
@@ -355,6 +370,7 @@ void WorkerThread::cleanup()
     m_workerGlobalScope = nullptr;
 
     m_thread->detachGC();
+    destroyIsolate();
 
     m_thread->removeTaskObserver(m_microtaskRunner.get());
     m_microtaskRunner = nullptr;
@@ -382,7 +398,9 @@ public:
         workerGlobalScope->clearInspector();
         // It's not safe to call clearScript until all the cleanup tasks posted by functions initiated by WorkerThreadShutdownStartTask have completed.
         workerGlobalScope->clearScript();
-        workerGlobalScope->thread()->m_thread->postTask(new Task(WTF::bind(&WorkerThread::cleanup, workerGlobalScope->thread())));
+        WorkerThread* workerThread = workerGlobalScope->thread();
+        workerThread->willDestroyIsolate();
+        workerThread->m_thread->postTask(FROM_HERE, new Task(WTF::bind(&WorkerThread::cleanup, workerThread)));
     }
 
     virtual bool isCleanupTask() const { return true; }
@@ -407,7 +425,7 @@ public:
 
         // Stick a shutdown command at the end of the queue, so that we deal
         // with all the cleanup tasks the databases post first.
-        workerGlobalScope->postTask(WorkerThreadShutdownFinishTask::create());
+        workerGlobalScope->postTask(FROM_HERE, WorkerThreadShutdownFinishTask::create());
     }
 
     virtual bool isCleanupTask() const { return true; }
@@ -416,7 +434,7 @@ public:
 void WorkerThread::stop()
 {
     // Prevent the deadlock between GC and an attempt to stop a thread.
-    ThreadState::SafePointScope safePointScope(ThreadState::HeapPointersOnStack);
+    SafePointScope safePointScope(ThreadState::HeapPointersOnStack);
     stopInternal();
 }
 
@@ -455,10 +473,23 @@ void WorkerThread::stopInternal()
         return;
 
     // Ensure that tasks are being handled by thread event loop. If script execution weren't forbidden, a while(1) loop in JS could keep the thread alive forever.
-    m_workerGlobalScope->script()->scheduleExecutionTermination();
+    terminateV8Execution();
+
     InspectorInstrumentation::didKillAllExecutionContextTasks(m_workerGlobalScope.get());
     m_debuggerMessageQueue.kill();
-    postTask(WorkerThreadShutdownStartTask::create());
+    postTask(FROM_HERE, WorkerThreadShutdownStartTask::create());
+}
+
+void WorkerThread::didStartRunLoop()
+{
+    ASSERT(isCurrentThread());
+    blink::Platform::current()->didStartWorkerRunLoop();
+}
+
+void WorkerThread::didStopRunLoop()
+{
+    ASSERT(isCurrentThread());
+    blink::Platform::current()->didStopWorkerRunLoop();
 }
 
 void WorkerThread::terminateAndWaitForAllWorkers()
@@ -485,29 +516,66 @@ void WorkerThread::idleHandler()
 
     // Do a script engine idle notification if the next event is distant enough.
     const double kMinIdleTimespan = 0.3;
-    if (m_sharedTimer->nextFireTime() == 0.0 || m_sharedTimer->nextFireTime() > currentTime() + kMinIdleTimespan) {
-        bool hasMoreWork = !m_workerGlobalScope->idleNotification();
+    const double nextFireTime = PlatformThreadData::current().threadTimers().nextFireTime();
+    if (nextFireTime == 0.0 || nextFireTime > currentTime() + kMinIdleTimespan) {
+        bool hasMoreWork = !isolate()->IdleNotificationDeadline(Platform::current()->monotonicallyIncreasingTime() + 1.0);
         if (hasMoreWork)
             delay = kShortIdleHandlerDelayMs;
     }
 
-    postDelayedTask(createSameThreadTask(&WorkerThread::idleHandler, this), delay);
+    postDelayedTask(FROM_HERE, createSameThreadTask(&WorkerThread::idleHandler, this), delay);
 }
 
-void WorkerThread::postTask(PassOwnPtr<ExecutionContextTask> task)
+void WorkerThread::postTask(const WebTraceLocation& location, PassOwnPtr<ExecutionContextTask> task)
 {
-    m_thread->postTask(WorkerThreadTask::create(*this, task, true).leakPtr());
+    m_thread->postTask(location, WorkerThreadTask::create(*this, task, true).leakPtr());
 }
 
-void WorkerThread::postDelayedTask(PassOwnPtr<ExecutionContextTask> task, long long delayMs)
+void WorkerThread::postDelayedTask(const WebTraceLocation& location, PassOwnPtr<ExecutionContextTask> task, long long delayMs)
 {
-    m_thread->postDelayedTask(WorkerThreadTask::create(*this, task, true).leakPtr(), delayMs);
+    m_thread->postDelayedTask(location, WorkerThreadTask::create(*this, task, true).leakPtr(), delayMs);
 }
 
-void WorkerThread::postDebuggerTask(PassOwnPtr<ExecutionContextTask> task)
+v8::Isolate* WorkerThread::initializeIsolate()
+{
+    ASSERT(isCurrentThread());
+    ASSERT(!m_isolate);
+    v8::Isolate* isolate = V8PerIsolateData::initialize();
+    V8Initializer::initializeWorker(isolate);
+
+    m_interruptor = adoptPtr(new V8IsolateInterruptor(isolate));
+    ThreadState::current()->addInterruptor(m_interruptor.get());
+    ThreadState::current()->registerTraceDOMWrappers(isolate, V8GCController::traceDOMWrappers);
+
+    return isolate;
+}
+
+void WorkerThread::willDestroyIsolate()
+{
+    ASSERT(isCurrentThread());
+    ASSERT(m_isolate);
+    V8PerIsolateData::willBeDestroyed(m_isolate);
+    ThreadState::current()->removeInterruptor(m_interruptor.get());
+}
+
+void WorkerThread::destroyIsolate()
+{
+    ASSERT(isCurrentThread());
+    V8PerIsolateData::destroy(m_isolate);
+    m_isolate = nullptr;
+}
+
+void WorkerThread::terminateV8Execution()
+{
+    ASSERT(isMainThread());
+    m_workerGlobalScope->script()->willScheduleExecutionTermination();
+    v8::V8::TerminateExecution(m_isolate);
+}
+
+void WorkerThread::postDebuggerTask(const WebTraceLocation& location, PassOwnPtr<ExecutionContextTask> task)
 {
     m_debuggerMessageQueue.append(WorkerThreadTask::create(*this, task, false));
-    postTask(RunDebuggerQueueTask::create(this));
+    postTask(location, RunDebuggerQueueTask::create(this));
 }
 
 MessageQueueWaitResult WorkerThread::runDebuggerTask(WaitMode waitMode)
@@ -519,7 +587,7 @@ MessageQueueWaitResult WorkerThread::runDebuggerTask(WaitMode waitMode)
     {
         if (waitMode == DontWaitForMessage)
             absoluteTime = 0.0;
-        ThreadState::SafePointScope safePointScope(ThreadState::NoHeapPointersOnStack);
+        SafePointScope safePointScope(ThreadState::NoHeapPointersOnStack);
         task = m_debuggerMessageQueue.waitForMessageWithTimeout(result, absoluteTime);
     }
 

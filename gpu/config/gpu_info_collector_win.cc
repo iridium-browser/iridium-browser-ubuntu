@@ -15,7 +15,6 @@
 #include <setupapi.h>
 
 #include "base/command_line.h"
-#include "base/debug/trace_event.h"
 #include "base/files/file_enumerator.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
@@ -31,6 +30,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/threading/thread.h"
 #include "base/threading/worker_pool.h"
+#include "base/trace_event/trace_event.h"
 #include "base/win/registry.h"
 #include "base/win/scoped_com_initializer.h"
 #include "base/win/scoped_comptr.h"
@@ -61,116 +61,6 @@ float ReadXMLFloatValue(XmlReader* reader) {
     return 0.0;
 
   return static_cast<float>(score);
-}
-
-GpuPerformanceStats RetrieveGpuPerformanceStats() {
-  TRACE_EVENT0("gpu", "RetrieveGpuPerformanceStats");
-
-  // If the user re-runs the assessment without restarting, the COM API
-  // returns WINSAT_ASSESSMENT_STATE_NOT_AVAILABLE. Because of that and
-  // http://crbug.com/124325, read the assessment result files directly.
-  GpuPerformanceStats stats;
-
-  // Get path to WinSAT results files.
-  wchar_t winsat_results_path[MAX_PATH];
-  DWORD size = ExpandEnvironmentStrings(
-      L"%WinDir%\\Performance\\WinSAT\\DataStore\\",
-      winsat_results_path, MAX_PATH);
-  if (size == 0 || size > MAX_PATH) {
-    LOG(ERROR) << "The path to the WinSAT results is too long: "
-               << size << " chars.";
-    return stats;
-  }
-
-  // Find most recent formal assessment results.
-  base::FileEnumerator file_enumerator(
-      base::FilePath(winsat_results_path),
-      false,  // not recursive
-      base::FileEnumerator::FILES,
-      FILE_PATH_LITERAL("* * Formal.Assessment (*).WinSAT.xml"));
-
-  base::FilePath current_results;
-  for (base::FilePath results = file_enumerator.Next(); !results.empty();
-       results = file_enumerator.Next()) {
-    // The filenames start with the date and time as yyyy-mm-dd hh.mm.ss.xxx,
-    // so the greatest file lexicographically is also the most recent file.
-    if (base::FilePath::CompareLessIgnoreCase(current_results.value(),
-                                              results.value()))
-      current_results = results;
-  }
-
-  std::string current_results_string = current_results.MaybeAsASCII();
-  if (current_results_string.empty())
-    return stats;
-
-  // Get relevant scores from results file. XML schema at:
-  // http://msdn.microsoft.com/en-us/library/windows/desktop/aa969210.aspx
-  XmlReader reader;
-  if (!reader.LoadFile(current_results_string)) {
-    LOG(ERROR) << "Could not open WinSAT results file.";
-    return stats;
-  }
-  // Descend into <WinSAT> root element.
-  if (!reader.SkipToElement() || !reader.Read()) {
-    LOG(ERROR) << "Could not read WinSAT results file.";
-    return stats;
-  }
-
-  // Search for <WinSPR> element containing the results.
-  do {
-    if (reader.NodeName() == "WinSPR")
-      break;
-  } while (reader.Next());
-  // Descend into <WinSPR> element.
-  if (!reader.Read()) {
-    LOG(ERROR) << "Could not find WinSPR element in results file.";
-    return stats;
-  }
-
-  // Read scores.
-  for (int depth = reader.Depth(); reader.Depth() == depth; reader.Next()) {
-    std::string node_name = reader.NodeName();
-    if (node_name == "SystemScore")
-      stats.overall = ReadXMLFloatValue(&reader);
-    else if (node_name == "GraphicsScore")
-      stats.graphics = ReadXMLFloatValue(&reader);
-    else if (node_name == "GamingScore")
-      stats.gaming = ReadXMLFloatValue(&reader);
-  }
-
-  if (stats.overall == 0.0)
-    LOG(ERROR) << "Could not read overall score from assessment results.";
-  if (stats.graphics == 0.0)
-    LOG(ERROR) << "Could not read graphics score from assessment results.";
-  if (stats.gaming == 0.0)
-    LOG(ERROR) << "Could not read gaming score from assessment results.";
-
-  return stats;
-}
-
-GpuPerformanceStats RetrieveGpuPerformanceStatsWithHistograms() {
-  base::TimeTicks start_time = base::TimeTicks::Now();
-
-  GpuPerformanceStats stats = RetrieveGpuPerformanceStats();
-
-  UMA_HISTOGRAM_TIMES("GPU.WinSAT.ReadResultsFileTime",
-                      base::TimeTicks::Now() - start_time);
-  UMA_HISTOGRAM_CUSTOM_COUNTS(
-      "GPU.WinSAT.OverallScore2",
-      static_cast<base::HistogramBase::Sample>(stats.overall * 10), 10, 200,
-      50);
-  UMA_HISTOGRAM_CUSTOM_COUNTS(
-      "GPU.WinSAT.GraphicsScore2",
-      static_cast<base::HistogramBase::Sample>(stats.graphics * 10), 10, 200,
-      50);
-  UMA_HISTOGRAM_CUSTOM_COUNTS(
-      "GPU.WinSAT.GamingScore2",
-      static_cast<base::HistogramBase::Sample>(stats.gaming * 10), 10, 200, 50);
-  UMA_HISTOGRAM_BOOLEAN(
-      "GPU.WinSAT.HasResults",
-      stats.overall != 0.0 && stats.graphics != 0.0 && stats.gaming != 0.0);
-
-  return stats;
 }
 
 // Returns the display link driver version or an invalid version if it is
@@ -208,161 +98,6 @@ bool IsLenovoDCuteInstalled() {
     return false;
 
   return true;
-}
-
-// Determines whether D3D11 won't work, either because it is not supported on
-// the machine or because it is known it is likely to crash.
-bool D3D11ShouldWork(const GPUInfo& gpu_info) {
-  // TODO(apatrick): This is a temporary change to see what impact disabling
-  // D3D11 stats collection has on Canary.
-#if 1
-  return false;
-#else
-  // Windows XP never supports D3D11. It seems to be less stable that D3D9 on
-  // Vista.
-  if (base::win::GetVersion() <= base::win::VERSION_VISTA)
-    return false;
-
-  // http://crbug.com/175525.
-  if (gpu_info.display_link_version.IsValid())
-    return false;
-
-  return true;
-#endif
-}
-
-// Collects information about the level of D3D11 support and records it in
-// the UMA stats. Records no stats when D3D11 in not supported at all.
-void CollectD3D11SupportOnWorkerThread() {
-  TRACE_EVENT0("gpu", "CollectD3D11Support");
-
-  typedef HRESULT (WINAPI *D3D11CreateDeviceFunc)(
-      IDXGIAdapter* adapter,
-      D3D_DRIVER_TYPE driver_type,
-      HMODULE software,
-      UINT flags,
-      const D3D_FEATURE_LEVEL* feature_levels,
-      UINT num_feature_levels,
-      UINT sdk_version,
-      ID3D11Device** device,
-      D3D_FEATURE_LEVEL* feature_level,
-      ID3D11DeviceContext** immediate_context);
-
-  // This enumeration must be kept in sync with histograms.xml. Do not reorder
-  // the members; always add to the end.
-  enum FeatureLevel {
-    FEATURE_LEVEL_UNKNOWN,
-    FEATURE_LEVEL_NO_D3D11_DLL,
-    FEATURE_LEVEL_NO_CREATE_DEVICE_ENTRY_POINT,
-    FEATURE_LEVEL_DEVICE_CREATION_FAILED,
-    FEATURE_LEVEL_9_1,
-    FEATURE_LEVEL_9_2,
-    FEATURE_LEVEL_9_3,
-    FEATURE_LEVEL_10_0,
-    FEATURE_LEVEL_10_1,
-    FEATURE_LEVEL_11_0,
-    NUM_FEATURE_LEVELS
-  };
-
-  FeatureLevel feature_level = FEATURE_LEVEL_UNKNOWN;
-  UINT bgra_support = 0;
-
-  // This module is leaked in case it is hooked by third party software.
-  base::NativeLibrary d3d11_module = base::LoadNativeLibrary(
-      base::FilePath(L"d3d11.dll"),
-      NULL);
-
-  if (!d3d11_module) {
-    feature_level = FEATURE_LEVEL_NO_D3D11_DLL;
-  } else {
-    D3D11CreateDeviceFunc create_func =
-        reinterpret_cast<D3D11CreateDeviceFunc>(
-            base::GetFunctionPointerFromNativeLibrary(d3d11_module,
-                                                      "D3D11CreateDevice"));
-    if (!create_func) {
-      feature_level = FEATURE_LEVEL_NO_CREATE_DEVICE_ENTRY_POINT;
-    } else {
-      static const D3D_FEATURE_LEVEL d3d_feature_levels[] = {
-        D3D_FEATURE_LEVEL_11_0,
-        D3D_FEATURE_LEVEL_10_1,
-        D3D_FEATURE_LEVEL_10_0,
-        D3D_FEATURE_LEVEL_9_3,
-        D3D_FEATURE_LEVEL_9_2,
-        D3D_FEATURE_LEVEL_9_1
-      };
-
-      base::win::ScopedComPtr<ID3D11Device> device;
-      D3D_FEATURE_LEVEL d3d_feature_level;
-      base::win::ScopedComPtr<ID3D11DeviceContext> device_context;
-      HRESULT hr = create_func(NULL,
-                               D3D_DRIVER_TYPE_HARDWARE,
-                               NULL,
-                               0,
-                               d3d_feature_levels,
-                               arraysize(d3d_feature_levels),
-                               D3D11_SDK_VERSION,
-                               device.Receive(),
-                               &d3d_feature_level,
-                               device_context.Receive());
-      if (FAILED(hr)) {
-        feature_level = FEATURE_LEVEL_DEVICE_CREATION_FAILED;
-      } else {
-        switch (d3d_feature_level) {
-          case D3D_FEATURE_LEVEL_11_0:
-            feature_level = FEATURE_LEVEL_11_0;
-            break;
-          case D3D_FEATURE_LEVEL_10_1:
-            feature_level = FEATURE_LEVEL_10_1;
-            break;
-          case D3D_FEATURE_LEVEL_10_0:
-            feature_level = FEATURE_LEVEL_10_0;
-            break;
-          case D3D_FEATURE_LEVEL_9_3:
-            feature_level = FEATURE_LEVEL_9_3;
-            break;
-          case D3D_FEATURE_LEVEL_9_2:
-            feature_level = FEATURE_LEVEL_9_2;
-            break;
-          case D3D_FEATURE_LEVEL_9_1:
-            feature_level = FEATURE_LEVEL_9_1;
-            break;
-          default:
-            NOTREACHED();
-            break;
-        }
-
-        hr = device->CheckFormatSupport(DXGI_FORMAT_B8G8R8A8_UNORM,
-                                        &bgra_support);
-        DCHECK(SUCCEEDED(hr));
-      }
-    }
-  }
-
-  UMA_HISTOGRAM_ENUMERATION("GPU.D3D11_FeatureLevel",
-                            feature_level,
-                            NUM_FEATURE_LEVELS);
-
-  // ANGLE requires at least feature level 10.0. Do not record any further
-  // stats if ANGLE would not work anyway.
-  if (feature_level < FEATURE_LEVEL_10_0)
-    return;
-
-  UMA_HISTOGRAM_BOOLEAN(
-      "GPU.D3D11_B8G8R8A8_Texture2DSupport",
-      (bgra_support & D3D11_FORMAT_SUPPORT_TEXTURE2D) != 0);
-  UMA_HISTOGRAM_BOOLEAN(
-      "GPU.D3D11_B8G8R8A8_RenderTargetSupport",
-      (bgra_support & D3D11_FORMAT_SUPPORT_RENDER_TARGET) != 0);
-}
-
-// Collects information about the level of D3D11 support and records it in
-// the UMA stats. Records no stats when D3D11 in not supported at all.
-void CollectD3D11Support() {
-  // D3D11 takes about 50ms to initialize so do this on a worker thread.
-  base::WorkerPool::PostTask(
-      FROM_HERE,
-      base::Bind(CollectD3D11SupportOnWorkerThread),
-      false);
 }
 
 void DeviceIDToVendorAndDevice(const std::wstring& id,
@@ -407,8 +142,18 @@ CollectInfoResult CollectDriverInfoD3D(const std::wstring& device_id,
                         {0xbf, 0xc1, 0x08, 0x00, 0x2b, 0xe1, 0x03, 0x18}};
 
   // create device info for the display device
-  HDEVINFO device_info =
-      SetupDiGetClassDevsW(&display_class, NULL, NULL, DIGCF_PRESENT);
+  HDEVINFO device_info;
+  if (base::win::GetVersion() <= base::win::VERSION_XP) {
+    // Collection of information on all adapters is much slower on XP (almost
+    // 100ms), and not very useful (as it's not going to use the GPU anyway), so
+    // just collect information on the current device. http://crbug.com/456178
+    device_info =
+        SetupDiGetClassDevsW(NULL, device_id.c_str(), NULL,
+                             DIGCF_PRESENT | DIGCF_PROFILE | DIGCF_ALLCLASSES);
+  } else {
+    device_info =
+        SetupDiGetClassDevsW(&display_class, NULL, NULL, DIGCF_PRESENT);
+  }
   if (device_info == INVALID_HANDLE_VALUE) {
     LOG(ERROR) << "Creating device info failed";
     return kCollectInfoNonFatalFailure;
@@ -650,8 +395,6 @@ CollectInfoResult CollectBasicGraphicsInfo(GPUInfo* gpu_info) {
 
   DCHECK(gpu_info);
 
-  gpu_info->performance_stats = RetrieveGpuPerformanceStatsWithHistograms();
-
   // nvd3d9wrap.dll is loaded into all processes when Optimus is enabled.
   HMODULE nvd3d9wrap = GetModuleHandleW(L"nvd3d9wrap.dll");
   gpu_info->optimus = nvd3d9wrap != NULL;
@@ -696,26 +439,6 @@ CollectInfoResult CollectBasicGraphicsInfo(GPUInfo* gpu_info) {
   if (!CollectDriverInfoD3D(id, gpu_info)) {
     gpu_info->basic_info_state = kCollectInfoNonFatalFailure;
     return kCollectInfoNonFatalFailure;
-  }
-
-  // Collect basic information about supported D3D11 features. Delay for 45
-  // seconds so as not to regress performance tests.
-  if (D3D11ShouldWork(*gpu_info)) {
-    // This is on a field trial so we can turn it off easily if it blows up
-    // again in stable channel.
-    scoped_refptr<base::FieldTrial> trial(
-        base::FieldTrialList::FactoryGetFieldTrial(
-            "D3D11Experiment", 100, "Disabled", 2015, 7, 8,
-            base::FieldTrial::SESSION_RANDOMIZED, NULL));
-    const int enabled_group =
-        trial->AppendGroup("Enabled", 0);
-
-    if (trial->group() == enabled_group) {
-      base::MessageLoop::current()->PostDelayedTask(
-          FROM_HERE,
-          base::Bind(&CollectD3D11Support),
-          base::TimeDelta::FromSeconds(45));
-    }
   }
 
   gpu_info->basic_info_state = kCollectInfoSuccess;
@@ -783,6 +506,8 @@ void MergeGPUInfo(GPUInfo* basic_gpu_info,
 
   MergeGPUInfoGL(basic_gpu_info, context_gpu_info);
 
+  basic_gpu_info->dx_diagnostics_info_state =
+      context_gpu_info.dx_diagnostics_info_state;
   basic_gpu_info->dx_diagnostics = context_gpu_info.dx_diagnostics;
 }
 

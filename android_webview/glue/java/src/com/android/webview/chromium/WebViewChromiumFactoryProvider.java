@@ -29,8 +29,10 @@ import com.android.webview.chromium.WebViewDelegateFactory.WebViewDelegate;
 import org.chromium.android_webview.AwBrowserContext;
 import org.chromium.android_webview.AwBrowserProcess;
 import org.chromium.android_webview.AwContents;
+import org.chromium.android_webview.AwContentsClient;
 import org.chromium.android_webview.AwContentsStatics;
 import org.chromium.android_webview.AwCookieManager;
+import org.chromium.android_webview.AwDataReductionProxyManager;
 import org.chromium.android_webview.AwDevToolsServer;
 import org.chromium.android_webview.AwQuotaManagerBridge;
 import org.chromium.android_webview.AwResource;
@@ -43,6 +45,7 @@ import org.chromium.base.ResourceExtractor;
 import org.chromium.base.ThreadUtils;
 import org.chromium.base.TraceEvent;
 import org.chromium.base.library_loader.LibraryLoader;
+import org.chromium.base.library_loader.LibraryProcessType;
 import org.chromium.base.library_loader.ProcessInitException;
 import org.chromium.content.app.ContentMain;
 import org.chromium.content.browser.ContentViewStatics;
@@ -76,12 +79,14 @@ public class WebViewChromiumFactoryProvider implements WebViewFactoryProvider {
     private WebStorageAdapter mWebStorage;
     private WebViewDatabaseAdapter mWebViewDatabase;
     private AwDevToolsServer mDevToolsServer;
+    private Context mWrappedAppContext;
 
     private ArrayList<WeakReference<WebViewChromium>> mWebViewsToStart =
             new ArrayList<WeakReference<WebViewChromium>>();
 
     // Read/write protected by mLock.
     private boolean mStarted;
+    private AwDataReductionProxyManager mProxyManager;
 
     private SharedPreferences mWebViewPrefs;
     private WebViewDelegate mWebViewDelegate;
@@ -234,7 +239,7 @@ public class WebViewChromiumFactoryProvider implements WebViewFactoryProvider {
         ResourceExtractor.setMandatoryPaksToExtract("");
 
         try {
-            LibraryLoader.ensureInitialized();
+            LibraryLoader.get(LibraryProcessType.PROCESS_WEBVIEW).ensureInitialized();
         } catch (ProcessInitException e) {
             throw new RuntimeException("Error initializing WebView library", e);
         }
@@ -270,6 +275,10 @@ public class WebViewChromiumFactoryProvider implements WebViewFactoryProvider {
         }
         mWebViewsToStart.clear();
         mWebViewsToStart = null;
+
+        // Start listening for data reduction proxy setting changes.
+        mProxyManager = new AwDataReductionProxyManager();
+        mProxyManager.start(mWebViewDelegate.getApplication());
     }
 
     boolean hasStarted() {
@@ -283,7 +292,11 @@ public class WebViewChromiumFactoryProvider implements WebViewFactoryProvider {
     }
 
     private Context getWrappedCurrentApplicationContext() {
-        return ResourcesContextWrapperFactory.get(mWebViewDelegate.getApplication());
+        if (mWrappedAppContext == null) {
+            mWrappedAppContext = ResourcesContextWrapperFactory.get(
+                    mWebViewDelegate.getApplication());
+        }
+        return mWrappedAppContext;
     }
 
     AwBrowserContext getBrowserContext() {
@@ -314,18 +327,9 @@ public class WebViewChromiumFactoryProvider implements WebViewFactoryProvider {
     }
 
     private void setUpResources(Context context) {
-        try {
-            final String packageName = WebViewFactory.getLoadedPackageInfo().packageName;
-            ResourceRewriter.rewriteRValues(
-                    mWebViewDelegate.getPackageId(context.getResources(), packageName));
-        } catch (RuntimeException e) {
-            // TODO(torne): remove this when we're no longer using the Android build system.
-            // The Android.mk-based build uses a different resources package name than the
-            // ninja-based build: the resources are always called com.android.webview even if the
-            // manifest has had the package renamed.
-            ResourceRewriter.rewriteRValues(
-                    mWebViewDelegate.getPackageId(context.getResources(), "com.android.webview"));
-        }
+        final String packageName = WebViewFactory.getLoadedPackageInfo().packageName;
+        ResourceRewriter.rewriteRValues(
+                mWebViewDelegate.getPackageId(context.getResources(), packageName));
 
         AwResource.setResources(context.getResources());
         AwResource.setErrorPageResources(android.R.raw.loaderror, android.R.raw.nodomain);
@@ -381,7 +385,7 @@ public class WebViewChromiumFactoryProvider implements WebViewFactoryProvider {
 
                     @Override
                     public Uri[] parseFileChooserResult(int resultCode, Intent intent) {
-                        return FileChooserParamsAdapter.parseFileChooserResult(resultCode, intent);
+                        return AwContentsClient.parseFileChooserResult(resultCode, intent);
                     }
                 };
             }

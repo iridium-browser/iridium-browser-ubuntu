@@ -4,9 +4,18 @@
 
 #include "device/udev_linux/udev.h"
 
+#include "base/strings/string_util.h"
 #include "device/udev_linux/udev_loader.h"
 
 namespace device {
+
+namespace {
+
+std::string StringOrEmptyIfNull(const char* value) {
+  return value ? value : std::string();
+}
+
+}  // namespace
 
 const char* udev_device_get_action(udev_device* udev_device) {
   return UdevLoader::Get()->udev_device_get_action(udev_device);
@@ -52,6 +61,14 @@ const char* udev_device_get_syspath(udev_device* udev_device) {
 
 udev_device* udev_device_new_from_devnum(udev* udev, char type, dev_t devnum) {
   return UdevLoader::Get()->udev_device_new_from_devnum(udev, type, devnum);
+}
+
+udev_device* udev_device_new_from_subsystem_sysname(
+    udev* udev,
+    const char* subsystem,
+    const char* sysname) {
+  return UdevLoader::Get()->udev_device_new_from_subsystem_sysname(
+      udev, subsystem, sysname);
 }
 
 udev_device* udev_device_new_from_syspath(udev* udev, const char* syspath) {
@@ -136,6 +153,31 @@ void udev_set_log_priority(struct udev* udev, int priority) {
 
 void udev_unref(udev* udev) {
   UdevLoader::Get()->udev_unref(udev);
+}
+
+std::string UdevDeviceGetPropertyValue(udev_device* udev_device,
+                                       const char* key) {
+  return StringOrEmptyIfNull(udev_device_get_property_value(udev_device, key));
+}
+
+std::string UdevDeviceGetSysattrValue(udev_device* udev_device,
+                                      const char* key) {
+  return StringOrEmptyIfNull(udev_device_get_sysattr_value(udev_device, key));
+}
+
+std::string UdevDecodeString(const std::string& encoded) {
+  std::string decoded;
+  const size_t size = encoded.size();
+  for (size_t i = 0; i < size; ++i) {
+    char c = encoded[i];
+    if ((i + 3 < size) && c == '\\' && encoded[i + 1] == 'x') {
+      c = (HexDigitToInt(encoded[i + 2]) << 4) +
+          HexDigitToInt(encoded[i + 3]);
+      i += 3;
+    }
+    decoded.push_back(c);
+  }
+  return decoded;
 }
 
 }  // namespace device

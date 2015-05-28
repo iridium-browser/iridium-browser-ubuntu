@@ -129,12 +129,6 @@ class ProfileInfoCache : public ProfileInfoInterface,
 
   const base::FilePath& GetUserDataDir() const;
 
-  // Gets all names of profiles associated with this instance of Chrome.
-  // Because this method will be called during uninstall, before the creation
-  // of the ProfileManager, it reads directly from the local state preferences,
-  // rather than going through the ProfileInfoCache object.
-  static std::vector<base::string16> GetProfileNames();
-
   // Register cache related preferences in Local State.
   static void RegisterPrefs(PrefRegistrySimple* registry);
 
@@ -159,10 +153,6 @@ class ProfileInfoCache : public ProfileInfoInterface,
 
   const base::DictionaryValue* GetInfoForProfileAtIndex(size_t index) const;
   // Saves the profile info to a cache and takes ownership of |info|.
-  // Currently the only information that is cached is the profile's name,
-  // user name, and avatar icon.
-  void SetInfoQuietlyForProfileAtIndex(size_t index,
-                                       base::DictionaryValue* info);
   void SetInfoForProfileAtIndex(size_t index, base::DictionaryValue* info);
   std::string CacheKeyFromProfilePath(const base::FilePath& profile_path) const;
   std::vector<std::string>::iterator FindPositionForProfile(

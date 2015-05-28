@@ -13,19 +13,24 @@ function FileTasks(fileManager) {
   this.fileManager_ = fileManager;
 
   /**
-   * @type {Array.<!Object>}
-   * @private
+   * @private {Array<!Object>}
    */
   this.tasks_ = null;
 
+  /**
+   * @private {Object}
+   */
   this.defaultTask_ = null;
+
+  /**
+   * @private {Array<!Entry>}
+   */
   this.entries_ = null;
 
   /**
    * List of invocations to be called once tasks are available.
    *
-   * @private
-   * @type {Array.<Object>}
+   * @private {Array.<Object>}
    */
   this.pendingInvocations_ = [];
 }
@@ -62,6 +67,16 @@ FileTasks.VIDEO_PLAYER_ID = 'jcgeabjmjgoblfofpppfkcoakmfobdko';
  * @type {string}
  */
 FileTasks.ZIP_UNPACKER_TASK_ID = 'oedeeodfidgoollimchfdnbmhcpnklnd|app|zip';
+
+/**
+ * Available actions in task menu button.
+ * @enum {string}
+ */
+FileTasks.TaskMenuButtonActions = {
+  ShowMenu: 'ShowMenu',
+  RunTask: 'RunTask',
+  ChangeDefaultAction: 'ChangeDefaultAction'
+};
 
 /**
  * Returns URL of the Chrome Web Store which show apps supporting the given
@@ -373,18 +388,18 @@ FileTasks.prototype.executeDefaultInternal_ = function(entries, opt_callback) {
   }.bind(this);
 
   var onViewFilesFailure = function() {
-    var fm = this.fileManager_;
-    if (!fm.isOnDrive() ||
-        !entries[0] ||
-        FileTasks.EXTENSIONS_TO_SKIP_SUGGEST_APPS_.indexOf(extension) !== -1) {
+    var fileManager = this.fileManager_;
+
+    if (FileTasks.EXTENSIONS_TO_SKIP_SUGGEST_APPS_.indexOf(extension) !== -1 ||
+        FileTasks.EXECUTABLE_EXTENSIONS.indexOf(extension) !== -1) {
       showAlert();
       return;
     }
 
-    fm.taskController.openSuggestAppsDialog(
+    fileManager.taskController.openSuggestAppsDialog(
         entries[0],
         function() {
-          var newTasks = new FileTasks(fm);
+          var newTasks = new FileTasks(fileManager);
           newTasks.init(entries, this.mimeTypes_);
           newTasks.executeDefault();
           callback(true, entries);
@@ -475,6 +490,7 @@ FileTasks.prototype.executeInternal_ = function(taskId, entries) {
 /**
  * Checks whether the remote files are available right now.
  *
+ * Must not call before initialization.
  * @param {function()} callback The callback.
  * @private
  */
@@ -488,31 +504,33 @@ FileTasks.prototype.checkAvailability_ = function(callback) {
   };
 
   var fm = this.fileManager_;
-  var entries = this.entries_;
+  var metadataModel = this.fileManager_.getMetadataModel();
+  var entries = assert(this.entries_);
 
   var isDriveOffline = fm.volumeManager.getDriveConnectionState().type ===
       VolumeManagerCommon.DriveConnectionType.OFFLINE;
 
   if (fm.isOnDrive() && isDriveOffline) {
-    fm.metadataCache_.get(entries, 'external', function(props) {
-      if (areAll(props, 'availableOffline')) {
-        callback();
-        return;
-      }
+    metadataModel.get(entries, ['availableOffline', 'hosted']).then(
+        function(props) {
+          if (areAll(props, 'availableOffline')) {
+            callback();
+            return;
+          }
 
-      fm.ui.alertDialog.showHtml(
-          loadTimeData.getString('OFFLINE_HEADER'),
-          props[0].hosted ?
-              loadTimeData.getStringF(
-                  entries.length === 1 ?
-                      'HOSTED_OFFLINE_MESSAGE' :
-                      'HOSTED_OFFLINE_MESSAGE_PLURAL') :
-              loadTimeData.getStringF(
-                  entries.length === 1 ?
-                      'OFFLINE_MESSAGE' :
-                      'OFFLINE_MESSAGE_PLURAL',
-                  loadTimeData.getString('OFFLINE_COLUMN_LABEL')),
-          null, null, null);
+          fm.ui.alertDialog.showHtml(
+              loadTimeData.getString('OFFLINE_HEADER'),
+              props[0].hosted ?
+                  loadTimeData.getStringF(
+                      entries.length === 1 ?
+                          'HOSTED_OFFLINE_MESSAGE' :
+                          'HOSTED_OFFLINE_MESSAGE_PLURAL') :
+                  loadTimeData.getStringF(
+                      entries.length === 1 ?
+                          'OFFLINE_MESSAGE' :
+                          'OFFLINE_MESSAGE_PLURAL',
+                      loadTimeData.getString('OFFLINE_COLUMN_LABEL')),
+              null, null, null);
     });
     return;
   }
@@ -521,27 +539,26 @@ FileTasks.prototype.checkAvailability_ = function(callback) {
       VolumeManagerCommon.DriveConnectionType.METERED;
 
   if (fm.isOnDrive() && isOnMetered) {
-    fm.metadataCache_.get(entries, 'external', function(driveProps) {
-      if (areAll(driveProps, 'availableWhenMetered')) {
-        callback();
-        return;
-      }
+    metadataModel.get(entries, ['availableWhenMetered', 'size']).then(
+        function(props) {
+          if (areAll(props, 'availableWhenMetered')) {
+            callback();
+            return;
+          }
 
-      fm.metadataCache_.get(entries, 'filesystem', function(fileProps) {
-        var sizeToDownload = 0;
-        for (var i = 0; i !== entries.length; i++) {
-          if (!driveProps[i].availableWhenMetered)
-            sizeToDownload += fileProps[i].size;
-        }
-        fm.ui.confirmDialog.show(
-            loadTimeData.getStringF(
-                entries.length === 1 ?
-                    'CONFIRM_MOBILE_DATA_USE' :
-                    'CONFIRM_MOBILE_DATA_USE_PLURAL',
-                util.bytesToString(sizeToDownload)),
-            callback, null, null);
-      });
-    });
+          var sizeToDownload = 0;
+          for (var i = 0; i !== entries.length; i++) {
+            if (!props[i].availableWhenMetered)
+              sizeToDownload += props[i].size;
+          }
+          fm.ui.confirmDialog.show(
+              loadTimeData.getStringF(
+                  entries.length === 1 ?
+                      'CONFIRM_MOBILE_DATA_USE' :
+                      'CONFIRM_MOBILE_DATA_USE_PLURAL',
+                  util.bytesToString(sizeToDownload)),
+              callback, null, null);
+        });
     return;
   }
 
@@ -644,7 +661,8 @@ FileTasks.prototype.display_ = function(combobutton) {
         str('ACTION_OPEN'));
   } else {
     combobutton.defaultItem = {
-      label: loadTimeData.getString('MORE_ACTIONS')
+      action: FileTasks.TaskMenuButtonActions.ShowMenu,
+      label: str('OPEN_WITH_BUTTON_LABEL')
     };
   }
 
@@ -663,6 +681,7 @@ FileTasks.prototype.display_ = function(combobutton) {
     if (this.defaultTask_) {
       combobutton.addSeparator();
       var changeDefaultMenuItem = combobutton.addDropDownItem({
+        action: FileTasks.TaskMenuButtonActions.ChangeDefaultAction,
         label: loadTimeData.getString('CHANGE_DEFAULT_MENU_ITEM')
       });
       changeDefaultMenuItem.classList.add('change-default');
@@ -725,6 +744,7 @@ FileTasks.prototype.createCombobuttonItem_ = function(task, opt_title,
                                                       opt_bold,
                                                       opt_isDefault) {
   return {
+    action: FileTasks.TaskMenuButtonActions.RunTask,
     label: opt_title || task.title,
     iconUrl: task.iconUrl,
     iconType: task.iconType,

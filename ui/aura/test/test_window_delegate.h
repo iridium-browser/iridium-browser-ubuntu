@@ -10,6 +10,7 @@
 #include "base/compiler_specific.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/aura/window_delegate.h"
+#include "ui/base/ime/dummy_text_input_client.h"
 #include "ui/events/keycodes/keyboard_codes.h"
 #include "ui/gfx/geometry/rect.h"
 
@@ -46,6 +47,7 @@ class TestWindowDelegate : public WindowDelegate {
   gfx::Size GetMaximumSize() const override;
   void OnBoundsChanged(const gfx::Rect& old_bounds,
                        const gfx::Rect& new_bounds) override;
+  ui::TextInputClient* GetFocusedTextInputClient() override;
   gfx::NativeCursor GetCursor(const gfx::Point& point) override;
   int GetNonClientComponent(const gfx::Point& point) const override;
   bool ShouldDescendIntoChildForEventHandling(
@@ -53,7 +55,7 @@ class TestWindowDelegate : public WindowDelegate {
       const gfx::Point& location) override;
   bool CanFocus() override;
   void OnCaptureLost() override;
-  void OnPaint(gfx::Canvas* canvas) override;
+  void OnPaint(const ui::PaintContext& context) override;
   void OnDeviceScaleFactorChanged(float device_scale_factor) override;
   void OnWindowDestroying(Window* window) override;
   void OnWindowDestroyed(Window* window) override;
@@ -66,6 +68,7 @@ class TestWindowDelegate : public WindowDelegate {
   bool delete_on_destroyed_;
   gfx::Size minimum_size_;
   gfx::Size maximum_size_;
+  ui::DummyTextInputClient text_input_client_;
   bool can_focus_;
 
   DISALLOW_COPY_AND_ASSIGN(TestWindowDelegate);
@@ -83,7 +86,7 @@ class ColorTestWindowDelegate : public TestWindowDelegate {
   // Overridden from TestWindowDelegate:
   void OnKeyEvent(ui::KeyEvent* event) override;
   void OnWindowDestroyed(Window* window) override;
-  void OnPaint(gfx::Canvas* canvas) override;
+  void OnPaint(const ui::PaintContext& context) override;
 
  private:
   SkColor color_;

@@ -69,7 +69,7 @@ public:
         return !m_color;
     }
 
-    void trace(Visitor*);
+    DECLARE_TRACE();
 };
 
 } // namespace blink
@@ -83,7 +83,7 @@ namespace blink {
 
 class CSSGradientValue : public CSSImageGeneratorValue {
 public:
-    PassRefPtr<Image> image(RenderObject*, const IntSize&);
+    PassRefPtr<Image> image(LayoutObject*, const IntSize&);
 
     void setFirstX(PassRefPtrWillBeRawPtr<CSSPrimitiveValue> val) { m_firstX = val; }
     void setFirstY(PassRefPtrWillBeRawPtr<CSSPrimitiveValue> val) { m_firstY = val; }
@@ -96,21 +96,19 @@ public:
 
     void appendCSSTextForDeprecatedColorStops(StringBuilder&) const;
 
-    void sortStopsIfNeeded();
-
     bool isRepeating() const { return m_repeating; }
 
     CSSGradientType gradientType() const { return m_gradientType; }
 
     bool isFixedSize() const { return false; }
-    IntSize fixedSize(const RenderObject*) const { return IntSize(); }
+    IntSize fixedSize(const LayoutObject*) const { return IntSize(); }
 
     bool isPending() const { return false; }
-    bool knownToBeOpaque(const RenderObject*) const;
+    bool knownToBeOpaque(const LayoutObject*) const;
 
-    void loadSubimages(ResourceFetcher*) { }
+    void loadSubimages(Document*) { }
 
-    void traceAfterDispatch(Visitor*);
+    DECLARE_TRACE_AFTER_DISPATCH();
 
 protected:
     CSSGradientValue(ClassType classType, CSSGradientRepeat repeat, CSSGradientType gradientType)
@@ -134,7 +132,8 @@ protected:
     {
     }
 
-    void addStops(Gradient*, const CSSToLengthConversionData&, float maxLengthForRepeat, const RenderObject&);
+    void addStops(Gradient*, const CSSToLengthConversionData&, const LayoutObject&);
+    void addDeprecatedStops(Gradient*, const LayoutObject&);
 
     // Resolve points/radii to front end values.
     FloatPoint computeEndPoint(CSSPrimitiveValue*, CSSPrimitiveValue*, const CSSToLengthConversionData&, const IntSize&);
@@ -157,7 +156,7 @@ protected:
 
 DEFINE_CSS_VALUE_TYPE_CASTS(CSSGradientValue, isGradientValue());
 
-class CSSLinearGradientValue : public CSSGradientValue {
+class CSSLinearGradientValue final : public CSSGradientValue {
 public:
 
     static PassRefPtrWillBeRawPtr<CSSLinearGradientValue> create(CSSGradientRepeat repeat, CSSGradientType gradientType = CSSLinearGradient)
@@ -170,7 +169,7 @@ public:
     String customCSSText() const;
 
     // Create the gradient for a given size.
-    PassRefPtr<Gradient> createGradient(const CSSToLengthConversionData&, const IntSize&, const RenderObject&);
+    PassRefPtr<Gradient> createGradient(const CSSToLengthConversionData&, const IntSize&, const LayoutObject&);
 
     PassRefPtrWillBeRawPtr<CSSLinearGradientValue> clone() const
     {
@@ -179,7 +178,7 @@ public:
 
     bool equals(const CSSLinearGradientValue&) const;
 
-    void traceAfterDispatch(Visitor*);
+    DECLARE_TRACE_AFTER_DISPATCH();
 
 private:
     CSSLinearGradientValue(CSSGradientRepeat repeat, CSSGradientType gradientType = CSSLinearGradient)
@@ -198,7 +197,7 @@ private:
 
 DEFINE_CSS_VALUE_TYPE_CASTS(CSSLinearGradientValue, isLinearGradientValue());
 
-class CSSRadialGradientValue : public CSSGradientValue {
+class CSSRadialGradientValue final : public CSSGradientValue {
 public:
     static PassRefPtrWillBeRawPtr<CSSRadialGradientValue> create(CSSGradientRepeat repeat, CSSGradientType gradientType = CSSRadialGradient)
     {
@@ -222,11 +221,11 @@ public:
     void setEndVerticalSize(PassRefPtrWillBeRawPtr<CSSPrimitiveValue> val) { m_endVerticalSize = val; }
 
     // Create the gradient for a given size.
-    PassRefPtr<Gradient> createGradient(const CSSToLengthConversionData&, const IntSize&, const RenderObject&);
+    PassRefPtr<Gradient> createGradient(const CSSToLengthConversionData&, const IntSize&, const LayoutObject&);
 
     bool equals(const CSSRadialGradientValue&) const;
 
-    void traceAfterDispatch(Visitor*);
+    DECLARE_TRACE_AFTER_DISPATCH();
 
 private:
     CSSRadialGradientValue(CSSGradientRepeat repeat, CSSGradientType gradientType = CSSRadialGradient)

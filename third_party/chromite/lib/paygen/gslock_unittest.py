@@ -1,11 +1,8 @@
-#!/usr/bin/python
 # Copyright (c) 2012 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
 """Test gslock library."""
-
-# pylint: disable=bad-whitespace
 
 from __future__ import print_function
 
@@ -13,17 +10,15 @@ import multiprocessing
 import os
 import socket
 
-import fixup_path
-fixup_path.FixupPath()
-
 from chromite.lib import cros_build_lib
 from chromite.lib import cros_test_lib
 from chromite.lib import gs
 
 from chromite.lib.paygen import gslock
 
+
 # We access a lot of protected members during testing.
-# pylint: disable=W0212
+# pylint: disable=protected-access
 
 
 def _InProcessAcquire(lock_uri):
@@ -118,7 +113,7 @@ class GSLockTest(cros_test_lib.MockTestCase):
     self.ctx = gs.GSContext()
 
     # Use the unique id to make sure the tests can be run multiple places.
-    unique_id = "%s.%d" % (socket.gethostname(), os.getpid())
+    unique_id = '%s.%d' % (socket.gethostname(), os.getpid())
 
     self.lock_uri = 'gs://chromeos-releases-test/test-%s-gslock' % unique_id
     self.data_uri = 'gs://chromeos-releases-test/test-%s-data' % unique_id
@@ -203,8 +198,8 @@ class GSLockTest(cros_test_lib.MockTestCase):
     """Test getting a lock when an old timed out one is present."""
 
     # Both locks are always timed out.
-    lock1 = gslock.Lock(self.lock_uri, lock_timeout_mins = -1)
-    lock2 = gslock.Lock(self.lock_uri, lock_timeout_mins = -1)
+    lock1 = gslock.Lock(self.lock_uri, lock_timeout_mins=-1)
+    lock2 = gslock.Lock(self.lock_uri, lock_timeout_mins=-1)
 
     lock1.Acquire()
     lock2.Acquire()
@@ -235,7 +230,7 @@ class GSLockTest(cros_test_lib.MockTestCase):
     self.ctx.Remove(self.lock_uri)
 
     # Ensure that only one of them got the lock (and got it twice).
-    self.assertEqual(results.count(0), count-1)
+    self.assertEqual(results.count(0), count - 1)
     self.assertEqual(results.count(2), 1)
 
   @cros_test_lib.NetworkTest()
@@ -254,6 +249,19 @@ class GSLockTest(cros_test_lib.MockTestCase):
     # Clean up the data file.
     self.ctx.Remove(self.data_uri)
 
+  @cros_test_lib.NetworkTest()
+  def testDryrunLock(self):
+    """Ensure that lcok can be obtained and released in dry-run mode."""
+    lock = gslock.Lock(self.lock_uri, dry_run=True)
+    self.assertIsNone(lock.Acquire())
+    self.assertFalse(self.ctx.Exists(self.lock_uri))
+    self.assertIsNone(lock.Release())
 
-if __name__ == '__main__':
-  cros_test_lib.main()
+  def testDryrunLockRepetition(self):
+    """Test aquiring same lock multiple times in dry-run mode."""
+    lock = gslock.Lock(self.lock_uri, dry_run=True)
+    self.assertIsNone(lock.Acquire())
+    self.assertIsNone(lock.Acquire())
+    self.assertIsNone(lock.Release())
+    self.assertIsNone(lock.Acquire())
+    self.assertIsNone(lock.Release())

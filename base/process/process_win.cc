@@ -6,8 +6,17 @@
 
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/metrics/field_trial.h"
+#include "base/numerics/safe_conversions.h"
 #include "base/process/kill.h"
 #include "base/win/windows_version.h"
+
+namespace {
+
+DWORD kBasicProcessAccess =
+  PROCESS_TERMINATE | PROCESS_QUERY_INFORMATION | SYNCHRONIZE;
+
+} // namespace
 
 namespace base {
 
@@ -37,6 +46,22 @@ Process Process::Current() {
   Process process;
   process.is_current_process_ = true;
   return process.Pass();
+}
+
+// static
+Process Process::Open(ProcessId pid) {
+  return Process(::OpenProcess(kBasicProcessAccess, FALSE, pid));
+}
+
+// static
+Process Process::OpenWithExtraPrivileges(ProcessId pid) {
+  DWORD access = kBasicProcessAccess | PROCESS_DUP_HANDLE | PROCESS_VM_READ;
+  return Process(::OpenProcess(access, FALSE, pid));
+}
+
+// static
+Process Process::OpenWithAccess(ProcessId pid, DWORD desired_access) {
+  return Process(::OpenProcess(desired_access, FALSE, pid));
 }
 
 // static
@@ -81,7 +106,7 @@ Process Process::Duplicate() const {
   return Process(out_handle);
 }
 
-ProcessId Process::pid() const {
+ProcessId Process::Pid() const {
   DCHECK(IsValid());
   return GetProcId(Handle());
 }
@@ -98,17 +123,17 @@ void Process::Close() {
   process_.Close();
 }
 
-void Process::Terminate(int result_code) {
+bool Process::Terminate(int exit_code, bool wait) const {
   DCHECK(IsValid());
-
-  // Call NtTerminateProcess directly, without going through the import table,
-  // which might have been hooked with a buggy replacement by third party
-  // software. http://crbug.com/81449.
-  HMODULE module = GetModuleHandle(L"ntdll.dll");
-  typedef UINT (WINAPI *TerminateProcessPtr)(HANDLE handle, UINT code);
-  TerminateProcessPtr terminate_process = reinterpret_cast<TerminateProcessPtr>(
-      GetProcAddress(module, "NtTerminateProcess"));
-  terminate_process(Handle(), result_code);
+  bool result = (::TerminateProcess(Handle(), exit_code) != FALSE);
+  if (result && wait) {
+    // The process may not end immediately due to pending I/O
+    if (::WaitForSingleObject(Handle(), 60 * 1000) != WAIT_OBJECT_0)
+      DPLOG(ERROR) << "Error waiting for process exit";
+  } else if (!result) {
+    DPLOG(ERROR) << "Unable to terminate process";
+  }
+  return result;
 }
 
 bool Process::WaitForExit(int* exit_code) {
@@ -117,10 +142,17 @@ bool Process::WaitForExit(int* exit_code) {
 }
 
 bool Process::WaitForExitWithTimeout(TimeDelta timeout, int* exit_code) {
-  // TODO(rvargas) crbug.com/417532: Move the implementation here.
-  if (timeout > TimeDelta::FromMilliseconds(INFINITE))
-    timeout = TimeDelta::FromMilliseconds(INFINITE);
-  return base::WaitForExitCodeWithTimeout(Handle(), exit_code, timeout);
+  // Limit timeout to INFINITE.
+  DWORD timeout_ms = saturated_cast<DWORD>(timeout.InMilliseconds());
+  if (::WaitForSingleObject(Handle(), timeout_ms) != WAIT_OBJECT_0)
+    return false;
+
+  DWORD temp_code;  // Don't clobber out-parameters in case of failure.
+  if (!::GetExitCodeProcess(Handle(), &temp_code))
+    return false;
+
+  *exit_code = temp_code;
+  return true;
 }
 
 bool Process::IsProcessBackgrounded() const {
@@ -142,7 +174,21 @@ bool Process::SetProcessBackgrounded(bool value) {
     priority = value ? PROCESS_MODE_BACKGROUND_BEGIN :
                        PROCESS_MODE_BACKGROUND_END;
   } else {
-    priority = value ? BELOW_NORMAL_PRIORITY_CLASS : NORMAL_PRIORITY_CLASS;
+    // Experiment (http://crbug.com/458594) with using IDLE_PRIORITY_CLASS as a
+    // background priority for background renderers (this code path is
+    // technically for more than just the renderers but they're the only use
+    // case in practice and experimenting here direclty is thus easier -- plus
+    // it doesn't really hurt as above we already state our intent of using
+    // PROCESS_MODE_BACKGROUND_BEGIN if available which is essentially
+    // IDLE_PRIORITY_CLASS plus lowered IO priority). Enabled by default in the
+    // asbence of field trials to get coverage on the perf waterfall.
+    DWORD background_priority = IDLE_PRIORITY_CLASS;
+    base::FieldTrial* trial =
+        base::FieldTrialList::Find("BackgroundRendererProcesses");
+    if (trial && trial->group_name() == "AllowBelowNormalFromBrowser")
+      background_priority = BELOW_NORMAL_PRIORITY_CLASS;
+
+    priority = value ? background_priority : NORMAL_PRIORITY_CLASS;
   }
 
   return (::SetPriorityClass(Handle(), priority) != 0);

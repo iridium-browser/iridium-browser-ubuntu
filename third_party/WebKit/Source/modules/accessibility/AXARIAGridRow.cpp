@@ -35,8 +35,8 @@
 
 namespace blink {
 
-AXARIAGridRow::AXARIAGridRow(RenderObject* renderer, AXObjectCacheImpl* axObjectCache)
-    : AXTableRow(renderer, axObjectCache)
+AXARIAGridRow::AXARIAGridRow(LayoutObject* layoutObject, AXObjectCacheImpl* axObjectCache)
+    : AXTableRow(layoutObject, axObjectCache)
 {
 }
 
@@ -44,9 +44,9 @@ AXARIAGridRow::~AXARIAGridRow()
 {
 }
 
-PassRefPtr<AXARIAGridRow> AXARIAGridRow::create(RenderObject* renderer, AXObjectCacheImpl* axObjectCache)
+PassRefPtr<AXARIAGridRow> AXARIAGridRow::create(LayoutObject* layoutObject, AXObjectCacheImpl* axObjectCache)
 {
-    return adoptRef(new AXARIAGridRow(renderer, axObjectCache));
+    return adoptRef(new AXARIAGridRow(layoutObject, axObjectCache));
 }
 
 bool AXARIAGridRow::isARIATreeGridRow() const
@@ -58,17 +58,12 @@ bool AXARIAGridRow::isARIATreeGridRow() const
     return parent->ariaRoleAttribute() == TreeGridRole;
 }
 
-AXObject* AXARIAGridRow::headerObject()
+void AXARIAGridRow::headerObjectsForRow(AccessibilityChildrenVector& headers)
 {
-    AccessibilityChildrenVector rowChildren = children();
-    unsigned childrenCount = rowChildren.size();
-    for (unsigned i = 0; i < childrenCount; ++i) {
-        AXObject* cell = rowChildren[i].get();
-        if (cell->ariaRoleAttribute() == RowHeaderRole)
-            return cell;
+    for (const auto& cell : children()) {
+        if (cell->roleValue() == RowHeaderRole)
+            headers.append(cell);
     }
-
-    return 0;
 }
 
 } // namespace blink

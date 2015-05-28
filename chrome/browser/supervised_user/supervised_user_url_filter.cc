@@ -54,7 +54,6 @@ const char* kFilteredSchemes[] = {
   "wss"
 };
 
-
 // This class encapsulates all the state that is required during construction of
 // a new SupervisedUserURLFilter::Contents.
 class FilterBuilder {
@@ -90,7 +89,6 @@ FilterBuilder::~FilterBuilder() {
 }
 
 bool FilterBuilder::AddPattern(const std::string& pattern, int site_id) {
-  DCHECK(BrowserThread::GetBlockingPool()->RunsTasksOnCurrentThread());
   std::string scheme;
   std::string host;
   uint16 port;
@@ -137,15 +135,12 @@ void FilterBuilder::AddSiteList(
 }
 
 scoped_ptr<SupervisedUserURLFilter::Contents> FilterBuilder::Build() {
-  DCHECK(BrowserThread::GetBlockingPool()->RunsTasksOnCurrentThread());
   contents_->url_matcher.AddConditionSets(all_conditions_);
   return contents_.Pass();
 }
 
 scoped_ptr<SupervisedUserURLFilter::Contents> CreateWhitelistFromPatterns(
     const std::vector<std::string>& patterns) {
-  DCHECK(BrowserThread::GetBlockingPool()->RunsTasksOnCurrentThread());
-
   FilterBuilder builder;
   for (const std::string& pattern : patterns) {
     // TODO(bauerb): We should create a fake site for the whitelist.
@@ -158,8 +153,6 @@ scoped_ptr<SupervisedUserURLFilter::Contents> CreateWhitelistFromPatterns(
 scoped_ptr<SupervisedUserURLFilter::Contents>
 LoadWhitelistsOnBlockingPoolThread(
     const std::vector<scoped_refptr<SupervisedUserSiteList> >& site_lists) {
-  DCHECK(BrowserThread::GetBlockingPool()->RunsTasksOnCurrentThread());
-
   FilterBuilder builder;
   for (const scoped_refptr<SupervisedUserSiteList>& site_list : site_lists)
     builder.AddSiteList(site_list);
@@ -172,7 +165,8 @@ LoadWhitelistsOnBlockingPoolThread(
 SupervisedUserURLFilter::SupervisedUserURLFilter()
     : default_behavior_(ALLOW),
       contents_(new Contents()),
-      blacklist_(NULL) {
+      blacklist_(nullptr),
+      blocking_task_runner_(BrowserThread::GetBlockingPool()) {
   // Detach from the current thread so we can be constructed on a different
   // thread than the one where we're used.
   DetachFromThread();
@@ -315,7 +309,7 @@ SupervisedUserURLFilter::GetFilteringBehaviorForURL(
 
   // Look for patterns matching the hostname, with a value that is different
   // from the default (a value of true in the map meaning allowed).
-  for (const std::pair<std::string, bool>& host_entry : host_map_) {
+  for (const auto& host_entry : host_map_) {
     if ((host_entry.second == (default_behavior_ == BLOCK)) &&
         HostMatchesPattern(host, host_entry.first)) {
       return host_entry.second ? ALLOW : BLOCK;
@@ -332,8 +326,9 @@ SupervisedUserURLFilter::GetFilteringBehaviorForURL(
   if (contents_->hash_site_map.count(GetHostnameHash(url)))
     return ALLOW;
 
-  // Check the static blacklist.
-  if (!manual_only && blacklist_ && blacklist_->HasURL(url)) {
+  // Check the static blacklist, unless the default is to block anyway.
+  if (!manual_only && default_behavior_ != BLOCK &&
+      blacklist_ && blacklist_->HasURL(url)) {
     *reason = BLACKLIST;
     return BLOCK;
   }
@@ -348,7 +343,9 @@ bool SupervisedUserURLFilter::GetFilteringBehaviorForURLWithAsyncChecks(
     const FilteringBehaviorCallback& callback) const {
   FilteringBehaviorReason reason = DEFAULT;
   FilteringBehavior behavior = GetFilteringBehaviorForURL(url, false, &reason);
-  if (reason != DEFAULT || !async_url_checker_) {
+  // Any non-default reason trumps the async checker.
+  // Also, if we're blocking anyway, then there's no need to check it.
+  if (reason != DEFAULT || behavior == BLOCK || !async_url_checker_) {
     callback.Run(behavior, reason, false);
     return true;
   }
@@ -375,14 +372,9 @@ void SupervisedUserURLFilter::GetSites(
     sites->push_back(&contents_->sites[entry->second]);
   }
 
-  typedef base::hash_multimap<std::string, int>::const_iterator
-      hash_site_map_iterator;
-  std::pair<hash_site_map_iterator, hash_site_map_iterator> bounds =
-      contents_->hash_site_map.equal_range(GetHostnameHash(url));
-  for (hash_site_map_iterator hash_it = bounds.first;
-       hash_it != bounds.second; hash_it++) {
+  auto bounds = contents_->hash_site_map.equal_range(GetHostnameHash(url));
+  for (auto hash_it = bounds.first; hash_it != bounds.second; hash_it++)
     sites->push_back(&contents_->sites[hash_it->second]);
-  }
 }
 
 void SupervisedUserURLFilter::SetDefaultFilteringBehavior(
@@ -396,7 +388,7 @@ void SupervisedUserURLFilter::LoadWhitelists(
   DCHECK(CalledOnValidThread());
 
   base::PostTaskAndReplyWithResult(
-      BrowserThread::GetBlockingPool(),
+      blocking_task_runner_.get(),
       FROM_HERE,
       base::Bind(&LoadWhitelistsOnBlockingPoolThread, site_lists),
       base::Bind(&SupervisedUserURLFilter::SetContents, this));
@@ -415,7 +407,7 @@ void SupervisedUserURLFilter::SetFromPatterns(
   DCHECK(CalledOnValidThread());
 
   base::PostTaskAndReplyWithResult(
-      BrowserThread::GetBlockingPool(),
+      blocking_task_runner_.get(),
       FROM_HERE,
       base::Bind(&CreateWhitelistFromPatterns, patterns),
       base::Bind(&SupervisedUserURLFilter::SetContents, this));
@@ -447,12 +439,26 @@ bool SupervisedUserURLFilter::HasAsyncURLChecker() const {
   return !!async_url_checker_;
 }
 
+void SupervisedUserURLFilter::Clear() {
+  default_behavior_ = ALLOW;
+  SetContents(make_scoped_ptr(new Contents()));
+  url_map_.clear();
+  host_map_.clear();
+  blacklist_ = nullptr;
+  async_url_checker_.reset();
+}
+
 void SupervisedUserURLFilter::AddObserver(Observer* observer) {
   observers_.AddObserver(observer);
 }
 
 void SupervisedUserURLFilter::RemoveObserver(Observer* observer) {
   observers_.RemoveObserver(observer);
+}
+
+void SupervisedUserURLFilter::SetBlockingTaskRunnerForTesting(
+    const scoped_refptr<base::TaskRunner>& task_runner) {
+  blocking_task_runner_ = task_runner;
 }
 
 void SupervisedUserURLFilter::SetContents(scoped_ptr<Contents> contents) {
@@ -466,12 +472,7 @@ void SupervisedUserURLFilter::CheckCallback(
     const GURL& url,
     FilteringBehavior behavior,
     bool uncertain) const {
-  // If we passed the async checker, but the default is to block, fall back to
-  // the default behavior.
-  if (behavior != BLOCK && default_behavior_ == BLOCK) {
-    callback.Run(default_behavior_, DEFAULT, uncertain);
-    return;
-  }
+  DCHECK(default_behavior_ != BLOCK);
 
   callback.Run(behavior, ASYNC_CHECKER, uncertain);
 }

@@ -11,6 +11,9 @@
 #include "base/i18n/rtl.h"
 #include "base/memory/weak_ptr.h"
 #include "base/strings/string16.h"
+#include "ui/base/window_open_disposition.h"
+
+class IdentityProvider;
 
 namespace content {
 class RenderFrameHost;
@@ -19,6 +22,10 @@ class RenderFrameHost;
 namespace gfx {
 class Rect;
 class RectF;
+}
+
+namespace rappor {
+class RapporService;
 }
 
 class GURL;
@@ -52,6 +59,26 @@ class AutofillClient {
     AutocompleteResultErrorInvalid,
   };
 
+  enum GetRealPanResult {
+    // Empty result. Used for initializing variables and should generally
+    // not be returned nor passed as arguments unless explicitly allowed by
+    // the API.
+    NONE,
+
+    // Request succeeded.
+    SUCCESS,
+
+    // Request failed; try again.
+    TRY_AGAIN_FAILURE,
+
+    // Request failed; don't try again.
+    PERMANENT_FAILURE,
+
+    // Unable to connect to Wallet servers. Prompt user to check internet
+    // connection.
+    NETWORK_ERROR,
+  };
+
   typedef base::Callback<void(RequestAutocompleteResult,
                               const base::string16&,
                               const FormStructure*)> ResultCallback;
@@ -71,6 +98,12 @@ class AutofillClient {
   // Gets the preferences associated with the client.
   virtual PrefService* GetPrefs() = 0;
 
+  // Gets the IdentityProvider associated with the client (for OAuth2).
+  virtual IdentityProvider* GetIdentityProvider() = 0;
+
+  // Gets the RapporService associated with the client (for metrics).
+  virtual rappor::RapporService* GetRapporService() = 0;
+
   // Hides the associated request autocomplete dialog (if it exists).
   virtual void HideRequestAutocompleteDialog() = 0;
 
@@ -81,7 +114,7 @@ class AutofillClient {
   // information to proceed.
   virtual void ShowUnmaskPrompt(const CreditCard& card,
                                 base::WeakPtr<CardUnmaskDelegate> delegate) = 0;
-  virtual void OnUnmaskVerificationResult(bool success) = 0;
+  virtual void OnUnmaskVerificationResult(GetRealPanResult result) = 0;
 
   // Run |save_card_callback| if the credit card should be imported as personal
   // data. |metric_logger| can be used to log user actions.
@@ -123,9 +156,9 @@ class AutofillClient {
   // Whether the Autocomplete feature of Autofill should be enabled.
   virtual bool IsAutocompleteEnabled() = 0;
 
-  // Pass the form structures to the password generation manager to detect
-  // account creation forms.
-  virtual void DetectAccountCreationForms(
+  // Pass the form structures to the password manager to choose correct username
+  // and to the password generation manager to detect account creation forms.
+  virtual void PropagateAutofillPredictions(
       content::RenderFrameHost* rfh,
       const std::vector<autofill::FormStructure*>& forms) = 0;
 
@@ -136,6 +169,10 @@ class AutofillClient {
 
   // Informs the client that a user gesture has been observed.
   virtual void OnFirstUserGestureObserved() = 0;
+
+  // Opens |url| with the supplied |disposition|.
+  virtual void LinkClicked(const GURL& url,
+                           WindowOpenDisposition disposition) = 0;
 };
 
 }  // namespace autofill

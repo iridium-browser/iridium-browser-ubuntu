@@ -4,6 +4,7 @@
 
 package org.chromium.media;
 
+import android.annotation.TargetApi;
 import android.content.Context;
 import android.graphics.ImageFormat;
 import android.hardware.camera2.CameraAccessException;
@@ -16,6 +17,7 @@ import android.hardware.camera2.CaptureRequest;
 import android.hardware.camera2.params.StreamConfigurationMap;
 import android.media.Image;
 import android.media.ImageReader;
+import android.os.Build;
 import android.os.Handler;
 import android.os.HandlerThread;
 import android.util.Log;
@@ -37,6 +39,7 @@ import java.util.List;
  * and their capabilities, using android.hardware.camera2.CameraManager.
  **/
 @JNINamespace("media")
+@TargetApi(Build.VERSION_CODES.LOLLIPOP)
 public class VideoCaptureCamera2 extends VideoCapture {
 
     // Inner class to extend a CameraDevice state change listener.
@@ -297,6 +300,27 @@ public class VideoCaptureCamera2 extends VideoCapture {
         } catch (CameraAccessException ex) {
             Log.e(TAG, "getNumberOfCameras: getCameraIdList(): " + ex);
             return 0;
+        }
+    }
+
+    static int getCaptureApiType(int id, Context appContext) {
+        final CameraCharacteristics cameraCharacteristics =
+                getCameraCharacteristics(appContext, id);
+        if (cameraCharacteristics == null) {
+            return CaptureApiType.API_TYPE_UNKNOWN;
+        }
+
+        final int supportedHWLevel = cameraCharacteristics.get(
+                CameraCharacteristics.INFO_SUPPORTED_HARDWARE_LEVEL);
+        switch (supportedHWLevel) {
+            case CameraMetadata.INFO_SUPPORTED_HARDWARE_LEVEL_LEGACY:
+                return CaptureApiType.API2_LEGACY;
+            case CameraMetadata.INFO_SUPPORTED_HARDWARE_LEVEL_FULL:
+                return CaptureApiType.API2_FULL;
+            case CameraMetadata.INFO_SUPPORTED_HARDWARE_LEVEL_LIMITED:
+                return CaptureApiType.API2_LIMITED;
+            default:
+                return CaptureApiType.API2_LEGACY;
         }
     }
 

@@ -6,9 +6,10 @@
  */
 
 #include "SampleCode.h"
+#include "SkAnimTimer.h"
 #include "SkView.h"
 #include "SkCanvas.h"
-#include "SkCanvasDrawable.h"
+#include "SkDrawable.h"
 #include "SkInterpolator.h"
 #include "SkPictureRecorder.h"
 #include "SkRandom.h"
@@ -42,10 +43,11 @@ static SkColor rand_opaque_color(uint32_t seed) {
     return rand.nextU() | (0xFF << 24);
 }
 
-class HTDrawable : public SkCanvasDrawable {
+class HTDrawable : public SkDrawable {
     SkRect          fR;
     SkColor         fColor;
     SkInterpolator* fInterp;
+    SkMSec          fTime;
 
 public:
     HTDrawable(SkRandom& rand) {
@@ -53,18 +55,21 @@ public:
                               rand.nextRangeF(20, 200), rand.nextRangeF(20, 200));
         fColor = rand_opaque_color(rand.nextU());
         fInterp = NULL;
+        fTime = 0;
     }
     
-    void spawnAnimation() {
+    void spawnAnimation(SkMSec now) {
+        this->setTime(now);
+
         SkDELETE(fInterp);
         fInterp = SkNEW_ARGS(SkInterpolator, (5, 3));
         SkScalar values[5];
         color_to_floats(fColor, values); values[4] = 0;
-        fInterp->setKeyFrame(0, SampleCode::GetAnimTime(), values);
+        fInterp->setKeyFrame(0, now, values);
         values[0] = 0; values[4] = 180;
-        fInterp->setKeyFrame(1, SampleCode::GetAnimTime() + 1000, values);
+        fInterp->setKeyFrame(1, now + 1000, values);
         color_to_floats(rand_opaque_color(fColor), values); values[4] = 360;
-        fInterp->setKeyFrame(2, SampleCode::GetAnimTime() + 2000, values);
+        fInterp->setKeyFrame(2, now + 2000, values);
 
         fInterp->setMirror(true);
         fInterp->setRepeatCount(3);
@@ -76,7 +81,9 @@ public:
         return oval_contains(fR, x, y);
     }
 
-    void onDraw(SkCanvas* canvas) SK_OVERRIDE {
+    void setTime(SkMSec time) { fTime = time; }
+
+    void onDraw(SkCanvas* canvas) override {
         SkAutoCanvasRestore acr(canvas, false);
 
         SkPaint paint;
@@ -84,7 +91,7 @@ public:
 
         if (fInterp) {
             SkScalar values[5];
-            SkInterpolator::Result res = fInterp->timeToValues(SampleCode::GetAnimTime(), values);
+            SkInterpolator::Result res = fInterp->timeToValues(fTime, values);
             fColor = floats_to_color(values);
 
             canvas->save();
@@ -104,8 +111,8 @@ public:
         paint.setColor(fColor);
         canvas->drawRect(fR, paint);
     }
-    
-    SkRect onGetBounds() SK_OVERRIDE { return fR; }
+
+    SkRect onGetBounds() override { return fR; }
 };
 
 class HTView : public SampleView {
@@ -120,7 +127,8 @@ public:
         HTDrawable* fDrawable;
     };
     Rec fArray[N];
-    SkAutoTUnref<SkCanvasDrawable> fRoot;
+    SkAutoTUnref<SkDrawable> fRoot;
+    SkMSec fTime;
     
     HTView() {
         SkRandom rand;
@@ -129,14 +137,14 @@ public:
         SkCanvas* canvas = recorder.beginRecording(SkRect::MakeWH(W, H));
         for (int i = 0; i < N; ++i) {
             fArray[i].fDrawable = new HTDrawable(rand);
-            canvas->EXPERIMENTAL_drawDrawable(fArray[i].fDrawable);
+            canvas->drawDrawable(fArray[i].fDrawable);
             fArray[i].fDrawable->unref();
         }
-        fRoot.reset(recorder.EXPERIMENTAL_endRecordingAsDrawable());
+        fRoot.reset(recorder.endRecordingAsDrawable());
     }
 
 protected:
-    bool onQuery(SkEvent* evt) SK_OVERRIDE {
+    bool onQuery(SkEvent* evt) override {
         if (SampleCode::TitleQ(*evt)) {
             SampleCode::TitleR(evt, "HT");
             return true;
@@ -144,16 +152,23 @@ protected:
         return this->INHERITED::onQuery(evt);
     }
 
-    void onDrawContent(SkCanvas* canvas) SK_OVERRIDE {
-        canvas->EXPERIMENTAL_drawDrawable(fRoot);
-        this->inval(NULL);
+    void onDrawContent(SkCanvas* canvas) override {
+        canvas->drawDrawable(fRoot);
     }
 
-    SkView::Click* onFindClickHandler(SkScalar x, SkScalar y, unsigned modi) SK_OVERRIDE {
+    bool onAnimate(const SkAnimTimer& timer) override {
+        fTime = timer.msec();
+        for (int i = 0; i < N; ++i) {
+            fArray[i].fDrawable->setTime(fTime);
+        }
+        return true;
+    }
+
+    SkView::Click* onFindClickHandler(SkScalar x, SkScalar y, unsigned modi) override {
         // search backwards to find the top-most
         for (int i = N - 1; i >= 0; --i) {
             if (fArray[i].fDrawable->hitTest(x, y)) {
-                fArray[i].fDrawable->spawnAnimation();
+                fArray[i].fDrawable->spawnAnimation(fTime);
                 break;
             }
         }

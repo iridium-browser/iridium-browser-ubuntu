@@ -26,15 +26,16 @@ class Rect;
 namespace app_list {
 
 class AppsGridView;
+class AppListPage;
 class ApplicationDragAndDropHost;
 class AppListFolderItem;
 class AppListMainView;
 class AppListViewDelegate;
 class AppsContainerView;
+class CustomLauncherPageView;
 class ContentsAnimator;
 class PaginationModel;
 class SearchBoxView;
-class SearchResultListView;
 class SearchResultPageView;
 class StartPageView;
 
@@ -71,8 +72,8 @@ class APP_LIST_EXPORT ContentsView : public views::View,
   void ShowFolderContent(AppListFolderItem* folder);
 
   // Sets the active launcher page and animates the pages into place.
-  void SetActivePage(int page_index);
-  void SetActivePage(int page_index, bool animate);
+  void SetActiveState(AppListModel::State state);
+  void SetActiveState(AppListModel::State state, bool animate);
 
   // The index of the currently active launcher page.
   int GetActivePageIndex() const;
@@ -99,21 +100,15 @@ class APP_LIST_EXPORT ContentsView : public views::View,
     return apps_container_view_;
   }
   StartPageView* start_page_view() const { return start_page_view_; }
-  views::View* custom_page_view() const { return custom_page_view_; }
-  SearchResultListView* search_results_list_view() const {
-    return search_results_list_view_;
-  }
+  CustomLauncherPageView* custom_page_view() const { return custom_page_view_; }
   SearchResultPageView* search_results_page_view() {
     return search_results_page_view_;
   }
-  views::View* GetPageView(int index) const;
+  AppListPage* GetPageView(int index) const;
 
   SearchBoxView* GetSearchBoxView() const;
 
   AppListMainView* app_list_main_view() const { return app_list_main_view_; }
-
-  // Adds a blank launcher page. For use in tests only.
-  void AddBlankPageForTesting();
 
   // Returns the pagination model for the ContentsView.
   const PaginationModel& pagination_model() { return pagination_model_; }
@@ -125,27 +120,9 @@ class APP_LIST_EXPORT ContentsView : public views::View,
   // Returns search box bounds to use for a given state.
   gfx::Rect GetSearchBoxBoundsForState(AppListModel::State state) const;
 
-  // Returns search box bounds to use for a given page index.
-  gfx::Rect GetSearchBoxBoundsForPageIndex(int index) const;
-
   // Returns the content area bounds to use for content views that do not
   // specify their own custom layout.
   gfx::Rect GetDefaultContentsBounds() const;
-
-  // Gets the location of the custom launcher page in "collapsed" state. This is
-  // where the page is peeking in from the bottom of the launcher (neither full
-  // on-screen or off-screen).
-  gfx::Rect GetCustomPageCollapsedBounds() const;
-
-  // Exposes GetAnimatorForTransition for tests.
-  ContentsAnimator* GetAnimatorForTransitionForTests(int from_page,
-                                                     int to_page,
-                                                     bool* reverse) const {
-    return GetAnimatorForTransition(from_page, to_page, reverse);
-  }
-
-  // Determines whether the custom page clickzone widget should be displayed.
-  bool ShouldShowCustomPageClickzone() const;
 
   // Performs the 'back' action for the active page. Returns whether the action
   // was handled.
@@ -165,9 +142,9 @@ class APP_LIST_EXPORT ContentsView : public views::View,
  private:
   // Sets the active launcher page, accounting for whether the change is for
   // search results.
-  void SetActivePageInternal(int page_index,
-                             bool show_search_results,
-                             bool animate);
+  void SetActiveStateInternal(int page_index,
+                              bool show_search_results,
+                              bool animate);
 
   // Invoked when active view is changed.
   void ActivePageChanged();
@@ -185,48 +162,38 @@ class APP_LIST_EXPORT ContentsView : public views::View,
   // animation, this positions the views as appropriate for the current frame.
   void UpdatePageBounds();
 
+  void UpdateSearchBox(double progress,
+                       AppListModel::State current_state,
+                       AppListModel::State target_state);
+
   // Adds |view| as a new page to the end of the list of launcher pages. The
   // view is inserted as a child of the ContentsView. There is no name
   // associated with the page. Returns the index of the new page.
-  int AddLauncherPage(views::View* view);
+  int AddLauncherPage(AppListPage* view);
 
   // Adds |view| as a new page to the end of the list of launcher pages. The
   // view is inserted as a child of the ContentsView. The page is associated
   // with the name |state|. Returns the index of the new page.
-  int AddLauncherPage(views::View* view, AppListModel::State state);
+  int AddLauncherPage(AppListPage* view, AppListModel::State state);
 
   // Gets the PaginationModel owned by the AppsGridView.
   // Note: This is different to |pagination_model_|, which manages top-level
   // launcher-page pagination.
   PaginationModel* GetAppsPaginationModel();
 
-  // Adds a ContentsAnimator for a transition from |from_state| to |to_state|.
-  void AddAnimator(AppListModel::State from_state,
-                   AppListModel::State to_state,
-                   scoped_ptr<ContentsAnimator> animator);
-
-  // Gets a ContentsAnimator for a transition from |from_page| to |to_page|. If
-  // the animator should be run in reverse (because it is a |to_page| to
-  // |from_page| animator), |reverse| is set to true; otherwise it is set to
-  // false.
-  ContentsAnimator* GetAnimatorForTransition(int from_page,
-                                             int to_page,
-                                             bool* reverse) const;
-
   // Special sub views of the ContentsView. All owned by the views hierarchy.
   AppsContainerView* apps_container_view_;
-
-  // Only used in the normal app list.
-  SearchResultListView* search_results_list_view_;
+  SearchResultPageView* search_results_page_view_;
 
   // Only used in the experimental app list.
-  SearchResultPageView* search_results_page_view_;
   StartPageView* start_page_view_;
-  views::View* custom_page_view_;
+  CustomLauncherPageView* custom_page_view_;
 
-  AppListMainView* app_list_main_view_;     // Parent view, owns this.
+  // The child page views. Owned by the views hierarchy.
+  std::vector<AppListPage*> app_list_pages_;
 
-  scoped_ptr<views::ViewModel> view_model_;
+  // Parent view. Owned by the views hierarchy.
+  AppListMainView* app_list_main_view_;
 
   // Maps State onto |view_model_| indices.
   std::map<AppListModel::State, int> state_to_view_;
@@ -239,14 +206,6 @@ class APP_LIST_EXPORT ContentsView : public views::View,
 
   // Manages the pagination for the launcher pages.
   PaginationModel pagination_model_;
-
-  // Maps from {A, B} pair to ContentsAnimator, where A and B are page
-  // |view_model_| indices for an animation from A to B.
-  std::map<std::pair<int, int>, linked_ptr<ContentsAnimator>>
-      contents_animators_;
-
-  // The animator for transitions not found in |contents_animators_|.
-  scoped_ptr<ContentsAnimator> default_animator_;
 
   DISALLOW_COPY_AND_ASSIGN(ContentsView);
 };

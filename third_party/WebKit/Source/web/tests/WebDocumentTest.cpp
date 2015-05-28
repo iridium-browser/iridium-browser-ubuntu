@@ -7,14 +7,14 @@
 #include "public/web/WebDocument.h"
 
 #include "core/CSSPropertyNames.h"
-#include "core/dom/NodeRenderStyle.h"
+#include "core/dom/NodeComputedStyle.h"
 #include "core/dom/StyleEngine.h"
 #include "core/frame/LocalFrame.h"
 #include "core/html/HTMLElement.h"
+#include "core/style/ComputedStyle.h"
 #include "core/page/Page.h"
-#include "core/rendering/style/RenderStyle.h"
-#include "core/testing/URLTestHelpers.h"
 #include "platform/graphics/Color.h"
+#include "platform/testing/URLTestHelpers.h"
 #include "web/tests/FrameTestHelpers.h"
 #include <gtest/gtest.h>
 
@@ -35,26 +35,24 @@ TEST(WebDocumentTest, InsertStyleSheet)
     webDoc.insertStyleSheet("body { color: green }");
 
     // Check insertStyleSheet did not cause a synchronous style recalc.
-    unsigned accessCount = coreDoc->styleEngine()->resolverAccessCount();
+    unsigned accessCount = coreDoc->styleEngine().resolverAccessCount();
     ASSERT_EQ(0U, accessCount);
 
     HTMLElement* bodyElement = coreDoc->body();
     ASSERT(bodyElement);
 
-    RenderStyle* style = bodyElement->renderStyle();
-    ASSERT(style);
+    const ComputedStyle& styleBeforeInsertion = bodyElement->computedStyleRef();
 
     // Inserted stylesheet not yet applied.
-    ASSERT_EQ(Color(0, 0, 0), style->visitedDependentColor(CSSPropertyColor));
+    ASSERT_EQ(Color(0, 0, 0), styleBeforeInsertion.visitedDependentColor(CSSPropertyColor));
 
     // Apply inserted stylesheet.
     coreDoc->updateRenderTreeIfNeeded();
 
-    style = bodyElement->renderStyle();
-    ASSERT(style);
+    const ComputedStyle& styleAfterInsertion = bodyElement->computedStyleRef();
 
     // Inserted stylesheet applied.
-    ASSERT_EQ(Color(0, 128, 0), style->visitedDependentColor(CSSPropertyColor));
+    ASSERT_EQ(Color(0, 128, 0), styleAfterInsertion.visitedDependentColor(CSSPropertyColor));
 }
 
 TEST(WebDocumentTest, BeginExitTransition)
@@ -73,13 +71,13 @@ TEST(WebDocumentTest, BeginExitTransition)
     Element* transitionElement = coreDoc->getElementById("foo");
     ASSERT(transitionElement);
 
-    RenderStyle* transitionStyle = transitionElement->renderStyle();
+    const ComputedStyle* transitionStyle = transitionElement->computedStyle();
     ASSERT(transitionStyle);
 
     HTMLElement* bodyElement = coreDoc->body();
     ASSERT(bodyElement);
 
-    RenderStyle* bodyStyle = bodyElement->renderStyle();
+    const ComputedStyle* bodyStyle = bodyElement->computedStyle();
     ASSERT(bodyStyle);
     // The transition_exit.css stylesheet should not have been applied at this point.
     ASSERT_EQ(Color(0, 0, 0), bodyStyle->visitedDependentColor(CSSPropertyColor));
@@ -91,12 +89,12 @@ TEST(WebDocumentTest, BeginExitTransition)
     coreDoc->updateRenderTreeIfNeeded();
 
     // The element should now be hidden.
-    transitionStyle = transitionElement->renderStyle();
+    transitionStyle = transitionElement->computedStyle();
     ASSERT_TRUE(transitionStyle);
     ASSERT_EQ(transitionStyle->opacity(), 0);
 
     // The stylesheet should now have been applied.
-    bodyStyle = bodyElement->renderStyle();
+    bodyStyle = bodyElement->computedStyle();
     ASSERT(bodyStyle);
     ASSERT_EQ(Color(0, 128, 0), bodyStyle->visitedDependentColor(CSSPropertyColor));
 }
@@ -118,13 +116,13 @@ TEST(WebDocumentTest, BeginExitTransitionToNativeApp)
     Element* transitionElement = coreDoc->getElementById("foo");
     ASSERT(transitionElement);
 
-    RenderStyle* transitionStyle = transitionElement->renderStyle();
+    const ComputedStyle* transitionStyle = transitionElement->computedStyle();
     ASSERT(transitionStyle);
 
     HTMLElement* bodyElement = coreDoc->body();
     ASSERT(bodyElement);
 
-    RenderStyle* bodyStyle = bodyElement->renderStyle();
+    const ComputedStyle* bodyStyle = bodyElement->computedStyle();
     ASSERT(bodyStyle);
     // The transition_exit.css stylesheet should not have been applied at this point.
     ASSERT_EQ(Color(0, 0, 0), bodyStyle->visitedDependentColor(CSSPropertyColor));
@@ -136,12 +134,12 @@ TEST(WebDocumentTest, BeginExitTransitionToNativeApp)
     coreDoc->updateRenderTreeIfNeeded();
 
     // The element should not be hidden.
-    transitionStyle = transitionElement->renderStyle();
+    transitionStyle = transitionElement->computedStyle();
     ASSERT_TRUE(transitionStyle);
     ASSERT_EQ(transitionStyle->opacity(), 1);
 
     // The stylesheet should now have been applied.
-    bodyStyle = bodyElement->renderStyle();
+    bodyStyle = bodyElement->computedStyle();
     ASSERT(bodyStyle);
     ASSERT_EQ(Color(0, 128, 0), bodyStyle->visitedDependentColor(CSSPropertyColor));
 }
@@ -161,7 +159,7 @@ TEST(WebDocumentTest, HideAndShowTransitionElements)
     Element* transitionElement = coreDoc->getElementById("foo");
     ASSERT(transitionElement);
 
-    RenderStyle* transitionStyle = transitionElement->renderStyle();
+    const ComputedStyle* transitionStyle = transitionElement->computedStyle();
     ASSERT(transitionStyle);
     EXPECT_EQ(transitionStyle->opacity(), 1);
 
@@ -169,7 +167,7 @@ TEST(WebDocumentTest, HideAndShowTransitionElements)
     frame->document().hideTransitionElements("#foo");
     FrameTestHelpers::pumpPendingRequestsDoNotUse(frame);
     coreDoc->updateRenderTreeIfNeeded();
-    transitionStyle = transitionElement->renderStyle();
+    transitionStyle = transitionElement->computedStyle();
     ASSERT_TRUE(transitionStyle);
     EXPECT_EQ(transitionStyle->opacity(), 0);
 
@@ -177,7 +175,7 @@ TEST(WebDocumentTest, HideAndShowTransitionElements)
     frame->document().showTransitionElements("#foo");
     FrameTestHelpers::pumpPendingRequestsDoNotUse(frame);
     coreDoc->updateRenderTreeIfNeeded();
-    transitionStyle = transitionElement->renderStyle();
+    transitionStyle = transitionElement->computedStyle();
     ASSERT_TRUE(transitionStyle);
     EXPECT_EQ(transitionStyle->opacity(), 1);
 }

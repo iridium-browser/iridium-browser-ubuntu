@@ -293,8 +293,7 @@ class WebViewInteractiveTest
                  const std::string& guest_url_spec) {
     ASSERT_TRUE(StartEmbeddedTestServer());
     GURL::Replacements replace_host;
-    std::string host_str("localhost");  // Must stay in scope with replace_host.
-    replace_host.SetHostStr(host_str);
+    replace_host.SetHostStr("localhost");
 
     GURL guest_url = embedded_test_server()->GetURL(guest_url_spec);
     guest_url = guest_url.ReplaceComponents(replace_host);
@@ -527,6 +526,24 @@ class WebViewInteractiveTest
                     &last_drop_data));
 
     last_drop_data_ = last_drop_data;
+  }
+
+  void FullscreenTestHelper(const std::string& test_name,
+                            const std::string& test_dir) {
+    TestHelper(test_name, test_dir, NO_TEST_SERVER);
+    content::WebContents* embedder_web_contents =
+        GetFirstAppWindowWebContents();
+    ASSERT_TRUE(embedder_web_contents);
+    ASSERT_TRUE(guest_web_contents());
+    // Click the guest to request fullscreen.
+    ExtensionTestMessageListener passed_listener(
+        "FULLSCREEN_STEP_PASSED", false);
+    passed_listener.set_failure_message("TEST_FAILED");
+    content::SimulateMouseClickAt(guest_web_contents(),
+                                  0,
+                                  blink::WebMouseEvent::ButtonLeft,
+                                  gfx::Point(20, 20));
+    ASSERT_TRUE(passed_listener.WaitUntilSatisfied());
   }
 
  protected:
@@ -892,6 +909,23 @@ IN_PROC_BROWSER_TEST_F(WebViewInteractiveTest,
   GetGuestViewManager()->WaitForGuestRemoved(2u);
 }
 
+// Tests whether <webview> context menu sees <webview> local coordinates
+// in its RenderViewContextMenu params.
+// Local coordinates are required for plugin actions to work properly.
+IN_PROC_BROWSER_TEST_F(WebViewInteractiveTest, ContextMenuParamCoordinates) {
+  TestHelper("testCoordinates", "web_view/context_menus/coordinates",
+             NO_TEST_SERVER);
+  ASSERT_TRUE(guest_web_contents());
+
+  ContextMenuWaiter menu_observer(content::NotificationService::AllSources());
+  SimulateRWHMouseClick(guest_web_contents()->GetRenderViewHost(),
+                        blink::WebMouseEvent::ButtonRight, 10, 20);
+  // Wait until the context menu is opened and closed.
+  menu_observer.WaitForMenuOpenAndClose();
+  ASSERT_EQ(10, menu_observer.params().x);
+  ASSERT_EQ(20, menu_observer.params().y);
+}
+
 IN_PROC_BROWSER_TEST_F(WebViewInteractiveTest, ExecuteCode) {
   ASSERT_TRUE(RunPlatformAppTestWithArg(
       "platform_apps/web_view/common", "execute_code")) << message_;
@@ -997,6 +1031,40 @@ IN_PROC_BROWSER_TEST_F(WebViewInteractiveTest,
   TestHelper("testPointerLockLostWithFocus",
              "web_view/pointerlock",
              NO_TEST_SERVER);
+}
+
+// Disable this on mac, throws an assertion failure on teardown which
+// will result in flakiness:
+//
+// "not is fullscreen state"
+// "*** Assertion failure in -[_NSWindowFullScreenTransition
+//     transitionedWindowFrame],"
+// See similar bug: http://crbug.com/169820.
+//
+// In addition to the above, these tests are flaky on many platforms:
+// http://crbug.com/468660
+IN_PROC_BROWSER_TEST_F(WebViewInteractiveTest,
+                       DISABLED_FullscreenAllow_EmbedderHasPermission) {
+  FullscreenTestHelper("testFullscreenAllow",
+                       "web_view/fullscreen/embedder_has_permission");
+}
+
+IN_PROC_BROWSER_TEST_F(WebViewInteractiveTest,
+                       DISABLED_FullscreenDeny_EmbedderHasPermission) {
+  FullscreenTestHelper("testFullscreenDeny",
+                       "web_view/fullscreen/embedder_has_permission");
+}
+
+IN_PROC_BROWSER_TEST_F(WebViewInteractiveTest,
+                       DISABLED_FullscreenAllow_EmbedderHasNoPermission) {
+  FullscreenTestHelper("testFullscreenAllow",
+                       "web_view/fullscreen/embedder_has_no_permission");
+}
+
+IN_PROC_BROWSER_TEST_F(WebViewInteractiveTest,
+                       DISABLED_FullscreenDeny_EmbedderHasNoPermission) {
+  FullscreenTestHelper("testFullscreenDeny",
+                       "web_view/fullscreen/embedder_has_no_permission");
 }
 
 // This test exercies the following scenario:
@@ -1113,39 +1181,32 @@ IN_PROC_BROWSER_TEST_F(WebViewInteractiveTest, DISABLED_Focus_InputMethod) {
                   "window.runCommand('testInputMethodRunNextStep', 2);"));
 
     // Wait for the next step to complete.
-    EXPECT_TRUE(next_step_listener.WaitUntilSatisfied());
+    ASSERT_TRUE(next_step_listener.WaitUntilSatisfied());
   }
 
-  // Moving focus causes IME cancel, and the composition will be committed
-  // in first <input> in the <webview>, not in the second <input>.
-  {
-    next_step_listener.Reset();
-    ui::CompositionText composition;
-    composition.text = base::UTF8ToUTF16("InputTest789");
-    text_input_client->SetCompositionText(composition);
-    EXPECT_TRUE(content::ExecuteScript(
-                    embedder_web_contents,
-                    "window.runCommand('testInputMethodRunNextStep', 3);"));
-
-    // Wait for the next step to complete.
-    EXPECT_TRUE(next_step_listener.WaitUntilSatisfied());
-  }
+  // TODO(lazyboy): http://crbug.com/457007, Add a step or a separate test to
+  // check the following, currently it turns this test to be flaky:
+  // If we move the focus from the first <input> to the second one after we
+  // have some composition text set but *not* committed (by calling
+  // text_input_client->SetCompositionText()), then it would cause IME cancel
+  // and the onging composition is committed in the first <input> in the
+  // <webview>, not the second one.
 
   // Tests ExtendSelectionAndDelete message works in <webview>.
   {
     next_step_listener.Reset();
 
     // At this point we have set focus on first <input> in the <webview>,
-    // and the value it contains is 'InputTestABC' with caret set after 'T'.
-    // Now we delete 'Test' in 'InputTestABC', as the caret is after 'T':
+    // and the value it contains is 'InputTest456' with caret set after 'T'.
+    // Now we delete 'Test' in 'InputTest456', as the caret is after 'T':
     // delete before 1 character ('T') and after 3 characters ('est').
     text_input_client->ExtendSelectionAndDelete(1, 3);
     EXPECT_TRUE(content::ExecuteScript(
                     embedder_web_contents,
-                    "window.runCommand('testInputMethodRunNextStep', 4);"));
+                    "window.runCommand('testInputMethodRunNextStep', 3);"));
 
     // Wait for the next step to complete.
-    EXPECT_TRUE(next_step_listener.WaitUntilSatisfied());
+    ASSERT_TRUE(next_step_listener.WaitUntilSatisfied());
   }
 }
 #endif

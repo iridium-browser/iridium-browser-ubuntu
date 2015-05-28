@@ -33,8 +33,8 @@
 #include "core/html/HTMLObjectElement.h"
 #include "core/html/PluginDocument.h"
 #include "core/html/parser/HTMLParserIdioms.h"
-#include "core/rendering/RenderEmbeddedObject.h"
-#include "core/rendering/RenderPart.h"
+#include "core/layout/LayoutEmbeddedObject.h"
+#include "core/layout/LayoutPart.h"
 
 namespace blink {
 
@@ -48,22 +48,22 @@ inline HTMLEmbedElement::HTMLEmbedElement(Document& document, bool createdByPars
 PassRefPtrWillBeRawPtr<HTMLEmbedElement> HTMLEmbedElement::create(Document& document, bool createdByParser)
 {
     RefPtrWillBeRawPtr<HTMLEmbedElement> element = adoptRefWillBeNoop(new HTMLEmbedElement(document, createdByParser));
-    element->ensureUserAgentShadowRoot();
+    element->ensureClosedShadowRoot();
     return element.release();
 }
 
-static inline RenderPart* findPartRenderer(const Node* n)
+static inline LayoutPart* findPartRenderer(const Node* n)
 {
-    if (!n->renderer())
+    if (!n->layoutObject())
         n = Traversal<HTMLObjectElement>::firstAncestor(*n);
 
-    if (n && n->renderer() && n->renderer()->isRenderPart())
-        return toRenderPart(n->renderer());
+    if (n && n->layoutObject() && n->layoutObject()->isLayoutPart())
+        return toLayoutPart(n->layoutObject());
 
     return nullptr;
 }
 
-RenderPart* HTMLEmbedElement::existingRenderPart() const
+LayoutPart* HTMLEmbedElement::existingLayoutPart() const
 {
     return findPartRenderer(this);
 }
@@ -94,13 +94,13 @@ void HTMLEmbedElement::parseAttribute(const QualifiedName& name, const AtomicStr
         size_t pos = m_serviceType.find(";");
         if (pos != kNotFound)
             m_serviceType = m_serviceType.left(pos);
-        if (!renderer())
+        if (!layoutObject())
             requestPluginCreationWithoutRendererIfPossible();
     } else if (name == codeAttr) {
         m_url = stripLeadingAndTrailingHTMLSpaces(value);
     } else if (name == srcAttr) {
         m_url = stripLeadingAndTrailingHTMLSpaces(value);
-        if (renderer() && isImageType()) {
+        if (layoutObject() && isImageType()) {
             if (!m_imageLoader)
                 m_imageLoader = HTMLImageLoader::create(this);
             m_imageLoader->updateFromElement(ImageLoader::UpdateIgnorePreviousError);
@@ -123,7 +123,7 @@ void HTMLEmbedElement::parametersForPlugin(Vector<String>& paramNames, Vector<St
 // moved down into HTMLPluginElement.cpp
 void HTMLEmbedElement::updateWidgetInternal()
 {
-    ASSERT(!renderEmbeddedObject()->showsUnavailablePluginIndicator());
+    ASSERT(!layoutEmbeddedObject()->showsUnavailablePluginIndicator());
     ASSERT(needsWidgetUpdate());
     setNeedsWidgetUpdate(false);
 
@@ -143,32 +143,28 @@ void HTMLEmbedElement::updateWidgetInternal()
     RefPtrWillBeRawPtr<HTMLEmbedElement> protect(this); // Loading the plugin might remove us from the document.
 
     // FIXME: Can we not have renderer here now that beforeload events are gone?
-    if (!renderer())
+    if (!layoutObject())
         return;
 
     requestObject(m_url, m_serviceType, paramNames, paramValues);
 }
 
-bool HTMLEmbedElement::rendererIsNeeded(const RenderStyle& style)
+bool HTMLEmbedElement::layoutObjectIsNeeded(const ComputedStyle& style)
 {
     if (isImageType())
-        return HTMLPlugInElement::rendererIsNeeded(style);
-
-    LocalFrame* frame = document().frame();
-    if (!frame)
-        return false;
+        return HTMLPlugInElement::layoutObjectIsNeeded(style);
 
     // If my parent is an <object> and is not set to use fallback content, I
     // should be ignored and not get a renderer.
     ContainerNode* p = parentNode();
     if (isHTMLObjectElement(p)) {
-        ASSERT(p->renderer());
+        ASSERT(p->layoutObject());
         if (!toHTMLObjectElement(p)->useFallbackContent()) {
-            ASSERT(!p->renderer()->isEmbeddedObject());
+            ASSERT(!p->layoutObject()->isEmbeddedObject());
             return false;
         }
     }
-    return HTMLPlugInElement::rendererIsNeeded(style);
+    return HTMLPlugInElement::layoutObjectIsNeeded(style);
 }
 
 bool HTMLEmbedElement::isURLAttribute(const Attribute& attribute) const

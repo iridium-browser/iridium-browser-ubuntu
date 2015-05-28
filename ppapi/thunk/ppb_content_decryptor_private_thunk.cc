@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-// From private/ppb_content_decryptor_private.idl modified Mon Jan 12 17:33:29
+// From private/ppb_content_decryptor_private.idl modified Mon Mar 30 22:35:33
 // 2015.
 
 #include "ppapi/c/pp_errors.h"
@@ -26,13 +26,13 @@ void PromiseResolved(PP_Instance instance, uint32_t promise_id) {
 
 void PromiseResolvedWithSession(PP_Instance instance,
                                 uint32_t promise_id,
-                                struct PP_Var web_session_id) {
+                                struct PP_Var session_id) {
   VLOG(4) << "PPB_ContentDecryptor_Private::PromiseResolvedWithSession()";
   EnterInstance enter(instance);
   if (enter.failed())
     return;
   enter.functions()->PromiseResolvedWithSession(instance, promise_id,
-                                                web_session_id);
+                                                session_id);
 }
 
 void PromiseRejected(PP_Instance instance,
@@ -49,7 +49,7 @@ void PromiseRejected(PP_Instance instance,
 }
 
 void SessionMessage(PP_Instance instance,
-                    struct PP_Var web_session_id,
+                    struct PP_Var session_id,
                     PP_CdmMessageType message_type,
                     struct PP_Var message,
                     struct PP_Var legacy_destination_url) {
@@ -57,12 +57,12 @@ void SessionMessage(PP_Instance instance,
   EnterInstance enter(instance);
   if (enter.failed())
     return;
-  enter.functions()->SessionMessage(instance, web_session_id, message_type,
-                                    message, legacy_destination_url);
+  enter.functions()->SessionMessage(instance, session_id, message_type, message,
+                                    legacy_destination_url);
 }
 
 void SessionKeysChange(PP_Instance instance,
-                       struct PP_Var web_session_id,
+                       struct PP_Var session_id,
                        PP_Bool has_additional_usable_key,
                        uint32_t key_count,
                        const struct PP_KeyInformation key_information[]) {
@@ -70,41 +70,41 @@ void SessionKeysChange(PP_Instance instance,
   EnterInstance enter(instance);
   if (enter.failed())
     return;
-  enter.functions()->SessionKeysChange(instance, web_session_id,
+  enter.functions()->SessionKeysChange(instance, session_id,
                                        has_additional_usable_key, key_count,
                                        key_information);
 }
 
 void SessionExpirationChange(PP_Instance instance,
-                             struct PP_Var web_session_id,
+                             struct PP_Var session_id,
                              PP_Time new_expiry_time) {
   VLOG(4) << "PPB_ContentDecryptor_Private::SessionExpirationChange()";
   EnterInstance enter(instance);
   if (enter.failed())
     return;
-  enter.functions()->SessionExpirationChange(instance, web_session_id,
+  enter.functions()->SessionExpirationChange(instance, session_id,
                                              new_expiry_time);
 }
 
-void SessionClosed(PP_Instance instance, struct PP_Var web_session_id) {
+void SessionClosed(PP_Instance instance, struct PP_Var session_id) {
   VLOG(4) << "PPB_ContentDecryptor_Private::SessionClosed()";
   EnterInstance enter(instance);
   if (enter.failed())
     return;
-  enter.functions()->SessionClosed(instance, web_session_id);
+  enter.functions()->SessionClosed(instance, session_id);
 }
 
-void SessionError(PP_Instance instance,
-                  struct PP_Var web_session_id,
-                  PP_CdmExceptionCode exception_code,
-                  uint32_t system_code,
-                  struct PP_Var error_description) {
-  VLOG(4) << "PPB_ContentDecryptor_Private::SessionError()";
+void LegacySessionError(PP_Instance instance,
+                        struct PP_Var session_id,
+                        PP_CdmExceptionCode exception_code,
+                        uint32_t system_code,
+                        struct PP_Var error_description) {
+  VLOG(4) << "PPB_ContentDecryptor_Private::LegacySessionError()";
   EnterInstance enter(instance);
   if (enter.failed())
     return;
-  enter.functions()->SessionError(instance, web_session_id, exception_code,
-                                  system_code, error_description);
+  enter.functions()->LegacySessionError(instance, session_id, exception_code,
+                                        system_code, error_description);
 }
 
 void DeliverBlock(PP_Instance instance,
@@ -174,15 +174,15 @@ void DeliverSamples(
                                     decrypted_sample_info);
 }
 
-const PPB_ContentDecryptor_Private_0_13
-    g_ppb_contentdecryptor_private_thunk_0_13 = {&PromiseResolved,
+const PPB_ContentDecryptor_Private_0_14
+    g_ppb_contentdecryptor_private_thunk_0_14 = {&PromiseResolved,
                                                  &PromiseResolvedWithSession,
                                                  &PromiseRejected,
                                                  &SessionMessage,
                                                  &SessionKeysChange,
                                                  &SessionExpirationChange,
                                                  &SessionClosed,
-                                                 &SessionError,
+                                                 &LegacySessionError,
                                                  &DeliverBlock,
                                                  &DecoderInitializeDone,
                                                  &DecoderDeinitializeDone,
@@ -192,9 +192,9 @@ const PPB_ContentDecryptor_Private_0_13
 
 }  // namespace
 
-PPAPI_THUNK_EXPORT const PPB_ContentDecryptor_Private_0_13*
-GetPPB_ContentDecryptor_Private_0_13_Thunk() {
-  return &g_ppb_contentdecryptor_private_thunk_0_13;
+PPAPI_THUNK_EXPORT const PPB_ContentDecryptor_Private_0_14*
+GetPPB_ContentDecryptor_Private_0_14_Thunk() {
+  return &g_ppb_contentdecryptor_private_thunk_0_14;
 }
 
 }  // namespace thunk

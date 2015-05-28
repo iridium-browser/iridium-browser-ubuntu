@@ -8,6 +8,7 @@
 #include <string.h>
 
 #include <list>
+#include <sstream>
 #include <string>
 #include <utility>
 #include <vector>
@@ -18,7 +19,9 @@
 #include "../fpdfsdk/include/fpdftext.h"
 #include "../fpdfsdk/include/fpdfview.h"
 #include "../core/include/fxcrt/fx_system.h"
+#include "image_diff_png.h"
 #include "v8/include/v8.h"
+#include "v8/include/libplatform/libplatform.h"
 
 #ifdef _WIN32
 #define snprintf _snprintf
@@ -30,6 +33,7 @@
 enum OutputFormat {
   OUTPUT_NONE,
   OUTPUT_PPM,
+  OUTPUT_PNG,
 #ifdef _WIN32
   OUTPUT_BMP,
   OUTPUT_EMF,
@@ -40,6 +44,7 @@ struct Options {
   Options() : output_format(OUTPUT_NONE) { }
 
   OutputFormat output_format;
+  std::string scale_factor_as_string;
   std::string exe_path;
   std::string bin_directory;
 };
@@ -105,19 +110,26 @@ static bool GetExternalData(const Options& options,
     return false;
   }
   result_data->data = const_cast<const char*>(data_buffer);
-  result_data->raw_size = data_length;
+  result_data->raw_size = static_cast<int>(data_length);
   return true;
 }
 #endif  // V8_USE_EXTERNAL_STARTUP_DATA
+
+static bool CheckDimensions(int stride, int width, int height) {
+  if (stride < 0 || width < 0 || height < 0)
+    return false;
+  if (height > 0 && width > INT_MAX / height)
+    return false;
+  return true;
+}
 
 static void WritePpm(const char* pdf_name, int num, const void* buffer_void,
                      int stride, int width, int height) {
   const char* buffer = reinterpret_cast<const char*>(buffer_void);
 
-  if (stride < 0 || width < 0 || height < 0)
+  if (!CheckDimensions(stride, width, height))
     return;
-  if (height > 0 && width > INT_MAX / height)
-    return;
+
   int out_len = width * height;
   if (out_len > INT_MAX / 3)
     return;
@@ -149,6 +161,42 @@ static void WritePpm(const char* pdf_name, int num, const void* buffer_void,
     delete [] result;
   }
   fclose(fp);
+}
+
+static void WritePng(const char* pdf_name, int num, const void* buffer_void,
+                     int stride, int width, int height) {
+  if (!CheckDimensions(stride, width, height))
+    return;
+
+  std::vector<unsigned char> png_encoding;
+  const unsigned char* buffer = static_cast<const unsigned char*>(buffer_void);
+  if (!image_diff_png::EncodeBGRAPNG(
+          buffer, width, height, stride, false, &png_encoding)) {
+    fprintf(stderr, "Failed to convert bitmap to PNG\n");
+    return;
+  }
+
+  char filename[256];
+  int chars_formatted = snprintf(
+      filename, sizeof(filename), "%s.%d.png", pdf_name, num);
+  if (chars_formatted < 0 ||
+      static_cast<size_t>(chars_formatted) >= sizeof(filename)) {
+    fprintf(stderr, "Filname %s is too long\n", filename);
+    return;
+  }
+
+  FILE* fp = fopen(filename, "wb");
+  if (!fp) {
+    fprintf(stderr, "Failed to open %s for output\n", filename);
+    return;
+  }
+
+  size_t bytes_written = fwrite(
+      &png_encoding.front(), 1, png_encoding.size(), fp);
+  if (bytes_written != png_encoding.size())
+    fprintf(stderr, "Failed to write to  %s\n", filename);
+
+  (void) fclose(fp);
 }
 
 #ifdef _WIN32
@@ -196,9 +244,9 @@ void WriteEmf(FPDF_PAGE page, const char* pdf_name, int num) {
   snprintf(filename, sizeof(filename), "%s.%d.emf", pdf_name, num);
 
   HDC dc = CreateEnhMetaFileA(NULL, filename, NULL, NULL);
-  
-  HRGN rgn = CreateRectRgn(0, 0, width, height); 
-  SelectClipRgn(dc, rgn); 
+
+  HRGN rgn = CreateRectRgn(0, 0, width, height);
+  SelectClipRgn(dc, rgn);
   DeleteObject(rgn);
 
   SelectObject(dc, GetStockObject(NULL_PEN));
@@ -213,12 +261,29 @@ void WriteEmf(FPDF_PAGE page, const char* pdf_name, int num) {
 }
 #endif
 
-int Form_Alert(IPDF_JSPLATFORM*, FPDF_WIDESTRING, FPDF_WIDESTRING, int, int) {
-  printf("Form_Alert called.\n");
+int ExampleAppAlert(IPDF_JSPLATFORM*, FPDF_WIDESTRING msg, FPDF_WIDESTRING,
+                    int, int) {
+  // Deal with differences between UTF16LE and wchar_t on this platform.
+  size_t characters = 0;
+  while (msg[characters]) {
+    ++characters;
+  }
+  wchar_t* platform_string =
+      (wchar_t*)malloc((characters + 1) * sizeof(wchar_t));
+  for (size_t i = 0; i < characters + 1; ++i) {
+    unsigned char* ptr = (unsigned char*)&msg[i];
+    platform_string[i] = ptr[0] + 256 * ptr[1];
+  }
+  printf("Alert: %ls\n", platform_string);
+  free(platform_string);
   return 0;
 }
 
-void Unsupported_Handler(UNSUPPORT_INFO*, int type) {
+void ExampleDocGotoPage(IPDF_JSPLATFORM*, int pageNumber) {
+  printf("Goto Page: %d\n", pageNumber);
+}
+
+void ExampleUnsupportedHandler(UNSUPPORT_INFO*, int type) {
   std::string feature = "Unknown";
   switch (type) {
     case FPDF_UNSP_DOC_XFAFORM:
@@ -277,6 +342,12 @@ bool ParseCommandLine(const std::vector<std::string>& args,
         return false;
       }
       options->output_format = OUTPUT_PPM;
+    } else if (cur_arg == "--png") {
+      if (options->output_format != OUTPUT_NONE) {
+        fprintf(stderr, "Duplicate or conflicting --png argument\n");
+        return false;
+      }
+      options->output_format = OUTPUT_PNG;
     }
 #ifdef _WIN32
     else if (cur_arg == "--emf") {
@@ -303,6 +374,13 @@ bool ParseCommandLine(const std::vector<std::string>& args,
       options->bin_directory = cur_arg.substr(10);
     }
 #endif  // V8_USE_EXTERNAL_STARTUP_DATA
+    else if (cur_arg.size() > 8 && cur_arg.compare(0, 8, "--scale=") == 0) {
+      if (!options->scale_factor_as_string.empty()) {
+        fprintf(stderr, "Duplicate --scale argument\n");
+        return false;
+      }
+      options->scale_factor_as_string = cur_arg.substr(8);
+    }
     else
       break;
   }
@@ -344,13 +422,14 @@ void Add_Segment(FX_DOWNLOADHINTS* pThis, size_t offset, size_t size) {
 }
 
 void RenderPdf(const std::string& name, const char* pBuf, size_t len,
-               OutputFormat format) {
-  printf("Rendering PDF file %s.\n", name.c_str());
+               const Options& options) {
+  fprintf(stderr, "Rendering PDF file %s.\n", name.c_str());
 
   IPDF_JSPLATFORM platform_callbacks;
   memset(&platform_callbacks, '\0', sizeof(platform_callbacks));
   platform_callbacks.version = 1;
-  platform_callbacks.app_alert = Form_Alert;
+  platform_callbacks.app_alert = ExampleAppAlert;
+  platform_callbacks.Doc_gotoPage = ExampleDocGotoPage;
 
   FPDF_FORMFILLINFO form_callbacks;
   memset(&form_callbacks, '\0', sizeof(form_callbacks));
@@ -381,10 +460,10 @@ void RenderPdf(const std::string& name, const char* pBuf, size_t len,
   (void) FPDFAvail_IsDocAvail(pdf_avail, &hints);
 
   if (!FPDFAvail_IsLinearized(pdf_avail)) {
-    printf("Non-linearized path...\n");
+    fprintf(stderr, "Non-linearized path...\n");
     doc = FPDF_LoadCustomDocument(&file_access, NULL);
   } else {
-    printf("Linearized path...\n");
+    fprintf(stderr, "Linearized path...\n");
     doc = FPDFAvail_GetDocument(pdf_avail, NULL);
   }
 
@@ -418,11 +497,15 @@ void RenderPdf(const std::string& name, const char* pBuf, size_t len,
     FORM_OnAfterLoadPage(page, form);
     FORM_DoPageAAction(page, form, FPDFPAGE_AACTION_OPEN);
 
-    int width = static_cast<int>(FPDF_GetPageWidth(page));
-    int height = static_cast<int>(FPDF_GetPageHeight(page));
+    double scale = 1.0;
+    if (!options.scale_factor_as_string.empty()) {
+      std::stringstream(options.scale_factor_as_string) >> scale;
+    }
+    int width = static_cast<int>(FPDF_GetPageWidth(page) * scale);
+    int height = static_cast<int>(FPDF_GetPageHeight(page) * scale);
+
     FPDF_BITMAP bitmap = FPDFBitmap_Create(width, height, 0);
     FPDFBitmap_FillRect(bitmap, 0, 0, width, height, 0xFFFFFFFF);
-
     FPDF_RenderPageBitmap(bitmap, page, 0, 0, width, height, 0, 0);
     rendered_pages ++;
 
@@ -431,7 +514,7 @@ void RenderPdf(const std::string& name, const char* pBuf, size_t len,
     const char* buffer =
         reinterpret_cast<const char*>(FPDFBitmap_GetBuffer(bitmap));
 
-    switch (format) {
+    switch (options.output_format) {
 #ifdef _WIN32
       case OUTPUT_BMP:
         WriteBmp(name.c_str(), i, buffer, stride, width, height);
@@ -441,9 +524,14 @@ void RenderPdf(const std::string& name, const char* pBuf, size_t len,
         WriteEmf(page, name.c_str(), i);
         break;
 #endif
+      case OUTPUT_PNG:
+        WritePng(name.c_str(), i, buffer, stride, width, height);
+        break;
+
       case OUTPUT_PPM:
         WritePpm(name.c_str(), i, buffer, stride, width, height);
         break;
+
       default:
         break;
     }
@@ -461,26 +549,34 @@ void RenderPdf(const std::string& name, const char* pBuf, size_t len,
   FPDF_CloseDocument(doc);
   FPDFAvail_Destroy(pdf_avail);
 
-  printf("Loaded, parsed and rendered %" PRIuS " pages.\n", rendered_pages);
-  printf("Skipped %" PRIuS " bad pages.\n", bad_pages);
+  fprintf(stderr, "Rendered %" PRIuS " pages.\n", rendered_pages);
+  fprintf(stderr, "Skipped %" PRIuS " bad pages.\n", bad_pages);
 }
+
+static const char usage_string[] =
+    "Usage: pdfium_test [OPTION] [FILE]...\n"
+    "  --bin-dir=<path> - override path to v8 external data\n"
+    "  --scale=<number> - scale output size by number (e.g. 0.5)\n"
+#ifdef _WIN32
+    "  --bmp - write page images <pdf-name>.<page-number>.bmp\n"
+    "  --emf - write page meta files <pdf-name>.<page-number>.emf\n"
+#endif
+    "  --png - write page images <pdf-name>.<page-number>.png\n"
+    "  --ppm - write page images <pdf-name>.<page-number>.ppm\n";
 
 int main(int argc, const char* argv[]) {
   std::vector<std::string> args(argv, argv + argc);
   Options options;
   std::list<std::string> files;
   if (!ParseCommandLine(args, &options, &files)) {
-    printf("Usage: pdfium_test [OPTION] [FILE]...\n");
-    printf("--bin-dir=<path> - override path to v8 external data\n");
-    printf("--ppm - write page images <pdf-name>.<page-number>.ppm\n");
-#ifdef _WIN32
-    printf("--bmp - write page images <pdf-name>.<page-number>.bmp\n");
-    printf("--emf - write page meta files <pdf-name>.<page-number>.emf\n");
-#endif
+    fprintf(stderr, "%s", usage_string);
     return 1;
   }
 
   v8::V8::InitializeICU();
+  v8::Platform* platform = v8::platform::CreateDefaultPlatform();
+  v8::V8::InitializePlatform(platform);
+  v8::V8::Initialize();
 
 #ifdef V8_USE_EXTERNAL_STARTUP_DATA
   v8::StartupData natives;
@@ -498,7 +594,7 @@ int main(int argc, const char* argv[]) {
   UNSUPPORT_INFO unsuppored_info;
   memset(&unsuppored_info, '\0', sizeof(unsuppored_info));
   unsuppored_info.version = 1;
-  unsuppored_info.FSDK_UnSupport_Handler = Unsupported_Handler;
+  unsuppored_info.FSDK_UnSupport_Handler = ExampleUnsupportedHandler;
 
   FSDK_SetUnSpObjProcessHandler(&unsuppored_info);
 
@@ -509,11 +605,13 @@ int main(int argc, const char* argv[]) {
     char* file_contents = GetFileContents(filename.c_str(), &file_length);
     if (!file_contents)
       continue;
-    RenderPdf(filename, file_contents, file_length, options.output_format);
+    RenderPdf(filename, file_contents, file_length, options);
     free(file_contents);
   }
 
   FPDF_DestroyLibrary();
+  v8::V8::ShutdownPlatform();
+  delete platform;
 
   return 0;
 }

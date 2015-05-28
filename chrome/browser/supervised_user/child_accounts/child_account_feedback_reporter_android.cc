@@ -8,10 +8,11 @@
 #include "chrome/browser/ui/android/window_android_helper.h"
 #include "content/public/browser/web_contents.h"
 #include "jni/ChildAccountFeedbackReporter_jni.h"
-#include "ui/base/android/window_android.h"
+#include "ui/android/window_android.h"
 #include "url/gurl.h"
 
 void ReportChildAccountFeedback(content::WebContents* web_contents,
+                                const std::string& description,
                                 const GURL& url) {
   JNIEnv* env = base::android::AttachCurrentThread();
 
@@ -20,10 +21,12 @@ void ReportChildAccountFeedback(content::WebContents* web_contents,
           web_contents);
   ui::WindowAndroid* window = helper->GetWindowAndroid();
 
+  ScopedJavaLocalRef<jstring> jdesc =
+      base::android::ConvertUTF8ToJavaString(env, description);
   ScopedJavaLocalRef<jstring> jurl =
       base::android::ConvertUTF8ToJavaString(env, url.spec());
   Java_ChildAccountFeedbackReporter_reportFeedbackWithWindow(
-      env, window->GetJavaObject().obj(), jurl.obj());
+      env, window->GetJavaObject().obj(), jdesc.obj(), jurl.obj());
 }
 
 bool RegisterChildAccountFeedbackReporter(JNIEnv* env) {

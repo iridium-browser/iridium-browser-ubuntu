@@ -10,6 +10,7 @@
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
 #include "base/message_loop/message_loop.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/prefs/pref_service.h"
 #include "base/prefs/scoped_user_pref_update.h"
 #include "base/strings/string_util.h"
@@ -173,7 +174,7 @@ void NotificationImageReady(
                             message,
                             notification_icon,
                             base::string16(),
-                            base::UTF8ToUTF16(delegate->id()),
+                            delegate->id(),
                             delegate.get());
 
   g_browser_process->notification_ui_manager()->Add(notification, profile);
@@ -188,7 +189,7 @@ void ShowBalloon(const Extension* extension, Profile* profile) {
       extension->is_app() ? IDS_BACKGROUND_CRASHED_APP_BALLOON_MESSAGE :
                             IDS_BACKGROUND_CRASHED_EXTENSION_BALLOON_MESSAGE,
       base::UTF8ToUTF16(extension->name()));
-  extension_misc::ExtensionIcons size(extension_misc::EXTENSION_ICON_MEDIUM);
+  extension_misc::ExtensionIcons size(extension_misc::EXTENSION_ICON_LARGE);
   extensions::ExtensionResource resource =
       extensions::IconsInfo::GetIconResource(
           extension, size, ExtensionIconSet::MATCH_SMALLER);
@@ -341,8 +342,11 @@ void BackgroundContentsService::Observe(
     int type,
     const content::NotificationSource& source,
     const content::NotificationDetails& details) {
+  TRACE_EVENT0("browser,startup", "BackgroundContentsService::Observe");
   switch (type) {
     case extensions::NOTIFICATION_EXTENSIONS_READY_DEPRECATED: {
+      SCOPED_UMA_HISTOGRAM_TIMER(
+          "Extensions.BackgroundContentsServiceStartupTime");
       Profile* profile = content::Source<Profile>(source).ptr();
       LoadBackgroundContentsFromManifests(profile);
       LoadBackgroundContentsFromPrefs(profile);
@@ -630,10 +634,7 @@ void BackgroundContentsService::LoadBackgroundContents(
       std::string(),
       NULL);
 
-  // TODO(atwilson): Create RenderViews asynchronously to avoid increasing
-  // startup latency (http://crbug.com/47236).
-  contents->web_contents()->GetController().LoadURL(
-      url, content::Referrer(), ui::PAGE_TRANSITION_LINK, std::string());
+  contents->CreateRenderViewSoon(url);
 }
 
 BackgroundContents* BackgroundContentsService::CreateBackgroundContents(
@@ -767,7 +768,7 @@ const base::string16& BackgroundContentsService::GetParentApplicationId(
 void BackgroundContentsService::AddWebContents(
     WebContents* new_contents,
     WindowOpenDisposition disposition,
-    const gfx::Rect& initial_pos,
+    const gfx::Rect& initial_rect,
     bool user_gesture,
     bool* was_blocked) {
   Browser* browser = chrome::FindLastActiveWithProfile(
@@ -775,6 +776,6 @@ void BackgroundContentsService::AddWebContents(
       chrome::GetActiveDesktop());
   if (browser) {
     chrome::AddWebContents(browser, NULL, new_contents, disposition,
-                           initial_pos, user_gesture, was_blocked);
+                           initial_rect, user_gesture, was_blocked);
   }
 }

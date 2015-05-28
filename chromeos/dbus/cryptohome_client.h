@@ -86,7 +86,7 @@ class CHROMEOS_EXPORT CryptohomeClient : public DBusClient {
            bool result,
            const cryptohome::BaseReply& reply)> ProtobufMethodCallback;
 
-  virtual ~CryptohomeClient();
+  ~CryptohomeClient() override;
 
   // Factory function, creates a new instance and returns ownership.
   // For normal usage, access the singleton via DBusThreadManager::Get().

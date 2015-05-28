@@ -46,7 +46,7 @@
 #include "platform/SharedBuffer.h"
 #include "platform/graphics/BitmapImage.h"
 #include "platform/graphics/ImageSource.h"
-#include "platform/graphics/skia/NativeImageSkia.h"
+#include "public/platform/WebSize.h"
 #include <v8.h>
 
 namespace blink {
@@ -54,7 +54,7 @@ namespace blink {
 static LayoutSize sizeFor(HTMLImageElement* image)
 {
     if (ImageResource* cachedImage = image->cachedImage())
-        return cachedImage->imageSizeForRenderer(image->renderer(), 1.0f); // FIXME: Not sure about this.
+        return cachedImage->imageSizeForLayoutObject(image->layoutObject(), 1.0f); // FIXME: Not sure about this.
     return LayoutSize();
 }
 
@@ -105,7 +105,7 @@ ScriptPromise ImageBitmapFactories::createImageBitmap(ScriptState* scriptState, 
         return ScriptPromise();
     }
     Document* document = eventTarget.toDOMWindow()->document();
-    if (!image->cachedImage()->passesAccessControlCheck(document, document->securityOrigin()) && document->securityOrigin()->taintsCanvas(image->src())) {
+    if (!image->cachedImage()->passesAccessControlCheck(document->securityOrigin()) && document->securityOrigin()->taintsCanvas(image->src())) {
         exceptionState.throwSecurityError("Cross-origin access to the source image is denied.");
         return ScriptPromise();
     }
@@ -283,7 +283,7 @@ void ImageBitmapFactories::ImageBitmapLoader::loadBlobAsync(ExecutionContext* co
     m_loader.start(context, blob->blobDataHandle());
 }
 
-void ImageBitmapFactories::trace(Visitor* visitor)
+DEFINE_TRACE(ImageBitmapFactories)
 {
     visitor->trace(m_pendingLoaders);
     WillBeHeapSupplement<LocalDOMWindow>::trace(visitor);
@@ -306,13 +306,13 @@ void ImageBitmapFactories::ImageBitmapLoader::didFinishLoading()
 
     OwnPtr<ImageSource> source = adoptPtr(new ImageSource());
     source->setData(*sharedBuffer, true);
-    RefPtr<NativeImageSkia> imageSkia = source->createFrameAtIndex(0);
-    if (!imageSkia) {
+    SkBitmap bitmap;
+    if (!source->createFrameAtIndex(0, &bitmap)) {
         rejectPromise();
         return;
     }
 
-    RefPtr<Image> image = BitmapImage::create(imageSkia);
+    RefPtr<Image> image = BitmapImage::create(bitmap);
     if (!image->width() || !image->height()) {
         rejectPromise();
         return;
@@ -332,7 +332,7 @@ void ImageBitmapFactories::ImageBitmapLoader::didFail(FileError::ErrorCode)
     rejectPromise();
 }
 
-void ImageBitmapFactories::ImageBitmapLoader::trace(Visitor* visitor)
+DEFINE_TRACE(ImageBitmapFactories::ImageBitmapLoader)
 {
     visitor->trace(m_factory);
     visitor->trace(m_resolver);

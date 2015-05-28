@@ -11,8 +11,6 @@
 #include "libANGLE/Context.h"
 #include "libANGLE/Framebuffer.h"
 #include "libANGLE/renderer/Renderer.h"
-#include "libANGLE/renderer/imageformats.h"
-#include "libANGLE/renderer/copyimage.h"
 
 namespace gl
 {
@@ -21,178 +19,142 @@ namespace gl
 // can decide the true, sized, internal format. The ES2FormatMap determines the internal format for all valid
 // format and type combinations.
 
-FormatType::FormatType()
-    : internalFormat(GL_NONE),
-      colorWriteFunction(NULL)
-{
-}
-
 typedef std::pair<GLenum, GLenum> FormatTypePair;
-typedef std::pair<FormatTypePair, FormatType> FormatPair;
-typedef std::map<FormatTypePair, FormatType> FormatMap;
+typedef std::pair<FormatTypePair, GLenum> FormatPair;
+typedef std::map<FormatTypePair, GLenum> FormatMap;
 
 // A helper function to insert data into the format map with fewer characters.
-static inline void InsertFormatMapping(FormatMap *map, GLenum format, GLenum type, GLenum internalFormat, ColorWriteFunction writeFunc)
+static inline void InsertFormatMapping(FormatMap *map, GLenum format, GLenum type, GLenum internalFormat)
 {
-    FormatType info;
-    info.internalFormat = internalFormat;
-    info.colorWriteFunction = writeFunc;
-    map->insert(FormatPair(FormatTypePair(format, type), info));
+    map->insert(FormatPair(FormatTypePair(format, type), internalFormat));
 }
 
 FormatMap BuildFormatMap()
 {
     FormatMap map;
 
-    using namespace rx;
+    //                       | Format               | Type                             | Internal format          |
+    InsertFormatMapping(&map, GL_RGBA,               GL_UNSIGNED_BYTE,                  GL_RGBA8);
+    InsertFormatMapping(&map, GL_RGBA,               GL_BYTE,                           GL_RGBA8_SNORM);
+    InsertFormatMapping(&map, GL_RGBA,               GL_UNSIGNED_SHORT_4_4_4_4,         GL_RGBA4);
+    InsertFormatMapping(&map, GL_RGBA,               GL_UNSIGNED_SHORT_5_5_5_1,         GL_RGB5_A1);
+    InsertFormatMapping(&map, GL_RGBA,               GL_UNSIGNED_INT_2_10_10_10_REV,    GL_RGB10_A2);
+    InsertFormatMapping(&map, GL_RGBA,               GL_FLOAT,                          GL_RGBA32F);
+    InsertFormatMapping(&map, GL_RGBA,               GL_HALF_FLOAT,                     GL_RGBA16F);
+    InsertFormatMapping(&map, GL_RGBA,               GL_HALF_FLOAT_OES,                 GL_RGBA16F);
 
-    //                       | Format               | Type                             | Internal format          | Color write function             |
-    InsertFormatMapping(&map, GL_RGBA,               GL_UNSIGNED_BYTE,                  GL_RGBA8,                  WriteColor<R8G8B8A8, GLfloat>     );
-    InsertFormatMapping(&map, GL_RGBA,               GL_BYTE,                           GL_RGBA8_SNORM,            WriteColor<R8G8B8A8S, GLfloat>    );
-    InsertFormatMapping(&map, GL_RGBA,               GL_UNSIGNED_SHORT_4_4_4_4,         GL_RGBA4,                  WriteColor<R4G4B4A4, GLfloat>     );
-    InsertFormatMapping(&map, GL_RGBA,               GL_UNSIGNED_SHORT_5_5_5_1,         GL_RGB5_A1,                WriteColor<R5G5B5A1, GLfloat>     );
-    InsertFormatMapping(&map, GL_RGBA,               GL_UNSIGNED_INT_2_10_10_10_REV,    GL_RGB10_A2,               WriteColor<R10G10B10A2, GLfloat>  );
-    InsertFormatMapping(&map, GL_RGBA,               GL_FLOAT,                          GL_RGBA32F,                WriteColor<R32G32B32A32F, GLfloat>);
-    InsertFormatMapping(&map, GL_RGBA,               GL_HALF_FLOAT,                     GL_RGBA16F,                WriteColor<R16G16B16A16F, GLfloat>);
-    InsertFormatMapping(&map, GL_RGBA,               GL_HALF_FLOAT_OES,                 GL_RGBA16F,                WriteColor<R16G16B16A16F, GLfloat>);
+    InsertFormatMapping(&map, GL_RGBA_INTEGER,       GL_UNSIGNED_BYTE,                  GL_RGBA8UI);
+    InsertFormatMapping(&map, GL_RGBA_INTEGER,       GL_BYTE,                           GL_RGBA8I);
+    InsertFormatMapping(&map, GL_RGBA_INTEGER,       GL_UNSIGNED_SHORT,                 GL_RGBA16UI);
+    InsertFormatMapping(&map, GL_RGBA_INTEGER,       GL_SHORT,                          GL_RGBA16I);
+    InsertFormatMapping(&map, GL_RGBA_INTEGER,       GL_UNSIGNED_INT,                   GL_RGBA32UI);
+    InsertFormatMapping(&map, GL_RGBA_INTEGER,       GL_INT,                            GL_RGBA32I);
+    InsertFormatMapping(&map, GL_RGBA_INTEGER,       GL_UNSIGNED_INT_2_10_10_10_REV,    GL_RGB10_A2UI);
 
-    InsertFormatMapping(&map, GL_RGBA_INTEGER,       GL_UNSIGNED_BYTE,                  GL_RGBA8UI,                WriteColor<R8G8B8A8, GLuint>      );
-    InsertFormatMapping(&map, GL_RGBA_INTEGER,       GL_BYTE,                           GL_RGBA8I,                 WriteColor<R8G8B8A8S, GLint>      );
-    InsertFormatMapping(&map, GL_RGBA_INTEGER,       GL_UNSIGNED_SHORT,                 GL_RGBA16UI,               WriteColor<R16G16B16A16, GLuint>  );
-    InsertFormatMapping(&map, GL_RGBA_INTEGER,       GL_SHORT,                          GL_RGBA16I,                WriteColor<R16G16B16A16S, GLint>  );
-    InsertFormatMapping(&map, GL_RGBA_INTEGER,       GL_UNSIGNED_INT,                   GL_RGBA32UI,               WriteColor<R32G32B32A32, GLuint>  );
-    InsertFormatMapping(&map, GL_RGBA_INTEGER,       GL_INT,                            GL_RGBA32I,                WriteColor<R32G32B32A32S, GLint>  );
-    InsertFormatMapping(&map, GL_RGBA_INTEGER,       GL_UNSIGNED_INT_2_10_10_10_REV,    GL_RGB10_A2UI,             WriteColor<R10G10B10A2, GLuint>   );
+    InsertFormatMapping(&map, GL_RGB,                GL_UNSIGNED_BYTE,                  GL_RGB8);
+    InsertFormatMapping(&map, GL_RGB,                GL_BYTE,                           GL_RGB8_SNORM);
+    InsertFormatMapping(&map, GL_RGB,                GL_UNSIGNED_SHORT_5_6_5,           GL_RGB565);
+    InsertFormatMapping(&map, GL_RGB,                GL_UNSIGNED_INT_10F_11F_11F_REV,   GL_R11F_G11F_B10F);
+    InsertFormatMapping(&map, GL_RGB,                GL_UNSIGNED_INT_5_9_9_9_REV,       GL_RGB9_E5);
+    InsertFormatMapping(&map, GL_RGB,                GL_FLOAT,                          GL_RGB32F);
+    InsertFormatMapping(&map, GL_RGB,                GL_HALF_FLOAT,                     GL_RGB16F);
+    InsertFormatMapping(&map, GL_RGB,                GL_HALF_FLOAT_OES,                 GL_RGB16F);
 
-    InsertFormatMapping(&map, GL_RGB,                GL_UNSIGNED_BYTE,                  GL_RGB8,                   WriteColor<R8G8B8, GLfloat>       );
-    InsertFormatMapping(&map, GL_RGB,                GL_BYTE,                           GL_RGB8_SNORM,             WriteColor<R8G8B8S, GLfloat>      );
-    InsertFormatMapping(&map, GL_RGB,                GL_UNSIGNED_SHORT_5_6_5,           GL_RGB565,                 WriteColor<R5G6B5, GLfloat>       );
-    InsertFormatMapping(&map, GL_RGB,                GL_UNSIGNED_INT_10F_11F_11F_REV,   GL_R11F_G11F_B10F,         WriteColor<R11G11B10F, GLfloat>   );
-    InsertFormatMapping(&map, GL_RGB,                GL_UNSIGNED_INT_5_9_9_9_REV,       GL_RGB9_E5,                WriteColor<R9G9B9E5, GLfloat>     );
-    InsertFormatMapping(&map, GL_RGB,                GL_FLOAT,                          GL_RGB32F,                 WriteColor<R32G32B32F, GLfloat>   );
-    InsertFormatMapping(&map, GL_RGB,                GL_HALF_FLOAT,                     GL_RGB16F,                 WriteColor<R16G16B16F, GLfloat>   );
-    InsertFormatMapping(&map, GL_RGB,                GL_HALF_FLOAT_OES,                 GL_RGB16F,                 WriteColor<R16G16B16F, GLfloat>   );
+    InsertFormatMapping(&map, GL_RGB_INTEGER,        GL_UNSIGNED_BYTE,                  GL_RGB8UI);
+    InsertFormatMapping(&map, GL_RGB_INTEGER,        GL_BYTE,                           GL_RGB8I);
+    InsertFormatMapping(&map, GL_RGB_INTEGER,        GL_UNSIGNED_SHORT,                 GL_RGB16UI);
+    InsertFormatMapping(&map, GL_RGB_INTEGER,        GL_SHORT,                          GL_RGB16I);
+    InsertFormatMapping(&map, GL_RGB_INTEGER,        GL_UNSIGNED_INT,                   GL_RGB32UI);
+    InsertFormatMapping(&map, GL_RGB_INTEGER,        GL_INT,                            GL_RGB32I);
 
-    InsertFormatMapping(&map, GL_RGB_INTEGER,        GL_UNSIGNED_BYTE,                  GL_RGB8UI,                 WriteColor<R8G8B8, GLuint>        );
-    InsertFormatMapping(&map, GL_RGB_INTEGER,        GL_BYTE,                           GL_RGB8I,                  WriteColor<R8G8B8S, GLint>        );
-    InsertFormatMapping(&map, GL_RGB_INTEGER,        GL_UNSIGNED_SHORT,                 GL_RGB16UI,                WriteColor<R16G16B16, GLuint>     );
-    InsertFormatMapping(&map, GL_RGB_INTEGER,        GL_SHORT,                          GL_RGB16I,                 WriteColor<R16G16B16S, GLint>     );
-    InsertFormatMapping(&map, GL_RGB_INTEGER,        GL_UNSIGNED_INT,                   GL_RGB32UI,                WriteColor<R32G32B32, GLuint>     );
-    InsertFormatMapping(&map, GL_RGB_INTEGER,        GL_INT,                            GL_RGB32I,                 WriteColor<R32G32B32S, GLint>     );
+    InsertFormatMapping(&map, GL_RG,                 GL_UNSIGNED_BYTE,                  GL_RG8);
+    InsertFormatMapping(&map, GL_RG,                 GL_BYTE,                           GL_RG8_SNORM);
+    InsertFormatMapping(&map, GL_RG,                 GL_FLOAT,                          GL_RG32F);
+    InsertFormatMapping(&map, GL_RG,                 GL_HALF_FLOAT,                     GL_RG16F);
+    InsertFormatMapping(&map, GL_RG,                 GL_HALF_FLOAT_OES,                 GL_RG16F);
 
-    InsertFormatMapping(&map, GL_RG,                 GL_UNSIGNED_BYTE,                  GL_RG8,                    WriteColor<R8G8, GLfloat>         );
-    InsertFormatMapping(&map, GL_RG,                 GL_BYTE,                           GL_RG8_SNORM,              WriteColor<R8G8S, GLfloat>        );
-    InsertFormatMapping(&map, GL_RG,                 GL_FLOAT,                          GL_RG32F,                  WriteColor<R32G32F, GLfloat>      );
-    InsertFormatMapping(&map, GL_RG,                 GL_HALF_FLOAT,                     GL_RG16F,                  WriteColor<R16G16F, GLfloat>      );
-    InsertFormatMapping(&map, GL_RG,                 GL_HALF_FLOAT_OES,                 GL_RG16F,                  WriteColor<R16G16F, GLfloat>      );
+    InsertFormatMapping(&map, GL_RG_INTEGER,         GL_UNSIGNED_BYTE,                  GL_RG8UI);
+    InsertFormatMapping(&map, GL_RG_INTEGER,         GL_BYTE,                           GL_RG8I);
+    InsertFormatMapping(&map, GL_RG_INTEGER,         GL_UNSIGNED_SHORT,                 GL_RG16UI);
+    InsertFormatMapping(&map, GL_RG_INTEGER,         GL_SHORT,                          GL_RG16I);
+    InsertFormatMapping(&map, GL_RG_INTEGER,         GL_UNSIGNED_INT,                   GL_RG32UI);
+    InsertFormatMapping(&map, GL_RG_INTEGER,         GL_INT,                            GL_RG32I);
 
-    InsertFormatMapping(&map, GL_RG_INTEGER,         GL_UNSIGNED_BYTE,                  GL_RG8UI,                  WriteColor<R8G8, GLuint>          );
-    InsertFormatMapping(&map, GL_RG_INTEGER,         GL_BYTE,                           GL_RG8I,                   WriteColor<R8G8S, GLint>          );
-    InsertFormatMapping(&map, GL_RG_INTEGER,         GL_UNSIGNED_SHORT,                 GL_RG16UI,                 WriteColor<R16G16, GLuint>        );
-    InsertFormatMapping(&map, GL_RG_INTEGER,         GL_SHORT,                          GL_RG16I,                  WriteColor<R16G16S, GLint>        );
-    InsertFormatMapping(&map, GL_RG_INTEGER,         GL_UNSIGNED_INT,                   GL_RG32UI,                 WriteColor<R32G32, GLuint>        );
-    InsertFormatMapping(&map, GL_RG_INTEGER,         GL_INT,                            GL_RG32I,                  WriteColor<R32G32S, GLint>        );
+    InsertFormatMapping(&map, GL_RED,                GL_UNSIGNED_BYTE,                  GL_R8);
+    InsertFormatMapping(&map, GL_RED,                GL_BYTE,                           GL_R8_SNORM);
+    InsertFormatMapping(&map, GL_RED,                GL_FLOAT,                          GL_R32F);
+    InsertFormatMapping(&map, GL_RED,                GL_HALF_FLOAT,                     GL_R16F);
+    InsertFormatMapping(&map, GL_RED,                GL_HALF_FLOAT_OES,                 GL_R16F);
 
-    InsertFormatMapping(&map, GL_RED,                GL_UNSIGNED_BYTE,                  GL_R8,                     WriteColor<R8, GLfloat>           );
-    InsertFormatMapping(&map, GL_RED,                GL_BYTE,                           GL_R8_SNORM,               WriteColor<R8S, GLfloat>          );
-    InsertFormatMapping(&map, GL_RED,                GL_FLOAT,                          GL_R32F,                   WriteColor<R32F, GLfloat>         );
-    InsertFormatMapping(&map, GL_RED,                GL_HALF_FLOAT,                     GL_R16F,                   WriteColor<R16F, GLfloat>         );
-    InsertFormatMapping(&map, GL_RED,                GL_HALF_FLOAT_OES,                 GL_R16F,                   WriteColor<R16F, GLfloat>         );
+    InsertFormatMapping(&map, GL_RED_INTEGER,        GL_UNSIGNED_BYTE,                  GL_R8UI);
+    InsertFormatMapping(&map, GL_RED_INTEGER,        GL_BYTE,                           GL_R8I);
+    InsertFormatMapping(&map, GL_RED_INTEGER,        GL_UNSIGNED_SHORT,                 GL_R16UI);
+    InsertFormatMapping(&map, GL_RED_INTEGER,        GL_SHORT,                          GL_R16I);
+    InsertFormatMapping(&map, GL_RED_INTEGER,        GL_UNSIGNED_INT,                   GL_R32UI);
+    InsertFormatMapping(&map, GL_RED_INTEGER,        GL_INT,                            GL_R32I);
 
-    InsertFormatMapping(&map, GL_RED_INTEGER,        GL_UNSIGNED_BYTE,                  GL_R8UI,                   WriteColor<R8, GLuint>            );
-    InsertFormatMapping(&map, GL_RED_INTEGER,        GL_BYTE,                           GL_R8I,                    WriteColor<R8S, GLint>            );
-    InsertFormatMapping(&map, GL_RED_INTEGER,        GL_UNSIGNED_SHORT,                 GL_R16UI,                  WriteColor<R16, GLuint>           );
-    InsertFormatMapping(&map, GL_RED_INTEGER,        GL_SHORT,                          GL_R16I,                   WriteColor<R16S, GLint>           );
-    InsertFormatMapping(&map, GL_RED_INTEGER,        GL_UNSIGNED_INT,                   GL_R32UI,                  WriteColor<R32, GLuint>           );
-    InsertFormatMapping(&map, GL_RED_INTEGER,        GL_INT,                            GL_R32I,                   WriteColor<R32S, GLint>           );
+    InsertFormatMapping(&map, GL_LUMINANCE_ALPHA,    GL_UNSIGNED_BYTE,                  GL_LUMINANCE8_ALPHA8_EXT);
+    InsertFormatMapping(&map, GL_LUMINANCE,          GL_UNSIGNED_BYTE,                  GL_LUMINANCE8_EXT);
+    InsertFormatMapping(&map, GL_ALPHA,              GL_UNSIGNED_BYTE,                  GL_ALPHA8_EXT);
+    InsertFormatMapping(&map, GL_LUMINANCE_ALPHA,    GL_FLOAT,                          GL_LUMINANCE_ALPHA32F_EXT);
+    InsertFormatMapping(&map, GL_LUMINANCE,          GL_FLOAT,                          GL_LUMINANCE32F_EXT);
+    InsertFormatMapping(&map, GL_ALPHA,              GL_FLOAT,                          GL_ALPHA32F_EXT);
+    InsertFormatMapping(&map, GL_LUMINANCE_ALPHA,    GL_HALF_FLOAT,                     GL_LUMINANCE_ALPHA16F_EXT);
+    InsertFormatMapping(&map, GL_LUMINANCE_ALPHA,    GL_HALF_FLOAT_OES,                 GL_LUMINANCE_ALPHA16F_EXT);
+    InsertFormatMapping(&map, GL_LUMINANCE,          GL_HALF_FLOAT,                     GL_LUMINANCE16F_EXT);
+    InsertFormatMapping(&map, GL_LUMINANCE,          GL_HALF_FLOAT_OES,                 GL_LUMINANCE16F_EXT);
+    InsertFormatMapping(&map, GL_ALPHA,              GL_HALF_FLOAT,                     GL_ALPHA16F_EXT);
+    InsertFormatMapping(&map, GL_ALPHA,              GL_HALF_FLOAT_OES,                 GL_ALPHA16F_EXT);
 
-    InsertFormatMapping(&map, GL_LUMINANCE_ALPHA,    GL_UNSIGNED_BYTE,                  GL_LUMINANCE8_ALPHA8_EXT,  WriteColor<L8A8, GLfloat>         );
-    InsertFormatMapping(&map, GL_LUMINANCE,          GL_UNSIGNED_BYTE,                  GL_LUMINANCE8_EXT,         WriteColor<L8, GLfloat>           );
-    InsertFormatMapping(&map, GL_ALPHA,              GL_UNSIGNED_BYTE,                  GL_ALPHA8_EXT,             WriteColor<A8, GLfloat>           );
-    InsertFormatMapping(&map, GL_LUMINANCE_ALPHA,    GL_FLOAT,                          GL_LUMINANCE_ALPHA32F_EXT, WriteColor<L32A32F, GLfloat>      );
-    InsertFormatMapping(&map, GL_LUMINANCE,          GL_FLOAT,                          GL_LUMINANCE32F_EXT,       WriteColor<L32F, GLfloat>         );
-    InsertFormatMapping(&map, GL_ALPHA,              GL_FLOAT,                          GL_ALPHA32F_EXT,           WriteColor<A32F, GLfloat>         );
-    InsertFormatMapping(&map, GL_LUMINANCE_ALPHA,    GL_HALF_FLOAT,                     GL_LUMINANCE_ALPHA16F_EXT, WriteColor<L16A16F, GLfloat>      );
-    InsertFormatMapping(&map, GL_LUMINANCE_ALPHA,    GL_HALF_FLOAT_OES,                 GL_LUMINANCE_ALPHA16F_EXT, WriteColor<L16A16F, GLfloat>      );
-    InsertFormatMapping(&map, GL_LUMINANCE,          GL_HALF_FLOAT,                     GL_LUMINANCE16F_EXT,       WriteColor<L16F, GLfloat>         );
-    InsertFormatMapping(&map, GL_LUMINANCE,          GL_HALF_FLOAT_OES,                 GL_LUMINANCE16F_EXT,       WriteColor<L16F, GLfloat>         );
-    InsertFormatMapping(&map, GL_ALPHA,              GL_HALF_FLOAT,                     GL_ALPHA16F_EXT,           WriteColor<A16F, GLfloat>         );
-    InsertFormatMapping(&map, GL_ALPHA,              GL_HALF_FLOAT_OES,                 GL_ALPHA16F_EXT,           WriteColor<A16F, GLfloat>         );
+    InsertFormatMapping(&map, GL_BGRA_EXT,           GL_UNSIGNED_BYTE,                  GL_BGRA8_EXT);
+    InsertFormatMapping(&map, GL_BGRA_EXT,           GL_UNSIGNED_SHORT_4_4_4_4_REV_EXT, GL_BGRA4_ANGLEX);
+    InsertFormatMapping(&map, GL_BGRA_EXT,           GL_UNSIGNED_SHORT_1_5_5_5_REV_EXT, GL_BGR5_A1_ANGLEX);
 
-    InsertFormatMapping(&map, GL_BGRA_EXT,           GL_UNSIGNED_BYTE,                  GL_BGRA8_EXT,              WriteColor<B8G8R8A8, GLfloat>     );
-    InsertFormatMapping(&map, GL_BGRA_EXT,           GL_UNSIGNED_SHORT_4_4_4_4_REV_EXT, GL_BGRA4_ANGLEX,           WriteColor<B4G4R4A4, GLfloat>     );
-    InsertFormatMapping(&map, GL_BGRA_EXT,           GL_UNSIGNED_SHORT_1_5_5_5_REV_EXT, GL_BGR5_A1_ANGLEX,         WriteColor<B5G5R5A1, GLfloat>     );
+    InsertFormatMapping(&map, GL_SRGB_EXT,           GL_UNSIGNED_BYTE,                  GL_SRGB8);
+    InsertFormatMapping(&map, GL_SRGB_ALPHA_EXT,     GL_UNSIGNED_BYTE,                  GL_SRGB8_ALPHA8);
 
-    InsertFormatMapping(&map, GL_SRGB_EXT,           GL_UNSIGNED_BYTE,                  GL_SRGB8,                  WriteColor<R8G8B8, GLfloat>       );
-    InsertFormatMapping(&map, GL_SRGB_ALPHA_EXT,     GL_UNSIGNED_BYTE,                  GL_SRGB8_ALPHA8,           WriteColor<R8G8B8A8, GLfloat>     );
+    InsertFormatMapping(&map, GL_COMPRESSED_RGB_S3TC_DXT1_EXT,    GL_UNSIGNED_BYTE,     GL_COMPRESSED_RGB_S3TC_DXT1_EXT);
+    InsertFormatMapping(&map, GL_COMPRESSED_RGBA_S3TC_DXT1_EXT,   GL_UNSIGNED_BYTE,     GL_COMPRESSED_RGBA_S3TC_DXT1_EXT);
+    InsertFormatMapping(&map, GL_COMPRESSED_RGBA_S3TC_DXT3_ANGLE, GL_UNSIGNED_BYTE,     GL_COMPRESSED_RGBA_S3TC_DXT3_ANGLE);
+    InsertFormatMapping(&map, GL_COMPRESSED_RGBA_S3TC_DXT5_ANGLE, GL_UNSIGNED_BYTE,     GL_COMPRESSED_RGBA_S3TC_DXT5_ANGLE);
 
-    InsertFormatMapping(&map, GL_COMPRESSED_RGB_S3TC_DXT1_EXT,    GL_UNSIGNED_BYTE,     GL_COMPRESSED_RGB_S3TC_DXT1_EXT,    NULL                     );
-    InsertFormatMapping(&map, GL_COMPRESSED_RGBA_S3TC_DXT1_EXT,   GL_UNSIGNED_BYTE,     GL_COMPRESSED_RGBA_S3TC_DXT1_EXT,   NULL                     );
-    InsertFormatMapping(&map, GL_COMPRESSED_RGBA_S3TC_DXT3_ANGLE, GL_UNSIGNED_BYTE,     GL_COMPRESSED_RGBA_S3TC_DXT3_ANGLE, NULL                     );
-    InsertFormatMapping(&map, GL_COMPRESSED_RGBA_S3TC_DXT5_ANGLE, GL_UNSIGNED_BYTE,     GL_COMPRESSED_RGBA_S3TC_DXT5_ANGLE, NULL                     );
+    InsertFormatMapping(&map, GL_DEPTH_COMPONENT,    GL_UNSIGNED_SHORT,                 GL_DEPTH_COMPONENT16);
+    InsertFormatMapping(&map, GL_DEPTH_COMPONENT,    GL_UNSIGNED_INT,                   GL_DEPTH_COMPONENT32_OES);
+    InsertFormatMapping(&map, GL_DEPTH_COMPONENT,    GL_FLOAT,                          GL_DEPTH_COMPONENT32F);
 
-    InsertFormatMapping(&map, GL_DEPTH_COMPONENT,    GL_UNSIGNED_SHORT,                 GL_DEPTH_COMPONENT16,      NULL                              );
-    InsertFormatMapping(&map, GL_DEPTH_COMPONENT,    GL_UNSIGNED_INT,                   GL_DEPTH_COMPONENT32_OES,  NULL                              );
-    InsertFormatMapping(&map, GL_DEPTH_COMPONENT,    GL_FLOAT,                          GL_DEPTH_COMPONENT32F,     NULL                              );
+    InsertFormatMapping(&map, GL_STENCIL,            GL_UNSIGNED_BYTE,                  GL_STENCIL_INDEX8);
 
-    InsertFormatMapping(&map, GL_STENCIL,            GL_UNSIGNED_BYTE,                  GL_STENCIL_INDEX8,         NULL                              );
-
-    InsertFormatMapping(&map, GL_DEPTH_STENCIL,      GL_UNSIGNED_INT_24_8,              GL_DEPTH24_STENCIL8,       NULL                              );
-    InsertFormatMapping(&map, GL_DEPTH_STENCIL,      GL_FLOAT_32_UNSIGNED_INT_24_8_REV, GL_DEPTH32F_STENCIL8,      NULL                              );
+    InsertFormatMapping(&map, GL_DEPTH_STENCIL,      GL_UNSIGNED_INT_24_8,              GL_DEPTH24_STENCIL8);
+    InsertFormatMapping(&map, GL_DEPTH_STENCIL,      GL_FLOAT_32_UNSIGNED_INT_24_8_REV, GL_DEPTH32F_STENCIL8);
 
     return map;
 }
 
 Type::Type()
     : bytes(0),
+      bytesShift(0),
       specialInterpretation(false)
 {
 }
 
-// Map of sizes of input types
-typedef std::pair<GLenum, Type> TypeInfoPair;
-typedef std::map<GLenum, Type> TypeInfoMap;
-
-static inline void InsertTypeInfo(TypeInfoMap *map, GLenum type, GLuint bytes, bool specialInterpretation)
+static Type GenTypeInfo(GLuint bytes, bool specialInterpretation)
 {
     Type info;
     info.bytes = bytes;
+    GLuint i = 0;
+    while ((1u << i) < bytes)
+    {
+        ++i;
+    }
+    info.bytesShift = i;
+    ASSERT((1u << info.bytesShift) == bytes);
     info.specialInterpretation = specialInterpretation;
-
-    map->insert(std::make_pair(type, info));
+    return info;
 }
 
 bool operator<(const Type& a, const Type& b)
 {
     return memcmp(&a, &b, sizeof(Type)) < 0;
-}
-
-static TypeInfoMap BuildTypeInfoMap()
-{
-    TypeInfoMap map;
-
-    InsertTypeInfo(&map, GL_UNSIGNED_BYTE,                  1, false);
-    InsertTypeInfo(&map, GL_BYTE,                           1, false);
-    InsertTypeInfo(&map, GL_UNSIGNED_SHORT,                 2, false);
-    InsertTypeInfo(&map, GL_SHORT,                          2, false);
-    InsertTypeInfo(&map, GL_UNSIGNED_INT,                   4, false);
-    InsertTypeInfo(&map, GL_INT,                            4, false);
-    InsertTypeInfo(&map, GL_HALF_FLOAT,                     2, false);
-    InsertTypeInfo(&map, GL_HALF_FLOAT_OES,                 2, false);
-    InsertTypeInfo(&map, GL_FLOAT,                          4, false);
-    InsertTypeInfo(&map, GL_UNSIGNED_SHORT_5_6_5,           2, true );
-    InsertTypeInfo(&map, GL_UNSIGNED_SHORT_4_4_4_4,         2, true );
-    InsertTypeInfo(&map, GL_UNSIGNED_SHORT_5_5_5_1,         2, true );
-    InsertTypeInfo(&map, GL_UNSIGNED_SHORT_4_4_4_4_REV_EXT, 2, true );
-    InsertTypeInfo(&map, GL_UNSIGNED_SHORT_1_5_5_5_REV_EXT, 2, true );
-    InsertTypeInfo(&map, GL_UNSIGNED_INT_2_10_10_10_REV,    4, true );
-    InsertTypeInfo(&map, GL_UNSIGNED_INT_24_8,              4, true );
-    InsertTypeInfo(&map, GL_UNSIGNED_INT_10F_11F_11F_REV,   4, true );
-    InsertTypeInfo(&map, GL_UNSIGNED_INT_5_9_9_9_REV,       4, true );
-    InsertTypeInfo(&map, GL_UNSIGNED_INT_24_8_OES,          4, true );
-    InsertTypeInfo(&map, GL_FLOAT_32_UNSIGNED_INT_24_8_REV, 8, true );
-
-    return map;
 }
 
 // Information about internal formats
@@ -543,33 +505,59 @@ static FormatSet BuildAllSizedInternalFormatSet()
     return result;
 }
 
-const FormatType &GetFormatTypeInfo(GLenum format, GLenum type)
-{
-    static const FormatMap formatMap = BuildFormatMap();
-    FormatMap::const_iterator iter = formatMap.find(FormatTypePair(format, type));
-    if (iter != formatMap.end())
-    {
-        return iter->second;
-    }
-    else
-    {
-        static const FormatType defaultInfo;
-        return defaultInfo;
-    }
-}
-
 const Type &GetTypeInfo(GLenum type)
 {
-    static const TypeInfoMap infoMap = BuildTypeInfoMap();
-    TypeInfoMap::const_iterator iter = infoMap.find(type);
-    if (iter != infoMap.end())
+    switch (type)
     {
-        return iter->second;
-    }
-    else
-    {
-        static const Type defaultInfo;
-        return defaultInfo;
+      case GL_UNSIGNED_BYTE:
+      case GL_BYTE:
+        {
+            static const Type info = GenTypeInfo(1, false);
+            return info;
+        }
+      case GL_UNSIGNED_SHORT:
+      case GL_SHORT:
+      case GL_HALF_FLOAT:
+      case GL_HALF_FLOAT_OES:
+        {
+            static const Type info = GenTypeInfo(2, false);
+            return info;
+        }
+      case GL_UNSIGNED_INT:
+      case GL_INT:
+      case GL_FLOAT:
+        {
+            static const Type info = GenTypeInfo(4, false);
+            return info;
+        }
+      case GL_UNSIGNED_SHORT_5_6_5:
+      case GL_UNSIGNED_SHORT_4_4_4_4:
+      case GL_UNSIGNED_SHORT_5_5_5_1:
+      case GL_UNSIGNED_SHORT_4_4_4_4_REV_EXT:
+      case GL_UNSIGNED_SHORT_1_5_5_5_REV_EXT:
+        {
+            static const Type info = GenTypeInfo(2, true);
+            return info;
+        }
+      case GL_UNSIGNED_INT_2_10_10_10_REV:
+      case GL_UNSIGNED_INT_24_8:
+      case GL_UNSIGNED_INT_10F_11F_11F_REV:
+      case GL_UNSIGNED_INT_5_9_9_9_REV:
+        {
+            ASSERT(GL_UNSIGNED_INT_24_8_OES == GL_UNSIGNED_INT_24_8);
+            static const Type info = GenTypeInfo(4, true);
+            return info;
+        }
+      case GL_FLOAT_32_UNSIGNED_INT_24_8_REV:
+        {
+            static const Type info = GenTypeInfo(8, true);
+            return info;
+        }
+      default:
+        {
+            static const Type defaultInfo;
+            return defaultInfo;
+        }
     }
 }
 
@@ -588,18 +576,28 @@ const InternalFormat &GetInternalFormatInfo(GLenum internalFormat)
     }
 }
 
-GLuint InternalFormat::computeRowPitch(GLenum type, GLsizei width, GLint alignment) const
+GLuint InternalFormat::computeRowPitch(GLenum formatType, GLsizei width, GLint alignment, GLint rowLength) const
 {
     ASSERT(alignment > 0 && isPow2(alignment));
-    return rx::roundUp(computeBlockSize(type, width, 1), static_cast<GLuint>(alignment));
+    GLuint rowBytes;
+    if (rowLength > 0)
+    {
+        ASSERT(!compressed);
+        rowBytes = pixelBytes * rowLength;
+    }
+    else
+    {
+        rowBytes = computeBlockSize(formatType, width, 1);
+    }
+    return rx::roundUp(rowBytes, static_cast<GLuint>(alignment));
 }
 
-GLuint InternalFormat::computeDepthPitch(GLenum type, GLsizei width, GLsizei height, GLint alignment) const
+GLuint InternalFormat::computeDepthPitch(GLenum formatType, GLsizei width, GLsizei height, GLint alignment, GLint rowLength) const
 {
-    return computeRowPitch(type, width, alignment) * height;
+    return computeRowPitch(formatType, width, alignment, rowLength) * height;
 }
 
-GLuint InternalFormat::computeBlockSize(GLenum type, GLsizei width, GLsizei height) const
+GLuint InternalFormat::computeBlockSize(GLenum formatType, GLsizei width, GLsizei height) const
 {
     if (compressed)
     {
@@ -609,7 +607,7 @@ GLuint InternalFormat::computeBlockSize(GLenum type, GLsizei width, GLsizei heig
     }
     else
     {
-        const Type &typeInfo = GetTypeInfo(type);
+        const Type &typeInfo = GetTypeInfo(formatType);
         if (typeInfo.specialInterpretation)
         {
             return typeInfo.bytes * width * height;
@@ -624,7 +622,23 @@ GLuint InternalFormat::computeBlockSize(GLenum type, GLsizei width, GLsizei heig
 GLenum GetSizedInternalFormat(GLenum internalFormat, GLenum type)
 {
     const InternalFormat& formatInfo = GetInternalFormatInfo(internalFormat);
-    return (formatInfo.pixelBytes > 0) ? internalFormat : GetFormatTypeInfo(internalFormat, type).internalFormat;
+    if (formatInfo.pixelBytes > 0)
+    {
+        return internalFormat;
+    }
+    else
+    {
+        static const FormatMap formatMap = BuildFormatMap();
+        FormatMap::const_iterator iter = formatMap.find(FormatTypePair(internalFormat, type));
+        if (iter != formatMap.end())
+        {
+            return iter->second;
+        }
+        else
+        {
+            return GL_NONE;
+        }
+    }
 }
 
 const FormatSet &GetAllSizedInternalFormats()

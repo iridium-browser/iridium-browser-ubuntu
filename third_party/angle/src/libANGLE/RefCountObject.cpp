@@ -12,9 +12,9 @@
 #include "RefCountObject.h"
 
 RefCountObject::RefCountObject(GLuint id)
+    : mId(id),
+      mRefCount(0)
 {
-    mId = id;
-    mRefCount = 0;
 }
 
 RefCountObject::~RefCountObject()
@@ -37,11 +37,3 @@ void RefCountObject::release() const
     }
 }
 
-void RefCountObjectBindingPointer::set(RefCountObject *newObject)
-{
-    // addRef first in case newObject == mObject and this is the last reference to it.
-    if (newObject != NULL) newObject->addRef();
-    if (mObject != NULL) mObject->release();
-
-    mObject = newObject;
-}

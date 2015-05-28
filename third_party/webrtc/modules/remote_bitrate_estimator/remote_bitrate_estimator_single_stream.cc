@@ -10,6 +10,7 @@
 #include <map>
 
 #include "webrtc/base/constructormagic.h"
+#include "webrtc/base/scoped_ptr.h"
 #include "webrtc/base/thread_annotations.h"
 #include "webrtc/modules/remote_bitrate_estimator/rate_statistics.h"
 #include "webrtc/modules/remote_bitrate_estimator/include/remote_bitrate_estimator.h"
@@ -20,7 +21,6 @@
 #include "webrtc/system_wrappers/interface/clock.h"
 #include "webrtc/system_wrappers/interface/critical_section_wrapper.h"
 #include "webrtc/system_wrappers/interface/logging.h"
-#include "webrtc/system_wrappers/interface/scoped_ptr.h"
 #include "webrtc/typedefs.h"
 
 namespace webrtc {
@@ -36,16 +36,16 @@ class RemoteBitrateEstimatorImpl : public RemoteBitrateEstimator {
                              uint32_t min_bitrate_bps);
   virtual ~RemoteBitrateEstimatorImpl();
 
-  virtual void IncomingPacket(int64_t arrival_time_ms,
-                              size_t payload_size,
-                              const RTPHeader& header) OVERRIDE;
-  virtual int32_t Process() OVERRIDE;
-  virtual int64_t TimeUntilNextProcess() OVERRIDE;
-  virtual void OnRttUpdate(uint32_t rtt) OVERRIDE;
-  virtual void RemoveStream(unsigned int ssrc) OVERRIDE;
-  virtual bool LatestEstimate(std::vector<unsigned int>* ssrcs,
-                              unsigned int* bitrate_bps) const OVERRIDE;
-  virtual bool GetStats(ReceiveBandwidthEstimatorStats* output) const OVERRIDE;
+  void IncomingPacket(int64_t arrival_time_ms,
+                      size_t payload_size,
+                      const RTPHeader& header) override;
+  int32_t Process() override;
+  int64_t TimeUntilNextProcess() override;
+  void OnRttUpdate(int64_t rtt) override;
+  void RemoveStream(unsigned int ssrc) override;
+  bool LatestEstimate(std::vector<unsigned int>* ssrcs,
+                      unsigned int* bitrate_bps) const override;
+  bool GetStats(ReceiveBandwidthEstimatorStats* output) const override;
 
  private:
   struct Detector {
@@ -75,9 +75,9 @@ class RemoteBitrateEstimatorImpl : public RemoteBitrateEstimator {
   Clock* clock_;
   SsrcOveruseEstimatorMap overuse_detectors_ GUARDED_BY(crit_sect_.get());
   RateStatistics incoming_bitrate_ GUARDED_BY(crit_sect_.get());
-  scoped_ptr<RemoteRateControl> remote_rate_ GUARDED_BY(crit_sect_.get());
+  rtc::scoped_ptr<RemoteRateControl> remote_rate_ GUARDED_BY(crit_sect_.get());
   RemoteBitrateObserver* observer_ GUARDED_BY(crit_sect_.get());
-  scoped_ptr<CriticalSectionWrapper> crit_sect_;
+  rtc::scoped_ptr<CriticalSectionWrapper> crit_sect_;
   int64_t last_process_time_;
   int64_t process_interval_ms_ GUARDED_BY(crit_sect_.get());
 
@@ -230,7 +230,7 @@ void RemoteBitrateEstimatorImpl::UpdateEstimate(int64_t now_ms) {
   }
 }
 
-void RemoteBitrateEstimatorImpl::OnRttUpdate(uint32_t rtt) {
+void RemoteBitrateEstimatorImpl::OnRttUpdate(int64_t rtt) {
   CriticalSectionScoped cs(crit_sect_.get());
   remote_rate_->SetRtt(rtt);
 }

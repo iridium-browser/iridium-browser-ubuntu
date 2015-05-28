@@ -133,6 +133,8 @@ std::string GetStringFromID(SavePasswordProgressLogger::StringID id) {
       return "Form manager found, exact match";
     case SavePasswordProgressLogger::STRING_MATCH_WITHOUT_ACTION:
       return "Form manager found, match except for action";
+    case SavePasswordProgressLogger::STRING_ORIGINS_MATCH:
+      return "Form manager found, only origins match";
     case SavePasswordProgressLogger::STRING_MATCHING_NOT_COMPLETE:
       return "No form manager has completed matching";
     case SavePasswordProgressLogger::STRING_FORM_BLACKLISTED:
@@ -211,6 +213,8 @@ std::string GetStringFromID(SavePasswordProgressLogger::StringID id) {
       return "The observed form will not be autofilled";
     case SavePasswordProgressLogger::STRING_CHANGE_PASSWORD_FORM:
       return "Not saving password for a change password form";
+    case SavePasswordProgressLogger::PROCESS_FRAME_METHOD:
+      return "PasswordFormManager::ProcessFrame";
     case SavePasswordProgressLogger::STRING_INVALID:
       return "INVALID";
       // Intentionally no default: clause here -- all IDs need to get covered.

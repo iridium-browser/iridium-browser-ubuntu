@@ -5,8 +5,6 @@
 #ifndef V8_COMPILER_RAW_MACHINE_ASSEMBLER_H_
 #define V8_COMPILER_RAW_MACHINE_ASSEMBLER_H_
 
-#include "src/v8.h"
-
 #include "src/compiler/common-operator.h"
 #include "src/compiler/graph-builder.h"
 #include "src/compiler/linkage.h"
@@ -44,19 +42,19 @@ class RawMachineAssembler : public GraphBuilder {
     DISALLOW_COPY_AND_ASSIGN(Label);
   };
 
-  RawMachineAssembler(Graph* graph, MachineSignature* machine_sig,
+  RawMachineAssembler(Isolate* isolate, Graph* graph,
+                      const MachineSignature* machine_sig,
                       MachineType word = kMachPtr,
                       MachineOperatorBuilder::Flags flags =
                           MachineOperatorBuilder::Flag::kNoFlags);
   ~RawMachineAssembler() OVERRIDE {}
 
-  Isolate* isolate() const { return zone()->isolate(); }
   Zone* zone() const { return graph()->zone(); }
   MachineOperatorBuilder* machine() { return &machine_; }
   CommonOperatorBuilder* common() { return &common_; }
   CallDescriptor* call_descriptor() const { return call_descriptor_; }
   size_t parameter_count() const { return machine_sig_->parameter_count(); }
-  MachineSignature* machine_sig() const { return machine_sig_; }
+  const MachineSignature* machine_sig() const { return machine_sig_; }
 
   Node* UndefinedConstant() {
     Unique<HeapObject> unique = Unique<HeapObject>::CreateImmovable(
@@ -92,6 +90,9 @@ class RawMachineAssembler : public GraphBuilder {
     Unique<HeapObject> val = Unique<HeapObject>::CreateUninitialized(object);
     return NewNode(common()->HeapConstant(val));
   }
+  Node* ExternalConstant(ExternalReference address) {
+    return NewNode(common()->ExternalConstant(address));
+  }
 
   Node* Projection(int index, Node* a) {
     return NewNode(common()->Projection(index), a);
@@ -99,14 +100,14 @@ class RawMachineAssembler : public GraphBuilder {
 
   // Memory Operations.
   Node* Load(MachineType rep, Node* base) {
-    return Load(rep, base, Int32Constant(0));
+    return Load(rep, base, IntPtrConstant(0));
   }
   Node* Load(MachineType rep, Node* base, Node* index) {
     return NewNode(machine()->Load(rep), base, index, graph()->start(),
                    graph()->start());
   }
   void Store(MachineType rep, Node* base, Node* value) {
-    Store(rep, base, Int32Constant(0), value);
+    Store(rep, base, IntPtrConstant(0), value);
   }
   void Store(MachineType rep, Node* base, Node* index, Node* value) {
     NewNode(machine()->Store(StoreRepresentation(rep, kNoWriteBarrier)), base,
@@ -174,6 +175,7 @@ class RawMachineAssembler : public GraphBuilder {
   Node* Word32Ror(Node* a, Node* b) {
     return NewNode(machine()->Word32Ror(), a, b);
   }
+  Node* Word32Clz(Node* a) { return NewNode(machine()->Word32Clz(), a); }
   Node* Word32Equal(Node* a, Node* b) {
     return NewNode(machine()->Word32Equal(), a, b);
   }
@@ -283,6 +285,9 @@ class RawMachineAssembler : public GraphBuilder {
   Node* Int64LessThan(Node* a, Node* b) {
     return NewNode(machine()->Int64LessThan(), a, b);
   }
+  Node* Uint64LessThan(Node* a, Node* b) {
+    return NewNode(machine()->Uint64LessThan(), a, b);
+  }
   Node* Int64LessThanOrEqual(Node* a, Node* b) {
     return NewNode(machine()->Int64LessThanOrEqual(), a, b);
   }
@@ -386,14 +391,32 @@ class RawMachineAssembler : public GraphBuilder {
   Node* TruncateInt64ToInt32(Node* a) {
     return NewNode(machine()->TruncateInt64ToInt32(), a);
   }
-  Node* Float64Floor(Node* a) { return NewNode(machine()->Float64Floor(), a); }
-  Node* Float64Ceil(Node* a) { return NewNode(machine()->Float64Ceil(), a); }
+  Node* Float64RoundDown(Node* a) {
+    return NewNode(machine()->Float64RoundDown(), a);
+  }
   Node* Float64RoundTruncate(Node* a) {
     return NewNode(machine()->Float64RoundTruncate(), a);
   }
   Node* Float64RoundTiesAway(Node* a) {
     return NewNode(machine()->Float64RoundTiesAway(), a);
   }
+
+  // Float64 bit operations.
+  Node* Float64ExtractLowWord32(Node* a) {
+    return NewNode(machine()->Float64ExtractLowWord32(), a);
+  }
+  Node* Float64ExtractHighWord32(Node* a) {
+    return NewNode(machine()->Float64ExtractHighWord32(), a);
+  }
+  Node* Float64InsertLowWord32(Node* a, Node* b) {
+    return NewNode(machine()->Float64InsertLowWord32(), a, b);
+  }
+  Node* Float64InsertHighWord32(Node* a, Node* b) {
+    return NewNode(machine()->Float64InsertHighWord32(), a, b);
+  }
+
+  // Stack operations.
+  Node* LoadStackPointer() { return NewNode(machine()->LoadStackPointer()); }
 
   // Parameters.
   Node* Parameter(size_t index);
@@ -402,6 +425,8 @@ class RawMachineAssembler : public GraphBuilder {
   Label* Exit();
   void Goto(Label* label);
   void Branch(Node* condition, Label* true_val, Label* false_val);
+  void Switch(Node* index, Label* default_label, int32_t* case_values,
+              Label** case_labels, size_t case_count);
   // Call through CallFunctionStub with lazy deopt and frame-state.
   Node* CallFunctionStub0(Node* function, Node* receiver, Node* context,
                           Node* frame_state, CallFunctionFlags flags);
@@ -448,7 +473,7 @@ class RawMachineAssembler : public GraphBuilder {
   Schedule* schedule_;
   MachineOperatorBuilder machine_;
   CommonOperatorBuilder common_;
-  MachineSignature* machine_sig_;
+  const MachineSignature* machine_sig_;
   CallDescriptor* call_descriptor_;
   Node** parameters_;
   Label exit_label_;

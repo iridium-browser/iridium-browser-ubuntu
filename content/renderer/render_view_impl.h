@@ -29,7 +29,6 @@
 #include "content/common/frame_message_enums.h"
 #include "content/common/gpu/client/webgraphicscontext3d_command_buffer_impl.h"
 #include "content/common/navigation_gesture.h"
-#include "content/common/navigation_params.h"
 #include "content/common/view_message_enums.h"
 #include "content/public/common/page_zoom.h"
 #include "content/public/common/referrer.h"
@@ -44,6 +43,7 @@
 #include "content/renderer/stats_collection_observer.h"
 #include "ipc/ipc_platform_file.h"
 #include "third_party/WebKit/public/platform/WebGraphicsContext3D.h"
+#include "third_party/WebKit/public/platform/WebPageVisibilityState.h"
 #include "third_party/WebKit/public/web/WebAXObject.h"
 #include "third_party/WebKit/public/web/WebConsoleMessage.h"
 #include "third_party/WebKit/public/web/WebDataSource.h"
@@ -54,7 +54,6 @@
 #include "third_party/WebKit/public/web/WebNavigationType.h"
 #include "third_party/WebKit/public/web/WebNode.h"
 #include "third_party/WebKit/public/web/WebPageSerializerClient.h"
-#include "third_party/WebKit/public/web/WebPageVisibilityState.h"
 #include "third_party/WebKit/public/web/WebSecurityOrigin.h"
 #include "third_party/WebKit/public/web/WebViewClient.h"
 #include "ui/base/window_open_disposition.h"
@@ -76,7 +75,6 @@
 class PepperDeviceTest;
 class SkBitmap;
 struct PP_NetAddress_Private;
-struct FrameMsg_Navigate_Params;
 struct ViewMsg_New_Params;
 struct ViewMsg_PostMessage_Params;
 struct ViewMsg_Resize_Params;
@@ -121,12 +119,9 @@ class WebHitTestResult;
 
 namespace content {
 
-class DevToolsAgent;
-class DocumentState;
 class HistoryController;
 class HistoryEntry;
 class MouseLockDispatcher;
-class NavigationState;
 class PageState;
 class PepperPluginInstanceImpl;
 class RenderViewImplTest;
@@ -150,6 +145,11 @@ class WebMediaPlayerProxyAndroid;
 // RenderView is an object that manages a WebView object, and provides a
 // communication interface with an embedding application process.
 //
+// DEPRECATED: RenderViewImpl is being removed as part of the SiteIsolation
+// project. New code should be added to RenderFrameImpl instead.
+//
+// For context, please see https://crbug.com/467770 and
+// http://www.chromium.org/developers/design-documents/site-isolation.
 class CONTENT_EXPORT RenderViewImpl
     : public RenderWidget,
       NON_EXPORTED_BASE(public blink::WebViewClient),
@@ -282,15 +282,8 @@ class CONTENT_EXPORT RenderViewImpl
 
   // Returns true if the focused element is editable text from the perspective
   // of IME support (also used for on-screen keyboard). Works correctly inside
-  // supported PPAPI plug-ins.
+  // supported PPAPI plugins.
   bool HasIMETextFocus();
-
-  // Callback for use with GetWindowSnapshot.
-  typedef base::Callback<void(
-      const gfx::Size&, const std::vector<unsigned char>&)>
-      WindowSnapshotCallback;
-
-  void GetWindowSnapshot(const WindowSnapshotCallback& callback);
 
   // Dispatches the current navigation state to the browser. Called on a
   // periodic timer so we don't send too many messages.
@@ -333,9 +326,6 @@ class CONTENT_EXPORT RenderViewImpl
   virtual void didFocus();
   virtual void didBlur();
   virtual void show(blink::WebNavigationPolicy policy);
-  virtual void runModal();
-  virtual bool enterFullScreen();
-  virtual void exitFullScreen();
   virtual bool requestPointerLock();
   virtual void requestPointerUnlock();
   virtual bool isPointerLocked();
@@ -386,7 +376,8 @@ class CONTENT_EXPORT RenderViewImpl
   virtual bool acceptsLoadDrops();
   virtual void focusNext();
   virtual void focusPrevious();
-  virtual void focusedNodeChanged(const blink::WebNode& node);
+  virtual void focusedNodeChanged(const blink::WebNode& fromNode,
+                                  const blink::WebNode& toNode);
   virtual void didUpdateLayout();
 #if defined(OS_ANDROID) || defined(TOOLKIT_VIEWS)
   virtual bool didTapMultipleTargets(
@@ -401,6 +392,7 @@ class CONTENT_EXPORT RenderViewImpl
   virtual blink::WebSpeechRecognizer* speechRecognizer();
   virtual void zoomLimitsChanged(double minimum_level, double maximum_level);
   virtual void zoomLevelChanged();
+  virtual void pageScaleFactorChanged();
   virtual double zoomLevelToZoomFactor(double zoom_level) const;
   virtual double zoomFactorToZoomLevel(double factor) const;
   virtual void registerProtocolHandler(const blink::WebString& scheme,
@@ -440,10 +432,7 @@ class CONTENT_EXPORT RenderViewImpl
   WebPreferences& GetWebkitPreferences() override;
   void SetWebkitPreferences(const WebPreferences& preferences) override;
   blink::WebView* GetWebView() override;
-  blink::WebElement GetFocusedElement() const override;
   bool IsEditableNode(const blink::WebNode& node) const override;
-  bool NodeContainsPoint(const blink::WebNode& node,
-                         const gfx::Point& point) const override;
   bool ShouldDisplayScrollbars(int width, int height) const override;
   int GetEnabledBindings() const override;
   bool GetContentStateImmediately() const override;
@@ -457,9 +446,9 @@ class CONTENT_EXPORT RenderViewImpl
   SSLStatus GetSSLStatusOfFrame(blink::WebFrame* frame) const override;
   const std::string& GetAcceptLanguages() const override;
 #if defined(OS_ANDROID)
-  virtual void UpdateTopControlsState(TopControlsState constraints,
-                                      TopControlsState current,
-                                      bool animate) override;
+  void UpdateTopControlsState(TopControlsState constraints,
+                              TopControlsState current,
+                              bool animate) override;
 #endif
   bool uses_temporary_zoom_level() const { return uses_temporary_zoom_level_; }
 
@@ -499,15 +488,13 @@ class CONTENT_EXPORT RenderViewImpl
   void OnOrientationChange() override;
   ui::TextInputType GetTextInputType() override;
   void GetSelectionBounds(gfx::Rect* start, gfx::Rect* end) override;
+  void FocusChangeComplete() override;
   void GetCompositionCharacterBounds(
       std::vector<gfx::Rect>* character_bounds) override;
   void GetCompositionRange(gfx::Range* range) override;
   bool CanComposeInline() override;
   void DidCommitCompositorFrame() override;
-  void InstrumentWillBeginFrame(int frame_id) override;
-  void InstrumentDidBeginFrame() override;
-  void InstrumentDidCancelFrame() override;
-  void InstrumentWillComposite() override;
+  void DidCompletePageScaleAnimation() override;
 
  protected:
   explicit RenderViewImpl(const ViewMsg_New_Params& params);
@@ -515,9 +502,9 @@ class CONTENT_EXPORT RenderViewImpl
   void Initialize(const ViewMsg_New_Params& params,
                   CompositorDependencies* compositor_deps,
                   bool was_created_by_renderer);
-  void SetScreenMetricsEmulationParameters(float device_scale_factor,
-                                           const gfx::Point& root_layer_offset,
-                                           float root_layer_scale) override;
+  void SetScreenMetricsEmulationParameters(
+      bool enabled,
+      const blink::WebDeviceEmulationParams& params) override;
 
   // Do not delete directly.  This class is reference counted.
   virtual ~RenderViewImpl();
@@ -558,6 +545,7 @@ class CONTENT_EXPORT RenderViewImpl
   FRIEND_TEST_ALL_PREFIXES(RenderViewImplTest,
                            GetCompositionCharacterBoundsTest);
   FRIEND_TEST_ALL_PREFIXES(RenderViewImplTest, OnNavigationHttpPost);
+  FRIEND_TEST_ALL_PREFIXES(RenderViewImplTest, ScreenMetricsEmulation);
   FRIEND_TEST_ALL_PREFIXES(RenderViewImplTest,
                            DecideNavigationPolicyHandlesAllTopLevel);
 #if defined(OS_MACOSX)
@@ -589,14 +577,9 @@ class CONTENT_EXPORT RenderViewImpl
   // still live here and are called from RenderFrameImpl. These implementations
   // are to be moved to RenderFrameImpl <http://crbug.com/361761>.
 
-  void didCreateDataSource(blink::WebLocalFrame* frame,
-                           blink::WebDataSource* datasource);
-  void didClearWindowObject(blink::WebLocalFrame* frame);
   void didChangeIcon(blink::WebLocalFrame*, blink::WebIconURL::Type);
   void didUpdateCurrentHistoryItem(blink::WebLocalFrame* frame);
   void didChangeScrollOffset(blink::WebLocalFrame* frame);
-
-  static bool IsReload(FrameMsg_Navigate_Type::Value navigation_type);
 
   static Referrer GetReferrerFromRequest(
       blink::WebFrame* frame,
@@ -686,10 +669,9 @@ class CONTENT_EXPORT RenderViewImpl
   void OnThemeChanged();
   void OnUpdateTargetURLAck();
   void OnUpdateWebPreferences(const WebPreferences& prefs);
+  void OnResetPageScale();
   void OnZoom(PageZoom zoom);
   void OnEnableViewSourceMode();
-  void OnWindowSnapshotCompleted(const int snapshot_id,
-      const gfx::Size& size, const std::vector<unsigned char>& png);
   void OnForceRedraw(int request_id);
   void OnSelectWordAroundCaret();
 #if defined(OS_ANDROID)
@@ -717,22 +699,12 @@ class CONTENT_EXPORT RenderViewImpl
   // Check whether the preferred size has changed.
   void CheckPreferredSize();
 
+  // Gets the currently focused element, if any.
+  blink::WebElement GetFocusedElement() const;
+
   // Called to get the WebPlugin to handle find requests in the document.
   // Returns NULL if there is no such WebPlugin.
   blink::WebPlugin* GetWebPluginForFind();
-
-
-  // If we initiated a navigation, this function will populate |document_state|
-  // with the navigation information saved in OnNavigate().
-  void PopulateDocumentStateFromPending(DocumentState* document_state);
-
-  // Returns a new NavigationState populated with the navigation information
-  // saved in OnNavigate().
-  NavigationState* CreateNavigationStateFromPending();
-
-  // Processes the command-line flags --enable-viewport,
-  // --enable-fixed-layout[=w,h] and --enable-pinch.
-  void ProcessViewLayoutFlags(const base::CommandLine& command_line);
 
 #if defined(OS_ANDROID)
   // Launch an Android content intent with the given URL.
@@ -847,26 +819,12 @@ class CONTENT_EXPORT RenderViewImpl
   // PageGroupLoadDeferrer on the stack that interferes with swapping out.
   bool suppress_dialogs_until_swap_out_;
 
-  // Holds state pertaining to a navigation that we initiated.  This is held by
-  // the WebDataSource::ExtraData attribute.  We use pending_navigation_state_
-  // as a temporary holder for the state until the WebDataSource corresponding
-  // to the new navigation is created.  See DidCreateDataSource.
-  // TODO(nasko): Move to RenderFrame, as this is per-frame state.
-  scoped_ptr<FrameMsg_Navigate_Params> pending_navigation_params_;
-
   // Timer used to delay the updating of nav state (see SyncNavigationState).
   base::OneShotTimer<RenderViewImpl> nav_state_sync_timer_;
 
   // Page IDs ------------------------------------------------------------------
   // See documentation in RenderView.
   int32 page_id_;
-
-  // Indicates the ID of the last page that we sent a FrameNavigate to the
-  // browser for. This is used to determine if the most recent transition
-  // generated a history entry (less than page_id_), or not (equal to or
-  // greater than). Note that this will be greater than page_id_ if the user
-  // goes back.
-  int32 last_page_id_sent_to_browser_;
 
   // The next available page ID to use for this RenderView.  These IDs are
   // specific to a given RenderView and the frames within it.
@@ -924,7 +882,7 @@ class CONTENT_EXPORT RenderViewImpl
 #if defined(OS_ANDROID)
   // Cache the old top controls state constraints. Used when updating
   // current value only without altering the constraints.
-  cc::TopControlsState top_controls_constraints_;
+  TopControlsState top_controls_constraints_;
 #endif
 
   // View ----------------------------------------------------------------------
@@ -954,8 +912,6 @@ class CONTENT_EXPORT RenderViewImpl
   // initialized.
   SpeechRecognitionDispatcher* speech_recognition_dispatcher_;
 
-  DevToolsAgent* devtools_agent_;
-
   // Mouse Lock dispatcher attached to this view.
   MouseLockDispatcher* mouse_lock_dispatcher_;
 
@@ -984,7 +940,7 @@ class CONTENT_EXPORT RenderViewImpl
   std::set<WebPluginDelegateProxy*> plugin_delegates_;
 
 #if defined(OS_WIN)
-  // The ID of the focused NPAPI plug-in.
+  // The ID of the focused NPAPI plugin.
   int focused_plugin_id_;
 #endif
 
@@ -1038,11 +994,6 @@ class CONTENT_EXPORT RenderViewImpl
   // Wraps the |webwidget_| as a MouseLockDispatcher::LockTarget interface.
   scoped_ptr<MouseLockDispatcher::LockTarget> webwidget_mouse_lock_target_;
 
-  // State associated with the GetWindowSnapshot function.
-  int next_snapshot_id_;
-  typedef std::map<int, WindowSnapshotCallback> PendingSnapshotMap;
-  PendingSnapshotMap pending_snapshots_;
-
   // This field stores drag/drop related info for the event that is currently
   // being handled. If the current event results in starting a drag/drop
   // session, this info is sent to the browser along with other drag/drop info.
@@ -1054,6 +1005,8 @@ class CONTENT_EXPORT RenderViewImpl
 
   typedef std::map<cc::SharedBitmapId, cc::SharedBitmap*> BitmapMap;
   BitmapMap disambiguation_bitmaps_;
+
+  bool page_scale_factor_is_one_;
 
   // ---------------------------------------------------------------------------
   // ADDING NEW DATA? Please see if it fits appropriately in one of the above

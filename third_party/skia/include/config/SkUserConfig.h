@@ -107,14 +107,6 @@
  */
 //#define SK_DEFAULT_IMAGE_CACHE_LIMIT (1024 * 1024)
 
-/*  If zlib is available and you want to support the flate compression
-    algorithm (used in PDF generation), define SK_ZLIB_INCLUDE to be the
-    include path. Alternatively, define SK_SYSTEM_ZLIB to use the system zlib
-    library specified as "#include <zlib.h>".
- */
-//#define SK_ZLIB_INCLUDE <zlib.h>
-//#define SK_SYSTEM_ZLIB
-
 /*  Define this to allow PDF scalars above 32k.  The PDF/A spec doesn't allow
     them, but modern PDF interpreters should handle them just fine.
  */
@@ -167,15 +159,5 @@
  * define should be removed entirely.
  */
 //#define SK_PDF_USE_PATHOPS
-
-/* Skia uses these defines as the target of include preprocessor directives.
- * The header files pointed to by these defines provide declarations and
- * possibly inline implementations of threading primitives.
- *
- * See SkThread.h for documentation on what these includes must contain.
- */
-//#define SK_ATOMICS_PLATFORM_H "SkAtomics_xxx.h"
-//#define SK_MUTEX_PLATFORM_H "SkMutex_xxx.h"
-//#define SK_BARRIERS_PLATFORM_H "SkBarriers_xxx.h"
 
 #endif

@@ -26,6 +26,7 @@
 #include "chrome/browser/ui/omnibox/omnibox_popup_model.h"
 #include "chrome/browser/ui/omnibox/omnibox_view.h"
 #include "chrome/browser/ui/search/instant_search_prerenderer.h"
+#include "chrome/browser/ui/search/instant_tab.h"
 #include "chrome/browser/ui/search/search_ipc_router_policy_impl.h"
 #include "chrome/browser/ui/search/search_tab_helper_delegate.h"
 #include "chrome/browser/ui/tab_contents/core_tab_helper.h"
@@ -55,20 +56,6 @@
 DEFINE_WEB_CONTENTS_USER_DATA_KEY(SearchTabHelper);
 
 namespace {
-
-// For reporting Cacheable NTP navigations.
-enum CacheableNTPLoad {
-  CACHEABLE_NTP_LOAD_FAILED = 0,
-  CACHEABLE_NTP_LOAD_SUCCEEDED = 1,
-  CACHEABLE_NTP_LOAD_MAX = 2
-};
-
-void RecordCacheableNTPLoadHistogram(bool succeeded) {
-  UMA_HISTOGRAM_ENUMERATION("InstantExtended.CacheableNTPLoad",
-                            succeeded ? CACHEABLE_NTP_LOAD_SUCCEEDED :
-                                CACHEABLE_NTP_LOAD_FAILED,
-                            CACHEABLE_NTP_LOAD_MAX);
-}
 
 bool IsCacheableNTP(const content::WebContents* contents) {
   const content::NavigationEntry* entry =
@@ -312,12 +299,9 @@ void SearchTabHelper::DidNavigateMainFrame(
     const content::LoadCommittedDetails& details,
     const content::FrameNavigateParams& params) {
   if (IsCacheableNTP(web_contents_)) {
-    if (details.http_status_code == 204 || details.http_status_code >= 400) {
-      RedirectToLocalNTP();
-      RecordCacheableNTPLoadHistogram(false);
-      return;
-    }
-    RecordCacheableNTPLoadHistogram(true);
+    UMA_HISTOGRAM_ENUMERATION("InstantExtended.CacheableNTPLoad",
+                              chrome::CACHEABLE_NTP_LOAD_SUCCEEDED,
+                              chrome::CACHEABLE_NTP_LOAD_MAX);
   }
 
   // Always set the title on the new tab page to be the one from our UI
@@ -336,21 +320,6 @@ void SearchTabHelper::DidNavigateMainFrame(
       (entry->GetVirtualURL() == GURL(chrome::kChromeUINewTabURL) ||
        chrome::NavEntryIsInstantNTP(web_contents_, entry))) {
     entry->SetTitle(l10n_util::GetStringUTF16(IDS_NEW_TAB_TITLE));
-  }
-}
-
-void SearchTabHelper::DidFailProvisionalLoad(
-    content::RenderFrameHost* render_frame_host,
-    const GURL& validated_url,
-    int error_code,
-    const base::string16& /* error_description */) {
-  // If error_code is ERR_ABORTED means that the user has canceled this
-  // navigation so it shouldn't be redirected.
-  if (!render_frame_host->GetParent() && error_code != net::ERR_ABORTED &&
-      validated_url != GURL(chrome::kChromeSearchLocalNtpUrl) &&
-      chrome::IsNTPURL(validated_url, profile())) {
-    RedirectToLocalNTP();
-    RecordCacheableNTPLoadHistogram(false);
   }
 }
 
@@ -433,6 +402,9 @@ void SearchTabHelper::ThemeInfoChanged(const ThemeBackgroundInfo& theme_info) {
 
 void SearchTabHelper::MostVisitedItemsChanged(
     const std::vector<InstantMostVisitedItem>& items) {
+  // When most visited change, the NTP usually reloads the tiles. This means
+  // our metrics get inconsistent. So we'd rather emit stats now.
+  InstantTab::EmitNtpStatistics(web_contents_);
   ipc_router_.SendMostVisitedItems(items);
 }
 
@@ -510,11 +482,12 @@ void SearchTabHelper::OnUndoAllMostVisitedDeletions() {
     instant_service_->UndoAllMostVisitedDeletions();
 }
 
-void SearchTabHelper::OnLogEvent(NTPLoggingEventType event) {
+void SearchTabHelper::OnLogEvent(NTPLoggingEventType event,
+                                 base::TimeDelta time) {
 // TODO(kmadhusu): Move platform specific code from here and get rid of #ifdef.
 #if !defined(OS_ANDROID)
-  NTPUserDataLogger::GetOrCreateFromWebContents(
-      web_contents())->LogEvent(event);
+  NTPUserDataLogger::GetOrCreateFromWebContents(web_contents())
+      ->LogEvent(event, time);
 #endif
 }
 
@@ -618,17 +591,6 @@ void SearchTabHelper::DetermineIfPageSupportsInstant() {
 
 Profile* SearchTabHelper::profile() const {
   return Profile::FromBrowserContext(web_contents_->GetBrowserContext());
-}
-
-void SearchTabHelper::RedirectToLocalNTP() {
-  // Extra parentheses to declare a variable.
-  content::NavigationController::LoadURLParams load_params(
-      (GURL(chrome::kChromeSearchLocalNtpUrl)));
-  load_params.referrer = content::Referrer();
-  load_params.transition_type = ui::PAGE_TRANSITION_SERVER_REDIRECT;
-  // Don't push a history entry.
-  load_params.should_replace_current_entry = true;
-  web_contents_->GetController().LoadURLWithParams(load_params);
 }
 
 bool SearchTabHelper::IsInputInProgress() const {

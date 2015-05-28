@@ -31,13 +31,13 @@
 #ifndef WebDocument_h
 #define WebDocument_h
 
-#include "../platform/WebReferrerPolicy.h"
-#include "../platform/WebVector.h"
 #include "WebDraggableRegion.h"
 #include "WebExceptionCode.h"
 #include "WebFrame.h"
 #include "WebNode.h"
-#include "WebSecurityOrigin.h"
+#include "public/platform/WebReferrerPolicy.h"
+#include "public/platform/WebSecurityOrigin.h"
+#include "public/platform/WebVector.h"
 
 #if BLINK_IMPLEMENTATION
 namespace WTF { template <typename T> class PassRefPtr; }
@@ -45,7 +45,7 @@ namespace WTF { template <typename T> class PassRefPtr; }
 
 namespace v8 {
 class Value;
-template <class T> class Handle;
+template <class T> class Local;
 }
 
 namespace blink {
@@ -143,9 +143,11 @@ public:
 
     BLINK_EXPORT WebVector<WebDraggableRegion> draggableRegions() const;
 
-    BLINK_EXPORT v8::Handle<v8::Value> registerEmbedderCustomElement(const WebString& name, v8::Handle<v8::Value> options, WebExceptionCode&);
+    BLINK_EXPORT v8::Local<v8::Value> registerEmbedderCustomElement(const WebString& name, v8::Local<v8::Value> options, WebExceptionCode&);
 
     BLINK_EXPORT WebURL manifestURL() const;
+
+    BLINK_EXPORT WebURL defaultPresentationURL() const;
 
 #if BLINK_IMPLEMENTATION
     WebDocument(const PassRefPtrWillBeRawPtr<Document>&);

@@ -13,7 +13,6 @@
 #include "base/command_line.h"
 #include "base/compiler_specific.h"
 #include "base/debug/alias.h"
-#include "base/debug/trace_event.h"
 #include "base/files/file_path.h"
 #include "base/i18n/rtl.h"
 #include "base/json/json_writer.h"
@@ -31,13 +30,13 @@
 #include "base/strings/sys_string_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
-#include "cc/base/switches.h"
+#include "base/trace_event/trace_event.h"
 #include "content/child/appcache/appcache_dispatcher.h"
 #include "content/child/appcache/web_application_cache_host_impl.h"
 #include "content/child/child_shared_bitmap_manager.h"
-#include "content/child/child_thread.h"
 #include "content/child/npapi/webplugin_delegate_impl.h"
 #include "content/child/request_extra_data.h"
+#include "content/child/v8_value_converter_impl.h"
 #include "content/child/webmessageportchannel_impl.h"
 #include "content/common/content_constants_internal.h"
 #include "content/common/database_messages.h"
@@ -72,11 +71,9 @@
 #include "content/public/renderer/render_view_visitor.h"
 #include "content/renderer/browser_plugin/browser_plugin.h"
 #include "content/renderer/browser_plugin/browser_plugin_manager.h"
-#include "content/renderer/devtools/devtools_agent.h"
 #include "content/renderer/disambiguation_popup_helper.h"
 #include "content/renderer/dom_storage/webstoragenamespace_impl.h"
 #include "content/renderer/drop_data_builder.h"
-#include "content/renderer/gpu/gpu_benchmarking_extension.h"
 #include "content/renderer/gpu/render_widget_compositor.h"
 #include "content/renderer/history_controller.h"
 #include "content/renderer/history_serialization.h"
@@ -86,8 +83,8 @@
 #include "content/renderer/internal_document_state_data.h"
 #include "content/renderer/media/audio_device_factory.h"
 #include "content/renderer/media/video_capture_impl_manager.h"
-#include "content/renderer/memory_benchmarking_extension.h"
 #include "content/renderer/mhtml_generator.h"
+#include "content/renderer/navigation_state_impl.h"
 #include "content/renderer/net_info_helper.h"
 #include "content/renderer/render_frame_impl.h"
 #include "content/renderer/render_frame_proxy.h"
@@ -98,20 +95,15 @@
 #include "content/renderer/renderer_webapplicationcachehost_impl.h"
 #include "content/renderer/resizing_mode_selector.h"
 #include "content/renderer/savable_resources.h"
-#include "content/renderer/skia_benchmarking_extension.h"
 #include "content/renderer/speech_recognition_dispatcher.h"
-#include "content/renderer/stats_collection_controller.h"
-#include "content/renderer/stats_collection_observer.h"
 #include "content/renderer/text_input_client_observer.h"
-#include "content/renderer/v8_value_converter_impl.h"
-#include "content/renderer/web_ui_extension.h"
 #include "content/renderer/web_ui_extension_data.h"
 #include "content/renderer/web_ui_mojo.h"
 #include "content/renderer/websharedworker_proxy.h"
 #include "media/audio/audio_output_device.h"
 #include "media/base/media_switches.h"
-#include "media/filters/audio_renderer_impl.h"
-#include "media/filters/gpu_video_accelerator_factories.h"
+#include "media/renderers/audio_renderer_impl.h"
+#include "media/renderers/gpu_video_accelerator_factories.h"
 #include "net/base/data_url.h"
 #include "net/base/escape.h"
 #include "net/base/net_errors.h"
@@ -197,7 +189,6 @@
 #include "content/renderer/android/content_detector.h"
 #include "content/renderer/android/email_detector.h"
 #include "content/renderer/android/phone_number_detector.h"
-#include "net/android/network_library.h"
 #include "third_party/WebKit/public/platform/WebFloatPoint.h"
 #include "third_party/WebKit/public/platform/WebFloatRect.h"
 #include "ui/gfx/geometry/rect_f.h"
@@ -337,13 +328,6 @@ static RenderViewImpl* (*g_create_render_view_impl)(const ViewMsg_New_Params&) =
     NULL;
 
 // static
-bool RenderViewImpl::IsReload(FrameMsg_Navigate_Type::Value navigation_type) {
-  return navigation_type == FrameMsg_Navigate_Type::RELOAD ||
-         navigation_type == FrameMsg_Navigate_Type::RELOAD_IGNORING_CACHE ||
-         navigation_type == FrameMsg_Navigate_Type::RELOAD_ORIGINAL_REQUEST_URL;
-}
-
-// static
 Referrer RenderViewImpl::GetReferrerFromRequest(
     WebFrame* frame,
     const WebURLRequest& request) {
@@ -423,6 +407,12 @@ static void ConvertToFaviconSizes(
     sizes->push_back(gfx::Size(web_sizes[i]));
 }
 
+static blink::WebDevToolsAgent* GetWebDevToolsAgent(WebView* webview) {
+  if (!webview || !webview->mainFrame()->isWebLocalFrame())
+    return nullptr;
+  return webview->mainFrame()->toWebLocalFrame()->devToolsAgent();
+}
+
 ///////////////////////////////////////////////////////////////////////////////
 
 struct RenderViewImpl::PendingFileChooser {
@@ -458,15 +448,6 @@ class WebWidgetLockTarget : public MouseLockDispatcher::LockTarget {
  private:
   blink::WebWidget* webwidget_;
 };
-
-bool TouchEnabled() {
-// Based on the definition of chrome::kEnableTouchIcon.
-#if defined(OS_ANDROID)
-  return true;
-#else
-  return false;
-#endif
-}
 
 WebDragData DropDataToWebDragData(const DropData& drop_data) {
   std::vector<WebDragData::Item> item_list;
@@ -642,7 +623,6 @@ RenderViewImpl::RenderViewImpl(const ViewMsg_New_Params& params)
       opener_suppressed_(false),
       suppress_dialogs_until_swap_out_(false),
       page_id_(-1),
-      last_page_id_sent_to_browser_(-1),
       next_page_id_(params.next_page_id),
       history_list_offset_(-1),
       history_list_length_(0),
@@ -650,11 +630,10 @@ RenderViewImpl::RenderViewImpl(const ViewMsg_New_Params& params)
       target_url_status_(TARGET_NONE),
       uses_temporary_zoom_level_(false),
 #if defined(OS_ANDROID)
-      top_controls_constraints_(cc::BOTH),
+      top_controls_constraints_(TOP_CONTROLS_STATE_BOTH),
 #endif
       has_scrolled_focused_editable_node_into_rect_(false),
       speech_recognition_dispatcher_(NULL),
-      devtools_agent_(NULL),
       mouse_lock_dispatcher_(NULL),
 #if defined(OS_ANDROID)
       expected_content_intent_id_(0),
@@ -669,7 +648,7 @@ RenderViewImpl::RenderViewImpl(const ViewMsg_New_Params& params)
 #endif
       enumeration_completion_id_(0),
       session_storage_namespace_id_(params.session_storage_namespace_id),
-      next_snapshot_id_(0) {
+      page_scale_factor_is_one_(true) {
 }
 
 void RenderViewImpl::Initialize(const ViewMsg_New_Params& params,
@@ -701,15 +680,13 @@ void RenderViewImpl::Initialize(const ViewMsg_New_Params& params,
     stats_collection_observer_.reset(new StatsCollectionObserver(this));
 
 #if defined(OS_ANDROID)
-  const std::string region_code =
-      command_line.HasSwitch(switches::kNetworkCountryIso)
-          ? command_line.GetSwitchValueASCII(switches::kNetworkCountryIso)
-          : net::android::GetTelephonyNetworkCountryIso();
   content_detectors_.push_back(linked_ptr<ContentDetector>(
       new AddressDetector()));
-  if (!region_code.empty()) {
+  const std::string& contry_iso =
+      params.renderer_preferences.network_contry_iso;
+  if (!contry_iso.empty()) {
     content_detectors_.push_back(linked_ptr<ContentDetector>(
-        new PhoneNumberDetector(region_code)));
+        new PhoneNumberDetector(contry_iso)));
   }
   content_detectors_.push_back(linked_ptr<ContentDetector>(
       new EmailDetector()));
@@ -743,9 +720,6 @@ void RenderViewImpl::Initialize(const ViewMsg_New_Params& params,
       command_line.HasSwitch(switches::kRootLayerScrolls));
 
   ApplyWebPreferences(webkit_preferences_, webview());
-
-  webview()->settings()->setAllowConnectingInsecureWebSocket(
-      command_line.HasSwitch(switches::kAllowInsecureWebSocketFromHttpsOrigin));
 
   RenderFrameProxy* proxy = NULL;
   if (params.proxy_routing_id != MSG_ROUTING_NONE) {
@@ -792,12 +766,14 @@ void RenderViewImpl::Initialize(const ViewMsg_New_Params& params,
   new TextInputClientObserver(this);
 #endif  // defined(OS_MACOSX)
 
+  // TODO(dgozman): do this not for main frame, but for local frame roots.
+  if (blink::WebDevToolsAgent* devToolsAgent = GetWebDevToolsAgent(webview())) {
+    if (RenderWidgetCompositor* rwc = compositor())
+      devToolsAgent->setLayerTreeId(rwc->GetLayerTreeId());
+  }
+
   // The next group of objects all implement RenderViewObserver, so are deleted
   // along with the RenderView automatically.
-  devtools_agent_ = new DevToolsAgent(main_render_frame_.get());
-  if (RenderWidgetCompositor* rwc = compositor()) {
-    webview()->devToolsAgent()->setLayerTreeId(rwc->GetLayerTreeId());
-  }
   mouse_lock_dispatcher_ = new RenderViewMouseLockDispatcher(this);
 
   history_controller_.reset(new HistoryController(this));
@@ -808,8 +784,6 @@ void RenderViewImpl::Initialize(const ViewMsg_New_Params& params,
     enabled_bindings_ |= BINDINGS_POLICY_DOM_AUTOMATION;
   if (command_line.HasSwitch(switches::kStatsCollectionController))
     enabled_bindings_ |= BINDINGS_POLICY_STATS_COLLECTION;
-
-  ProcessViewLayoutFlags(command_line);
 
   GetContentClient()->renderer()->RenderViewCreated(this);
 
@@ -832,7 +806,7 @@ RenderViewImpl::~RenderViewImpl() {
        it != disambiguation_bitmaps_.end();
        ++it)
     delete it->second;
-  base::debug::TraceLog::GetInstance()->RemoveProcessLabel(routing_id_);
+  base::trace_event::TraceLog::GetInstance()->RemoveProcessLabel(routing_id_);
 
   // If file chooser is still waiting for answer, dispatch empty answer.
   while (!file_chooser_completions_.empty()) {
@@ -1017,7 +991,10 @@ void RenderView::ApplyWebPreferences(const WebPreferences& prefs,
       prefs.allow_displaying_insecure_content);
   settings->setAllowRunningOfInsecureContent(
       prefs.allow_running_insecure_content);
+  settings->setDisableReadingFromCanvas(prefs.disable_reading_from_canvas);
   settings->setStrictMixedContentChecking(prefs.strict_mixed_content_checking);
+  settings->setStrictPowerfulFeatureRestrictions(
+      prefs.strict_powerful_feature_restrictions);
   settings->setPasswordEchoEnabled(prefs.password_echo_enabled);
   settings->setShouldPrintBackgrounds(prefs.should_print_backgrounds);
   settings->setShouldClearDocumentBackground(
@@ -1066,10 +1043,13 @@ void RenderView::ApplyWebPreferences(const WebPreferences& prefs,
   settings->setV8CacheOptions(
       static_cast<WebSettings::V8CacheOptions>(prefs.v8_cache_options));
 
-  settings->setV8ScriptStreamingEnabled(prefs.v8_script_streaming_enabled);
-  settings->setV8ScriptStreamingMode(
-      static_cast<WebSettings::V8ScriptStreamingMode>(
-          prefs.v8_script_streaming_mode));
+  settings->setImageAnimationPolicy(
+      static_cast<WebSettings::ImageAnimationPolicy>(prefs.animation_policy));
+
+  // Needs to happen before setIgnoreVIewportTagScaleLimits below.
+  web_view->setDefaultPageScaleLimits(
+      prefs.default_minimum_page_scale_factor,
+      prefs.default_maximum_page_scale_factor);
 
 #if defined(OS_ANDROID)
   settings->setAllowCustomScrollbarInMainFrame(false);
@@ -1115,6 +1095,7 @@ void RenderView::ApplyWebPreferences(const WebPreferences& prefs,
 
   settings->setShrinksStandaloneImagesToFit(false);
   settings->setShrinksViewportContentToFit(true);
+  settings->setUseMobileViewportStyle(true);
 #endif
 
   WebNetworkStateNotifier::setOnLine(prefs.is_online);
@@ -1125,12 +1106,13 @@ void RenderView::ApplyWebPreferences(const WebPreferences& prefs,
 
   settings->setPinchOverlayScrollbarThickness(
       prefs.pinch_overlay_scrollbar_thickness);
-  settings->setRubberBandingOnCompositorThread(
-      prefs.rubber_banding_on_compositor_thread);
   settings->setUseSolidColorScrollbars(prefs.use_solid_color_scrollbars);
 
-#if defined(OS_WIN)
-  settings->setShowContextMenuOnMouseUp(true);
+  settings->setShowContextMenuOnMouseUp(prefs.context_menu_on_mouse_up);
+
+#if defined(OS_MACOSX)
+  settings->setDoubleTapToZoomEnabled(true);
+  web_view->setMaximumLegibleScale(prefs.default_maximum_page_scale_factor);
 #endif
 }
 
@@ -1271,7 +1253,7 @@ bool RenderViewImpl::OnMessageReceived(const IPC::Message& message) {
   if (main_frame && main_frame->isWebLocalFrame())
     GetContentClient()->SetActiveURL(main_frame->document().url());
 
-  ObserverListBase<RenderViewObserver>::Iterator it(observers_);
+  ObserverListBase<RenderViewObserver>::Iterator it(&observers_);
   RenderViewObserver* observer;
   while ((observer = it.GetNext()) != NULL)
     if (observer->OnMessageReceived(message))
@@ -1289,6 +1271,7 @@ bool RenderViewImpl::OnMessageReceived(const IPC::Message& message) {
     IPC_MESSAGE_HANDLER(ViewMsg_SaveImageAt, OnSaveImageAt)
     IPC_MESSAGE_HANDLER(ViewMsg_Find, OnFind)
     IPC_MESSAGE_HANDLER(ViewMsg_StopFinding, OnStopFinding)
+    IPC_MESSAGE_HANDLER(ViewMsg_ResetPageScale, OnResetPageScale)
     IPC_MESSAGE_HANDLER(ViewMsg_Zoom, OnZoom)
     IPC_MESSAGE_HANDLER(ViewMsg_SetZoomLevelForLoadingURL,
                         OnSetZoomLevelForLoadingURL)
@@ -1341,8 +1324,6 @@ bool RenderViewImpl::OnMessageReceived(const IPC::Message& message) {
     IPC_MESSAGE_HANDLER(ViewMsg_EnableViewSourceMode, OnEnableViewSourceMode)
     IPC_MESSAGE_HANDLER(ViewMsg_ReleaseDisambiguationPopupBitmap,
                         OnReleaseDisambiguationPopupBitmap)
-    IPC_MESSAGE_HANDLER(ViewMsg_WindowSnapshotCompleted,
-                        OnWindowSnapshotCompleted)
     IPC_MESSAGE_HANDLER(ViewMsg_ForceRedraw, OnForceRedraw)
     IPC_MESSAGE_HANDLER(ViewMsg_SelectWordAroundCaret, OnSelectWordAroundCaret)
 #if defined(OS_ANDROID)
@@ -1418,15 +1399,20 @@ void RenderViewImpl::OnScrollFocusedEditableNodeIntoRect(
     const gfx::Rect& rect) {
   if (has_scrolled_focused_editable_node_into_rect_ &&
       rect == rect_for_scrolled_focused_editable_node_) {
+    FocusChangeComplete();
     return;
   }
 
   blink::WebElement element = GetFocusedElement();
+  bool will_animate = false;
   if (!element.isNull() && IsEditableNode(element)) {
     rect_for_scrolled_focused_editable_node_ = rect;
     has_scrolled_focused_editable_node_into_rect_ = true;
-    webview()->scrollFocusedNodeIntoRect(rect);
+    will_animate = webview()->scrollFocusedNodeIntoRect(rect);
   }
+
+  if (!will_animate)
+    FocusChangeComplete();
 }
 
 void RenderViewImpl::OnSetEditCommandsForNextKeyEvent(
@@ -1497,21 +1483,6 @@ bool RenderViewImpl::SendAndRunNestedMessageLoop(IPC::SyncMessage* message) {
   return Send(message);
 }
 
-void RenderViewImpl::GetWindowSnapshot(const WindowSnapshotCallback& callback) {
-  int id = next_snapshot_id_++;
-  pending_snapshots_.insert(std::make_pair(id, callback));
-  ui::LatencyInfo latency_info;
-  latency_info.AddLatencyNumber(ui::WINDOW_OLD_SNAPSHOT_FRAME_NUMBER_COMPONENT,
-                                0,
-                                id);
-  scoped_ptr<cc::SwapPromiseMonitor> latency_info_swap_promise_monitor;
-  if (RenderWidgetCompositor* rwc = compositor()) {
-    latency_info_swap_promise_monitor =
-        rwc->CreateLatencyInfoSwapPromiseMonitor(&latency_info).Pass();
-  }
-  ScheduleCompositeWithForcedRedraw();
-}
-
 void RenderViewImpl::OnForceRedraw(int id) {
   ui::LatencyInfo latency_info;
   if (id) {
@@ -1525,22 +1496,6 @@ void RenderViewImpl::OnForceRedraw(int id) {
         rwc->CreateLatencyInfoSwapPromiseMonitor(&latency_info).Pass();
   }
   ScheduleCompositeWithForcedRedraw();
-}
-
-void RenderViewImpl::OnWindowSnapshotCompleted(const int snapshot_id,
-    const gfx::Size& size, const std::vector<unsigned char>& png) {
-
-  // Any pending snapshots with a lower ID than the one received are considered
-  // to be implicitly complete, and returned the same snapshot data.
-  PendingSnapshotMap::iterator it = pending_snapshots_.begin();
-  while(it != pending_snapshots_.end()) {
-      if (it->first <= snapshot_id) {
-        it->second.Run(size, png);
-        pending_snapshots_.erase(it++);
-      } else {
-        ++it;
-      }
-  }
 }
 
 // blink::WebViewClient ------------------------------------------------------
@@ -1745,7 +1700,7 @@ bool RenderViewImpl::runFileChooser(
     ipc_params.mode = FileChooserParams::Open;
   ipc_params.title = params.title;
   ipc_params.default_file_name =
-      base::FilePath::FromUTF16Unsafe(params.initialValue);
+      base::FilePath::FromUTF16Unsafe(params.initialValue).BaseName();
   ipc_params.accept_types.reserve(params.acceptTypes.size());
   for (size_t i = 0; i < params.acceptTypes.size(); ++i)
     ipc_params.accept_types.push_back(params.acceptTypes[i]);
@@ -1906,21 +1861,35 @@ void RenderViewImpl::focusPrevious() {
   Send(new ViewHostMsg_TakeFocus(routing_id_, true));
 }
 
-void RenderViewImpl::focusedNodeChanged(const WebNode& node) {
+void RenderViewImpl::focusedNodeChanged(const WebNode& fromNode,
+                                        const WebNode& toNode) {
   has_scrolled_focused_editable_node_into_rect_ = false;
 
   gfx::Rect node_bounds;
-  if (!node.isNull() && node.isElementNode()) {
-    WebNode web_node = const_cast<WebNode&>(node);
+  if (!toNode.isNull() && toNode.isElementNode()) {
+    WebNode web_node = const_cast<WebNode&>(toNode);
     node_bounds = gfx::Rect(web_node.to<WebElement>().boundsInViewportSpace());
   }
-  Send(new ViewHostMsg_FocusedNodeChanged(routing_id_, IsEditableNode(node),
+  Send(new ViewHostMsg_FocusedNodeChanged(routing_id_, IsEditableNode(toNode),
                                           node_bounds));
 
-  FOR_EACH_OBSERVER(RenderViewObserver, observers_, FocusedNodeChanged(node));
+  // TODO(estade): remove.
+  FOR_EACH_OBSERVER(RenderViewObserver, observers_, FocusedNodeChanged(toNode));
 
-  // TODO(dmazzoni): this should be part of RenderFrameObserver.
-  GetMainRenderFrame()->FocusedNodeChanged(node);
+  RenderFrameImpl* previous_frame = nullptr;
+  if (!fromNode.isNull())
+    previous_frame = RenderFrameImpl::FromWebFrame(fromNode.document().frame());
+  RenderFrameImpl* new_frame = nullptr;
+  if (!toNode.isNull())
+    new_frame = RenderFrameImpl::FromWebFrame(toNode.document().frame());
+
+  if (previous_frame && previous_frame != new_frame)
+    previous_frame->FocusedNodeChanged(WebNode());
+  if (new_frame)
+    new_frame->FocusedNodeChanged(toNode);
+
+  // TODO(dmazzoni): remove once there's a separate a11y tree per frame.
+  GetMainRenderFrame()->FocusedNodeChangedForAccessibility(toNode);
 }
 
 void RenderViewImpl::didUpdateLayout() {
@@ -1990,44 +1959,13 @@ void RenderViewImpl::show(WebNavigationPolicy policy) {
 
   DCHECK(opener_id_ != MSG_ROUTING_NONE);
 
-  // NOTE: initial_pos_ may still have its default values at this point, but
+  // NOTE: initial_rect_ may still have its default values at this point, but
   // that's okay.  It'll be ignored if disposition is not NEW_POPUP, or the
   // browser process will impose a default position otherwise.
   Send(new ViewHostMsg_ShowView(opener_id_, routing_id_,
-      NavigationPolicyToDisposition(policy), initial_pos_,
+      NavigationPolicyToDisposition(policy), initial_rect_,
       opened_by_user_gesture_));
-  SetPendingWindowRect(initial_pos_);
-}
-
-void RenderViewImpl::runModal() {
-  DCHECK(did_show_) << "should already have shown the view";
-
-  // Don't allow further dialogs if we are waiting to swap out, since the
-  // PageGroupLoadDeferrer in our stack prevents it.
-  if (suppress_dialogs_until_swap_out_)
-    return;
-
-  // We must keep WebKit's shared timer running in this case in order to allow
-  // showModalDialog to function properly.
-  //
-  // TODO(darin): WebKit should really be smarter about suppressing events and
-  // timers so that we do not need to manage the shared timer in such a heavy
-  // handed manner.
-  //
-  if (RenderThreadImpl::current())  // Will be NULL during unit tests.
-    RenderThreadImpl::current()->DoNotSuspendWebKitSharedTimer();
-
-  SendAndRunNestedMessageLoop(new ViewHostMsg_RunModal(
-      routing_id_, opener_id_));
-}
-
-bool RenderViewImpl::enterFullScreen() {
-  Send(new ViewHostMsg_ToggleFullscreen(routing_id_, true));
-  return true;
-}
-
-void RenderViewImpl::exitFullScreen() {
-  Send(new ViewHostMsg_ToggleFullscreen(routing_id_, false));
+  SetPendingWindowRect(initial_rect_);
 }
 
 bool RenderViewImpl::requestPointerLock() {
@@ -2074,8 +2012,9 @@ void RenderViewImpl::initializeLayerTreeView() {
   RenderWidgetCompositor* rwc = compositor();
   if (!rwc)
     return;
-  if (webview() && webview()->devToolsAgent())
-    webview()->devToolsAgent()->setLayerTreeId(rwc->GetLayerTreeId());
+  // TODO(dgozman): do this not for main frame, but for local frame roots.
+  if (blink::WebDevToolsAgent* devToolsAgent = GetWebDevToolsAgent(webview()))
+    devToolsAgent->setLayerTreeId(rwc->GetLayerTreeId());
 
   bool use_threaded_event_handling = true;
 #if defined(OS_MACOSX) && !defined(OS_IOS)
@@ -2134,219 +2073,9 @@ const std::string& RenderViewImpl::GetAcceptLanguages() const {
   return renderer_preferences_.accept_languages;
 }
 
-void RenderViewImpl::didCreateDataSource(WebLocalFrame* frame,
-                                         WebDataSource* ds) {
-  bool content_initiated = !pending_navigation_params_.get();
-
-  // Make sure any previous redirect URLs end up in our new data source.
-  if (pending_navigation_params_.get()) {
-    for (std::vector<GURL>::const_iterator i =
-             pending_navigation_params_->redirects.begin();
-         i != pending_navigation_params_->redirects.end(); ++i) {
-      ds->appendRedirect(*i);
-    }
-  }
-
-  DocumentState* document_state = DocumentState::FromDataSource(ds);
-  if (!document_state) {
-    document_state = new DocumentState;
-    ds->setExtraData(document_state);
-    if (!content_initiated)
-      PopulateDocumentStateFromPending(document_state);
-  }
-
-  // Carry over the user agent override flag, if it exists.
-  if (content_initiated && webview() && webview()->mainFrame() &&
-      webview()->mainFrame()->isWebLocalFrame() &&
-      webview()->mainFrame()->dataSource()) {
-    DocumentState* old_document_state =
-        DocumentState::FromDataSource(webview()->mainFrame()->dataSource());
-    if (old_document_state) {
-      InternalDocumentStateData* internal_data =
-          InternalDocumentStateData::FromDocumentState(document_state);
-      InternalDocumentStateData* old_internal_data =
-          InternalDocumentStateData::FromDocumentState(old_document_state);
-      internal_data->set_is_overriding_user_agent(
-          old_internal_data->is_overriding_user_agent());
-    }
-  }
-
-  // The rest of RenderView assumes that a WebDataSource will always have a
-  // non-null NavigationState.
-  if (content_initiated) {
-    document_state->set_navigation_state(
-        NavigationState::CreateContentInitiated());
-  } else {
-    document_state->set_navigation_state(CreateNavigationStateFromPending());
-    pending_navigation_params_.reset();
-  }
-
-  // DocumentState::referred_by_prefetcher_ is true if we are
-  // navigating from a page that used prefetching using a link on that
-  // page.  We are early enough in the request process here that we
-  // can still see the DocumentState of the previous page and set
-  // this value appropriately.
-  // TODO(gavinp): catch the important case of navigation in a new
-  // renderer process.
-  if (webview()) {
-    if (WebFrame* old_frame = webview()->mainFrame()) {
-      const WebURLRequest& original_request = ds->originalRequest();
-      const GURL referrer(
-          original_request.httpHeaderField(WebString::fromUTF8("Referer")));
-      if (!referrer.is_empty() && old_frame->isWebLocalFrame() &&
-          DocumentState::FromDataSource(old_frame->dataSource())
-              ->was_prefetcher()) {
-        for (; old_frame; old_frame = old_frame->traverseNext(false)) {
-          WebDataSource* old_frame_ds = old_frame->dataSource();
-          if (old_frame_ds && referrer == GURL(old_frame_ds->request().url())) {
-            document_state->set_was_referred_by_prefetcher(true);
-            break;
-          }
-        }
-      }
-    }
-  }
-
-  if (content_initiated) {
-    const WebURLRequest& request = ds->request();
-    switch (request.cachePolicy()) {
-      case WebURLRequest::UseProtocolCachePolicy:  // normal load.
-        document_state->set_load_type(DocumentState::LINK_LOAD_NORMAL);
-        break;
-      case WebURLRequest::ReloadIgnoringCacheData:  // reload.
-      case WebURLRequest::ReloadBypassingCache:  // end-to-end reload.
-        document_state->set_load_type(DocumentState::LINK_LOAD_RELOAD);
-        break;
-      case WebURLRequest::ReturnCacheDataElseLoad:  // allow stale data.
-        document_state->set_load_type(
-            DocumentState::LINK_LOAD_CACHE_STALE_OK);
-        break;
-      case WebURLRequest::ReturnCacheDataDontLoad:  // Don't re-post.
-        document_state->set_load_type(DocumentState::LINK_LOAD_CACHE_ONLY);
-        break;
-      default:
-        NOTREACHED();
-    }
-  }
-
-  FOR_EACH_OBSERVER(
-      RenderViewObserver, observers_, DidCreateDataSource(frame, ds));
-}
-
-void RenderViewImpl::PopulateDocumentStateFromPending(
-    DocumentState* document_state) {
-  const FrameMsg_Navigate_Params& params = *pending_navigation_params_.get();
-  document_state->set_request_time(params.request_time);
-
-  InternalDocumentStateData* internal_data =
-      InternalDocumentStateData::FromDocumentState(document_state);
-
-  if (!params.common_params.url.SchemeIs(url::kJavaScriptScheme) &&
-      params.common_params.navigation_type == FrameMsg_Navigate_Type::RESTORE) {
-    // We're doing a load of a page that was restored from the last session. By
-    // default this prefers the cache over loading (LOAD_PREFERRING_CACHE) which
-    // can result in stale data for pages that are set to expire. We explicitly
-    // override that by setting the policy here so that as necessary we load
-    // from the network.
-    //
-    // TODO(davidben): Remove this in favor of passing a cache policy to the
-    // loadHistoryItem call in OnNavigate. That requires not overloading
-    // UseProtocolCachePolicy to mean both "normal load" and "determine cache
-    // policy based on load type, etc".
-    internal_data->set_cache_policy_override(
-        WebURLRequest::UseProtocolCachePolicy);
-  }
-
-  if (IsReload(params.common_params.navigation_type))
-    document_state->set_load_type(DocumentState::RELOAD);
-  else if (params.commit_params.page_state.IsValid())
-    document_state->set_load_type(DocumentState::HISTORY_LOAD);
-  else
-    document_state->set_load_type(DocumentState::NORMAL_LOAD);
-
-  internal_data->set_is_overriding_user_agent(
-      params.commit_params.is_overriding_user_agent);
-  internal_data->set_must_reset_scroll_and_scale_state(
-      params.common_params.navigation_type ==
-      FrameMsg_Navigate_Type::RELOAD_ORIGINAL_REQUEST_URL);
-  document_state->set_can_load_local_resources(params.can_load_local_resources);
-}
-
-NavigationState* RenderViewImpl::CreateNavigationStateFromPending() {
-  const FrameMsg_Navigate_Params& params = *pending_navigation_params_.get();
-  NavigationState* navigation_state = NULL;
-
-  // A navigation resulting from loading a javascript URL should not be treated
-  // as a browser initiated event.  Instead, we want it to look as if the page
-  // initiated any load resulting from JS execution.
-  if (!params.common_params.url.SchemeIs(url::kJavaScriptScheme)) {
-    navigation_state = NavigationState::CreateBrowserInitiated(
-        params.page_id,
-        params.pending_history_list_offset,
-        params.should_clear_history_list,
-        params.common_params.transition);
-    navigation_state->set_should_replace_current_entry(
-        params.should_replace_current_entry);
-    navigation_state->set_transferred_request_child_id(
-        params.transferred_request_child_id);
-    navigation_state->set_transferred_request_request_id(
-        params.transferred_request_request_id);
-    navigation_state->set_allow_download(params.common_params.allow_download);
-    navigation_state->set_extra_headers(params.request_params.extra_headers);
-  } else {
-    navigation_state = NavigationState::CreateContentInitiated();
-  }
-  return navigation_state;
-}
-
-void RenderViewImpl::ProcessViewLayoutFlags(
-    const base::CommandLine& command_line) {
-  bool enable_viewport =
-      command_line.HasSwitch(switches::kEnableViewport) ||
-      command_line.HasSwitch(switches::kEnableViewportMeta);
-
-  // If viewport tag is enabled, then the WebKit side will take care
-  // of setting the fixed layout size and page scale limits.
-  if (enable_viewport)
-    return;
-
-  // When navigating to a new page, reset the page scale factor to be 1.0.
-  webview()->setInitialPageScaleOverride(1.f);
-
-  float maxPageScaleFactor =
-      command_line.HasSwitch(switches::kEnablePinch) ? 4.f : 1.f ;
-  webview()->setPageScaleFactorLimits(1, maxPageScaleFactor);
-}
-
-void RenderViewImpl::didClearWindowObject(WebLocalFrame* frame) {
-  FOR_EACH_OBSERVER(
-      RenderViewObserver, observers_, DidClearWindowObject(frame));
-
-  if (enabled_bindings_& BINDINGS_POLICY_WEB_UI)
-    WebUIExtension::Install(frame);
-
-  if (enabled_bindings_ & BINDINGS_POLICY_STATS_COLLECTION)
-    StatsCollectionController::Install(frame);
-
-  const base::CommandLine& command_line =
-      *base::CommandLine::ForCurrentProcess();
-
-  if (command_line.HasSwitch(switches::kEnableSkiaBenchmarking))
-    SkiaBenchmarking::Install(frame);
-
-  if (command_line.HasSwitch(cc::switches::kEnableGpuBenchmarking))
-    GpuBenchmarking::Install(frame);
-
-  if (command_line.HasSwitch(switches::kEnableMemoryBenchmarking))
-    MemoryBenchmarkingExtension::Install(frame);
-}
-
 void RenderViewImpl::didChangeIcon(WebLocalFrame* frame,
                                    WebIconURL::Type icon_type) {
   if (frame->parent())
-    return;
-
-  if (!TouchEnabled() && icon_type != WebIconURL::TypeFavicon)
     return;
 
   WebVector<WebIconURL> icon_urls = frame->iconURLs(icon_type);
@@ -2444,19 +2173,6 @@ blink::WebView* RenderViewImpl::GetWebView() {
   return webview();
 }
 
-blink::WebElement RenderViewImpl::GetFocusedElement() const {
-  if (!webview())
-    return WebElement();
-  WebFrame* focused_frame = webview()->focusedFrame();
-  if (focused_frame) {
-    WebDocument doc = focused_frame->document();
-    if (!doc.isNull())
-      return doc.focusedElement();
-  }
-
-  return WebElement();
-}
-
 bool RenderViewImpl::IsEditableNode(const WebNode& node) const {
   if (node.isNull())
     return false;
@@ -2483,13 +2199,6 @@ bool RenderViewImpl::IsEditableNode(const WebNode& node) const {
   }
 
   return false;
-}
-
-bool RenderViewImpl::NodeContainsPoint(const WebNode& node,
-                                       const gfx::Point& point) const {
-  blink::WebHitTestResult hit_test =
-      webview()->hitTestResultAt(WebPoint(point.x(), point.y()));
-  return node.containsIncludingShadowDOM(hit_test.node());
 }
 
 bool RenderViewImpl::ShouldDisplayScrollbars(int width, int height) const {
@@ -2522,6 +2231,19 @@ void RenderViewImpl::SyncNavigationState() {
   if (!webview())
     return;
   SendUpdateState(history_controller_->GetCurrentEntry());
+}
+
+blink::WebElement RenderViewImpl::GetFocusedElement() const {
+  if (!webview())
+    return WebElement();
+  WebFrame* focused_frame = webview()->focusedFrame();
+  if (focused_frame) {
+    WebDocument doc = focused_frame->document();
+    if (!doc.isNull())
+      return doc.focusedElement();
+  }
+
+  return WebElement();
 }
 
 blink::WebPlugin* RenderViewImpl::GetWebPluginForFind() {
@@ -2745,6 +2467,12 @@ void RenderViewImpl::OnFindMatchRects(int current_version) {
 }
 #endif
 
+void RenderViewImpl::OnResetPageScale() {
+  if (!webview())
+    return;
+  webview()->setPageScaleFactor(1);
+}
+
 void RenderViewImpl::OnZoom(PageZoom zoom) {
   if (!webview())  // Not sure if this can happen, but no harm in being safe.
     return;
@@ -2816,16 +2544,10 @@ void RenderViewImpl::OnPostMessageEvent(
   }
 
   // If the message contained MessagePorts, create the corresponding endpoints.
-  DCHECK_EQ(params.message_port_ids.size(), params.new_routing_ids.size());
-  blink::WebMessagePortChannelArray channels(params.message_port_ids.size());
-  for (size_t i = 0;
-       i < params.message_port_ids.size() && i < params.new_routing_ids.size();
-       ++i) {
-    channels[i] =
-        new WebMessagePortChannelImpl(params.new_routing_ids[i],
-                                      params.message_port_ids[i],
-                                      base::MessageLoopProxy::current().get());
-  }
+  blink::WebMessagePortChannelArray channels =
+      WebMessagePortChannelImpl::CreatePorts(
+          params.message_ports, params.new_routing_ids,
+          base::MessageLoopProxy::current().get());
 
   WebSerializedScriptValue serialized_script_value;
   if (params.is_data_raw_string) {
@@ -3075,7 +2797,8 @@ void RenderViewImpl::OnMediaPlayerActionAt(const gfx::Point& location,
 }
 
 void RenderViewImpl::OnOrientationChange() {
-  webview()->mainFrame()->toWebLocalFrame()->sendOrientationChangeEvent();
+  if (webview() && webview()->mainFrame()->isWebLocalFrame())
+    webview()->mainFrame()->toWebLocalFrame()->sendOrientationChangeEvent();
 }
 
 void RenderViewImpl::OnPluginActionAt(const gfx::Point& location,
@@ -3199,10 +2922,6 @@ void RenderViewImpl::OnResize(const ViewMsg_Resize_Params& params) {
 
   if (old_visible_viewport_size != visible_viewport_size_)
     has_scrolled_focused_editable_node_into_rect_ = false;
-
-  FOR_EACH_OBSERVER(RenderViewObserver,
-                    observers_,
-                    Resized());
 }
 
 void RenderViewImpl::DidInitiatePaint() {
@@ -3240,6 +2959,9 @@ void RenderViewImpl::DidFlushPaint() {
   // of loading and we don't want to save stats.
   if (!main_frame->provisionalDataSource()) {
     WebDataSource* ds = main_frame->dataSource();
+    if (!ds)
+      return;
+
     DocumentState* document_state = DocumentState::FromDataSource(ds);
 
     // TODO(jar): The following code should all be inside a method, probably in
@@ -3503,8 +3225,8 @@ void RenderViewImpl::OnImeSetComposition(
   }
 
 #if defined(OS_WIN)
-  // When a plug-in has focus, we create platform-specific IME data used by
-  // our IME emulator and send it directly to the focused plug-in, i.e. we
+  // When a plugin has focus, we create platform-specific IME data used by
+  // our IME emulator and send it directly to the focused plugin, i.e. we
   // bypass WebKit. (WebPluginDelegate dispatches this IME data only when its
   // instance ID is the same one as the specified ID.)
   if (focused_plugin_id_ >= 0) {
@@ -3546,7 +3268,7 @@ void RenderViewImpl::OnImeConfirmComposition(
   }
 #if defined(OS_WIN)
   // Same as OnImeSetComposition(), we send the text from IMEs directly to
-  // plug-ins. When we send IME text directly to plug-ins, we should not send
+  // plugins. When we send IME text directly to plugins, we should not send
   // it to WebKit to prevent WebKit from controlling IMEs.
   // TODO(thakis): Honor |replacement_range| for plugins?
   if (focused_plugin_id_ >= 0) {
@@ -3583,9 +3305,6 @@ void RenderViewImpl::SetDeviceScaleFactor(float device_scale_factor) {
   }
   if (auto_resize_mode_)
     AutoResizeCompositor();
-
-  if (BrowserPluginManager::Get())
-    BrowserPluginManager::Get()->UpdateDeviceScaleFactor();
 }
 
 bool RenderViewImpl::SetDeviceColorProfile(
@@ -3626,6 +3345,11 @@ void RenderViewImpl::GetSelectionBounds(gfx::Rect* start, gfx::Rect* end) {
   }
 #endif
   RenderWidget::GetSelectionBounds(start, end);
+}
+
+void RenderViewImpl::FocusChangeComplete() {
+  RenderWidget::FocusChangeComplete();
+  FOR_EACH_OBSERVER(RenderViewObserver, observers_, FocusChangeComplete());
 }
 
 void RenderViewImpl::GetCompositionCharacterBounds(
@@ -3681,48 +3405,18 @@ bool RenderViewImpl::CanComposeInline() {
   return true;
 }
 
-void RenderViewImpl::InstrumentWillBeginFrame(int frame_id) {
-  if (!webview())
-    return;
-  if (!webview()->devToolsAgent())
-    return;
-  webview()->devToolsAgent()->didBeginFrame(frame_id);
-}
-
-void RenderViewImpl::InstrumentDidBeginFrame() {
-  if (!webview())
-    return;
-  if (!webview()->devToolsAgent())
-    return;
-  // TODO(jamesr/caseq): Decide if this needs to be renamed.
-  webview()->devToolsAgent()->didComposite();
-}
-
-void RenderViewImpl::InstrumentDidCancelFrame() {
-  if (!webview())
-    return;
-  if (!webview()->devToolsAgent())
-    return;
-  webview()->devToolsAgent()->didCancelFrame();
-}
-
-void RenderViewImpl::InstrumentWillComposite() {
-  if (!webview())
-    return;
-  if (!webview()->devToolsAgent())
-    return;
-  webview()->devToolsAgent()->willComposite();
+void RenderViewImpl::DidCompletePageScaleAnimation() {
+  FocusChangeComplete();
 }
 
 void RenderViewImpl::SetScreenMetricsEmulationParameters(
-    float device_scale_factor,
-    const gfx::Point& root_layer_offset,
-    float root_layer_scale) {
+    bool enabled,
+    const blink::WebDeviceEmulationParams& params) {
   if (webview() && compositor()) {
-    webview()->setCompositorDeviceScaleFactorOverride(device_scale_factor);
-    webview()->setRootLayerTransform(
-        blink::WebSize(root_layer_offset.x(), root_layer_offset.y()),
-        root_layer_scale);
+    if (enabled)
+      webview()->enableDeviceEmulation(params);
+    else
+      webview()->disableDeviceEmulation();
   }
 }
 
@@ -3759,9 +3453,11 @@ blink::WebSpeechRecognizer* RenderViewImpl::speechRecognizer() {
 
 void RenderViewImpl::zoomLimitsChanged(double minimum_level,
                                        double maximum_level) {
-  int minimum_percent = static_cast<int>(
+  // Round the double to avoid returning incorrect minimum/maximum zoom
+  // percentages.
+  int minimum_percent = round(
       ZoomLevelToZoomFactor(minimum_level) * 100);
-  int maximum_percent = static_cast<int>(
+  int maximum_percent = round(
       ZoomLevelToZoomFactor(maximum_level) * 100);
 
   Send(new ViewHostMsg_UpdateZoomLimits(
@@ -3780,6 +3476,17 @@ void RenderViewImpl::zoomLevelChanged() {
         routing_id_, zoom_level,
         GURL(webview()->mainFrame()->document().url())));
   }
+}
+
+void RenderViewImpl::pageScaleFactorChanged() {
+  if (!webview())
+    return;
+  bool page_scale_factor_is_one = webview()->pageScaleFactor() == 1;
+  if (page_scale_factor_is_one == page_scale_factor_is_one_)
+    return;
+  page_scale_factor_is_one_ = page_scale_factor_is_one;
+  Send(new ViewHostMsg_PageScaleFactorIsOneChanged(routing_id_,
+                                                   page_scale_factor_is_one_));
 }
 
 double RenderViewImpl::zoomLevelToZoomFactor(double zoom_level) const {
@@ -4040,11 +3747,11 @@ void RenderViewImpl::SetDeviceColorProfileForTesting(
 }
 
 void RenderViewImpl::ForceResizeForTesting(const gfx::Size& new_size) {
-  gfx::Rect new_position(rootWindowRect().x,
-                         rootWindowRect().y,
-                         new_size.width(),
-                         new_size.height());
-  ResizeSynchronously(new_position, new_size);
+  gfx::Rect new_window_rect(rootWindowRect().x,
+                            rootWindowRect().y,
+                            new_size.width(),
+                            new_size.height());
+  SetWindowRectSynchronously(new_window_rect);
 }
 
 void RenderViewImpl::UseSynchronousResizeModeForTesting(bool enable) {
@@ -4070,8 +3777,6 @@ void RenderViewImpl::OnReleaseDisambiguationPopupBitmap(
 
 void RenderViewImpl::DidCommitCompositorFrame() {
   RenderWidget::DidCommitCompositorFrame();
-  if (BrowserPluginManager::Get())
-    BrowserPluginManager::Get()->DidCommitCompositorFrame(GetRoutingID());
   FOR_EACH_OBSERVER(RenderViewObserver, observers_, DidCommitCompositorFrame());
 }
 
@@ -4081,9 +3786,8 @@ void RenderViewImpl::SendUpdateFaviconURL(const std::vector<FaviconURL>& urls) {
 }
 
 void RenderViewImpl::DidStopLoadingIcons() {
-  int icon_types = WebIconURL::TypeFavicon;
-  if (TouchEnabled())
-    icon_types |= WebIconURL::TypeTouchPrecomposed | WebIconURL::TypeTouch;
+  int icon_types = WebIconURL::TypeFavicon | WebIconURL::TypeTouchPrecomposed |
+      WebIconURL::TypeTouch;
 
   // Favicons matter only for the top-level frame. If it is a WebRemoteFrame,
   // just return early.

@@ -12,7 +12,8 @@ import android.util.Log;
 
 import org.chromium.base.CommandLine;
 import org.chromium.base.ThreadUtils;
-import org.chromium.base.library_loader.LibraryLoader;
+import org.chromium.base.annotations.SuppressFBWarnings;
+import org.chromium.base.library_loader.LibraryProcessType;
 import org.chromium.base.library_loader.ProcessInitException;
 import org.chromium.content.app.ContentApplication;
 import org.chromium.content.browser.BrowserStartupController;
@@ -67,6 +68,7 @@ public class NotificationService extends IntentService {
      *
      * @param intent The intent containing the notification's information.
      */
+    @SuppressFBWarnings("DM_EXIT")
     private void dispatchIntentOnUIThread(Intent intent) {
         Context context = getApplicationContext();
         if (!CommandLine.isInitialized()) {
@@ -74,8 +76,8 @@ public class NotificationService extends IntentService {
         }
 
         try {
-            LibraryLoader.ensureInitialized();
-            BrowserStartupController.get(this).startBrowserProcessesSync(false);
+            BrowserStartupController.get(this, LibraryProcessType.PROCESS_BROWSER)
+                    .startBrowserProcessesSync(false);
 
             // Now that the browser process is initialized, we pass forward the call to the
             // Notification UI Manager which will take care of delivering the appropriate events.

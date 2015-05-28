@@ -24,7 +24,7 @@ class JustOneDraw : public SkPicture::AbortCallback {
 public:
     JustOneDraw() : fCalls(0) {}
 
-    virtual bool abort() SK_OVERRIDE { return fCalls++ > 0; }
+    bool abort() override { return fCalls++ > 0; }
 private:
     int fCalls;
 };
@@ -123,16 +123,17 @@ DEF_TEST(RecordDraw_SetMatrixClobber, r) {
 }
 
 struct TestBBH : public SkBBoxHierarchy {
-    virtual void insert(SkAutoTMalloc<SkRect>* boundsArray, int N) SK_OVERRIDE {
+    void insert(const SkRect boundsArray[], int N) override {
         fEntries.setCount(N);
         for (int i = 0; i < N; i++) {
-            Entry e = { (unsigned)i, (*boundsArray)[i] };
+            Entry e = { (unsigned)i, boundsArray[i] };
             fEntries[i] = e;
         }
     }
 
-    virtual void search(const SkRect& query, SkTDArray<unsigned>* results) const SK_OVERRIDE {}
-    virtual size_t bytesUsed() const SK_OVERRIDE { return 0; }
+    void search(const SkRect& query, SkTDArray<unsigned>* results) const override {}
+    size_t bytesUsed() const override { return 0; }
+    SkRect getRootBound() const override { return SkRect::MakeEmpty(); }
 
     struct Entry {
         unsigned opIndex;
@@ -289,12 +290,12 @@ DEF_TEST(RecordDraw_drawImage, r){
         }
 
         void onDrawImage(const SkImage* image, SkScalar left, SkScalar top,
-                         const SkPaint* paint) SK_OVERRIDE {
+                         const SkPaint* paint) override {
             fDrawImageCalled = true;
         }
 
         void onDrawImageRect(const SkImage* image, const SkRect* src, const SkRect& dst,
-                             const SkPaint* paint) SK_OVERRIDE {
+                             const SkPaint* paint) override {
             fDrawImageRectCalled = true;
         }
 

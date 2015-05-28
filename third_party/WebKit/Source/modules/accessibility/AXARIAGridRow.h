@@ -38,13 +38,13 @@ class AXObjectCacheImpl;
 class AXARIAGridRow final : public AXTableRow {
 
 private:
-    AXARIAGridRow(RenderObject*, AXObjectCacheImpl*);
+    AXARIAGridRow(LayoutObject*, AXObjectCacheImpl*);
 
 public:
-    static PassRefPtr<AXARIAGridRow> create(RenderObject*, AXObjectCacheImpl*);
+    static PassRefPtr<AXARIAGridRow> create(LayoutObject*, AXObjectCacheImpl*);
     virtual ~AXARIAGridRow();
 
-    virtual AXObject* headerObject() override;
+    virtual void headerObjectsForRow(AccessibilityChildrenVector&) override;
 
 private:
     virtual bool isARIATreeGridRow() const override;

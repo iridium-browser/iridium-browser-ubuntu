@@ -31,10 +31,6 @@ class QueryNotSpecific(GerritException):
   """Thrown when a query needs to identify one CL, but matched multiple."""
 
 
-class FailedToReachGerrit(GerritException):
-  """Exception thrown if we failed to contact the Gerrit server."""
-
-
 class GerritHelper(object):
   """Helper class to manage interaction with the gerrit-on-borg service."""
 
@@ -236,10 +232,10 @@ class GerritHelper(object):
       kwargs['change'] = change
       change = None
     elif change and cros_patch.ParseFullChangeID(change):
-      project, branch, change_id = cros_patch.ParseFullChangeID(change)
-      kwargs['change'] = change_id
-      kwargs['project'] = project
-      kwargs['branch'] = branch
+      change = cros_patch.ParseFullChangeID(change)
+      kwargs['change'] = change.change_id
+      kwargs['project'] = change.project
+      kwargs['branch'] = change.branch
       change = None
 
     if change and query_kwds.get('change'):
@@ -354,6 +350,20 @@ class GerritHelper(object):
       return
     gob_util.SetReview(self.host, self._to_changenum(change),
                        msg=msg, labels=labels, notify='ALL')
+
+  def SetTopic(self, change, topic, dryrun=False):
+    """Update the topic on a gerrit change.
+
+    Args:
+      change: A gerrit change number.
+      topic: The topic to set the review to.
+      dryrun: If True, don't actually set the topic.
+    """
+    if dryrun:
+      cros_build_lib.Info('Would have set topic "%s" for change "%s".',
+                          topic, change)
+      return
+    gob_util.SetTopic(self.host, self._to_changenum(change), topic=topic)
 
   def RemoveReady(self, change, dryrun=False):
     """Set the 'Commit-Queue' and 'Trybot-Ready' labels on a |change| to '0'."""
@@ -479,20 +489,20 @@ def GetGerritPatchInfoWithPatchQueries(patches):
   """
   seen = set()
   results = []
+  order = {k.ToGerritQueryText(): idx for (idx, k) in enumerate(patches)}
   for remote in constants.CHANGE_PREFIX.keys():
     helper = GetGerritHelper(remote)
-    raw_ids = [x.ToGerritQueryText() for x in patches
-               if x.remote == remote]
-    for _k, change in helper.QueryMultipleCurrentPatchset(raw_ids):
+    raw_ids = [x.ToGerritQueryText() for x in patches if x.remote == remote]
+    for k, change in helper.QueryMultipleCurrentPatchset(raw_ids):
       # return a unique list, while maintaining the ordering of the first
       # seen instance of each patch.  Do this to ensure whatever ordering
       # the user is trying to enforce, we honor; lest it break on
       # cherry-picking.
       if change.id not in seen:
-        results.append(change)
+        results.append((order[k], change))
         seen.add(change.id)
 
-  return results
+  return [change for _idx, change in sorted(results)]
 
 
 def GetGerritHelper(remote=None, gob=None, **kwargs):

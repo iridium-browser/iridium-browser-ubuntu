@@ -35,48 +35,61 @@
 
 namespace blink {
 
-MediaStreamAudioDestinationNode* MediaStreamAudioDestinationNode::create(AudioContext* context, size_t numberOfChannels)
-{
-    return new MediaStreamAudioDestinationNode(context, numberOfChannels);
-}
-
-MediaStreamAudioDestinationNode::MediaStreamAudioDestinationNode(AudioContext* context, size_t numberOfChannels)
-    : AudioBasicInspectorNode(NodeTypeMediaStreamAudioDestination, context, context->sampleRate(), numberOfChannels)
+MediaStreamAudioDestinationHandler::MediaStreamAudioDestinationHandler(AudioNode& node, size_t numberOfChannels)
+    : AudioBasicInspectorHandler(NodeTypeMediaStreamAudioDestination, node, node.context()->sampleRate(), numberOfChannels)
     , m_mixBus(AudioBus::create(numberOfChannels, ProcessingSizeInFrames))
 {
     m_source = MediaStreamSource::create("WebAudio-" + createCanonicalUUIDString(), MediaStreamSource::TypeAudio, "MediaStreamAudioDestinationNode", false, true, MediaStreamSource::ReadyStateLive, true);
     MediaStreamSourceVector audioSources;
     audioSources.append(m_source);
     MediaStreamSourceVector videoSources;
-    m_stream = MediaStream::create(context->executionContext(), MediaStreamDescriptor::create(audioSources, videoSources));
+    m_stream = MediaStream::create(node.context()->executionContext(), MediaStreamDescriptor::create(audioSources, videoSources));
     MediaStreamCenter::instance().didCreateMediaStreamAndTracks(m_stream->descriptor());
 
-    m_source->setAudioFormat(numberOfChannels, context->sampleRate());
+    m_source->setAudioFormat(numberOfChannels, node.context()->sampleRate());
 
     initialize();
 }
 
-MediaStreamAudioDestinationNode::~MediaStreamAudioDestinationNode()
+MediaStreamAudioDestinationHandler::~MediaStreamAudioDestinationHandler()
 {
     ASSERT(!isInitialized());
 }
 
-void MediaStreamAudioDestinationNode::dispose()
+void MediaStreamAudioDestinationHandler::dispose()
 {
     uninitialize();
-    AudioBasicInspectorNode::dispose();
+    AudioBasicInspectorHandler::dispose();
 }
 
-void MediaStreamAudioDestinationNode::trace(Visitor* visitor)
+DEFINE_TRACE(MediaStreamAudioDestinationHandler)
 {
     visitor->trace(m_stream);
-    AudioBasicInspectorNode::trace(visitor);
+    AudioBasicInspectorHandler::trace(visitor);
 }
 
-void MediaStreamAudioDestinationNode::process(size_t numberOfFrames)
+void MediaStreamAudioDestinationHandler::process(size_t numberOfFrames)
 {
     m_mixBus->copyFrom(*input(0)->bus());
     m_source->consumeAudio(m_mixBus.get(), numberOfFrames);
+}
+
+// ----------------------------------------------------------------
+
+MediaStreamAudioDestinationNode::MediaStreamAudioDestinationNode(AudioContext& context, size_t numberOfChannels)
+    : AudioNode(context)
+{
+    setHandler(new MediaStreamAudioDestinationHandler(*this, numberOfChannels));
+}
+
+MediaStreamAudioDestinationNode* MediaStreamAudioDestinationNode::create(AudioContext* context, size_t numberOfChannels)
+{
+    return new MediaStreamAudioDestinationNode(*context, numberOfChannels);
+}
+
+MediaStream* MediaStreamAudioDestinationNode::stream() const
+{
+    return static_cast<MediaStreamAudioDestinationHandler&>(handler()).stream();
 }
 
 } // namespace blink

@@ -15,7 +15,7 @@ class SimplePage(page_module.Page):
     self.archive_data_file = 'data/simple_mobile_sites.json'
 
   def RunNavigateSteps(self, action_runner):
-    action_runner.NavigateToPage(self)
+    super(SimplePage, self).RunNavigateSteps(action_runner)
     # TODO(epenner): Remove this wait (http://crbug.com/366933)
     action_runner.Wait(5)
 
@@ -27,7 +27,7 @@ class SimpleScrollPage(SimplePage):
   def RunPageInteractions(self, action_runner):
     # Make the scroll longer to reduce noise.
     interaction = action_runner.BeginGestureInteraction(
-        'ScrollAction', is_smooth=True)
+        'ScrollAction')
     action_runner.ScrollPage(direction='down', speed_in_pixels_per_second=300)
     interaction.End()
 

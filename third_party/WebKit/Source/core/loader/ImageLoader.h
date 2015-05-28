@@ -44,7 +44,7 @@ public:
     // Determines whether the observed ImageResource should have higher priority in the decoded resources cache.
     virtual bool requestsHighLiveResourceCachePriority() { return false; }
 
-    virtual void trace(Visitor*) { }
+    DEFINE_INLINE_VIRTUAL_TRACE() { }
 
 protected:
     ImageLoaderClient() { }
@@ -52,7 +52,7 @@ protected:
 
 class Element;
 class ImageLoader;
-class RenderImageResource;
+class LayoutImageResource;
 
 template<typename T> class EventSender;
 typedef EventSender<ImageLoader> ImageEventSender;
@@ -61,7 +61,7 @@ class ImageLoader : public NoBaseWillBeGarbageCollectedFinalized<ImageLoader>, p
 public:
     explicit ImageLoader(Element*);
     virtual ~ImageLoader();
-    void trace(Visitor*);
+    DECLARE_TRACE();
 
     enum UpdateFromElementBehavior {
         // This should be the update behavior when the element is attached to a document, or when DOM mutations trigger a new load.
@@ -125,7 +125,7 @@ private:
     void dispatchPendingLoadEvent();
     void dispatchPendingErrorEvent();
 
-    RenderImageResource* renderImageResource();
+    LayoutImageResource* layoutImageResource();
     void updateRenderer();
 
     void setImageWithoutConsideringPendingLoadEvent(ImageResource*);
@@ -134,7 +134,6 @@ private:
     void dispatchErrorEvent();
     void crossSiteOrCSPViolationOccurred(AtomicString);
     void enqueueImageLoadingMicroTask(UpdateFromElementBehavior);
-    static ResourcePtr<ImageResource> createImageResourceForImageDocument(Document&, FetchRequest&);
 
     void timerFired(Timer<ImageLoader>*);
 
@@ -169,7 +168,7 @@ private:
     // for HeapHashMap is not triggered when both of ImageLoader and
     // ImageLoaderClient are unreachable.
     GC_PLUGIN_IGNORE("http://crbug.com/383742")
-    PersistentHeapHashMap<WeakMember<ImageLoaderClient>, OwnPtr<ImageLoaderClientRemover> > m_clients;
+    PersistentHeapHashMap<WeakMember<ImageLoaderClient>, OwnPtr<ImageLoaderClientRemover>> m_clients;
 #else
     HashSet<ImageLoaderClient*> m_clients;
 #endif

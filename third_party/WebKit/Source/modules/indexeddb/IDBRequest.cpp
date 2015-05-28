@@ -31,7 +31,8 @@
 
 #include "bindings/core/v8/ExceptionState.h"
 #include "bindings/core/v8/ExceptionStatePlaceholder.h"
-#include "bindings/modules/v8/IDBBindingUtilities.h"
+#include "bindings/modules/v8/ToV8ForModules.h"
+#include "bindings/modules/v8/V8BindingForModules.h"
 #include "core/dom/ExecutionContext.h"
 #include "core/events/EventQueue.h"
 #include "modules/IndexedDBNames.h"
@@ -79,7 +80,7 @@ IDBRequest::~IDBRequest()
     ASSERT(m_readyState == DONE || m_readyState == EarlyDeath || !executionContext());
 }
 
-void IDBRequest::trace(Visitor* visitor)
+DEFINE_TRACE(IDBRequest)
 {
     visitor->trace(m_transaction);
     visitor->trace(m_source);
@@ -104,7 +105,7 @@ ScriptValue IDBRequest::result(ExceptionState& exceptionState)
     if (m_contextStopped || !executionContext())
         return ScriptValue();
     m_resultDirty = false;
-    ScriptValue value = idbAnyToScriptValue(m_scriptState.get(), m_result);
+    ScriptValue value = ScriptValue::from(m_scriptState.get(), m_result);
     return value;
 }
 
@@ -122,7 +123,7 @@ ScriptValue IDBRequest::source() const
     if (m_contextStopped || !executionContext())
         return ScriptValue();
 
-    return idbAnyToScriptValue(m_scriptState.get(), m_source);
+    return ScriptValue::from(m_scriptState.get(), m_source);
 }
 
 const String& IDBRequest::readyState() const
@@ -175,7 +176,7 @@ void IDBRequest::setPendingCursor(IDBCursor* cursor)
 
     m_hasPendingActivity = true;
     m_pendingCursor = cursor;
-    setResult(0);
+    setResult(nullptr);
     m_readyState = PENDING;
     m_error.clear();
     m_transaction->registerRequest(this);
@@ -192,7 +193,7 @@ IDBCursor* IDBRequest::getResultCursor() const
     return 0;
 }
 
-void IDBRequest::setResultCursor(IDBCursor* cursor, IDBKey* key, IDBKey* primaryKey, PassRefPtr<SharedBuffer> value, PassOwnPtr<Vector<WebBlobInfo> > blobInfo)
+void IDBRequest::setResultCursor(IDBCursor* cursor, IDBKey* key, IDBKey* primaryKey, PassRefPtr<SharedBuffer> value, PassOwnPtr<Vector<WebBlobInfo>> blobInfo)
 {
     ASSERT(m_readyState == PENDING);
     m_cursorKey = key;
@@ -206,6 +207,8 @@ void IDBRequest::setResultCursor(IDBCursor* cursor, IDBKey* key, IDBKey* primary
 void IDBRequest::setBlobInfo(PassOwnPtr<Vector<WebBlobInfo>> blobInfo)
 {
     m_blobs = adoptPtr(new IDBBlobHolder(blobInfo));
+    if (!m_blobs->getUUIDs().isEmpty() && m_transaction && m_transaction->backendDB())
+        m_transaction->backendDB()->ackReceivedBlobs(m_blobs->getUUIDs());
 }
 
 bool IDBRequest::shouldEnqueueEvent() const
@@ -244,14 +247,14 @@ void IDBRequest::onSuccess(const Vector<String>& stringList)
     onSuccessInternal(IDBAny::create(domStringList.release()));
 }
 
-void IDBRequest::onSuccess(PassOwnPtr<WebIDBCursor> backend, IDBKey* key, IDBKey* primaryKey, PassRefPtr<SharedBuffer> value, PassOwnPtr<Vector<WebBlobInfo> > blobInfo)
+void IDBRequest::onSuccess(PassOwnPtr<WebIDBCursor> backend, IDBKey* key, IDBKey* primaryKey, PassRefPtr<SharedBuffer> value, PassOwnPtr<Vector<WebBlobInfo>> blobInfo)
 {
     IDB_TRACE("IDBRequest::onSuccess(IDBCursor)");
     if (!shouldEnqueueEvent())
         return;
 
     ASSERT(!m_pendingCursor);
-    IDBCursor* cursor = 0;
+    IDBCursor* cursor = nullptr;
     switch (m_cursorType) {
     case IndexedDB::CursorKeyOnly:
         cursor = IDBCursor::create(backend, m_cursorDirection, this, m_source.get(), m_transaction.get());
@@ -277,7 +280,7 @@ void IDBRequest::onSuccess(IDBKey* idbKey)
         onSuccessInternal(IDBAny::createUndefined());
 }
 
-void IDBRequest::onSuccess(PassRefPtr<SharedBuffer> valueBuffer, PassOwnPtr<Vector<WebBlobInfo> > blobInfo)
+void IDBRequest::onSuccess(PassRefPtr<SharedBuffer> valueBuffer, PassOwnPtr<Vector<WebBlobInfo>> blobInfo)
 {
     IDB_TRACE("IDBRequest::onSuccess(SharedBuffer)");
     if (!shouldEnqueueEvent())
@@ -308,7 +311,7 @@ static IDBObjectStore* effectiveObjectStore(IDBAny* source)
 }
 #endif
 
-void IDBRequest::onSuccess(PassRefPtr<SharedBuffer> prpValueBuffer, PassOwnPtr<Vector<WebBlobInfo> > blobInfo, IDBKey* prpPrimaryKey, const IDBKeyPath& keyPath)
+void IDBRequest::onSuccess(PassRefPtr<SharedBuffer> prpValueBuffer, PassOwnPtr<Vector<WebBlobInfo>> blobInfo, IDBKey* prpPrimaryKey, const IDBKeyPath& keyPath)
 {
     IDB_TRACE("IDBRequest::onSuccess(SharedBuffer, IDBKey, IDBKeyPath)");
     if (!shouldEnqueueEvent())
@@ -357,7 +360,7 @@ void IDBRequest::setResult(IDBAny* result)
     m_resultDirty = true;
 }
 
-void IDBRequest::onSuccess(IDBKey* key, IDBKey* primaryKey, PassRefPtr<SharedBuffer> value, PassOwnPtr<Vector<WebBlobInfo> > blobInfo)
+void IDBRequest::onSuccess(IDBKey* key, IDBKey* primaryKey, PassRefPtr<SharedBuffer> value, PassOwnPtr<Vector<WebBlobInfo>> blobInfo)
 {
     IDB_TRACE("IDBRequest::onSuccess(key, primaryKey, value)");
     if (!shouldEnqueueEvent())
@@ -425,7 +428,7 @@ bool IDBRequest::dispatchEvent(PassRefPtrWillBeRawPtr<Event> event)
         m_readyState = DONE;
     dequeueEvent(event.get());
 
-    WillBeHeapVector<RefPtrWillBeMember<EventTarget> > targets;
+    WillBeHeapVector<RefPtrWillBeMember<EventTarget>> targets;
     targets.append(this);
     if (m_transaction && !m_preventPropagation) {
         targets.append(m_transaction);
@@ -437,7 +440,7 @@ bool IDBRequest::dispatchEvent(PassRefPtrWillBeRawPtr<Event> event)
     }
 
     // Cursor properties should not be updated until the success event is being dispatched.
-    IDBCursor* cursorToNotify = 0;
+    IDBCursor* cursorToNotify = nullptr;
     if (event->type() == EventTypeNames::success) {
         cursorToNotify = getResultCursor();
         if (cursorToNotify)

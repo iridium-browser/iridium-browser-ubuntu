@@ -8,7 +8,6 @@
 #include <string>
 
 #include "chrome/browser/chromeos/login/mixin_based_browser_test.h"
-#include "chrome/browser/chromeos/login/mock_login_utils.h"
 #include "chrome/browser/chromeos/login/test/js_checker.h"
 
 namespace content {
@@ -30,10 +29,10 @@ class LoginManagerTest : public MixinBasedBrowserTest {
   explicit LoginManagerTest(bool should_launch_browser);
 
   // Overridden from InProcessBrowserTest.
-  virtual void TearDownOnMainThread() override;
-  virtual void SetUpCommandLine(base::CommandLine* command_line) override;
-  virtual void SetUpInProcessBrowserTestFixture() override;
-  virtual void SetUpOnMainThread() override;
+  void TearDownOnMainThread() override;
+  void SetUpCommandLine(base::CommandLine* command_line) override;
+  void SetUpInProcessBrowserTestFixture() override;
+  void SetUpOnMainThread() override;
 
   // Registers the user with the given |user_id| on the device.
   // This method should be called in PRE_* test.
@@ -63,8 +62,6 @@ class LoginManagerTest : public MixinBasedBrowserTest {
   // that it is true.
   void JSExpect(const std::string& expression);
 
-  MockLoginUtils& login_utils() { return *mock_login_utils_; }
-
   content::WebContents* web_contents() { return web_contents_; }
 
   test::JSChecker& js_checker() { return js_checker_; }
@@ -76,7 +73,6 @@ class LoginManagerTest : public MixinBasedBrowserTest {
     web_contents_ = web_contents;
   }
 
-  MockLoginUtils* mock_login_utils_;
   bool should_launch_browser_;
   content::WebContents* web_contents_;
   test::JSChecker js_checker_;

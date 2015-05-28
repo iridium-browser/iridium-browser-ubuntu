@@ -34,7 +34,6 @@ namespace blink {
 
 class CSSRule;
 class CSSStyleSheet;
-class Document;
 class ExceptionState;
 class MediaList;
 class MediaQuery;
@@ -55,19 +54,19 @@ public:
 
     void addMediaQuery(PassOwnPtrWillBeRawPtr<MediaQuery>);
 
-    const WillBeHeapVector<OwnPtrWillBeMember<MediaQuery> >& queryVector() const { return m_queries; }
+    const WillBeHeapVector<OwnPtrWillBeMember<MediaQuery>>& queryVector() const { return m_queries; }
 
     String mediaText() const;
 
     PassRefPtrWillBeRawPtr<MediaQuerySet> copy() const { return adoptRefWillBeNoop(new MediaQuerySet(*this)); }
 
-    void trace(Visitor*);
+    DECLARE_TRACE();
 
 private:
     MediaQuerySet();
     MediaQuerySet(const MediaQuerySet&);
 
-    WillBeHeapVector<OwnPtrWillBeMember<MediaQuery> > m_queries;
+    WillBeHeapVector<OwnPtrWillBeMember<MediaQuery>> m_queries;
 };
 
 class MediaList final : public RefCountedWillBeGarbageCollected<MediaList>, public ScriptWrappable {
@@ -105,7 +104,7 @@ public:
 
     void reattach(MediaQuerySet*);
 
-    void trace(Visitor*);
+    DECLARE_TRACE();
 
 private:
     MediaList(MediaQuerySet*, CSSStyleSheet* parentSheet);
@@ -117,9 +116,6 @@ private:
     // Cleared in the ~CSSMediaRule and ~CSSImportRule destructors when oilpan is not enabled.
     RawPtrWillBeMember<CSSRule> m_parentRule;
 };
-
-// Adds message to inspector console whenever dpi or dpcm values are used for "screen" media.
-void reportMediaQueryWarningIfNeeded(Document*, const MediaQuerySet*);
 
 } // namespace blink
 

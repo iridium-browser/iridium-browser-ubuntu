@@ -5,6 +5,7 @@
 #include <sys/types.h>
 
 #include "ash/shell.h"
+#include "base/command_line.h"
 #include "base/compiler_specific.h"
 #include "base/macros.h"
 #include "base/prefs/pref_service.h"
@@ -44,12 +45,12 @@ class PreferencesTest : public LoginManagerTest {
         input_settings_(NULL),
         keyboard_(NULL) {}
 
-  virtual void SetUpCommandLine(base::CommandLine* command_line) override {
+  void SetUpCommandLine(base::CommandLine* command_line) override {
     LoginManagerTest::SetUpCommandLine(command_line);
     command_line->AppendSwitch(switches::kStubCrosSettings);
   }
 
-  virtual void SetUpOnMainThread() override {
+  void SetUpOnMainThread() override {
     LoginManagerTest::SetUpOnMainThread();
     input_settings_ = new system::FakeInputDeviceSettings();
     system::InputDeviceSettings::SetSettingsForTesting(input_settings_);

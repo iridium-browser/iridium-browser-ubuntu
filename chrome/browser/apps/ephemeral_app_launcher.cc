@@ -93,13 +93,7 @@ bool CheckCommonLaunchCriteria(Profile* profile,
 
 // static
 bool EphemeralAppLauncher::IsFeatureEnabled() {
-  return app_list::switches::IsExperimentalAppListEnabled();
-}
-
-// static
-bool EphemeralAppLauncher::IsFeatureEnabledInWebstore() {
-  return IsFeatureEnabled() &&
-         base::CommandLine::ForCurrentProcess()->HasSwitch(
+  return base::CommandLine::ForCurrentProcess()->HasSwitch(
              switches::kEnableEphemeralAppsInWebstore);
 }
 
@@ -399,9 +393,8 @@ EphemeralAppLauncher::CreateInstallPrompt() const {
 
   // Skip the prompt by returning null if the app does not need to display
   // permission warnings.
-  extensions::PermissionMessages permissions =
-      extension->permissions_data()->GetPermissionMessages();
-  if (permissions.empty())
+  if (extension->permissions_data()->GetLegacyPermissionMessageStrings()
+      .empty())
     return NULL;
 
   return make_scoped_refptr(new ExtensionInstallPrompt::Prompt(

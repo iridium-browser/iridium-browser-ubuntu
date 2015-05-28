@@ -12,17 +12,12 @@
 
 namespace blink {
 
-const AtomicString& RemoteDOMWindow::interfaceName() const
-{
-    return emptyAtom;
-}
-
 ExecutionContext* RemoteDOMWindow::executionContext() const
 {
     return nullptr;
 }
 
-void RemoteDOMWindow::trace(Visitor* visitor)
+DEFINE_TRACE(RemoteDOMWindow)
 {
     visitor->trace(m_frame);
     DOMWindow::trace(visitor);
@@ -84,12 +79,6 @@ BarProp* RemoteDOMWindow::toolbar() const
 Navigator* RemoteDOMWindow::navigator() const
 {
     ASSERT_NOT_REACHED();
-    return nullptr;
-}
-
-Location* RemoteDOMWindow::location() const
-{
-    // FIXME: Implement.
     return nullptr;
 }
 
@@ -197,18 +186,6 @@ double RemoteDOMWindow::devicePixelRatio() const
     return 0.0;
 }
 
-Storage* RemoteDOMWindow::sessionStorage(ExceptionState&) const
-{
-    ASSERT_NOT_REACHED();
-    return nullptr;
-}
-
-Storage* RemoteDOMWindow::localStorage(ExceptionState&) const
-{
-    ASSERT_NOT_REACHED();
-    return nullptr;
-}
-
 ApplicationCache* RemoteDOMWindow::applicationCache() const
 {
     ASSERT_NOT_REACHED();
@@ -222,12 +199,6 @@ int RemoteDOMWindow::orientation() const
 }
 
 Console* RemoteDOMWindow::console() const
-{
-    ASSERT_NOT_REACHED();
-    return 0;
-}
-
-Performance* RemoteDOMWindow::performance() const
 {
     ASSERT_NOT_REACHED();
     return 0;
@@ -313,22 +284,22 @@ void RemoteDOMWindow::scrollTo(const ScrollToOptions&) const
     ASSERT_NOT_REACHED();
 }
 
-void RemoteDOMWindow::moveBy(float x, float y) const
+void RemoteDOMWindow::moveBy(int x, int y, bool hasX, bool hasY) const
 {
     ASSERT_NOT_REACHED();
 }
 
-void RemoteDOMWindow::moveTo(float x, float y) const
+void RemoteDOMWindow::moveTo(int x, int y, bool hasX, bool hasY) const
 {
     ASSERT_NOT_REACHED();
 }
 
-void RemoteDOMWindow::resizeBy(float x, float y) const
+void RemoteDOMWindow::resizeBy(int x, int y, bool hasX, bool hasY) const
 {
     ASSERT_NOT_REACHED();
 }
 
-void RemoteDOMWindow::resizeTo(float width, float height) const
+void RemoteDOMWindow::resizeTo(int width, int height, bool hasWidth, bool hasHeight) const
 {
     ASSERT_NOT_REACHED();
 }
@@ -351,13 +322,13 @@ PassRefPtrWillBeRawPtr<CSSRuleList> RemoteDOMWindow::getMatchedCSSRules(Element*
     return nullptr;
 }
 
-int RemoteDOMWindow::requestAnimationFrame(RequestAnimationFrameCallback*)
+int RemoteDOMWindow::requestAnimationFrame(FrameRequestCallback*)
 {
     ASSERT_NOT_REACHED();
     return 0;
 }
 
-int RemoteDOMWindow::webkitRequestAnimationFrame(RequestAnimationFrameCallback*)
+int RemoteDOMWindow::webkitRequestAnimationFrame(FrameRequestCallback*)
 {
     ASSERT_NOT_REACHED();
     return 0;
@@ -366,11 +337,6 @@ int RemoteDOMWindow::webkitRequestAnimationFrame(RequestAnimationFrameCallback*)
 void RemoteDOMWindow::cancelAnimationFrame(int id)
 {
     ASSERT_NOT_REACHED();
-}
-
-void RemoteDOMWindow::postMessage(PassRefPtr<SerializedScriptValue> message, const MessagePortArray*, const String& targetOrigin, LocalDOMWindow* source, ExceptionState&)
-{
-    // FIXME: Implement.
 }
 
 String RemoteDOMWindow::sanitizedCrossDomainAccessErrorMessage(LocalDOMWindow* callingWindow)

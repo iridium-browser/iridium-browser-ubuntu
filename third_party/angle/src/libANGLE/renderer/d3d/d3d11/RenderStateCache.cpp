@@ -8,13 +8,15 @@
 // state objects.
 
 #include "libANGLE/renderer/d3d/d3d11/RenderStateCache.h"
-#include "libANGLE/renderer/d3d/d3d11/renderer11_utils.h"
-#include "libANGLE/renderer/d3d/d3d11/Renderer11.h"
-#include "libANGLE/Framebuffer.h"
-#include "libANGLE/FramebufferAttachment.h"
+
+#include <float.h>
 
 #include "common/debug.h"
-
+#include "libANGLE/Framebuffer.h"
+#include "libANGLE/FramebufferAttachment.h"
+#include "libANGLE/renderer/d3d/FramebufferD3D.h"
+#include "libANGLE/renderer/d3d/d3d11/renderer11_utils.h"
+#include "libANGLE/renderer/d3d/d3d11/Renderer11.h"
 #include "third_party/murmurhash/MurmurHash3.h"
 
 namespace rx
@@ -92,7 +94,8 @@ gl::Error RenderStateCache::getBlendState(const gl::Framebuffer *framebuffer, co
 
     bool mrt = false;
 
-    const gl::ColorbufferInfo &colorbuffers = framebuffer->getColorbuffersForRender(mRenderer->getWorkarounds());
+    const FramebufferD3D *framebufferD3D = GetImplAs<FramebufferD3D>(framebuffer);
+    const gl::AttachmentList &colorbuffers = framebufferD3D->getColorAttachmentsForRender(mRenderer->getWorkarounds());
 
     BlendStateKey key = { 0 };
     key.blendState = blendState;
@@ -421,6 +424,16 @@ gl::Error RenderStateCache::getSamplerState(const gl::SamplerState &samplerState
         samplerDesc.BorderColor[3] = 0.0f;
         samplerDesc.MinLOD = samplerState.minLod;
         samplerDesc.MaxLOD = samplerState.maxLod;
+
+        if (mRenderer->getFeatureLevel() <= D3D_FEATURE_LEVEL_9_3)
+        {
+            // Check that maxLOD is nearly FLT_MAX (1000.0f is the default), since 9_3 doesn't support anything other than FLT_MAX.
+            // Note that Feature Level 9_* only supports GL ES 2.0, so the consumer of ANGLE can't modify the Max LOD themselves.
+            ASSERT(samplerState.maxLod >= 999.9f);
+
+            // Now just set MaxLOD to FLT_MAX. Other parts of the renderer (e.g. the non-zero max LOD workaround) should take account of this.
+            samplerDesc.MaxLOD = FLT_MAX;
+        }
 
         ID3D11SamplerState *dx11SamplerState = NULL;
         HRESULT result = mDevice->CreateSamplerState(&samplerDesc, &dx11SamplerState);

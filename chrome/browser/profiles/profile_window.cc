@@ -174,16 +174,16 @@ void OpenBrowserWindowForProfile(
       true);
 }
 
-// Called after a |guest_profile| is available to be used by the user manager.
+// Called after a |system_profile| is available to be used by the user manager.
 // Based on the value of |tutorial_mode| we determine a url to be displayed
 // by the webui and run the |callback|, if it exists. After opening a profile,
 // perform |profile_open_action|.
-void OnUserManagerGuestProfileCreated(
+void OnUserManagerSystemProfileCreated(
     const base::FilePath& profile_path_to_focus,
     profiles::UserManagerTutorialMode tutorial_mode,
     profiles::UserManagerProfileSelected profile_open_action,
     const base::Callback<void(Profile*, const std::string&)>& callback,
-    Profile* guest_profile,
+    Profile* system_profile,
     Profile::CreateStatus status) {
   if (status != Profile::CREATE_STATUS_INITIALIZED || callback.is_null())
     return;
@@ -213,8 +213,11 @@ void OnUserManagerGuestProfileCreated(
   } else if (profile_open_action ==
              profiles::USER_MANAGER_SELECT_PROFILE_CHROME_MEMORY) {
     page += profiles::kUserManagerSelectProfileChromeMemory;
+  } else if (profile_open_action ==
+             profiles::USER_MANAGER_SELECT_PROFILE_APP_LAUNCHER) {
+    page += profiles::kUserManagerSelectProfileAppLauncher;
   }
-  callback.Run(guest_profile, page);
+  callback.Run(system_profile, page);
 }
 
 // Updates Chrome services that require notification when
@@ -236,6 +239,7 @@ const char kUserManagerSelectProfileTaskManager[] = "#task-manager";
 const char kUserManagerSelectProfileAboutChrome[] = "#about-chrome";
 const char kUserManagerSelectProfileChromeSettings[] = "#chrome-settings";
 const char kUserManagerSelectProfileChromeMemory[] = "#chrome-memory";
+const char kUserManagerSelectProfileAppLauncher[] = "#app-launcher";
 
 void FindOrCreateNewWindowForProfile(
     Profile* profile,
@@ -258,10 +262,9 @@ void FindOrCreateNewWindowForProfile(
 
   content::RecordAction(UserMetricsAction("NewWindow"));
   base::CommandLine command_line(base::CommandLine::NO_PROGRAM);
-  int return_code;
   StartupBrowserCreator browser_creator;
-  browser_creator.LaunchBrowser(command_line, profile, base::FilePath(),
-                                process_startup, is_first_run, &return_code);
+  browser_creator.LaunchBrowser(
+      command_line, profile, base::FilePath(), process_startup, is_first_run);
 #endif  // defined(OS_IOS)
 }
 
@@ -270,6 +273,9 @@ void SwitchToProfile(const base::FilePath& path,
                      bool always_create,
                      ProfileManager::CreateCallback callback,
                      ProfileMetrics::ProfileOpen metric) {
+  ProfileMetrics::LogProfileSwitch(metric,
+                                   g_browser_process->profile_manager(),
+                                   path);
   g_browser_process->profile_manager()->CreateProfileAsync(
       path,
       base::Bind(&OpenBrowserWindowForProfile,
@@ -280,13 +286,16 @@ void SwitchToProfile(const base::FilePath& path,
       base::string16(),
       base::string16(),
       std::string());
-  ProfileMetrics::LogProfileSwitchUser(metric);
 }
 
 void SwitchToGuestProfile(chrome::HostDesktopType desktop_type,
                           ProfileManager::CreateCallback callback) {
+  const base::FilePath& path = ProfileManager::GetGuestProfilePath();
+  ProfileMetrics::LogProfileSwitch(ProfileMetrics::SWITCH_PROFILE_GUEST,
+                                   g_browser_process->profile_manager(),
+                                   path);
   g_browser_process->profile_manager()->CreateProfileAsync(
-      ProfileManager::GetGuestProfilePath(),
+      path,
       base::Bind(&OpenBrowserWindowForProfile,
                  callback,
                  false,
@@ -295,7 +304,13 @@ void SwitchToGuestProfile(chrome::HostDesktopType desktop_type,
       base::string16(),
       base::string16(),
       std::string());
-  ProfileMetrics::LogProfileSwitchUser(ProfileMetrics::SWITCH_PROFILE_GUEST);
+}
+
+bool HasProfileSwitchTargets(Profile* profile) {
+  size_t min_profiles = profile->IsGuestSession() ? 1 : 2;
+  size_t number_of_profiles =
+      g_browser_process->profile_manager()->GetNumberOfProfiles();
+  return number_of_profiles < min_profiles;
 }
 
 void CreateAndSwitchToNewProfile(chrome::HostDesktopType desktop_type,
@@ -396,16 +411,16 @@ bool IsLockAvailable(Profile* profile) {
   return false;
 }
 
-void CreateGuestProfileForUserManager(
+void CreateSystemProfileForUserManager(
     const base::FilePath& profile_path_to_focus,
     profiles::UserManagerTutorialMode tutorial_mode,
     profiles::UserManagerProfileSelected profile_open_action,
     const base::Callback<void(Profile*, const std::string&)>& callback) {
-  // Create the guest profile, if necessary, and open the User Manager
-  // from the guest profile.
+  // Create the system profile, if necessary, and open the User Manager
+  // from the system profile.
   g_browser_process->profile_manager()->CreateProfileAsync(
-      ProfileManager::GetGuestProfilePath(),
-      base::Bind(&OnUserManagerGuestProfileCreated,
+      ProfileManager::GetSystemProfilePath(),
+      base::Bind(&OnUserManagerSystemProfileCreated,
                  profile_path_to_focus,
                  tutorial_mode,
                  profile_open_action,
@@ -499,6 +514,9 @@ void BubbleViewModeFromAvatarBubbleMode(
     case BrowserWindow::AVATAR_BUBBLE_MODE_SHOW_ERROR:
       *bubble_view_mode = BUBBLE_VIEW_MODE_PROFILE_CHOOSER;
       *tutorial_mode = TUTORIAL_MODE_SHOW_ERROR;
+      return;
+    case BrowserWindow::AVATAR_BUBBLE_MODE_FAST_USER_SWITCH:
+      *bubble_view_mode = profiles::BUBBLE_VIEW_MODE_FAST_PROFILE_CHOOSER;
       return;
     default:
       *bubble_view_mode = profiles::BUBBLE_VIEW_MODE_PROFILE_CHOOSER;

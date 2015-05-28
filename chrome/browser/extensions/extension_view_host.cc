@@ -63,7 +63,6 @@ ExtensionViewHost::ExtensionViewHost(
       associated_web_contents_(NULL) {
   // Not used for panels, see PanelHost.
   DCHECK(host_type == VIEW_TYPE_EXTENSION_DIALOG ||
-         host_type == VIEW_TYPE_EXTENSION_INFOBAR ||
          host_type == VIEW_TYPE_EXTENSION_POPUP);
 }
 
@@ -78,7 +77,6 @@ ExtensionViewHost::~ExtensionViewHost() {
 
 void ExtensionViewHost::CreateView(Browser* browser) {
   view_ = CreateExtensionView(this, browser);
-  view_->Init();
 }
 
 void ExtensionViewHost::SetAssociatedWebContents(WebContents* web_contents) {
@@ -100,25 +98,17 @@ void ExtensionViewHost::UnhandledKeyboardEvent(
 
 // ExtensionHost overrides:
 
-void ExtensionViewHost::OnDidStopLoading() {
-  DCHECK(did_stop_loading());
+void ExtensionViewHost::OnDidStopFirstLoad() {
   view_->DidStopLoading();
-}
-
-void ExtensionViewHost::OnDocumentAvailable() {
-  if (extension_host_type() == VIEW_TYPE_EXTENSION_INFOBAR) {
-    // No style sheet for other types, at the moment.
-    InsertInfobarCSS();
-  }
 }
 
 void ExtensionViewHost::LoadInitialURL() {
   if (!ExtensionSystem::Get(browser_context())->
           runtime_data()->IsBackgroundPageReady(extension())) {
     // Make sure the background page loads before any others.
-    registrar()->Add(this,
-                     extensions::NOTIFICATION_EXTENSION_BACKGROUND_PAGE_READY,
-                     content::Source<Extension>(extension()));
+    registrar_.Add(this,
+                   extensions::NOTIFICATION_EXTENSION_BACKGROUND_PAGE_READY,
+                   content::Source<Extension>(extension()));
     return;
   }
 
@@ -305,21 +295,11 @@ WebContents* ExtensionViewHost::GetVisibleWebContents() const {
 void ExtensionViewHost::Observe(int type,
                                 const content::NotificationSource& source,
                                 const content::NotificationDetails& details) {
-  if (type == extensions::NOTIFICATION_EXTENSION_BACKGROUND_PAGE_READY) {
-    DCHECK(ExtensionSystem::Get(browser_context())->
-               runtime_data()->IsBackgroundPageReady(extension()));
-    LoadInitialURL();
-    return;
-  }
-  ExtensionHost::Observe(type, source, details);
-}
-
-void ExtensionViewHost::InsertInfobarCSS() {
-  static const base::StringPiece css(
-      ResourceBundle::GetSharedInstance().GetRawDataResource(
-      IDR_EXTENSIONS_INFOBAR_CSS));
-
-  host_contents()->InsertCSS(css.as_string());
+  DCHECK_EQ(type, extensions::NOTIFICATION_EXTENSION_BACKGROUND_PAGE_READY);
+  DCHECK(ExtensionSystem::Get(browser_context())
+             ->runtime_data()
+             ->IsBackgroundPageReady(extension()));
+  LoadInitialURL();
 }
 
 }  // namespace extensions

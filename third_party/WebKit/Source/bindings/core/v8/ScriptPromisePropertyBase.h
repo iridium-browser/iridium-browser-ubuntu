@@ -8,6 +8,7 @@
 #include "bindings/core/v8/ScopedPersistent.h"
 #include "bindings/core/v8/ScriptPromise.h"
 #include "bindings/core/v8/ScriptPromiseProperties.h"
+#include "core/CoreExport.h"
 #include "core/dom/ContextLifecycleObserver.h"
 #include "wtf/OwnPtr.h"
 #include "wtf/RefCounted.h"
@@ -20,7 +21,7 @@ class DOMWrapperWorld;
 class ExecutionContext;
 class ScriptState;
 
-class ScriptPromisePropertyBase : public GarbageCollectedFinalized<ScriptPromisePropertyBase>, public ContextLifecycleObserver {
+class CORE_EXPORT ScriptPromisePropertyBase : public GarbageCollectedFinalized<ScriptPromisePropertyBase>, public ContextLifecycleObserver {
     WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(ScriptPromisePropertyBase);
 public:
     virtual ~ScriptPromisePropertyBase();
@@ -40,7 +41,7 @@ public:
 
     ScriptPromise promise(DOMWrapperWorld&);
 
-    virtual void trace(Visitor*) override;
+    DECLARE_VIRTUAL_TRACE();
 
 protected:
     ScriptPromisePropertyBase(ExecutionContext*, Name);
@@ -60,7 +61,7 @@ protected:
     void resetBase();
 
 private:
-    typedef Vector<OwnPtr<ScopedPersistent<v8::Object> > > WeakPersistentSet;
+    typedef Vector<OwnPtr<ScopedPersistent<v8::Object>>> WeakPersistentSet;
 
     void resolveOrRejectInternal(v8::Handle<v8::Promise::Resolver>);
     v8::Local<v8::Object> ensureHolderWrapper(ScriptState*);

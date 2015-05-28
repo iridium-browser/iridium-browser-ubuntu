@@ -27,9 +27,8 @@
 #include "bindings/core/v8/V8PerIsolateData.h"
 
 #include "bindings/core/v8/DOMDataStore.h"
-#include "bindings/core/v8/PageScriptDebugServer.h"
-#include "bindings/core/v8/ScriptGCEvent.h"
-#include "bindings/core/v8/ScriptProfiler.h"
+#include "bindings/core/v8/ScriptDebugServer.h"
+#include "bindings/core/v8/ScriptSourceCode.h"
 #include "bindings/core/v8/V8Binding.h"
 #include "bindings/core/v8/V8HiddenValue.h"
 #include "bindings/core/v8/V8ObjectConstructor.h"
@@ -48,6 +47,11 @@ static void assertV8RecursionScope()
 {
     ASSERT(V8RecursionScope::properlyUsed(v8::Isolate::GetCurrent()));
 }
+
+static bool runningUnitTest()
+{
+    return blink::Platform::current()->unitTestSupport();
+}
 #endif
 
 static void useCounterCallback(v8::Isolate* isolate, v8::Isolate::UseCounterFeature feature)
@@ -60,7 +64,8 @@ static void useCounterCallback(v8::Isolate* isolate, v8::Isolate::UseCounterFeat
         UseCounter::count(callingExecutionContext(isolate), UseCounter::BreakIterator);
         break;
     default:
-        ASSERT_NOT_REACHED();
+        // This can happen if V8 has added counters that this version of Blink
+        // does not know about. It's harmless.
         break;
     }
 }
@@ -77,20 +82,17 @@ V8PerIsolateData::V8PerIsolateData()
 #if ENABLE(ASSERT)
     , m_internalScriptRecursionLevel(0)
 #endif
-    , m_gcEventData(adoptPtr(new GCEventData()))
     , m_performingMicrotaskCheckpoint(false)
+    , m_debugServer(nullptr)
 {
     // FIXME: Remove once all v8::Isolate::GetCurrent() calls are gone.
     isolate()->Enter();
 #if ENABLE(ASSERT)
-    // currentThread will always be non-null in production, but can be null in Chromium unit tests.
-    if (blink::Platform::current()->currentThread())
+    if (!runningUnitTest())
         isolate()->AddCallCompletedCallback(&assertV8RecursionScope);
 #endif
-    if (isMainThread()) {
+    if (isMainThread())
         mainThreadPerIsolateData = this;
-        PageScriptDebugServer::setMainThreadIsolate(isolate());
-    }
     isolate()->SetUseCounterCallback(&useCounterCallback);
 }
 
@@ -139,12 +141,13 @@ void V8PerIsolateData::willBeDestroyed(v8::Isolate* isolate)
 void V8PerIsolateData::destroy(v8::Isolate* isolate)
 {
 #if ENABLE(ASSERT)
-    if (blink::Platform::current()->currentThread())
+    if (!runningUnitTest())
         isolate->RemoveCallCompletedCallback(&assertV8RecursionScope);
 #endif
     V8PerIsolateData* data = from(isolate);
     // FIXME: Remove once all v8::Isolate::GetCurrent() calls are gone.
     isolate->Exit();
+    data->m_debugServer.clear();
     delete data;
 }
 
@@ -155,7 +158,7 @@ V8PerIsolateData::DOMTemplateMap& V8PerIsolateData::currentDOMTemplateMap()
     return m_domTemplateMapForNonMainWorld;
 }
 
-v8::Handle<v8::FunctionTemplate> V8PerIsolateData::domTemplate(void* domTemplateKey, v8::FunctionCallback callback, v8::Handle<v8::Value> data, v8::Handle<v8::Signature> signature, int length)
+v8::Handle<v8::FunctionTemplate> V8PerIsolateData::domTemplate(const void* domTemplateKey, v8::FunctionCallback callback, v8::Handle<v8::Value> data, v8::Handle<v8::Signature> signature, int length)
 {
     DOMTemplateMap& domTemplateMap = currentDOMTemplateMap();
     DOMTemplateMap::iterator result = domTemplateMap.find(domTemplateKey);
@@ -167,7 +170,7 @@ v8::Handle<v8::FunctionTemplate> V8PerIsolateData::domTemplate(void* domTemplate
     return templ;
 }
 
-v8::Handle<v8::FunctionTemplate> V8PerIsolateData::existingDOMTemplate(void* domTemplateKey)
+v8::Handle<v8::FunctionTemplate> V8PerIsolateData::existingDOMTemplate(const void* domTemplateKey)
 {
     DOMTemplateMap& domTemplateMap = currentDOMTemplateMap();
     DOMTemplateMap::iterator result = domTemplateMap.find(domTemplateKey);
@@ -176,7 +179,7 @@ v8::Handle<v8::FunctionTemplate> V8PerIsolateData::existingDOMTemplate(void* dom
     return v8::Local<v8::FunctionTemplate>();
 }
 
-void V8PerIsolateData::setDOMTemplate(void* domTemplateKey, v8::Handle<v8::FunctionTemplate> templ)
+void V8PerIsolateData::setDOMTemplate(const void* domTemplateKey, v8::Handle<v8::FunctionTemplate> templ)
 {
     currentDOMTemplateMap().add(domTemplateKey, v8::Eternal<v8::FunctionTemplate>(isolate(), v8::Local<v8::FunctionTemplate>(templ)));
 }
@@ -190,15 +193,15 @@ v8::Local<v8::Context> V8PerIsolateData::ensureScriptRegexpContext()
     return m_scriptRegexpScriptState->context();
 }
 
-bool V8PerIsolateData::hasInstance(const WrapperTypeInfo* info, v8::Handle<v8::Value> value)
+bool V8PerIsolateData::hasInstance(const WrapperTypeInfo* untrustedWrapperTypeInfo, v8::Handle<v8::Value> value)
 {
-    return hasInstance(info, value, m_domTemplateMapForMainWorld)
-        || hasInstance(info, value, m_domTemplateMapForNonMainWorld);
+    return hasInstance(untrustedWrapperTypeInfo, value, m_domTemplateMapForMainWorld)
+        || hasInstance(untrustedWrapperTypeInfo, value, m_domTemplateMapForNonMainWorld);
 }
 
-bool V8PerIsolateData::hasInstance(const WrapperTypeInfo* info, v8::Handle<v8::Value> value, DOMTemplateMap& domTemplateMap)
+bool V8PerIsolateData::hasInstance(const WrapperTypeInfo* untrustedWrapperTypeInfo, v8::Handle<v8::Value> value, DOMTemplateMap& domTemplateMap)
 {
-    DOMTemplateMap::iterator result = domTemplateMap.find(info);
+    DOMTemplateMap::iterator result = domTemplateMap.find(untrustedWrapperTypeInfo);
     if (result == domTemplateMap.end())
         return false;
     v8::Handle<v8::FunctionTemplate> templ = result->value.Get(isolate());
@@ -239,7 +242,9 @@ static void constructorOfToString(const v8::FunctionCallbackInfo<v8::Value>& inf
         v8SetReturnValue(info, v8::String::Empty(info.GetIsolate()));
         return;
     }
-    v8SetReturnValue(info, V8ScriptRunner::callInternalFunction(v8::Handle<v8::Function>::Cast(value), info.This(), 0, 0, info.GetIsolate()));
+    v8::Local<v8::Value> result;
+    if (V8ScriptRunner::callInternalFunction(v8::Handle<v8::Function>::Cast(value), info.This(), 0, 0, info.GetIsolate()).ToLocal(&result))
+        v8SetReturnValue(info, result);
 }
 
 v8::Handle<v8::FunctionTemplate> V8PerIsolateData::toStringTemplate()
@@ -266,6 +271,12 @@ void V8PerIsolateData::runEndOfScopeTasks()
 void V8PerIsolateData::clearEndOfScopeTasks()
 {
     m_endOfScopeTasks.clear();
+}
+
+void V8PerIsolateData::setScriptDebugServer(PassOwnPtrWillBeRawPtr<ScriptDebugServer> server)
+{
+    ASSERT(!m_debugServer);
+    m_debugServer = server;
 }
 
 } // namespace blink

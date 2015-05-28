@@ -24,27 +24,26 @@
 #include "base/strings/stringprintf.h"
 #include "base/sys_info.h"
 #include "base/threading/thread_checker.h"
-#include "ui/base/ui_base_export.h"
+#include "ui/base/ime/ui_base_ime_export.h"
 
 namespace chromeos {
 namespace input_method {
 
-class UI_BASE_EXPORT ImeKeyboardX11 : public ImeKeyboard {
+class UI_BASE_IME_EXPORT ImeKeyboardX11 : public ImeKeyboard {
  public:
   ImeKeyboardX11();
-  virtual ~ImeKeyboardX11();
+  ~ImeKeyboardX11() override;
 
   // ImeKeyboard:
-  virtual bool SetCurrentKeyboardLayoutByName(
-      const std::string& layout_name) override;
-  virtual bool ReapplyCurrentKeyboardLayout() override;
-  virtual void ReapplyCurrentModifierLockStatus() override;
-  virtual void DisableNumLock() override;
-  virtual void SetCapsLockEnabled(bool enable_caps_lock) override;
-  virtual bool CapsLockIsEnabled() override;
-  virtual bool SetAutoRepeatEnabled(bool enabled) override;
-  virtual bool GetAutoRepeatEnabled() override;
-  virtual bool SetAutoRepeatRate(const AutoRepeatRate& rate) override;
+  bool SetCurrentKeyboardLayoutByName(const std::string& layout_name) override;
+  bool ReapplyCurrentKeyboardLayout() override;
+  void ReapplyCurrentModifierLockStatus() override;
+  void DisableNumLock() override;
+  void SetCapsLockEnabled(bool enable_caps_lock) override;
+  bool CapsLockIsEnabled() override;
+  bool SetAutoRepeatEnabled(bool enabled) override;
+  bool GetAutoRepeatEnabled() override;
+  bool SetAutoRepeatRate(const AutoRepeatRate& rate) override;
 
  private:
   // Returns a mask for Num Lock (e.g. 1U << 4). Returns 0 on error.

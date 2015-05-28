@@ -6,7 +6,6 @@
 
 from __future__ import print_function
 
-import contextlib
 import errno
 import os
 import signal
@@ -102,7 +101,7 @@ class Cgroup(object):
 
   NEEDED_SUBSYSTEMS = ('cpuset',)
   PROC_PATH = '/proc/cgroups'
-  _MOUNT_ROOT_POTENTIALS = ('/sys/fs/cgroup',)
+  _MOUNT_ROOT_POTENTIALS = ('/sys/fs/cgroup/cpuset', '/sys/fs/cgroup')
   _MOUNT_ROOT_FALLBACK = '/dev/cgroup'
   CGROUP_ROOT = None
   MOUNT_ROOT = None
@@ -118,8 +117,9 @@ class Cgroup(object):
       return False
 
     def _EnsureMounted(mnt, args):
-      if _FileContains('/proc/mounts', [mnt]):
-        return True
+      for mtab in osutils.IterateMountPoints():
+        if mtab.destination == mnt:
+          return True
 
       # Grab a lock so in the off chance we have multiple programs (like two
       # cros_sdk launched in parallel) running this init logic, we don't end
@@ -127,8 +127,9 @@ class Cgroup(object):
       lock_path = '/tmp/.chromite.cgroups.lock'
       with locking.FileLock(lock_path, 'cgroup lock') as lock:
         lock.write_lock()
-        if _FileContains('/proc/mounts', [mnt]):
-          return True
+        for mtab in osutils.IterateMountPoints():
+          if mtab.destination == mnt:
+            return True
 
         # Not all distros mount cgroup_root to sysfs.
         osutils.SafeMakedirs(mnt, sudo=True)
@@ -173,6 +174,7 @@ class Cgroup(object):
         break
     else:
       cls.MOUNT_ROOT = cls._MOUNT_ROOT_FALLBACK
+    cls.MOUNT_ROOT = os.path.realpath(cls.MOUNT_ROOT)
 
     cls.CGROUP_ROOT = os.path.join(cls.MOUNT_ROOT, 'cros')
     return True
@@ -429,17 +431,6 @@ class Cgroup(object):
       return True
     return False
 
-  def RemoveGroup(self, name, strict=False):
-    """Removes a nested cgroup of ours
-
-    Args:
-      name: the namespace to remove.
-      strict: if False, remove it if possible.  If True, its an error if it
-              cannot be removed.
-    """
-    return self._RemoveGroupOnDisk(self._LimitName(name, for_path=True),
-                                   strict)
-
   @classmethod
   def _RemoveGroupOnDisk(cls, path, strict, sudo_strict=True):
     """Perform the actual group removal.
@@ -536,23 +527,6 @@ class Cgroup(object):
       # Suppress any sudo_strict behaviour, since we may be invoked
       # during interpreter shutdown.
       self._RemoveGroupOnDisk(self.path, False, sudo_strict=False)
-
-  def TemporarilySwitchToNewGroup(self, namespace, **kwargs):
-    """Context manager to create a new cgroup & temporarily switch into it."""
-    node = self.AddGroup(namespace, **kwargs)
-    return self.TemporarilySwitchToGroup(node)
-
-  @contextlib.contextmanager
-  def TemporarilySwitchToGroup(self, group):
-    """Temporarily move this process into the given group, moving back after.
-
-    Used in a context manager fashion (aka, the with statement).
-    """
-    group.TransferCurrentProcess()
-    try:
-      yield
-    finally:
-      self.TransferCurrentProcess()
 
   def KillProcesses(self, poll_interval=0.05, remove=False, sigterm_timeout=10):
     """Kill all processes in this namespace."""

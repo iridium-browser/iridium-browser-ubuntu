@@ -31,22 +31,27 @@
 #ifndef Notification_h
 #define Notification_h
 
+#include "bindings/core/v8/SerializedScriptValue.h"
 #include "core/dom/ActiveDOMObject.h"
 #include "modules/EventTargetModules.h"
 #include "platform/AsyncMethodRunner.h"
 #include "platform/heap/Handle.h"
 #include "platform/text/TextDirection.h"
 #include "platform/weborigin/KURL.h"
-#include "public/platform/WebNotificationDelegate.h"
-#include "public/platform/WebNotificationPermission.h"
+#include "public/platform/modules/notifications/WebNotificationDelegate.h"
+#include "public/platform/modules/notifications/WebNotificationPermission.h"
 #include "wtf/PassOwnPtr.h"
+#include "wtf/PassRefPtr.h"
 #include "wtf/RefCounted.h"
+#include "wtf/RefPtr.h"
 
 namespace blink {
 
 class ExecutionContext;
 class NotificationOptions;
 class NotificationPermissionCallback;
+class ScriptState;
+class ScriptValue;
 struct WebNotificationData;
 
 class Notification final : public RefCountedGarbageCollectedEventTargetWithInlineData<Notification>, public ActiveDOMObject, public WebNotificationDelegate {
@@ -56,7 +61,7 @@ class Notification final : public RefCountedGarbageCollectedEventTargetWithInlin
 public:
     // Used for JavaScript instantiations of the Notification object. Will automatically schedule for
     // the notification to be displayed to the user.
-    static Notification* create(ExecutionContext*, const String& title, const NotificationOptions&);
+    static Notification* create(ExecutionContext*, const String& title, const NotificationOptions&, ExceptionState&);
 
     // Used for embedder-created Notification objects. Will initialize the Notification's state as showing.
     static Notification* create(ExecutionContext*, const String& persistentId, const WebNotificationData&);
@@ -82,12 +87,15 @@ public:
     String body() const { return m_body; }
     String tag() const { return m_tag; }
     String icon() const { return m_iconUrl; }
+    bool silent() const { return m_silent; }
+    ScriptValue data(ScriptState*) const;
 
     TextDirection direction() const;
     KURL iconURL() const { return m_iconUrl; }
+    SerializedScriptValue* serializedData() const { return m_serializedData.get(); }
 
-    static const String& permissionString(WebNotificationPermission);
-    static const String& permission(ExecutionContext*);
+    static String permissionString(WebNotificationPermission);
+    static String permission(ExecutionContext*);
     static WebNotificationPermission checkPermission(ExecutionContext*);
     static void requestPermission(ExecutionContext*, NotificationPermissionCallback* = nullptr);
 
@@ -100,7 +108,7 @@ public:
     virtual void stop() override;
     virtual bool hasPendingActivity() const override;
 
-    virtual void trace(Visitor*) override;
+    DECLARE_VIRTUAL_TRACE();
 
 private:
     Notification(const String& title, ExecutionContext*);
@@ -119,6 +127,8 @@ private:
     void setBody(const String& body) { m_body = body; }
     void setIconUrl(KURL iconUrl) { m_iconUrl = iconUrl; }
     void setTag(const String& tag) { m_tag = tag; }
+    void setSilent(bool silent) { m_silent = silent; }
+    void setSerializedData(PassRefPtr<SerializedScriptValue> data) { m_serializedData = data; }
 
     void setPersistentId(const String& persistentId) { m_persistentId = persistentId; }
 
@@ -128,6 +138,8 @@ private:
     String m_lang;
     String m_body;
     String m_tag;
+    bool m_silent;
+    RefPtr<SerializedScriptValue> m_serializedData;
 
     KURL m_iconUrl;
 

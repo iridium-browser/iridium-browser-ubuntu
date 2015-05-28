@@ -4,7 +4,10 @@
 
 #include "chromecast/browser/cast_browser_main_parts.h"
 
+#if !defined(OS_ANDROID)
 #include <signal.h>
+#include <sys/prctl.h>
+#endif
 
 #include "base/command_line.h"
 #include "base/files/file_util.h"
@@ -13,6 +16,7 @@
 #include "base/prefs/pref_registry_simple.h"
 #include "base/run_loop.h"
 #include "cc/base/switches.h"
+#include "chromecast/base/cast_paths.h"
 #include "chromecast/base/metrics/cast_metrics_helper.h"
 #include "chromecast/base/metrics/grouped_histogram.h"
 #include "chromecast/browser/cast_browser_context.h"
@@ -23,22 +27,30 @@
 #include "chromecast/browser/pref_service_helper.h"
 #include "chromecast/browser/service/cast_service.h"
 #include "chromecast/browser/url_request_context_factory.h"
-#include "chromecast/common/cast_paths.h"
+#include "chromecast/common/chromecast_switches.h"
 #include "chromecast/common/platform_client_auth.h"
-#include "chromecast/net/network_change_notifier_cast.h"
-#include "chromecast/net/network_change_notifier_factory_cast.h"
+#include "chromecast/net/connectivity_checker.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/common/content_switches.h"
+#include "media/base/browser_cdm_factory.h"
 #include "media/base/media_switches.h"
 
 #if defined(OS_ANDROID)
 #include "chromecast/crash/android/crash_handler.h"
 #include "components/crash/browser/crash_dump_manager_android.h"
 #include "net/android/network_change_notifier_factory_android.h"
+#else
+#include "chromecast/browser/media/cast_browser_cdm_factory.h"
+#endif
+
+#if defined(USE_AURA)
+#include "ui/aura/test/test_screen.h"
+#include "ui/gfx/screen.h"
 #endif
 
 namespace {
 
+#if !defined(OS_ANDROID)
 int kSignalsToRunClosure[] = { SIGTERM, SIGINT, };
 
 // Closure to run on SIGTERM and SIGINT.
@@ -54,6 +66,8 @@ void RunClosureOnSignal(int signum) {
 
 void RegisterClosureOnSignal(const base::Closure& closure) {
   DCHECK(!g_signal_closure);
+  DCHECK_GT(arraysize(kSignalsToRunClosure), 0U);
+
   // Allow memory leak by intention.
   g_signal_closure = new base::Closure(closure);
 
@@ -71,7 +85,54 @@ void RegisterClosureOnSignal(const base::Closure& closure) {
       DCHECK_EQ(sa_old.sa_handler, SIG_DFL);
     }
   }
+
+  // Get the first signal to exit when the parent process dies.
+  prctl(PR_SET_PDEATHSIG, kSignalsToRunClosure[0]);
 }
+
+const int kKillOnAlarmTimeoutSec = 5;  // 5 seconds
+
+void KillOnAlarm(int signum) {
+  LOG(ERROR) << "Got alarm signal for termination: " << signum;
+  raise(SIGKILL);
+}
+
+void RegisterKillOnAlarm(int timeout_seconds) {
+  struct sigaction sa_new;
+  memset(&sa_new, 0, sizeof(sa_new));
+  sa_new.sa_handler = KillOnAlarm;
+  sigfillset(&sa_new.sa_mask);
+  sa_new.sa_flags = SA_RESTART;
+
+  struct sigaction sa_old;
+  if (sigaction(SIGALRM, &sa_new, &sa_old) == -1) {
+    NOTREACHED();
+  } else {
+    DCHECK_EQ(sa_old.sa_handler, SIG_DFL);
+  }
+
+  if (alarm(timeout_seconds) > 0)
+    NOTREACHED() << "Previous alarm() was cancelled";
+}
+
+void DeregisterKillOnAlarm() {
+  // Explicitly cancel any outstanding alarm() calls.
+  alarm(0);
+
+  struct sigaction sa_new;
+  memset(&sa_new, 0, sizeof(sa_new));
+  sa_new.sa_handler = SIG_DFL;
+  sigfillset(&sa_new.sa_mask);
+  sa_new.sa_flags = SA_RESTART;
+
+  struct sigaction sa_old;
+  if (sigaction(SIGALRM, &sa_new, &sa_old) == -1) {
+    NOTREACHED();
+  } else {
+    DCHECK_EQ(sa_old.sa_handler, KillOnAlarm);
+  }
+}
+#endif  // !defined(OS_ANDROID)
 
 }  // namespace
 
@@ -86,27 +147,30 @@ struct DefaultCommandLineSwitch {
 };
 
 DefaultCommandLineSwitch g_default_switches[] = {
+  // TODO(gunsch): Enable unprefixed EME. See http://crbug.com/471936.
+  { switches::kDisableEncryptedMedia, ""},
 #if defined(OS_ANDROID)
-  { switches::kMediaDrmEnableNonCompositing, ""},
+  // Disables Chromecast-specific WiFi-related features on ATV for now.
+  { switches::kNoWifi, "" },
   { switches::kEnableOverlayFullscreenVideo, ""},
   { switches::kDisableInfobarForProtectedMediaIdentifier, ""},
   { switches::kDisableGestureRequirementForMediaPlayback, ""},
-  { switches::kForceUseOverlayEmbeddedVideo, ""},
 #endif
-  { switches::kDisablePlugins, "" },
   // Always enable HTMLMediaElement logs.
   { switches::kBlinkPlatformLogChannels, "Media"},
 #if defined(DISABLE_DISPLAY)
   { switches::kDisableGpu, "" },
 #endif
-#if defined(OS_LINUX) && defined(ARCH_CPU_X86_FAMILY)
+#if defined(OS_LINUX)
+#if defined(ARCH_CPU_X86_FAMILY)
   // This is needed for now to enable the egltest Ozone platform to work with
   // current Linux/NVidia OpenGL drivers.
   { switches::kIgnoreGpuBlacklist, ""},
-  // TODO(gusfernandez): This is needed to fix a bug with
-  // glPostSubBufferCHROMIUM (crbug.com/429200)
-  { cc::switches::kUIDisablePartialSwap, ""},
+#elif defined(ARCH_CPU_ARM_FAMILY) && !defined(DISABLE_DISPLAY)
+  // On Linux arm, enable CMA pipeline by default.
+  { switches::kEnableCmaMediaPipeline, "" },
 #endif
+#endif  // defined(OS_LINUX)
   // Needed to fix a bug where the raster thread doesn't get scheduled for a
   // substantial time (~5 seconds).  See https://crbug.com/441895.
   { switches::kUseNormalPriorityForTileTaskWorkerThreads, "" },
@@ -150,9 +214,6 @@ void CastBrowserMainParts::PreMainMessageLoopStart() {
 #if defined(OS_ANDROID)
   net::NetworkChangeNotifier::SetFactory(
       new net::NetworkChangeNotifierFactoryAndroid());
-#else
-  net::NetworkChangeNotifier::SetFactory(
-      new NetworkChangeNotifierFactoryCast());
 #endif  // defined(OS_ANDROID)
 }
 
@@ -166,12 +227,31 @@ void CastBrowserMainParts::PostMainMessageLoopStart() {
 }
 
 int CastBrowserMainParts::PreCreateThreads() {
-#if !defined(OS_ANDROID)
+#if defined(OS_ANDROID)
+  // GPU process is started immediately after threads are created, requiring
+  // CrashDumpManager to be initialized beforehand.
+  base::FilePath crash_dumps_dir;
+  if (!chromecast::CrashHandler::GetCrashDumpLocation(&crash_dumps_dir)) {
+    LOG(ERROR) << "Could not find crash dump location.";
+  }
+  cast_browser_process_->SetCrashDumpManager(
+      make_scoped_ptr(new breakpad::CrashDumpManager(crash_dumps_dir)));
+#else
   base::FilePath home_dir;
   CHECK(PathService::Get(DIR_CAST_HOME, &home_dir));
   if (!base::CreateDirectory(home_dir))
     return 1;
-#endif  // !defined(OS_ANDROID)
+#endif
+
+#if defined(USE_AURA)
+  // Screen can (and should) exist even with no displays connected. Its presence
+  // is assumed as an interface to access display information, e.g. from metrics
+  // code.  See CastContentWindow::CreateWindowTree for update when resolution
+  // is available.
+  DCHECK(!gfx::Screen::GetScreenByType(gfx::SCREEN_TYPE_NATIVE));
+  gfx::Screen::SetScreenInstance(gfx::SCREEN_TYPE_NATIVE,
+                                 aura::TestScreen::Create(gfx::Size(0, 0)));
+#endif
   return 0;
 }
 
@@ -180,6 +260,17 @@ void CastBrowserMainParts::PreMainMessageLoopRun() {
   metrics::RegisterPrefs(pref_registry.get());
   cast_browser_process_->SetPrefService(
       PrefServiceHelper::CreatePrefService(pref_registry.get()));
+
+#if !defined(OS_ANDROID)
+  const base::CommandLine* cmd_line = base::CommandLine::ForCurrentProcess();
+  if (cmd_line->HasSwitch(switches::kEnableCmaMediaPipeline))
+    ::media::SetBrowserCdmFactory(new media::CastBrowserCdmFactory);
+#endif  // !defined(OS_ANDROID)
+
+  cast_browser_process_->SetConnectivityChecker(
+      make_scoped_refptr(new ConnectivityChecker(
+          content::BrowserThread::GetMessageLoopProxyForThread(
+              content::BrowserThread::FILE))));
 
   url_request_context_factory_->InitializeOnUIThread();
 
@@ -191,18 +282,8 @@ void CastBrowserMainParts::PreMainMessageLoopRun() {
           cast_browser_process_->pref_service(),
           cast_browser_process_->browser_context()->GetRequestContext()));
 
-#if defined(OS_ANDROID)
-  base::FilePath crash_dumps_dir;
-  if (!chromecast::CrashHandler::GetCrashDumpLocation(&crash_dumps_dir)) {
-    LOG(ERROR) << "Could not find crash dump location.";
-  }
-  cast_browser_process_->SetCrashDumpManager(
-      make_scoped_ptr(new breakpad::CrashDumpManager(crash_dumps_dir)));
-#endif
-
-  if (!PlatformClientAuth::Initialize()) {
+  if (!PlatformClientAuth::Initialize())
     LOG(ERROR) << "PlatformClientAuth::Initialize failed.";
-  }
 
   cast_browser_process_->SetRemoteDebuggingServer(
       make_scoped_ptr(new RemoteDebuggingServer()));
@@ -212,19 +293,24 @@ void CastBrowserMainParts::PreMainMessageLoopRun() {
       cast_browser_process_->pref_service(),
       cast_browser_process_->metrics_service_client(),
       url_request_context_factory_->GetSystemGetter()));
+  cast_browser_process_->cast_service()->Initialize();
 
+  // Initializing metrics service and network delegates must happen after cast
+  // service is intialized because CastMetricsServiceClient and
+  // CastNetworkDelegate may use components initialized by cast service.
   cast_browser_process_->metrics_service_client()
       ->Initialize(cast_browser_process_->cast_service());
-
-  // Initializing network delegates must happen after Cast service is created.
   url_request_context_factory_->InitializeNetworkDelegates();
 
-  cast_browser_process_->cast_service()->Initialize();
+  cast_browser_process_->cast_service()->Start();
 }
 
 bool CastBrowserMainParts::MainMessageLoopRun(int* result_code) {
-  cast_browser_process_->cast_service()->Start();
-
+#if defined(OS_ANDROID)
+  // Android does not use native main MessageLoop.
+  NOTREACHED();
+  return true;
+#else
   base::RunLoop run_loop;
   base::Closure quit_closure(run_loop.QuitClosure());
   RegisterClosureOnSignal(quit_closure);
@@ -238,14 +324,27 @@ bool CastBrowserMainParts::MainMessageLoopRun(int* result_code) {
 
   run_loop.Run();
 
+  // Once the main loop has stopped running, we give the browser process a few
+  // seconds to stop cast service and finalize all resources. If a hang occurs
+  // and cast services refuse to terminate successfully, then we SIGKILL the
+  // current process to avoid indefinte hangs.
+  RegisterKillOnAlarm(kKillOnAlarmTimeoutSec);
+
   cast_browser_process_->cast_service()->Stop();
   return true;
+#endif
 }
 
 void CastBrowserMainParts::PostMainMessageLoopRun() {
+#if defined(OS_ANDROID)
+  // Android does not use native main MessageLoop.
+  NOTREACHED();
+#else
   cast_browser_process_->cast_service()->Finalize();
   cast_browser_process_->metrics_service_client()->Finalize();
   cast_browser_process_.reset();
+  DeregisterKillOnAlarm();
+#endif
 }
 
 }  // namespace shell

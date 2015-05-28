@@ -17,6 +17,10 @@ class PrefService;
 class SigninManagerBase;
 class TokenWebData;
 
+namespace content_settings {
+class Observer;
+}
+
 namespace net {
 class URLRequestContextGetter;
 }
@@ -90,13 +94,18 @@ class SigninClient : public KeyedService {
                             const std::string& username,
                             const std::string& password) {}
 
-  virtual void SetSigninProcess(int host_id) = 0;
-  virtual void ClearSigninProcess() = 0;
-  virtual bool IsSigninProcess(int host_id) const = 0;
-  virtual bool HasSigninProcess() const = 0;
-
   virtual bool IsFirstRun() const = 0;
   virtual base::Time GetInstallDate() = 0;
+
+  // Returns true if GAIA cookies are allowed in the content area.
+  virtual bool AreSigninCookiesAllowed() = 0;
+
+  // Adds an observer to listen for changes to the state of sign in cookie
+  // settings.
+  virtual void AddContentSettingsObserver(
+      content_settings::Observer* observer) = 0;
+  virtual void RemoveContentSettingsObserver(
+      content_settings::Observer* observer) = 0;
 
 #if defined(OS_IOS)
   // TODO(msarda): http://crbug.com/358544 Remove this iOS specific code from

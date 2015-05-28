@@ -7,90 +7,20 @@
 #include "net/quic/quic_connection.h"
 #include "net/quic/test_tools/quic_connection_peer.h"
 #include "net/quic/test_tools/quic_test_utils.h"
+#include "net/tools/epoll_server/epoll_server.h"
 #include "net/tools/quic/quic_epoll_connection_helper.h"
 
 using base::StringPiece;
 using net::test::MakeAckFrame;
 using net::test::MockHelper;
 using net::test::QuicConnectionPeer;
+using testing::_;
+using testing::AnyNumber;
+using testing::Invoke;
 
 namespace net {
 namespace tools {
 namespace test {
-
-QuicPacketWriter* NiceMockPacketWriterFactory::Create(
-    QuicConnection* /*connection*/) const {
-  return new testing::NiceMock<MockPacketWriter>();
-}
-
-MockConnection::MockConnection(bool is_server)
-    : QuicConnection(kTestConnectionId,
-                     IPEndPoint(net::test::Loopback4(), kTestPort),
-                     new testing::NiceMock<MockHelper>(),
-                     NiceMockPacketWriterFactory(),
-                     /* owns_writer= */ true,
-                     is_server,
-                     /* is_secure= */ false,
-                     QuicSupportedVersions()),
-      helper_(helper()) {
-}
-
-MockConnection::MockConnection(bool is_server, bool is_secure)
-    : QuicConnection(kTestConnectionId,
-                     IPEndPoint(net::test::Loopback4(), kTestPort),
-                     new testing::NiceMock<MockHelper>(),
-                     NiceMockPacketWriterFactory(),
-                     /* owns_writer= */ true,
-                     is_server,
-                     is_secure,
-                     QuicSupportedVersions()),
-      helper_(helper()) {
-}
-
-MockConnection::MockConnection(IPEndPoint address,
-                               bool is_server)
-    : QuicConnection(kTestConnectionId, address,
-                     new testing::NiceMock<MockHelper>(),
-                     NiceMockPacketWriterFactory(),
-                     /* owns_writer= */ true,
-                     is_server,
-                     /* is_secure= */ false,
-                     QuicSupportedVersions()),
-      helper_(helper()) {
-}
-
-MockConnection::MockConnection(QuicConnectionId connection_id,
-                               bool is_server)
-    : QuicConnection(connection_id,
-                     IPEndPoint(net::test::Loopback4(), kTestPort),
-                     new testing::NiceMock<MockHelper>(),
-                     NiceMockPacketWriterFactory(),
-                     /* owns_writer= */ true,
-                     is_server,
-                     /* is_secure= */ false,
-                     QuicSupportedVersions()),
-      helper_(helper()) {
-}
-
-MockConnection::MockConnection(bool is_server,
-                               const QuicVersionVector& supported_versions)
-    : QuicConnection(kTestConnectionId,
-                     IPEndPoint(net::test::Loopback4(), kTestPort),
-                     new testing::NiceMock<MockHelper>(),
-                     NiceMockPacketWriterFactory(),
-                     /* owns_writer= */ true,
-                     is_server,
-                     /* is_secure= */ false,
-                     supported_versions),
-      helper_(helper()) {
-}
-
-MockConnection::~MockConnection() {
-}
-
-void MockConnection::AdvanceTime(QuicTime::Delta delta) {
-  static_cast<MockHelper*>(helper())->AdvanceTime(delta);
-}
 
 QuicAckFrame MakeAckFrameWithNackRanges(
     size_t num_nack_ranges, QuicPacketSequenceNumber least_unacked) {
@@ -183,6 +113,24 @@ WriteResult TestWriterFactory::PerConnectionPacketWriter::WritePacket(
                                                     buf_len,
                                                     self_address,
                                                     peer_address);
+}
+
+MockTimeWaitListManager::MockTimeWaitListManager(
+    QuicPacketWriter* writer,
+    QuicServerSessionVisitor* visitor,
+    QuicConnectionHelperInterface* helper)
+    : QuicTimeWaitListManager(writer, visitor, helper,
+                              QuicSupportedVersions()) {
+  // Though AddConnectionIdToTimeWait is mocked, we want to retain its
+  // functionality.
+  EXPECT_CALL(*this, AddConnectionIdToTimeWait(_, _, _)).Times(AnyNumber());
+  ON_CALL(*this, AddConnectionIdToTimeWait(_, _, _))
+      .WillByDefault(
+          Invoke(this, &MockTimeWaitListManager::
+                           QuicTimeWaitListManager_AddConnectionIdToTimeWait));
+}
+
+MockTimeWaitListManager::~MockTimeWaitListManager() {
 }
 
 }  // namespace test

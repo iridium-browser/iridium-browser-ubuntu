@@ -7,19 +7,23 @@
 
 var DocumentNatives = requireNative('document_natives');
 var GuestView = require('guestView').GuestView;
+var GuestViewInternalNatives = requireNative('guest_view_internal');
 var IdGenerator = requireNative('id_generator');
 
 function GuestViewContainer(element, viewType) {
   privates(element).internal = this;
+  this.attributes = {};
   this.element = element;
   this.elementAttached = false;
-  this.guest = new GuestView(viewType);
   this.viewInstanceId = IdGenerator.GetNextId();
   this.viewType = viewType;
 
+  this.setupGuestProperty();
+  this.guest = new GuestView(viewType);
+  this.setupAttributes();
+
   privates(this).browserPluginElement = this.createBrowserPluginElement();
   this.setupFocusPropagation();
-
   var shadowRoot = this.element.createShadowRoot();
   shadowRoot.appendChild(privates(this).browserPluginElement);
 }
@@ -39,19 +43,43 @@ GuestViewContainer.forwardApiMethods = function(proto, apiMethods) {
 
 // Registers the browserplugin and guestview as custom elements once the
 // document has loaded.
-GuestViewContainer.registerElement =
-    function(guestViewContainerType) {
+GuestViewContainer.registerElement = function(guestViewContainerType) {
   var useCapture = true;
   window.addEventListener('readystatechange', function listener(event) {
-    if (document.readyState == 'loading') {
+    if (document.readyState == 'loading')
       return;
-    }
 
     registerBrowserPluginElement(
         guestViewContainerType.VIEW_TYPE.toLowerCase());
     registerGuestViewElement(guestViewContainerType);
     window.removeEventListener(event.type, listener, useCapture);
   }, useCapture);
+};
+
+// Create the 'guest' property to track new GuestViews and always listen for
+// their resizes.
+GuestViewContainer.prototype.setupGuestProperty = function() {
+  Object.defineProperty(this, 'guest', {
+    get: function() {
+      return privates(this).guest;
+    }.bind(this),
+    set: function(value) {
+      privates(this).guest = value;
+      if (!value) {
+        return;
+      }
+      privates(this).guest.onresize = function(e) {
+        // Dispatch the 'contentresize' event.
+        var contentResizeEvent = new Event('contentresize', { bubbles: true });
+        contentResizeEvent.oldWidth = e.oldWidth;
+        contentResizeEvent.oldHeight = e.oldHeight;
+        contentResizeEvent.newWidth = e.newWidth;
+        contentResizeEvent.newHeight = e.newHeight;
+        this.dispatchEvent(contentResizeEvent);
+      }.bind(this);
+    }.bind(this),
+    enumerable: true
+  });
 };
 
 GuestViewContainer.prototype.createBrowserPluginElement = function() {
@@ -88,7 +116,7 @@ GuestViewContainer.prototype.attachWindow = function() {
 
   this.guest.attach(this.internalInstanceId,
                     this.viewInstanceId,
-                    this.buildAttachParams());
+                    this.buildParams());
   return true;
 };
 
@@ -98,22 +126,60 @@ GuestViewContainer.prototype.handleBrowserPluginAttributeMutation =
     privates(this).browserPluginElement.removeAttribute('internalinstanceid');
     this.internalInstanceId = parseInt(newValue);
 
+    // Track when the element resizes using the element resize callback.
+    GuestViewInternalNatives.RegisterElementResizeCallback(
+        this.internalInstanceId, this.onElementResize.bind(this));
+
     if (!this.guest.getId()) {
       return;
     }
     this.guest.attach(this.internalInstanceId,
                       this.viewInstanceId,
-                      this.buildAttachParams());
+                      this.buildParams());
   }
 };
 
-// Implemented by the specific view type, if needed.
-GuestViewContainer.prototype.buildAttachParams = function() { return {}; };
-GuestViewContainer.prototype.handleAttributeMutation = function() {};
-GuestViewContainer.prototype.onElementAttached = function() {};
-GuestViewContainer.prototype.onElementDetached = function() {
-  this.guest.destroy();
+GuestViewContainer.prototype.onElementResize = function(oldWidth, oldHeight,
+                                                        newWidth, newHeight) {
+  // Dispatch the 'resize' event.
+  var resizeEvent = new Event('resize', { bubbles: true });
+  resizeEvent.oldWidth = oldWidth;
+  resizeEvent.oldHeight = oldHeight;
+  resizeEvent.newWidth = newWidth;
+  resizeEvent.newHeight = newHeight;
+  this.dispatchEvent(resizeEvent);
+
+  if (!this.guest.getId())
+    return;
+  this.guest.setSize({normal: {width: newWidth, height: newHeight}});
 };
+
+GuestViewContainer.prototype.buildParams = function() {
+  var params = this.buildContainerParams();
+  params['instanceId'] = this.viewInstanceId;
+  // When the GuestViewContainer is not participating in layout (display:none)
+  // then getBoundingClientRect() would report a width and height of 0.
+  // However, in the case where the GuestViewContainer has a fixed size we can
+  // use that value to initially size the guest so as to avoid a relayout of the
+  // on display:block.
+  var css = window.getComputedStyle(this.element, null);
+  var elementRect = this.element.getBoundingClientRect();
+  params['elementWidth'] = parseInt(elementRect.width) ||
+      parseInt(css.getPropertyValue('width'));
+  params['elementHeight'] = parseInt(elementRect.height) ||
+      parseInt(css.getPropertyValue('height'));
+  return params;
+};
+
+GuestViewContainer.prototype.dispatchEvent = function(event) {
+  return this.element.dispatchEvent(event);
+}
+
+// Implemented by the specific view type, if needed.
+GuestViewContainer.prototype.buildContainerParams = function() { return {}; };
+GuestViewContainer.prototype.onElementAttached = function() {};
+GuestViewContainer.prototype.onElementDetached = function() {};
+GuestViewContainer.prototype.setupAttributes = function() {};
 
 // Registers the browser plugin <object> custom element. |viewType| is the
 // name of the specific guestview container (e.g. 'webview').
@@ -171,10 +237,12 @@ function registerGuestViewElement(guestViewContainerType) {
 
   proto.attributeChangedCallback = function(name, oldValue, newValue) {
     var internal = privates(this).internal;
-    if (!internal) {
+    if (!internal || !internal.attributes[name]) {
       return;
     }
-    internal.handleAttributeMutation(name, oldValue, newValue);
+
+    // Let the changed attribute handle its own mutation.
+    internal.attributes[name].maybeHandleMutation(oldValue, newValue);
   };
 
   proto.detachedCallback = function() {
@@ -183,6 +251,8 @@ function registerGuestViewElement(guestViewContainerType) {
       return;
     }
     internal.elementAttached = false;
+    internal.internalInstanceId = 0;
+    internal.guest.destroy();
     internal.onElementDetached();
   };
 

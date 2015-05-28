@@ -50,6 +50,14 @@ PassRefPtr<SimpleFontData> FontDataCache::get(const FontPlatformData* platformDa
     if (!platformData)
         return nullptr;
 
+    // TODO: crbug.com/446376 - This should not happen, but we currently
+    // do not have a reproduction for the crash that an empty typeface()
+    // causes downstream from here.
+    if (!platformData->typeface()) {
+        WTF_LOG_ERROR("Empty typeface() in FontPlatformData when accessing FontDataCache.");
+        return nullptr;
+    }
+
     Cache::iterator result = m_cache.find(*platformData);
     if (result == m_cache.end()) {
         pair<RefPtr<SimpleFontData>, unsigned> newValue(SimpleFontData::create(*platformData), shouldRetain == Retain ? 1 : 0);
@@ -124,8 +132,8 @@ bool FontDataCache::purgeLeastRecentlyUsed(int count)
     isPurging = true;
 
     Vector<RefPtr<SimpleFontData>, 20> fontDataToDelete;
-    ListHashSet<RefPtr<SimpleFontData> >::iterator end = m_inactiveFontData.end();
-    ListHashSet<RefPtr<SimpleFontData> >::iterator it = m_inactiveFontData.begin();
+    ListHashSet<RefPtr<SimpleFontData>>::iterator end = m_inactiveFontData.end();
+    ListHashSet<RefPtr<SimpleFontData>>::iterator it = m_inactiveFontData.begin();
     for (int i = 0; i < count && it != end; ++it, ++i) {
         RefPtr<SimpleFontData>& fontData = *it.get();
         m_cache.remove(fontData->platformData());

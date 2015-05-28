@@ -12,8 +12,8 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "chrome/browser/printing/print_view_manager_observer.h"
+#include "components/signin/core/browser/gaia_cookie_manager_service.h"
 #include "content/public/browser/web_ui_message_handler.h"
-#include "google_apis/gaia/merge_session_helper.h"
 #include "ui/shell_dialogs/select_file_dialog.h"
 
 #if defined(ENABLE_SERVICE_DISCOVERY)
@@ -21,7 +21,7 @@
 #include "chrome/browser/local_discovery/service_discovery_shared_client.h"
 #endif  // ENABLE_SERVICE_DISCOVERY
 
-class AccountReconcilor;
+class PrinterHandler;
 class PrintSystemTaskProxy;
 
 namespace base {
@@ -46,7 +46,7 @@ class PrintPreviewHandler
 #endif
       public ui::SelectFileDialog::Listener,
       public printing::PrintViewManagerObserver,
-      public MergeSessionHelper::Observer {
+      public GaiaCookieManagerService::Observer {
  public:
   PrintPreviewHandler();
   ~PrintPreviewHandler() override;
@@ -63,9 +63,10 @@ class PrintPreviewHandler
   // PrintViewManagerObserver implementation.
   void OnPrintDialogShown() override;
 
-  // MergeSessionHelper::Observer implementation.
-  void MergeSessionCompleted(const std::string& account_id,
-                             const GoogleServiceAuthError& error) override;
+  // GaiaCookieManagerService::Observer implementation.
+  void OnAddAccountToCookieCompleted(
+      const std::string& account_id,
+      const GoogleServiceAuthError& error) override;
 
   // Displays a modal dialog, prompting the user to select a file.
   void SelectFile(const base::FilePath& default_path);
@@ -123,6 +124,9 @@ class PrintPreviewHandler
 
   // Starts getting all local privet printers. |arg| is unused.
   void HandleGetPrivetPrinters(const base::ListValue* args);
+
+  // Starts getting all local extension managed printers. |arg| is unused.
+  void HandleGetExtensionPrinters(const base::ListValue* args);
 
   // Stops getting all local privet printers. |arg| is unused.
   void HandleStopGetPrivetPrinters(const base::ListValue* args);
@@ -195,6 +199,10 @@ class PrintPreviewHandler
   void HandleForceOpenNewTab(const base::ListValue* args);
 
   void HandleGetPrivetPrinterCapabilities(const base::ListValue* arg);
+
+  // Requests an extension managed printer's capabilities.
+  // |arg| contains the ID of the printer whose capabilities are requested.
+  void HandleGetExtensionPrinterCapabilities(const base::ListValue* args);
 
   void SendInitialSettings(const std::string& default_printer);
 
@@ -282,10 +290,34 @@ class PrintPreviewHandler
       base::DictionaryValue* printer_value);
 #endif
 
+  // Lazily creates |extension_printer_handler_| that can be used to handle
+  // extension printers requests.
+  void EnsureExtensionPrinterHandlerSet();
+
+  // Called when a list of printers is reported by an extension.
+  // |printers|: The list of printers managed by the extension.
+  // |done|: Whether all the extensions have reported the list of printers
+  //     they manage.
+  void OnGotPrintersForExtension(const base::ListValue& printers, bool done);
+
+  // Called when an extension reports the set of print capabilites for a
+  // printer.
+  // |printer_id|: The id of the printer whose capabilities are reported.
+  // |capabilities|: The printer capabilities.
+  void OnGotExtensionPrinterCapabilities(
+      const std::string& printer_id,
+      const base::DictionaryValue& capabilities);
+
+  // Called when an extension print job is completed.
+  // |success|: Whether the job succeeded.
+  // |status|: The returned print job status. Useful for reporting a specific
+  //     error.
+  void OnExtensionPrintResult(bool success, const std::string& status);
+
   // Register/unregister from notifications of changes done to the GAIA
   // cookie.
-  void RegisterForMergeSession();
-  void UnregisterForMergeSession();
+  void RegisterForGaiaCookieChanges();
+  void UnregisterForGaiaCookieChanges();
 
   // The underlying dialog object.
   scoped_refptr<ui::SelectFileDialog> select_file_dialog_;
@@ -311,9 +343,9 @@ class PrintPreviewHandler
   // Holds token service to get OAuth2 access tokens.
   scoped_ptr<AccessTokenService> token_service_;
 
-  // Pointer to reconcilor so that print preview can listen for GAIA cookie
-  // changes.
-  AccountReconcilor* reconcilor_;
+  // Pointer to cookie manager service so that print preview can listen for GAIA
+  // cookie changes.
+  GaiaCookieManagerService* gaia_cookie_manager_service_;
 
 #if defined(ENABLE_SERVICE_DISCOVERY)
   scoped_refptr<local_discovery::ServiceDiscoverySharedClient>
@@ -329,6 +361,10 @@ class PrintPreviewHandler
   scoped_ptr<local_discovery::PrivetLocalPrintOperation>
       privet_local_print_operation_;
 #endif
+
+  // Handles requests for extension printers. Created lazily by calling
+  // |EnsureExtensionPrinterHandlerSet|.
+  scoped_ptr<PrinterHandler> extension_printer_handler_;
 
   // Notifies tests that want to know if the PDF has been saved. This doesn't
   // notify the test if it was a successful save, only that it was attempted.

@@ -15,7 +15,7 @@ var TREEITEM_C = TREEITEM_B + '> .tree-children > div:nth-child(1) ';
 var TREEITEM_D = TREEITEM_DRIVE + '> .tree-children > div:nth-child(2) ';
 var TREEITEM_E = TREEITEM_D + '> .tree-children > div:nth-child(1) ';
 var EXPAND_ICON = '> .tree-row > .expand-icon';
-var VOLUME_ICON = '> .tree-row > .volume-icon';
+var ITEM_ICON = '> .tree-row > .item-icon';
 var EXPANDED_SUBTREE = '> .tree-children[expanded]';
 
 /**
@@ -42,13 +42,13 @@ var DIRECTORY = {
     contents: [ENTRIES.directoryA.getExpectedRow(),
                ENTRIES.directoryD.getExpectedRow()],
     name: 'Drive',
-    navItem: '#tree-item-autogen-id-2',
+    navItem: '#tree-item-autogen-id-3',
     treeItem: TREEITEM_DRIVE
   },
   A: {
     contents: [ENTRIES.directoryB.getExpectedRow()],
     name: 'A',
-    navItem: '#tree-item-autogen-id-13',
+    navItem: '#tree-item-autogen-id-14',
     treeItem: TREEITEM_A
   },
   B: {
@@ -59,13 +59,13 @@ var DIRECTORY = {
   C: {
     contents: [],
     name: 'C',
-    navItem: '#tree-item-autogen-id-13',
+    navItem: '#tree-item-autogen-id-14',
     treeItem: TREEITEM_C
   },
   D: {
     contents: [ENTRIES.directoryE.getExpectedRow()],
     name: 'D',
-    navItem: '#tree-item-autogen-id-12',
+    navItem: '#tree-item-autogen-id-13',
     treeItem: TREEITEM_D
   },
   E: {
@@ -134,9 +134,9 @@ function expandDirectoryTree(windowId) {
  */
 function navigateToDirectory(windowId, directory) {
   return remoteCall.waitForElement(
-      windowId, directory.treeItem + VOLUME_ICON).then(function() {
+      windowId, directory.treeItem + ITEM_ICON).then(function() {
     return remoteCall.callRemoteTestUtil(
-        'fakeMouseClick', windowId, [directory.treeItem + VOLUME_ICON]);
+        'fakeMouseClick', windowId, [directory.treeItem + ITEM_ICON]);
   }).then(function(result) {
     chrome.test.assertTrue(result);
     return remoteCall.waitForFiles(windowId, directory.contents);
@@ -294,11 +294,22 @@ testcase.traverseFolderShortcuts = function() {
     },
 
     // Press UP to select 3rd shortcut.
-    // Current directory should be C.
+    // Current directory should remain D.
     // Shortcut to C should be selected.
     function() {
       remoteCall.callRemoteTestUtil('fakeKeyDown', windowId,
           ['#directory-tree', 'Up', false], this.next);
+    },
+    function(result) {
+      chrome.test.assertTrue(result);
+      expectSelection(windowId, DIRECTORY.D, DIRECTORY.C).then(this.next);
+    },
+
+    // Press Enter to change the directory to C.
+    // Current directory should be C.
+    function() {
+      remoteCall.callRemoteTestUtil('fakeKeyDown', windowId,
+          ['#directory-tree', 'Enter', false], this.next);
     },
     function(result) {
       chrome.test.assertTrue(result);

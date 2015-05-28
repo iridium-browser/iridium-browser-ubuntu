@@ -25,6 +25,7 @@
 #define Event_h
 
 #include "bindings/core/v8/ScriptWrappable.h"
+#include "core/CoreExport.h"
 #include "core/dom/DOMTimeStamp.h"
 #include "core/events/EventInitDictionary.h"
 #include "core/events/EventPath.h"
@@ -46,7 +47,7 @@ public:
     bool cancelable;
 };
 
-class Event : public RefCountedWillBeGarbageCollectedFinalized<Event>,  public ScriptWrappable {
+class CORE_EXPORT Event : public RefCountedWillBeGarbageCollectedFinalized<Event>,  public ScriptWrappable {
     DEFINE_WRAPPERTYPEINFO();
 public:
     enum PhaseType {
@@ -73,6 +74,12 @@ public:
         BLUR                = 8192,
         SELECT              = 16384,
         CHANGE              = 32768
+    };
+
+    enum RailsMode {
+        RailsModeFree       = 0,
+        RailsModeHorizontal = 1,
+        RailsModeVertical   = 2
     };
 
     static PassRefPtrWillBeRawPtr<Event> create()
@@ -179,14 +186,14 @@ public:
     EventPath& eventPath() { ASSERT(m_eventPath); return *m_eventPath; }
     void initEventPath(Node&);
 
-    PassRefPtrWillBeRawPtr<StaticNodeList> path() const;
+    WillBeHeapVector<RefPtrWillBeMember<EventTarget>> path() const;
 
     bool isBeingDispatched() const { return eventPhase(); }
 
     double uiCreateTime() const { return m_uiCreateTime; }
     void setUICreateTime(double uiCreateTime) { m_uiCreateTime = uiCreateTime; }
 
-    virtual void trace(Visitor*);
+    DECLARE_VIRTUAL_TRACE();
 
 protected:
     Event();

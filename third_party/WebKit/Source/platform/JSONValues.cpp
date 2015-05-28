@@ -438,7 +438,7 @@ PassRefPtr<JSONArray> JSONArrayBase::asArray()
 void JSONArrayBase::writeJSON(StringBuilder* output) const
 {
     output->append('[');
-    for (Vector<RefPtr<JSONValue> >::const_iterator it = m_data.begin(); it != m_data.end(); ++it) {
+    for (Vector<RefPtr<JSONValue>>::const_iterator it = m_data.begin(); it != m_data.end(); ++it) {
         if (it != m_data.begin())
             output->append(',');
         (*it)->writeJSON(output);
@@ -449,17 +449,17 @@ void JSONArrayBase::writeJSON(StringBuilder* output) const
 void JSONArrayBase::prettyWriteJSONInternal(StringBuilder* output, int depth) const
 {
     output->append('[');
-    bool lastIsArrayOrObject = false;
-    for (Vector<RefPtr<JSONValue> >::const_iterator it = m_data.begin(); it != m_data.end(); ++it) {
-        bool isArrayOrObject = (*it)->type() == JSONValue::TypeObject || (*it)->type() == JSONValue::TypeArray;
+    bool lastInsertedNewLine = false;
+    for (Vector<RefPtr<JSONValue>>::const_iterator it = m_data.begin(); it != m_data.end(); ++it) {
+        bool insertNewLine = (*it)->type() == JSONValue::TypeObject || (*it)->type() == JSONValue::TypeArray || (*it)->type() == JSONValue::TypeString;
         if (it == m_data.begin()) {
-            if (isArrayOrObject) {
+            if (insertNewLine) {
                 output->append('\n');
                 writeIndent(depth + 1, output);
             }
         } else {
             output->append(',');
-            if (lastIsArrayOrObject) {
+            if (lastInsertedNewLine) {
                 output->append('\n');
                 writeIndent(depth + 1, output);
             } else {
@@ -467,9 +467,9 @@ void JSONArrayBase::prettyWriteJSONInternal(StringBuilder* output, int depth) co
             }
         }
         (*it)->prettyWriteJSONInternal(output, depth + 1);
-        lastIsArrayOrObject = isArrayOrObject;
+        lastInsertedNewLine = insertNewLine;
     }
-    if (lastIsArrayOrObject) {
+    if (lastInsertedNewLine) {
         output->append('\n');
         writeIndent(depth, output);
     }

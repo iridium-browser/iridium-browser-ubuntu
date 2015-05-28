@@ -17,7 +17,6 @@ function WallpaperManager(dialogDom) {
   this.dialogDom_ = dialogDom;
   this.document_ = dialogDom.ownerDocument;
   this.enableOnlineWallpaper_ = loadTimeData.valueExists('manifestBaseURL');
-  this.selectedCategory = null;
   this.selectedItem_ = null;
   this.progressManager_ = new ProgressManager();
   this.customWallpaperData_ = null;
@@ -182,7 +181,8 @@ function WallpaperManager(dialogDom) {
     var accessManifestKey = Constants.AccessManifestKey;
     var self = this;
     Constants.WallpaperLocalStorage.get(accessManifestKey, function(items) {
-      self.manifest_ = items[accessManifestKey] ? items[accessManifestKey] : {};
+      self.manifest_ = items[accessManifestKey] ?
+          items[accessManifestKey] : null;
       self.showError_(str('connectionFailed'));
       self.postManifestDomInit_();
       $('wallpaper-grid').classList.add('image-picker-offline');
@@ -195,6 +195,7 @@ function WallpaperManager(dialogDom) {
    * @private
    */
   WallpaperManager.prototype.toggleSurpriseMe_ = function() {
+    var self = this;
     var checkbox = $('surprise-me').querySelector('#checkbox');
     var shouldEnable = !checkbox.classList.contains('checked');
     WallpaperUtil.saveToStorage(Constants.AccessSurpriseMeEnabledKey,
@@ -202,7 +203,16 @@ function WallpaperManager(dialogDom) {
       if (chrome.runtime.lastError == null) {
           if (shouldEnable) {
             checkbox.classList.add('checked');
+            // Hides the wallpaper set by message if there is any.
+            $('wallpaper-set-by-message').textContent = '';
           } else {
+            // Unchecking the "Surprise me" checkbox falls back to the previous
+            // wallpaper before "Surprise me" was turned on.
+            if (self.wallpaperGrid_.activeItem) {
+              self.setSelectedWallpaper_(self.wallpaperGrid_.activeItem);
+              self.onWallpaperChanged_(self.wallpaperGrid_.activeItem,
+                                       self.currentWallpaper_);
+            }
             checkbox.classList.remove('checked');
           }
           $('categories-list').disabled = shouldEnable;
@@ -445,7 +455,6 @@ function WallpaperManager(dialogDom) {
   WallpaperManager.prototype.initThumbnailsGrid_ = function() {
     this.wallpaperGrid_ = $('wallpaper-grid');
     wallpapers.WallpaperThumbnailsGrid.decorate(this.wallpaperGrid_);
-    this.wallpaperGrid_.autoExpands = true;
 
     this.wallpaperGrid_.addEventListener('change', this.onChange_.bind(this));
     this.wallpaperGrid_.addEventListener('dblclick', this.onClose_.bind(this));
@@ -585,7 +594,7 @@ function WallpaperManager(dialogDom) {
                                             selectedItem.source);
             self.wallpaperRequest_ = null;
           };
-          var onFailure = function() {
+          var onFailure = function(status) {
             self.progressManager_.hideProgressBar(selectedGridItem);
             self.showError_(str('downloadFailed'));
             self.wallpaperRequest_ = null;
@@ -726,7 +735,7 @@ function WallpaperManager(dialogDom) {
   };
 
   /**
-   * Close the last opened overlay on pressing the Escape key.
+   * Close the last opened overlay or app window on pressing the Escape key.
    * @param {Event} event A keydown event.
    */
   WallpaperManager.prototype.onKeyDown_ = function(event) {
@@ -740,6 +749,8 @@ function WallpaperManager(dialogDom) {
       if (closeButton) {
         closeButton.click();
         event.preventDefault();
+      } else {
+        this.onClose_();
       }
     }
   };
@@ -749,50 +760,20 @@ function WallpaperManager(dialogDom) {
    */
   WallpaperManager.prototype.initCategoriesList_ = function() {
     this.categoriesList_ = $('categories-list');
-    cr.ui.List.decorate(this.categoriesList_);
-    // cr.ui.list calculates items in view port based on client height and item
-    // height. However, categories list is displayed horizontally. So we should
-    // not calculate visible items here. Sets autoExpands to true to show every
-    // item in the list.
-    // TODO(bshe): Use ul to replace cr.ui.list for category list.
-    this.categoriesList_.autoExpands = true;
+    wallpapers.WallpaperCategoriesList.decorate(this.categoriesList_);
 
-    var self = this;
-    this.categoriesList_.itemConstructor = function(entry) {
-      return self.renderCategory_(entry);
-    };
-
-    this.categoriesList_.selectionModel = new cr.ui.ListSingleSelectionModel();
     this.categoriesList_.selectionModel.addEventListener(
         'change', this.onCategoriesChange_.bind(this));
 
-    var categoriesDataModel = new cr.ui.ArrayDataModel([]);
-    if (this.enableOnlineWallpaper_) {
+    if (this.enableOnlineWallpaper_ && this.manifest_) {
       // Adds all category as first category.
-      categoriesDataModel.push(str('allCategoryLabel'));
+      this.categoriesList_.dataModel.push(str('allCategoryLabel'));
       for (var key in this.manifest_.categories) {
-        categoriesDataModel.push(this.manifest_.categories[key]);
+        this.categoriesList_.dataModel.push(this.manifest_.categories[key]);
       }
     }
     // Adds custom category as last category.
-    categoriesDataModel.push(str('customCategoryLabel'));
-    this.categoriesList_.dataModel = categoriesDataModel;
-  };
-
-  /**
-   * Constructs the element in categories list.
-   * @param {string} entry Text content of a category.
-   */
-  WallpaperManager.prototype.renderCategory_ = function(entry) {
-    var li = this.document_.createElement('li');
-    cr.defineProperty(li, 'custom', cr.PropertyKind.BOOL_ATTR);
-    li.custom = (entry == str('customCategoryLabel'));
-    cr.defineProperty(li, 'lead', cr.PropertyKind.BOOL_ATTR);
-    cr.defineProperty(li, 'selected', cr.PropertyKind.BOOL_ATTR);
-    var div = this.document_.createElement('div');
-    div.textContent = entry;
-    li.appendChild(div);
-    return li;
+    this.categoriesList_.dataModel.push(str('customCategoryLabel'));
   };
 
   /**
@@ -982,7 +963,7 @@ function WallpaperManager(dialogDom) {
     bar.style.width = selectedListItem.offsetWidth + 'px';
 
     var wallpapersDataModel = new cr.ui.ArrayDataModel([]);
-    var selectedItem;
+    var selectedItem = null;
     if (selectedListItem.custom) {
       this.document_.body.setAttribute('custom', '');
       var errorHandler = this.onFileSystemError_.bind(this);
@@ -991,10 +972,14 @@ function WallpaperManager(dialogDom) {
       };
 
       var self = this;
+      // Need this check for test purpose.
+      var numOnlineWallpaper = (this.enableOnlineWallpaper_ && this.manifest_) ?
+        this.manifest_.wallpaper_list.length : 0;
       var processResults = function(entries) {
         for (var i = 0; i < entries.length; i++) {
           var entry = entries[i];
           var wallpaperInfo = {
+                wallpaperId: numOnlineWallpaper + i,
                 baseURL: entry.name,
                 // The layout will be replaced by the actual value saved in
                 // local storage when requested later. Layout is not important
@@ -1009,6 +994,7 @@ function WallpaperManager(dialogDom) {
         }
         if (loadTimeData.getBoolean('isOEMDefaultWallpaper')) {
           var oemDefaultWallpaperElement = {
+              wallpaperId: numOnlineWallpaper + entries.length,
               baseURL: 'OemDefaultWallpaper',
               layout: 'CENTER_CROPPED',
               source: Constants.WallpaperSourceEnum.OEM,
@@ -1028,8 +1014,10 @@ function WallpaperManager(dialogDom) {
         };
         wallpapersDataModel.push(lastElement);
         self.wallpaperGrid_.dataModel = wallpapersDataModel;
-        self.wallpaperGrid_.selectedItem = selectedItem;
-        self.wallpaperGrid_.activeItem = selectedItem;
+        if (selectedItem) {
+          self.wallpaperGrid_.selectedItem = selectedItem;
+          self.wallpaperGrid_.activeItem = selectedItem;
+        }
       };
 
       var success = function(dirEntry) {
@@ -1053,18 +1041,22 @@ function WallpaperManager(dialogDom) {
                                        success, errorHandler);
     } else {
       this.document_.body.removeAttribute('custom');
-      for (var key in this.manifest_.wallpaper_list) {
+      // Need this check for test purpose.
+      var numOnlineWallpaper = (this.enableOnlineWallpaper_ && this.manifest_) ?
+          this.manifest_.wallpaper_list.length : 0;
+      for (var i = 0; i < numOnlineWallpaper; i++) {
         if (selectedIndex == AllCategoryIndex ||
-            this.manifest_.wallpaper_list[key].categories.indexOf(
+            this.manifest_.wallpaper_list[i].categories.indexOf(
                 selectedIndex - OnlineCategoriesOffset) != -1) {
           var wallpaperInfo = {
-            baseURL: this.manifest_.wallpaper_list[key].base_url,
-            layout: this.manifest_.wallpaper_list[key].default_layout,
+            wallpaperId: i,
+            baseURL: this.manifest_.wallpaper_list[i].base_url,
+            layout: this.manifest_.wallpaper_list[i].default_layout,
             source: Constants.WallpaperSourceEnum.Online,
             availableOffline: false,
-            author: this.manifest_.wallpaper_list[key].author,
-            authorWebsite: this.manifest_.wallpaper_list[key].author_website,
-            dynamicURL: this.manifest_.wallpaper_list[key].dynamic_url
+            author: this.manifest_.wallpaper_list[i].author,
+            authorWebsite: this.manifest_.wallpaper_list[i].author_website,
+            dynamicURL: this.manifest_.wallpaper_list[i].dynamic_url
           };
           var startIndex = wallpaperInfo.baseURL.lastIndexOf('/') + 1;
           var fileName = wallpaperInfo.baseURL.substring(startIndex) +
@@ -1074,7 +1066,7 @@ function WallpaperManager(dialogDom) {
             wallpaperInfo.availableOffline = true;
           }
           wallpapersDataModel.push(wallpaperInfo);
-          var url = this.manifest_.wallpaper_list[key].base_url +
+          var url = this.manifest_.wallpaper_list[i].base_url +
               Constants.HighResolutionSuffix;
           if (url == this.currentWallpaper_) {
             selectedItem = wallpaperInfo;
@@ -1082,8 +1074,10 @@ function WallpaperManager(dialogDom) {
         }
       }
       this.wallpaperGrid_.dataModel = wallpapersDataModel;
-      this.wallpaperGrid_.selectedItem = selectedItem;
-      this.wallpaperGrid_.activeItem = selectedItem;
+      if (selectedItem) {
+        this.wallpaperGrid_.selectedItem = selectedItem;
+        this.wallpaperGrid_.activeItem = selectedItem;
+      }
     }
   };
 

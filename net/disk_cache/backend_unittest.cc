@@ -127,6 +127,7 @@ class DiskCacheBackendTest : public DiskCacheTestWithCache {
   void BackendDisable2();
   void BackendDisable3();
   void BackendDisable4();
+  void BackendDisabledAPI();
 };
 
 int DiskCacheBackendTest::GeneratePendingIO(net::TestCompletionCallback* cb) {
@@ -349,8 +350,8 @@ TEST_F(DiskCacheBackendTest, ShaderCacheBasics) {
 
 void DiskCacheBackendTest::BackendKeying() {
   InitCache();
-  const char* kName1 = "the first key";
-  const char* kName2 = "the first Key";
+  const char kName1[] = "the first key";
+  const char kName2[] = "the first Key";
   disk_cache::Entry *entry1, *entry2;
   ASSERT_EQ(net::OK, CreateEntry(kName1, &entry1));
 
@@ -2734,6 +2735,51 @@ TEST_F(DiskCacheBackendTest, NewEvictionDisableSuccess4) {
   BackendDisable4();
 }
 
+// Tests the exposed API with a disabled cache.
+void DiskCacheBackendTest::BackendDisabledAPI() {
+  cache_impl_->SetUnitTestMode();  // Simulate failure restarting the cache.
+
+  disk_cache::Entry* entry1, *entry2;
+  scoped_ptr<TestIterator> iter = CreateIterator();
+  EXPECT_EQ(2, cache_->GetEntryCount());
+  ASSERT_EQ(net::OK, iter->OpenNextEntry(&entry1));
+  entry1->Close();
+  EXPECT_NE(net::OK, iter->OpenNextEntry(&entry2));
+  FlushQueueForTest();
+  // The cache should be disabled.
+
+  EXPECT_EQ(net::DISK_CACHE, cache_->GetCacheType());
+  EXPECT_EQ(0, cache_->GetEntryCount());
+  EXPECT_NE(net::OK, OpenEntry("First", &entry2));
+  EXPECT_NE(net::OK, CreateEntry("Something new", &entry2));
+  EXPECT_NE(net::OK, DoomEntry("First"));
+  EXPECT_NE(net::OK, DoomAllEntries());
+  EXPECT_NE(net::OK, DoomEntriesBetween(Time(), Time::Now()));
+  EXPECT_NE(net::OK, DoomEntriesSince(Time()));
+  iter = CreateIterator();
+  EXPECT_NE(net::OK, iter->OpenNextEntry(&entry2));
+
+  std::vector<std::pair<std::string, std::string>> stats;
+  cache_->GetStats(&stats);
+  EXPECT_TRUE(stats.empty());
+  cache_->OnExternalCacheHit("First");
+}
+
+TEST_F(DiskCacheBackendTest, DisabledAPI) {
+  ASSERT_TRUE(CopyTestCache("bad_rankings2"));
+  DisableFirstCleanup();
+  InitCache();
+  BackendDisabledAPI();
+}
+
+TEST_F(DiskCacheBackendTest, NewEvictionDisabledAPI) {
+  ASSERT_TRUE(CopyTestCache("bad_rankings2"));
+  DisableFirstCleanup();
+  SetNewEviction();
+  InitCache();
+  BackendDisabledAPI();
+}
+
 TEST_F(DiskCacheTest, Backend_UsageStatsTimer) {
   MessageLoopHelper helper;
 
@@ -3231,7 +3277,7 @@ TEST_F(DiskCacheBackendTest, SimpleCacheOpenMissingFile) {
   SetSimpleCacheMode();
   InitCache();
 
-  const char* key = "the first key";
+  const char key[] = "the first key";
   disk_cache::Entry* entry = NULL;
 
   ASSERT_EQ(net::OK, CreateEntry(key, &entry));
@@ -3267,7 +3313,7 @@ TEST_F(DiskCacheBackendTest, SimpleCacheOpenBadFile) {
   SetSimpleCacheMode();
   InitCache();
 
-  const char* key = "the first key";
+  const char key[] = "the first key";
   disk_cache::Entry* entry = NULL;
 
   ASSERT_EQ(net::OK, CreateEntry(key, &entry));

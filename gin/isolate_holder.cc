@@ -105,18 +105,6 @@ bool VerifyV8SnapshotFile(base::MemoryMappedFile* snapshot_file,
   return !memcmp(fingerprint, output, sizeof(output));
 }
 #endif  // V8_VERIFY_EXTERNAL_STARTUP_DATA
-
-#if !defined(OS_MACOSX)
-const int v8_snapshot_dir =
-#if defined(OS_ANDROID)
-    base::DIR_ANDROID_APP_DATA;
-#elif defined(OS_POSIX)
-    base::DIR_EXE;
-#elif defined(OS_WIN)
-    base::DIR_MODULE;
-#endif  // OS_ANDROID
-#endif  // !OS_MACOSX
-
 #endif  // V8_USE_EXTERNAL_STARTUP_DATA
 
 }  // namespace
@@ -129,6 +117,17 @@ extern const unsigned char g_natives_fingerprint[];
 extern const unsigned char g_snapshot_fingerprint[];
 #endif  // V8_VERIFY_EXTERNAL_STARTUP_DATA
 
+#if !defined(OS_MACOSX)
+const int IsolateHolder::kV8SnapshotBasePathKey =
+#if defined(OS_ANDROID)
+    base::DIR_ANDROID_APP_DATA;
+#elif defined(OS_POSIX)
+    base::DIR_EXE;
+#elif defined(OS_WIN)
+    base::DIR_MODULE;
+#endif  // OS_ANDROID
+#endif  // !OS_MACOSX
+
 const char IsolateHolder::kNativesFileName[] = "natives_blob.bin";
 const char IsolateHolder::kSnapshotFileName[] = "snapshot_blob.bin";
 
@@ -139,7 +138,7 @@ bool IsolateHolder::LoadV8Snapshot() {
 
 #if !defined(OS_MACOSX)
   base::FilePath data_path;
-  PathService::Get(v8_snapshot_dir, &data_path);
+  PathService::Get(kV8SnapshotBasePathKey, &data_path);
   DCHECK(!data_path.empty());
 
   base::FilePath natives_path = data_path.AppendASCII(kNativesFileName);
@@ -253,6 +252,7 @@ IsolateHolder::~IsolateHolder() {
 #endif
   isolate_data_.reset();
   isolate_->Dispose();
+  isolate_ = NULL;
 }
 
 // static
@@ -266,8 +266,8 @@ void IsolateHolder::Initialize(ScriptMode mode,
   v8::V8::SetArrayBufferAllocator(allocator);
   g_array_buffer_allocator = allocator;
   if (mode == gin::IsolateHolder::kStrictMode) {
-    static const char v8_flags[] = "--use_strict";
-    v8::V8::SetFlagsFromString(v8_flags, sizeof(v8_flags) - 1);
+    static const char use_strict[] = "--use_strict";
+    v8::V8::SetFlagsFromString(use_strict, sizeof(use_strict) - 1);
   }
   v8::V8::SetEntropySource(&GenerateEntropy);
 #if defined(V8_USE_EXTERNAL_STARTUP_DATA)

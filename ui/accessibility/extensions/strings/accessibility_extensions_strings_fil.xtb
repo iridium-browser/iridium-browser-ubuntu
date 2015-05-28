@@ -1,9 +1,11 @@
 <?xml version="1.0" ?><!DOCTYPE translationbundle><translationbundle lang="fil">
 <translation id="1408730541890277710">Palitan ang mga larawan ng alt text ng mga ito.</translation>
+<translation id="6017514345406065928">Berde</translation>
 <translation id="595639123821853262">Naka-invert na Grayscale</translation>
 <translation id="8260673944985561857">Mga Opsyon sa Pagba-browse ng Caret</translation>
 <translation id="3410969471888629217">Kalimutan ang mga pag-customize ng site</translation>
 <translation id="6050189528197190982">Grayscale</translation>
+<translation id="8261559421026395104">Pahusayin ang pagtingin para sa:</translation>
 <translation id="5094574508723441140">Dinagdagan ang Contrast</translation>
 <translation id="8609925175482059018">Pindutin ang &lt;span class='key'&gt;F7&lt;/span&gt; upang i-on ang Pagba-browse ng Caret. Pindutin itong muli upang i-off ito.</translation>
 <translation id="3435896845095436175">Paganahin</translation>
@@ -14,6 +16,8 @@
 <translation id="2394933097471027016">Subukan ito ngayon - palaging naka-enable ang Pagba-browse ng Caret sa page na ito!</translation>
 <translation id="3622586652998721735">Itakda bilang default na scheme</translation>
 <translation id="2179565792157161713">Buksan Ang Mahabang Paglalarawan Sa Bagong Tab</translation>
+<translation id="7942349550061667556">Pula</translation>
+<translation id="1555130319947370107">Asul</translation>
 <translation id="2471847333270902538">Scheme ng kulay para sa <ph name="SITE"/>:</translation>
 <translation id="381767806621926835">Mag-right click sa anumang bagay na may attribute na &quot;longdesc&quot; o &quot;aria-describedat&quot; upang i-access ang mahabang paglalarawan nito.</translation>
 <translation id="786423340267544509">Magdagdag ng border sa mga elementong may mga attribute na aria-describedat o longdesc.</translation>
@@ -31,6 +35,7 @@
 <translation id="4896660567607030658">Walang feedback, ipakita lang ang cursor.</translation>
 <translation id="5631241868147802353">Default na scheme ng kulay:</translation>
 <translation id="5173942593318174089">I-highlight ang posisyon ng cursor sa pamamagitan ng animation.</translation>
+<translation id="7379645913608427028">Antas</translation>
 <translation id="894241283505723656">Mahahabang Paglalarawan sa Menu ng Konteksto</translation>
 <translation id="5555153510860501336">Naka-disable ang Mataas na Contrast</translation>
 <translation id="1703735871906654364">Pagba-browse ng Caret</translation>
@@ -38,6 +43,7 @@
 <translation id="6550675742724504774">Mga Pagpipilian</translation>
 <translation id="5650358096585648000">Visual na Feedback</translation>
 <translation id="4388820049312272371">I-highlight ang posisyon ng cursor sa pamamagitan ng mabilisang pagkislap.</translation>
+<translation id="2223143012868735942">Isang naku-customize na filter para sa kulay na nalalapat sa mga webpage upang pahusayin ang pagtingin sa kulay.</translation>
 <translation id="4023902424053835668">I-browse ang text ng mga web page gamit ang mga arrow key.</translation>
 <translation id="2795227192542594043">Nagbibigay sa iyo ang extension na ito ng naililipat na cursor sa web page, na nagbibigay-daan sa iyo na pumili ng text gamit ang keyboard.</translation>
 <translation id="4394049700291259645">Huwag paganahin</translation>

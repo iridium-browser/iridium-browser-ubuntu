@@ -86,6 +86,7 @@ class BrowserProcessImpl : public BrowserProcess,
   PrefService* local_state() override;
   net::URLRequestContextGetter* system_request_context() override;
   chrome_variations::VariationsService* variations_service() override;
+  PromoResourceService* promo_resource_service() override;
   BrowserProcessPlatformPart* platform_part() override;
   extensions::EventRouterForwarder* extension_event_router_forwarder() override;
   NotificationUIManager* notification_ui_manager() override;
@@ -124,11 +125,12 @@ class BrowserProcessImpl : public BrowserProcess,
 #endif
 
   ChromeNetLog* net_log() override;
-  prerender::PrerenderTracker* prerender_tracker() override;
   component_updater::ComponentUpdateService* component_updater() override;
   CRLSetFetcher* crl_set_fetcher() override;
   component_updater::PnaclComponentInstaller* pnacl_component_installer()
       override;
+  component_updater::SupervisedUserWhitelistInstaller*
+  supervised_user_whitelist_installer() override;
   MediaFileSystemRegistry* media_file_system_registry() override;
   bool created_local_state() const override;
 #if defined(ENABLE_WEBRTC)
@@ -251,14 +253,10 @@ class BrowserProcessImpl : public BrowserProcess,
   // Lives here so can safely log events on shutdown.
   scoped_ptr<ChromeNetLog> net_log_;
 
-  // Ordered before resource_dispatcher_host_delegate_ due to destruction
-  // ordering.
-  scoped_ptr<prerender::PrerenderTracker> prerender_tracker_;
-
   scoped_ptr<ChromeResourceDispatcherHostDelegate>
       resource_dispatcher_host_delegate_;
 
-  scoped_refptr<PromoResourceService> promo_resource_service_;
+  scoped_ptr<PromoResourceService> promo_resource_service_;
 
 #if (defined(OS_WIN) || defined(OS_LINUX)) && !defined(OS_CHROMEOS)
   base::RepeatingTimer<BrowserProcessImpl> autoupdate_timer_;
@@ -277,12 +275,15 @@ class BrowserProcessImpl : public BrowserProcess,
   scoped_refptr<CRLSetFetcher> crl_set_fetcher_;
 
 #if !defined(DISABLE_NACL)
-  scoped_ptr<component_updater::PnaclComponentInstaller>
+  scoped_refptr<component_updater::PnaclComponentInstaller>
       pnacl_component_installer_;
 #endif
 
+  scoped_ptr<component_updater::SupervisedUserWhitelistInstaller>
+      supervised_user_whitelist_installer_;
+
 #if defined(ENABLE_PLUGIN_INSTALLATION)
-  scoped_refptr<PluginsResourceService> plugins_resource_service_;
+  scoped_ptr<PluginsResourceService> plugins_resource_service_;
 #endif
 
   scoped_ptr<BrowserProcessPlatformPart> platform_part_;

@@ -61,13 +61,13 @@ class CC_EXPORT VideoFrameExternalResources {
   ~VideoFrameExternalResources();
 };
 
-// VideoResourceUpdater is by the video system to produce frame content as
+// VideoResourceUpdater is used by the video system to produce frame content as
 // resources consumable by the compositor.
 class CC_EXPORT VideoResourceUpdater
     : public base::SupportsWeakPtr<VideoResourceUpdater> {
  public:
-  explicit VideoResourceUpdater(ContextProvider* context_provider,
-                                ResourceProvider* resource_provider);
+  VideoResourceUpdater(ContextProvider* context_provider,
+                       ResourceProvider* resource_provider);
   ~VideoResourceUpdater();
 
   VideoFrameExternalResources CreateExternalResourcesFromVideoFrame(
@@ -131,6 +131,7 @@ class CC_EXPORT VideoResourceUpdater
   ContextProvider* context_provider_;
   ResourceProvider* resource_provider_;
   scoped_ptr<media::SkCanvasVideoRenderer> video_renderer_;
+  std::vector<uint8_t> upload_pixels_;
 
   // Recycle resources so that we can reduce the number of allocations and
   // data transfers.

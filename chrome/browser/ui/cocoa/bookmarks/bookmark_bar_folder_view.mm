@@ -13,6 +13,8 @@
 #include "content/public/browser/user_metrics.h"
 
 using base::UserMetricsAction;
+using bookmarks::BookmarkModel;
+using bookmarks::BookmarkNode;
 
 #import "third_party/mozilla/NSPasteboard+Utils.h"
 

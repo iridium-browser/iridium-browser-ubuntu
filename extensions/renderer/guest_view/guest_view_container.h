@@ -25,14 +25,14 @@ class GuestViewContainer : public content::BrowserPluginDelegate {
   void SetElementInstanceID(int element_instance_id) override;
 
   int element_instance_id() const { return element_instance_id_; }
-  int render_view_routing_id() const { return render_view_routing_id_; }
   content::RenderFrame* render_frame() const { return render_frame_; }
+
+  virtual void OnRenderFrameDestroyed() {}
 
  private:
   class RenderFrameLifetimeObserver;
 
   int element_instance_id_;
-  const int render_view_routing_id_;
   content::RenderFrame* render_frame_;
   scoped_ptr<RenderFrameLifetimeObserver> render_frame_lifetime_observer_;
 

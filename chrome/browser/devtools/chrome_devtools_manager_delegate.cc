@@ -7,11 +7,12 @@
 #include "base/values.h"
 #include "chrome/browser/devtools/devtools_target_impl.h"
 #include "chrome/browser/devtools/devtools_window.h"
-#include "chrome/browser/history/top_sites.h"
+#include "chrome/browser/history/top_sites_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_iterator.h"
+#include "components/history/core/browser/top_sites.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/devtools_agent_host.h"
 #include "content/public/browser/web_contents.h"
@@ -50,7 +51,8 @@ std::string ChromeDevToolsManagerDelegate::GetPageThumbnailData(
     const GURL& url) {
   for (chrome::BrowserIterator it; !it.done(); it.Next()) {
     Profile* profile = (*it)->profile();
-    history::TopSites* top_sites = profile->GetTopSites();
+    scoped_refptr<history::TopSites> top_sites =
+        TopSitesFactory::GetForProfile(profile);
     if (!top_sites)
       continue;
     scoped_refptr<base::RefCountedMemory> data;

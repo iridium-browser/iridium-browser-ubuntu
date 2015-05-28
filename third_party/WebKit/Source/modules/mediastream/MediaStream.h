@@ -66,9 +66,12 @@ public:
     MediaStreamTrackVector getVideoTracks() const { return m_videoTracks; }
     MediaStreamTrackVector getTracks();
 
+    bool active() const { return m_descriptor->active(); }
     bool ended() const;
     void stop();
 
+    DEFINE_ATTRIBUTE_EVENT_LISTENER(active);
+    DEFINE_ATTRIBUTE_EVENT_LISTENER(inactive);
     DEFINE_ATTRIBUTE_EVENT_LISTENER(ended);
     DEFINE_ATTRIBUTE_EVENT_LISTENER(addtrack);
     DEFINE_ATTRIBUTE_EVENT_LISTENER(removetrack);
@@ -87,7 +90,7 @@ public:
     // URLRegistrable
     virtual URLRegistry& registry() const override;
 
-    virtual void trace(Visitor*) override;
+    DECLARE_VIRTUAL_TRACE();
 
 private:
     MediaStream(ExecutionContext*, PassRefPtr<MediaStreamDescriptor>);
@@ -100,6 +103,8 @@ private:
     virtual void addRemoteTrack(MediaStreamComponent*) override;
     virtual void removeRemoteTrack(MediaStreamComponent*) override;
 
+    bool emptyOrOnlyEndedTracks();
+
     void scheduleDispatchEvent(PassRefPtrWillBeRawPtr<Event>);
     void scheduledEventTimerFired(Timer<MediaStream>*);
 
@@ -110,10 +115,10 @@ private:
     RefPtr<MediaStreamDescriptor> m_descriptor;
 
     Timer<MediaStream> m_scheduledEventTimer;
-    WillBeHeapVector<RefPtrWillBeMember<Event> > m_scheduledEvents;
+    WillBeHeapVector<RefPtrWillBeMember<Event>> m_scheduledEvents;
 };
 
-typedef HeapVector<Member<MediaStream> > MediaStreamVector;
+typedef HeapVector<Member<MediaStream>> MediaStreamVector;
 
 } // namespace blink
 

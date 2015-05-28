@@ -30,8 +30,10 @@
 #include "bindings/core/v8/ScriptState.h"
 #include "bindings/core/v8/V8HiddenValue.h"
 #include "bindings/core/v8/WrapperTypeInfo.h"
+#include "core/CoreExport.h"
 #include "gin/public/isolate_holder.h"
 #include "wtf/HashMap.h"
+#include "wtf/Noncopyable.h"
 #include "wtf/OwnPtr.h"
 #include "wtf/Vector.h"
 #include <v8.h>
@@ -39,13 +41,14 @@
 namespace blink {
 
 class DOMDataStore;
-class GCEventData;
+class ScriptDebugServer;
 class StringCache;
 struct WrapperTypeInfo;
 
 typedef WTF::Vector<DOMDataStore*> DOMDataStoreList;
 
-class V8PerIsolateData {
+class CORE_EXPORT V8PerIsolateData {
+    WTF_MAKE_NONCOPYABLE(V8PerIsolateData);
 public:
     class EndOfScopeTask {
     public:
@@ -92,14 +95,13 @@ public:
     int decrementInternalScriptRecursionLevel() { return --m_internalScriptRecursionLevel; }
 #endif
 
-    GCEventData* gcEventData() { return m_gcEventData.get(); }
     V8HiddenValue* hiddenValue() { return m_hiddenValue.get(); }
 
-    v8::Handle<v8::FunctionTemplate> domTemplate(void* domTemplateKey, v8::FunctionCallback = 0, v8::Handle<v8::Value> data = v8::Handle<v8::Value>(), v8::Handle<v8::Signature> = v8::Handle<v8::Signature>(), int length = 0);
-    v8::Handle<v8::FunctionTemplate> existingDOMTemplate(void* domTemplateKey);
-    void setDOMTemplate(void* domTemplateKey, v8::Handle<v8::FunctionTemplate>);
+    v8::Handle<v8::FunctionTemplate> domTemplate(const void* domTemplateKey, v8::FunctionCallback = 0, v8::Handle<v8::Value> data = v8::Handle<v8::Value>(), v8::Handle<v8::Signature> = v8::Handle<v8::Signature>(), int length = 0);
+    v8::Handle<v8::FunctionTemplate> existingDOMTemplate(const void* domTemplateKey);
+    void setDOMTemplate(const void* domTemplateKey, v8::Handle<v8::FunctionTemplate>);
 
-    bool hasInstance(const WrapperTypeInfo*, v8::Handle<v8::Value>);
+    bool hasInstance(const WrapperTypeInfo* untrusted, v8::Handle<v8::Value>);
     v8::Local<v8::Object> findInstanceInPrototypeChain(const WrapperTypeInfo*, v8::Local<v8::Value>);
 
     v8::Local<v8::Context> ensureScriptRegexpContext();
@@ -115,13 +117,15 @@ public:
     void runEndOfScopeTasks();
     void clearEndOfScopeTasks();
 
+    void setScriptDebugServer(PassOwnPtrWillBeRawPtr<ScriptDebugServer>);
+
 private:
     V8PerIsolateData();
     ~V8PerIsolateData();
 
-    typedef HashMap<const void*, v8::Eternal<v8::FunctionTemplate> > DOMTemplateMap;
+    typedef HashMap<const void*, v8::Eternal<v8::FunctionTemplate>> DOMTemplateMap;
     DOMTemplateMap& currentDOMTemplateMap();
-    bool hasInstance(const WrapperTypeInfo*, v8::Handle<v8::Value>, DOMTemplateMap&);
+    bool hasInstance(const WrapperTypeInfo* untrusted, v8::Handle<v8::Value>, DOMTemplateMap&);
     v8::Local<v8::Object> findInstanceInPrototypeChain(const WrapperTypeInfo*, v8::Local<v8::Value>, DOMTemplateMap&);
 
     bool m_destructionPending;
@@ -146,10 +150,14 @@ private:
 #if ENABLE(ASSERT)
     int m_internalScriptRecursionLevel;
 #endif
-    OwnPtr<GCEventData> m_gcEventData;
     bool m_performingMicrotaskCheckpoint;
 
     Vector<OwnPtr<EndOfScopeTask>> m_endOfScopeTasks;
+#if ENABLE(OILPAN)
+    CrossThreadPersistent<ScriptDebugServer> m_debugServer;
+#else
+    OwnPtr<ScriptDebugServer> m_debugServer;
+#endif
 };
 
 } // namespace blink

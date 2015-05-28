@@ -9,13 +9,13 @@
 #include "base/path_service.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/chromeos/login/existing_user_controller.h"
-#include "chrome/browser/chromeos/login/users/fake_user_manager.h"
 #include "chrome/browser/chromeos/net/network_portal_detector_test_impl.h"
 #include "chrome/browser/lifetime/application_lifetime.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
 #include "chromeos/chromeos_switches.h"
 #include "chromeos/dbus/fake_shill_manager_client.h"
+#include "components/user_manager/fake_user_manager.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_service.h"
@@ -93,9 +93,8 @@ void OobeBaseTest::SetUpCommandLine(base::CommandLine* command_line) {
   // webstore in chrome_resource_dispatcher_host_delegate.cc.
   const GURL& server_url = embedded_test_server()->base_url();
 
-  std::string gaia_host("gaia");
   GURL::Replacements replace_gaia_host;
-  replace_gaia_host.SetHostStr(gaia_host);
+  replace_gaia_host.SetHostStr("gaia");
   GURL gaia_url = server_url.ReplaceComponents(replace_gaia_host);
   command_line->AppendSwitchASCII(::switches::kGaiaUrl, gaia_url.spec());
   command_line->AppendSwitchASCII(::switches::kLsoUrl, gaia_url.spec());

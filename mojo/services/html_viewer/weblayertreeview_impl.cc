@@ -13,25 +13,20 @@
 #include "mojo/cc/context_provider_mojo.h"
 #include "mojo/cc/output_surface_mojo.h"
 #include "mojo/converters/surfaces/surfaces_type_converters.h"
-#include "mojo/services/view_manager/public/cpp/view.h"
 #include "third_party/WebKit/public/web/WebWidget.h"
+#include "third_party/mojo_services/src/view_manager/public/cpp/view.h"
 
 namespace html_viewer {
 
 WebLayerTreeViewImpl::WebLayerTreeViewImpl(
     scoped_refptr<base::MessageLoopProxy> compositor_message_loop_proxy,
-    mojo::SurfacesServicePtr surfaces_service,
+    mojo::SurfacePtr surface,
     mojo::GpuPtr gpu_service)
     : widget_(NULL),
       view_(NULL),
-      surfaces_service_(surfaces_service.Pass()),
-      gpu_service_(gpu_service.Pass()),
       main_thread_compositor_task_runner_(base::MessageLoopProxy::current()),
       weak_factory_(this) {
   main_thread_bound_weak_ptr_ = weak_factory_.GetWeakPtr();
-  surfaces_service_->CreateSurfaceConnection(
-      base::Bind(&WebLayerTreeViewImpl::OnSurfaceConnectionCreated,
-                 main_thread_bound_weak_ptr_));
 
   cc::LayerTreeSettings settings;
 
@@ -39,27 +34,42 @@ WebLayerTreeViewImpl::WebLayerTreeViewImpl(
   // to keep content always crisp when possible.
   settings.layer_transforms_should_scale_layer_contents = true;
 
-  cc::SharedBitmapManager* shared_bitmap_manager = NULL;
-  gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager = NULL;
+  cc::SharedBitmapManager* shared_bitmap_manager = nullptr;
+  gpu::GpuMemoryBufferManager* gpu_memory_buffer_manager = nullptr;
+  cc::TaskGraphRunner* task_graph_runner = nullptr;
 
   layer_tree_host_ =
       cc::LayerTreeHost::CreateThreaded(this,
                                         shared_bitmap_manager,
                                         gpu_memory_buffer_manager,
+                                        task_graph_runner,
                                         settings,
                                         base::MessageLoopProxy::current(),
                                         compositor_message_loop_proxy,
                                         nullptr);
   DCHECK(layer_tree_host_);
+
+  if (surface && gpu_service) {
+    mojo::CommandBufferPtr cb;
+    gpu_service->CreateOffscreenGLES2Context(GetProxy(&cb));
+    scoped_refptr<cc::ContextProvider> context_provider(
+        new mojo::ContextProviderMojo(cb.PassMessagePipe()));
+    output_surface_.reset(
+        new mojo::OutputSurfaceMojo(this, context_provider, surface.Pass()));
+  }
+  layer_tree_host_->SetLayerTreeHostClientReady();
 }
 
 WebLayerTreeViewImpl::~WebLayerTreeViewImpl() {
 }
 
-void WebLayerTreeViewImpl::WillBeginMainFrame(int frame_id) {
+void WebLayerTreeViewImpl::WillBeginMainFrame() {
 }
 
 void WebLayerTreeViewImpl::DidBeginMainFrame() {
+}
+
+void WebLayerTreeViewImpl::BeginMainFrameNotExpectedSoon() {
 }
 
 void WebLayerTreeViewImpl::BeginMainFrame(const cc::BeginFrameArgs& args) {
@@ -77,8 +87,8 @@ void WebLayerTreeViewImpl::Layout() {
 }
 
 void WebLayerTreeViewImpl::ApplyViewportDeltas(
-    const gfx::Vector2d& inner_delta,
-    const gfx::Vector2d& outer_delta,
+    const gfx::Vector2dF& inner_delta,
+    const gfx::Vector2dF& outer_delta,
     const gfx::Vector2dF& elastic_overscroll_delta,
     float page_scale,
     float top_controls_delta) {
@@ -98,7 +108,8 @@ void WebLayerTreeViewImpl::ApplyViewportDeltas(
 }
 
 void WebLayerTreeViewImpl::RequestNewOutputSurface() {
-  layer_tree_host_->SetOutputSurface(output_surface_.Pass());
+  if (output_surface_.get())
+    layer_tree_host_->SetOutputSurface(output_surface_.Pass());
 }
 
 void WebLayerTreeViewImpl::DidFailToInitializeOutputSurface() {
@@ -153,10 +164,6 @@ void WebLayerTreeViewImpl::setBackgroundColor(blink::WebColor color) {
 void WebLayerTreeViewImpl::setHasTransparentBackground(
     bool has_transparent_background) {
   layer_tree_host_->set_has_transparent_background(has_transparent_background);
-}
-
-void WebLayerTreeViewImpl::setOverhangBitmap(const SkBitmap& bitmap) {
-  layer_tree_host_->SetOverhangBitmap(bitmap);
 }
 
 void WebLayerTreeViewImpl::setVisible(bool visible) {
@@ -230,17 +237,6 @@ bool WebLayerTreeViewImpl::commitRequested() const {
 
 void WebLayerTreeViewImpl::finishAllRendering() {
   layer_tree_host_->FinishAllRendering();
-}
-
-void WebLayerTreeViewImpl::OnSurfaceConnectionCreated(mojo::SurfacePtr surface,
-                                                      uint32_t id_namespace) {
-  mojo::CommandBufferPtr cb;
-  gpu_service_->CreateOffscreenGLES2Context(GetProxy(&cb));
-  scoped_refptr<cc::ContextProvider> context_provider(
-      new mojo::ContextProviderMojo(cb.PassMessagePipe()));
-  output_surface_.reset(new mojo::OutputSurfaceMojo(
-      this, context_provider, surface.Pass(), id_namespace));
-  layer_tree_host_->SetLayerTreeHostClientReady();
 }
 
 void WebLayerTreeViewImpl::DidCreateSurface(cc::SurfaceId id) {

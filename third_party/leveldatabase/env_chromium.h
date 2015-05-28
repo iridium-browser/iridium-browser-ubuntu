@@ -47,6 +47,11 @@ enum MethodID {
   kNumEntries
 };
 
+// The default value for leveldb::Options::reuse_logs. Currently log reuse is an
+// experimental feature in leveldb. More info at:
+// https://github.com/google/leveldb/commit/251ebf5dc70129ad3
+const bool kDefaultLogReuseOptionValue = true;
+
 const char* MethodIDToString(MethodID method);
 
 leveldb::Status MakeIOError(leveldb::Slice filename,
@@ -59,14 +64,13 @@ leveldb::Status MakeIOError(leveldb::Slice filename,
 
 enum ErrorParsingResult {
   METHOD_ONLY,
-  METHOD_AND_PFE,
-  METHOD_AND_ERRNO,
+  METHOD_AND_BFE,
   NONE,
 };
 
 ErrorParsingResult ParseMethodAndError(const leveldb::Status& status,
                                        MethodID* method,
-                                       int* error);
+                                       base::File::Error* error);
 int GetCorruptionCode(const leveldb::Status& status);
 int GetNumCorruptionCodes();
 std::string GetCorruptionMessage(const leveldb::Status& status);
@@ -88,17 +92,9 @@ class RetrierProvider {
       MethodID method) const = 0;
 };
 
-class WriteTracker {
- public:
-  virtual void DidCreateNewFile(const std::string& fname) = 0;
-  virtual bool DoesDirNeedSync(const std::string& fname) = 0;
-  virtual void DidSyncDir(const std::string& fname) = 0;
-};
-
 class ChromiumEnv : public leveldb::Env,
                     public UMALogger,
-                    public RetrierProvider,
-                    public WriteTracker {
+                    public RetrierProvider {
  public:
   ChromiumEnv();
 
@@ -137,16 +133,13 @@ class ChromiumEnv : public leveldb::Env,
                                     leveldb::Logger** result);
 
  protected:
-  virtual void DidSyncDir(const std::string& fname);
-
   std::string name_;
+  std::string uma_ioerror_base_name_;
   bool make_backup_;
 
  private:
   static const char* FileErrorString(base::File::Error error);
 
-  virtual void DidCreateNewFile(const std::string& fname);
-  virtual bool DoesDirNeedSync(const std::string& fname);
   virtual void RecordErrorAt(MethodID method) const;
   virtual void RecordOSError(MethodID method,
                              base::File::Error error) const;
@@ -170,9 +163,6 @@ class ChromiumEnv : public leveldb::Env,
     leveldb::port::Mutex mu_;
     std::set<std::string> locked_files_;
   };
-
-  std::set<std::string> directories_needing_sync_;
-  base::Lock directory_sync_lock_;
 
   const int kMaxRetryTimeMillis;
   // BGThread() is the body of the background thread

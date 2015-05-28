@@ -71,8 +71,7 @@ function testCreateDirectoryTree(callback) {
 
   // Create mocks.
   var directoryModel = new MockDirectoryModel();
-  var volumeManager = new MockVolumeManager();
-  var metadataCache = new MockMetadataCache();
+  var volumeManager = new MockVolumeManagerWrapper();
 
   // Set entry which is returned by
   // window.webkitResolveLocalFileSystemURLResults.
@@ -81,7 +80,7 @@ function testCreateDirectoryTree(callback) {
       new MockDirectoryEntry(driveFileSystem, '/root');
 
   DirectoryTree.decorate(directoryTree, directoryModel, volumeManager,
-      metadataCache, true);
+      null, true);
   directoryTree.dataModel = new MockNavigationListModel(volumeManager);
   directoryTree.redraw(true);
 
@@ -121,8 +120,7 @@ function testUpdateSubElementsFromList() {
 
   // Creates mocks.
   var directoryModel = new MockDirectoryModel();
-  var volumeManager = new MockVolumeManager();
-  var metadataCache = new MockMetadataCache();
+  var volumeManager = new MockVolumeManagerWrapper();
 
   // Sets entry which is returned by
   // window.webkitResolveLocalFileSystemURLResults.
@@ -131,7 +129,7 @@ function testUpdateSubElementsFromList() {
       new MockDirectoryEntry(driveFileSystem, '/root');
 
   DirectoryTree.decorate(directoryTree, directoryModel, volumeManager,
-      metadataCache, true);
+      null, true);
   directoryTree.dataModel = new MockNavigationListModel(volumeManager);
   directoryTree.updateSubElementsFromList(true);
 
@@ -142,7 +140,7 @@ function testUpdateSubElementsFromList() {
   ], getDirectoryTreeItemLabelsAsAList(directoryTree));
 
   // Mounts a removable volume.
-  var removableVolume = MockVolumeManager.createMockVolumeInfo(
+  var removableVolume = MockVolumeManagerWrapper.createMockVolumeInfo(
       VolumeManagerCommon.VolumeType.REMOVABLE,
       'removable',
       str('REMOVABLE_DIRECTORY_LABEL'));
@@ -163,7 +161,7 @@ function testUpdateSubElementsFromList() {
   ], getDirectoryTreeItemLabelsAsAList(directoryTree));
 
   // Mounts an archive volume before the removable directory.
-  var archiveVolume = MockVolumeManager.createMockVolumeInfo(
+  var archiveVolume = MockVolumeManagerWrapper.createMockVolumeInfo(
       VolumeManagerCommon.VolumeType.ARCHIVE,
       'archive',
       str('ARCHIVE_DIRECTORY_LABEL'));

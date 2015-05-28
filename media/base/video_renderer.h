@@ -24,8 +24,8 @@ class MEDIA_EXPORT VideoRenderer {
   // Used to paint VideoFrame.
   typedef base::Callback<void(const scoped_refptr<VideoFrame>&)> PaintCB;
 
-  // Used to query the current time or duration of the media.
-  typedef base::Callback<base::TimeDelta()> TimeDeltaCB;
+  // Used to convert a media timestamp into a wall clock timestamp.
+  typedef base::Callback<base::TimeTicks(base::TimeDelta)> WallClockTimeCB;
 
   VideoRenderer();
 
@@ -33,7 +33,8 @@ class MEDIA_EXPORT VideoRenderer {
   virtual ~VideoRenderer();
 
   // Initializes a VideoRenderer with |stream|, executing |init_cb| upon
-  // completion.
+  // completion. If initialization fails, only |init_cb| (not |error_cb|) will
+  // be called.
   //
   // |set_decryptor_ready_cb| is fired when a Decryptor is needed, i.e. when the
   // |stream| is encrypted.
@@ -49,18 +50,24 @@ class MEDIA_EXPORT VideoRenderer {
   //
   // |ended_cb| is executed when video rendering has reached the end of stream.
   //
-  // |error_cb| is executed if an error was encountered.
+  // |error_cb| is executed if an error was encountered after initialization.
   //
-  // |get_time_cb| is used to query the current media playback time.
-  virtual void Initialize(DemuxerStream* stream,
-                          const PipelineStatusCB& init_cb,
-                          const SetDecryptorReadyCB& set_decryptor_ready_cb,
-                          const StatisticsCB& statistics_cb,
-                          const BufferingStateCB& buffering_state_cb,
-                          const PaintCB& paint_cb,
-                          const base::Closure& ended_cb,
-                          const PipelineStatusCB& error_cb,
-                          const TimeDeltaCB& get_time_cb) = 0;
+  // |wall_clock_time_cb| is used to convert media timestamps into wallclock
+  // timestamps.
+  //
+  // |waiting_for_decryption_key_cb| is executed whenever the key needed to
+  // decrypt the stream is not available.
+  virtual void Initialize(
+      DemuxerStream* stream,
+      const PipelineStatusCB& init_cb,
+      const SetDecryptorReadyCB& set_decryptor_ready_cb,
+      const StatisticsCB& statistics_cb,
+      const BufferingStateCB& buffering_state_cb,
+      const PaintCB& paint_cb,
+      const base::Closure& ended_cb,
+      const PipelineStatusCB& error_cb,
+      const WallClockTimeCB& wall_clock_time_cb,
+      const base::Closure& waiting_for_decryption_key_cb) = 0;
 
   // Discards any video data and stops reading from |stream|, executing
   // |callback| when completed.

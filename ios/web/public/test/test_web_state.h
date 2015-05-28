@@ -7,6 +7,7 @@
 
 #include <string>
 
+#include "ios/web/public/web_state/url_verification_constants.h"
 #include "ios/web/public/web_state/web_state.h"
 #include "url/gurl.h"
 
@@ -15,26 +16,46 @@ namespace web {
 // Minimal implementation of WebState, to be used in tests.
 class TestWebState : public WebState {
  public:
+  TestWebState();
+  ~TestWebState() override;
+
   // WebState implementation.
-  virtual BrowserState* GetBrowserState() const override;
-  virtual void OpenURL(const OpenURLParams& params) override {}
-  virtual NavigationManager* GetNavigationManager() override;
-  virtual CRWJSInjectionReceiver* GetJSInjectionReceiver() const override;
-  virtual const std::string& GetContentsMimeType() const override;
-  virtual const std::string& GetContentLanguageHeader() const override;
-  virtual bool ContentIsHTML() const override;
-  virtual const GURL& GetVisibleURL() const override;
-  virtual const GURL& GetLastCommittedURL() const override;
-  virtual void AddScriptCommandCallback(
-      const ScriptCommandCallback& callback,
-      const std::string& command_prefix) override {}
-  virtual void RemoveScriptCommandCallback(
-      const std::string& command_prefix) override {}
-  virtual void AddObserver(WebStateObserver* observer) override {}
-  virtual void RemoveObserver(WebStateObserver* observer) override {}
+  UIView* GetView() override;
+  WebViewType GetWebViewType() const override;
+  BrowserState* GetBrowserState() const override;
+  void OpenURL(const OpenURLParams& params) override {}
+  NavigationManager* GetNavigationManager() override;
+  CRWJSInjectionReceiver* GetJSInjectionReceiver() const override;
+  const std::string& GetContentsMimeType() const override;
+  const std::string& GetContentLanguageHeader() const override;
+  bool ContentIsHTML() const override;
+  const GURL& GetVisibleURL() const override;
+  const GURL& GetLastCommittedURL() const override;
+  GURL GetCurrentURL(URLVerificationTrustLevel* trust_level) const override;
+  void AddScriptCommandCallback(const ScriptCommandCallback& callback,
+                                const std::string& command_prefix) override {}
+  void RemoveScriptCommandCallback(const std::string& command_prefix) override {
+  }
+  CRWWebViewProxyType GetWebViewProxy() const override;
+  bool IsShowingWebInterstitial() const override;
+  WebInterstitial* GetWebInterstitial() const override;
+  void AddObserver(WebStateObserver* observer) override {}
+  void RemoveObserver(WebStateObserver* observer) override {}
+  int DownloadImage(const GURL& url,
+                    bool is_favicon,
+                    uint32_t max_bitmap_size,
+                    bool bypass_cache,
+                    const ImageDownloadCallback& callback) override;
+
+  // Setters for test data.
+  void SetContentIsHTML(bool content_is_html);
+  void SetCurrentURL(const GURL& url);
+  void SetTrustLevel(URLVerificationTrustLevel trust_level);
 
  private:
   GURL url_;
+  URLVerificationTrustLevel trust_level_;
+  bool content_is_html_;
   std::string mime_type_;
   std::string content_language_;
 };

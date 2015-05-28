@@ -36,6 +36,7 @@
 #include "bindings/core/v8/ScriptState.h"
 #include "bindings/core/v8/V8ArrayBuffer.h"
 #include "bindings/core/v8/V8Binding.h"
+#include "bindings/core/v8/V8ObjectBuilder.h"
 #include "bindings/modules/v8/V8CryptoKey.h"
 #include "core/dom/ContextLifecycleObserver.h"
 #include "core/dom/DOMArrayBuffer.h"
@@ -150,16 +151,14 @@ void CryptoResultImpl::completeWithJson(const char* utf8Data, unsigned length)
         ScriptState* scriptState = resolver->scriptState();
         ScriptState::Scope scope(scriptState);
 
-        v8::Handle<v8::String> jsonString = v8::String::NewFromUtf8(scriptState->isolate(), utf8Data, v8::String::kInternalizedString, length);
+        v8::Handle<v8::String> jsonString = v8AtomicString(scriptState->isolate(), utf8Data, length);
 
         v8::TryCatch exceptionCatcher;
-        v8::Handle<v8::Value> jsonDictionary = v8::JSON::Parse(jsonString);
-        if (exceptionCatcher.HasCaught() || jsonDictionary.IsEmpty()) {
-            ASSERT_NOT_REACHED();
-            resolver->reject(DOMException::create(OperationError, "Failed inflating JWK JSON to object"));
-        } else {
+        v8::Local<v8::Value> jsonDictionary;
+        if (v8Call(v8::JSON::Parse(scriptState->isolate(), jsonString), jsonDictionary, exceptionCatcher))
             resolver->resolve(jsonDictionary);
-        }
+        else
+            resolver->reject(exceptionCatcher.Exception());
     }
     clearResolver();
 }
@@ -184,13 +183,10 @@ void CryptoResultImpl::completeWithKeyPair(const WebCryptoKey& publicKey, const 
         ScriptState* scriptState = m_resolver->scriptState();
         ScriptState::Scope scope(scriptState);
 
-        Dictionary keyPair = Dictionary::createEmpty(scriptState->isolate());
+        V8ObjectBuilder keyPair(scriptState);
 
-        v8::Handle<v8::Value> publicKeyValue = toV8(CryptoKey::create(publicKey), scriptState->context()->Global(), scriptState->isolate());
-        v8::Handle<v8::Value> privateKeyValue = toV8(CryptoKey::create(privateKey), scriptState->context()->Global(), scriptState->isolate());
-
-        keyPair.set("publicKey", publicKeyValue);
-        keyPair.set("privateKey", privateKeyValue);
+        keyPair.add("publicKey", ScriptValue::from(scriptState, CryptoKey::create(publicKey)));
+        keyPair.add("privateKey", ScriptValue::from(scriptState, CryptoKey::create(privateKey)));
 
         m_resolver->resolve(keyPair.v8Value());
     }

@@ -24,8 +24,8 @@
 #include "content/common/sandbox_linux/sandbox_seccomp_bpf_linux.h"
 #include "sandbox/linux/bpf_dsl/bpf_dsl.h"
 #include "sandbox/linux/seccomp-bpf-helpers/syscall_sets.h"
-#include "sandbox/linux/services/linux_syscalls.h"
 #include "sandbox/linux/syscall_broker/broker_file_permission.h"
+#include "sandbox/linux/system_headers/linux_syscalls.h"
 
 using sandbox::bpf_dsl::Allow;
 using sandbox::bpf_dsl::Arg;
@@ -60,10 +60,10 @@ void AddArmMaliGpuWhitelist(std::vector<BrokerFilePermission>* permissions) {
   static const char kMali0Path[] = "/dev/mali0";
 
   // Video processor used on ARM Exynos platforms.
-  static const char kDevGsc1Path[] = "/dev/gsc1";
+  static const char kDevGsc0Path[] = "/dev/gsc0";
 
   permissions->push_back(BrokerFilePermission::ReadWrite(kMali0Path));
-  permissions->push_back(BrokerFilePermission::ReadWrite(kDevGsc1Path));
+  permissions->push_back(BrokerFilePermission::ReadWrite(kDevGsc0Path));
 }
 
 void AddArmGpuWhitelist(std::vector<BrokerFilePermission>* permissions) {

@@ -391,7 +391,8 @@ html[dir=rtl] .action-box-area {
 
 .action-box-area:focus,
 .action-box-area.hovered,
-.action-box-area.active {
+.action-box-area.active,
+.action-box-area.forced {
   opacity: 1;
 }
 
@@ -426,8 +427,12 @@ html[dir=rtl] .user-type-icon-area {
   width: 16px;
 }
 
-.user-type-icon-area.supervised .user-type-icon-image {
-  background-image: url(chrome://theme/IDR_SUPERVISED_USER_ICON);
+.user-type-icon-area.legacySupervised .user-type-icon-image {
+  background-image: url(chrome://theme/IDR_LEGACY_SUPERVISED_USER_ICON);
+}
+
+.user-type-icon-area.child .user-type-icon-image {
+  background-image: url(chrome://theme/IDR_CHILD_USER_ICON);
 }
 
 .user-type-icon-area.policy .user-type-icon-image {
@@ -518,7 +523,7 @@ html[dir=rtl] .action-box-area.active ~ .action-box-menu {
 }
 
 .action-box-remove-user-warning-text,
-.action-box-remove-supervised-user-warning-text {
+.action-box-remove-legacy-supervised-user-warning-text {
   padding-bottom: 20px;
 }
 

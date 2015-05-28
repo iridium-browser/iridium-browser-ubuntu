@@ -19,24 +19,9 @@ var remoting = remoting || {};
 remoting.ClientPlugin = function() {};
 
 /**
- * @return {number} The width of the remote desktop, in pixels.
+ * @return {remoting.HostDesktop}
  */
-remoting.ClientPlugin.prototype.getDesktopWidth = function() {};
-
-/**
- * @return {number} The height of the remote desktop, in pixels.
- */
-remoting.ClientPlugin.prototype.getDesktopHeight = function() {};
-
-/**
- * @return {number} The x-DPI of the remote desktop.
- */
-remoting.ClientPlugin.prototype.getDesktopXDpi = function() {};
-
-/**
- * @return {number} The y-DPI of the remote desktop.
- */
-remoting.ClientPlugin.prototype.getDesktopYDpi = function() {};
+remoting.ClientPlugin.prototype.hostDesktop = function() {};
 
 /**
  * @return {HTMLElement} The DOM element representing the remote session.
@@ -44,30 +29,17 @@ remoting.ClientPlugin.prototype.getDesktopYDpi = function() {};
 remoting.ClientPlugin.prototype.element = function() {};
 
 /**
- * @param {function():void} onDone Completion callback.
+ * @param {function(boolean):void} onDone Completion callback.
  */
 remoting.ClientPlugin.prototype.initialize = function(onDone) {};
 
 /**
- * @param {string} hostJid The jid of the host to connect to.
- * @param {string} hostPublicKey The base64 encoded version of the host's
- *     public key.
+ * @param {remoting.Host} host The host to connect to.
  * @param {string} localJid Local jid.
- * @param {string} sharedSecret The access code for IT2Me or the PIN
- *     for Me2Me.
- * @param {string} authenticationMethods Comma-separated list of
- *     authentication methods the client should attempt to use.
- * @param {string} authenticationTag A host-specific tag to mix into
- *     authentication hashes.
- * @param {string} clientPairingId For paired Me2Me connections, the
- *     pairing id for this client, as issued by the host.
- * @param {string} clientPairedSecret For paired Me2Me connections, the
- *     paired secret for this client, as issued by the host.
+ * @param {remoting.CredentialsProvider} credentialsProvider
  */
-remoting.ClientPlugin.prototype.connect = function(
-    hostJid, hostPublicKey, localJid, sharedSecret,
-    authenticationMethods, authenticationTag,
-    clientPairingId, clientPairedSecret) {};
+remoting.ClientPlugin.prototype.connect =
+    function(host, localJid, credentialsProvider) {};
 
 /**
  * @param {number} key The keycode to inject.
@@ -75,6 +47,22 @@ remoting.ClientPlugin.prototype.connect = function(
  */
 remoting.ClientPlugin.prototype.injectKeyEvent =
     function(key, down) {};
+
+/**
+ * Sends a key combination to the host, by sending down events for
+ * the given keys, followed by up events in reverse order.
+ *
+ * @param {Array<number>} keys Key codes to be sent.
+ * @return {void} Nothing.
+ */
+remoting.ClientPlugin.prototype.injectKeyCombination = function(keys) {};
+
+/**
+ * Sets and stores the key remapping setting for the current host.
+ *
+ * @param {string} remappings Comma separated list of key remappings.
+ */
+remoting.ClientPlugin.prototype.setRemapKeys = function(remappings) {};
 
 /**
  * @param {number} from
@@ -88,14 +76,6 @@ remoting.ClientPlugin.prototype.remapKey = function(from, to) {};
 remoting.ClientPlugin.prototype.releaseAllKeys = function() {};
 
 /**
- * @param {number} width
- * @param {number} height
- * @param {number} dpi
- */
-remoting.ClientPlugin.prototype.notifyClientResolution =
-    function(width, height, dpi) {};
-
-/**
  * @param {string} iq
  */
 remoting.ClientPlugin.prototype.onIncomingIq = function(iq) {};
@@ -107,7 +87,7 @@ remoting.ClientPlugin.prototype.isSupportedVersion = function() {};
 
 /**
  * @param {remoting.ClientPlugin.Feature} feature
- * @return {boolean} True if the plugin support the specified feature.
+ * @return {boolean} True if the plugin supports the specified feature.
  */
 remoting.ClientPlugin.prototype.hasFeature = function(feature) {};
 
@@ -121,11 +101,6 @@ remoting.ClientPlugin.prototype.sendClipboardItem =
     function(mimeType, item) {};
 
 /**
- * Tell the plugin to request a PIN asynchronously.
- */
-remoting.ClientPlugin.prototype.useAsyncPinDialog = function() {};
-
-/**
  * Request that this client be paired with the current host.
  *
  * @param {string} clientName The human-readable name of the client.
@@ -136,25 +111,9 @@ remoting.ClientPlugin.prototype.requestPairing =
     function(clientName, onDone) {};
 
 /**
- * Called when a PIN is obtained from the user.
- *
- * @param {string} pin The PIN.
- */
-remoting.ClientPlugin.prototype.onPinFetched = function(pin) {};
-
-/**
  * Allows automatic mouse-lock.
  */
 remoting.ClientPlugin.prototype.allowMouseLock = function() {};
-
-/**
- * Sets the third party authentication token and shared secret.
- *
- * @param {string} token The token received from the token URL.
- * @param {string} sharedSecret Shared secret received from the token URL.
- */
-remoting.ClientPlugin.prototype.onThirdPartyTokenFetched =
-    function(token, sharedSecret) {};
 
 /**
  * @param {boolean} pause True to pause the audio stream; false to resume it.
@@ -182,72 +141,9 @@ remoting.ClientPlugin.prototype.sendClientMessage =
     function(name, data) {};
 
 /**
- * @param {function(string):void} handler Callback for sending an IQ stanza.
+ * @param {remoting.ClientPlugin.ConnectionEventHandler} handler
  */
-remoting.ClientPlugin.prototype.setOnOutgoingIqHandler =
-    function(handler) {};
-
-/**
- * @param {function(string):void} handler Callback for logging debug messages.
- */
-remoting.ClientPlugin.prototype.setOnDebugMessageHandler =
-    function(handler) {};
-
-/**
- * @param {function(number, number):void} handler Callback for connection status
- *     update notifications. The first parameter is the connection state; the
- *     second is the error code, if any.
- */
-remoting.ClientPlugin.prototype.setConnectionStatusUpdateHandler =
-    function(handler) {};
-
-/**
- * @param {function(string, string):void} handler Callback for route-change
- *     notifications. The first parameter is the channel name, and the second
- *     is the connection type.
- */
-remoting.ClientPlugin.prototype.setRouteChangedHandler = function(handler) {};
-
-/**
- * @param {function(boolean):void} handler Callback for connection readiness
- *     notifications.
- */
-remoting.ClientPlugin.prototype.setConnectionReadyHandler =
-    function(handler) {};
-
-/**
- * @param {function():void} handler Callback for desktop size change
- *     notifications.
- */
-remoting.ClientPlugin.prototype.setDesktopSizeUpdateHandler =
-    function(handler) {};
-
-/**
- * @param {function():void} handler Callback for desktop shape change
- *     notifications.
- */
-remoting.ClientPlugin.prototype.setDesktopShapeUpdateHandler =
-    function(handler) {};
-
-/**
- * @param {function(!Array.<string>):void} handler Callback to inform of
- *     capabilities negotiated between host and client.
- */
-remoting.ClientPlugin.prototype.setCapabilitiesHandler =
-    function(handler) {};
-
-/**
- * @param {function(string):void} handler Callback for processing security key
- *     (Gnubby) protocol messages.
- */
-remoting.ClientPlugin.prototype.setGnubbyAuthHandler =
-    function(handler) {};
-
-/**
- * @param {function(string):void} handler Callback for processing Cast protocol
- *     messages.
- */
-remoting.ClientPlugin.prototype.setCastExtensionHandler =
+remoting.ClientPlugin.prototype.setConnectionEventHandler =
     function(handler) {};
 
 /**
@@ -260,20 +156,10 @@ remoting.ClientPlugin.prototype.setMouseCursorHandler =
     function(handler) {};
 
 /**
- * @param {function(string, string, string):void} handler Callback for
- *     fetching third-party tokens. The first parameter is the token URL; the
- *     second is the public key of the host; the third is the OAuth2 scope
- *     being requested.
+ * @param {function({rects:Array<Array<number>>}):void|null} handler Callback
+ *     to receive dirty region information for each video frame, for debugging.
  */
-remoting.ClientPlugin.prototype.setFetchThirdPartyTokenHandler =
-    function(handler) {};
-
-/**
- * @param {function(boolean):void} handler Callback for fetching a PIN from
- *     the user. The parameter is true if PIN pairing is supported by the
- *     host, or false otherwise.
- */
-remoting.ClientPlugin.prototype.setFetchPinHandler =
+remoting.ClientPlugin.prototype.setDebugDirtyRegionHandler =
     function(handler) {};
 
 
@@ -302,18 +188,68 @@ remoting.ClientPlugin.Feature = {
 /**
  * @interface
  */
+remoting.ClientPlugin.ConnectionEventHandler = function() {};
+
+/**
+ * @param {string} iq
+ */
+remoting.ClientPlugin.ConnectionEventHandler.prototype.onOutgoingIq =
+    function(iq) {};
+
+/**
+ * @param {string} msg
+ */
+remoting.ClientPlugin.ConnectionEventHandler.prototype.onDebugMessage =
+    function(msg) {};
+
+/**
+ * @param {remoting.ClientSession.State} status The plugin's status.
+ * @param {remoting.ClientSession.ConnectionError} error The plugin's error
+ *        state, if any.
+ */
+remoting.ClientPlugin.ConnectionEventHandler.prototype.
+    onConnectionStatusUpdate = function(status, error) {};
+
+/**
+ * @param {string} channel The channel name.
+ * @param {string} connectionType The new connection type.
+ */
+remoting.ClientPlugin.ConnectionEventHandler.prototype.onRouteChanged =
+    function(channel, connectionType) {};
+
+/**
+ * @param {boolean} ready True if the connection is ready.
+ */
+remoting.ClientPlugin.ConnectionEventHandler.prototype.onConnectionReady =
+    function(ready) {};
+
+/**
+ * @param {!Array<string>} capabilities The set of capabilities negotiated
+ *     between the client and host.
+ */
+remoting.ClientPlugin.ConnectionEventHandler.prototype.onSetCapabilities =
+    function(capabilities) {};
+
+/**
+ * @param {string} type
+ * @param {string} data
+ */
+remoting.ClientPlugin.ConnectionEventHandler.prototype.onExtensionMessage =
+    function(type, data) {};
+
+
+/**
+ * @interface
+ */
 remoting.ClientPluginFactory = function() {};
 
 /**
  * @param {Element} container The container for the embed element.
- * @param {function(string, string):boolean} onExtensionMessage The handler for
- *     protocol extension messages. Returns true if a message is recognized;
- *     false otherwise.
- * @param {Array.<string>} requiredCapabilities
+ * @param {Array<string>} requiredCapabilities
  * @return {remoting.ClientPlugin} A new client plugin instance.
  */
 remoting.ClientPluginFactory.prototype.createPlugin =
-    function(container, onExtensionMessage, requiredCapabilities) {};
+    function(container, requiredCapabilities) {};
 
 /**
  * Preload the plugin to make instantiation faster when the user tries

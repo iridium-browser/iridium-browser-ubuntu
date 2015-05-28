@@ -31,9 +31,8 @@ CHROMEOS_EXPORT const OncFieldSignature* GetFieldSignature(
     const OncValueSignature& signature,
     const std::string& onc_field_name);
 
-CHROMEOS_EXPORT bool FieldIsCredential(
-    const OncValueSignature& signature,
-    const std::string& onc_field_name);
+CHROMEOS_EXPORT bool FieldIsCredential(const OncValueSignature& signature,
+                                       const std::string& onc_field_name);
 
 CHROMEOS_EXPORT extern const OncValueSignature kRecommendedSignature;
 CHROMEOS_EXPORT extern const OncValueSignature kEAPSignature;
@@ -43,6 +42,7 @@ CHROMEOS_EXPORT extern const OncValueSignature kIPsecSignature;
 CHROMEOS_EXPORT extern const OncValueSignature kL2TPSignature;
 CHROMEOS_EXPORT extern const OncValueSignature kXAUTHSignature;
 CHROMEOS_EXPORT extern const OncValueSignature kOpenVPNSignature;
+CHROMEOS_EXPORT extern const OncValueSignature kThirdPartyVPNSignature;
 CHROMEOS_EXPORT extern const OncValueSignature kVerifyX509Signature;
 CHROMEOS_EXPORT extern const OncValueSignature kVPNSignature;
 CHROMEOS_EXPORT extern const OncValueSignature kEthernetSignature;

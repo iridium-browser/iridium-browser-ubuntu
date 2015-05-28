@@ -23,8 +23,6 @@
  * OF THIS SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
-typedef (ArrayBuffer or ArrayBufferView) BufferSource;
-
 [
     ActiveDOMObject,
     RuntimeEnabled=EncryptedMedia,
@@ -35,6 +33,7 @@ typedef (ArrayBuffer or ArrayBufferView) BufferSource;
     readonly attribute DOMString sessionId;
     readonly attribute unrestricted double expiration;
     [CallWith=ScriptState] readonly attribute Promise closed;
+    readonly attribute MediaKeyStatusMap keyStatuses;
 
     // session initialization
     [CallWith=ScriptState] Promise<void> generateRequest(DOMString initDataType, BufferSource initData);

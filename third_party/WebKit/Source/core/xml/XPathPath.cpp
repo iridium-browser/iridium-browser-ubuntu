@@ -37,7 +37,7 @@
 namespace blink {
 namespace XPath {
 
-Filter::Filter(PassOwnPtrWillBeRawPtr<Expression> expr, WillBeHeapVector<OwnPtrWillBeMember<Predicate> >& predicates)
+Filter::Filter(PassOwnPtrWillBeRawPtr<Expression> expr, WillBeHeapVector<OwnPtrWillBeMember<Predicate>>& predicates)
     : m_expr(expr)
 {
     m_predicates.swap(predicates);
@@ -50,7 +50,7 @@ Filter::~Filter()
 {
 }
 
-void Filter::trace(Visitor* visitor)
+DEFINE_TRACE(Filter)
 {
     visitor->trace(m_expr);
     visitor->trace(m_predicates);
@@ -97,7 +97,7 @@ LocationPath::~LocationPath()
 #endif
 }
 
-void LocationPath::trace(Visitor* visitor)
+DEFINE_TRACE(LocationPath)
 {
 #if ENABLE(OILPAN)
     visitor->trace(m_steps);
@@ -138,7 +138,7 @@ void LocationPath::evaluate(EvaluationContext& context, NodeSet& nodes) const
     for (unsigned i = 0; i < m_steps.size(); i++) {
         Step* step = m_steps[i];
         OwnPtrWillBeRawPtr<NodeSet> newNodes(NodeSet::create());
-        WillBeHeapHashSet<RawPtrWillBeMember<Node> > newNodesSet;
+        WillBeHeapHashSet<RawPtrWillBeMember<Node>> newNodesSet;
 
         bool needToCheckForDuplicateNodes = !nodes.subtreesAreDisjoint() || (step->axis() != Step::ChildAxis && step->axis() != Step::SelfAxis
             && step->axis() != Step::DescendantAxis && step->axis() != Step::DescendantOrSelfAxis && step->axis() != Step::AttributeAxis);
@@ -217,7 +217,7 @@ Path::~Path()
 {
 }
 
-void Path::trace(Visitor* visitor)
+DEFINE_TRACE(Path)
 {
     visitor->trace(m_filter);
     visitor->trace(m_path);

@@ -4,14 +4,27 @@
 
 package org.chromium.chrome.browser.preferences;
 
+import android.content.Context;
+import android.content.SharedPreferences;
+import android.net.Uri;
+import android.preference.PreferenceManager;
 import android.text.TextUtils;
+import android.util.Log;
 
 import org.chromium.base.CalledByNative;
 import org.chromium.base.ThreadUtils;
+import org.chromium.chrome.browser.ContentSettingsType;
+import org.chromium.chrome.browser.UrlUtilities;
+import org.chromium.chrome.browser.preferences.website.ContentSetting;
+import org.chromium.chrome.browser.preferences.website.GeolocationInfo;
+import org.chromium.chrome.browser.preferences.website.JavaScriptExceptionInfo;
+import org.chromium.chrome.browser.preferences.website.PopupExceptionInfo;
+import org.chromium.chrome.browser.preferences.website.WebsitePreferenceBridge;
 import org.chromium.chrome.browser.search_engines.TemplateUrlService;
 
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 
 /**
  * PrefServiceBridge is a singleton which provides access to some native preferences. Ideally
@@ -19,7 +32,6 @@ import java.util.List;
  * preferences.
  */
 public final class PrefServiceBridge {
-
     // Does not need sync with native; used for the popup settings check
     public static final String EXCEPTION_SETTING_ALLOW = "allow";
     public static final String EXCEPTION_SETTING_BLOCK = "block";
@@ -31,7 +43,12 @@ public final class PrefServiceBridge {
     public static final int SUPERVISED_USER_FILTERING_WARN = 1;
     public static final int SUPERVISED_USER_FILTERING_BLOCK = 2;
 
+    private static final String MIGRATION_PREF_KEY = "PrefMigrationVersion";
+    private static final int MIGRATION_CURRENT_VERSION = 2;
+
     private static String sProfilePath;
+
+    private static final String HTTPS_SCHEME = "https";
 
     // Object to notify when "clear browsing data" completes.
     private OnClearBrowsingDataListener mClearBrowsingDataListener;
@@ -40,6 +57,10 @@ public final class PrefServiceBridge {
     // Constants related to the Contextual Search preference.
     private static final String CONTEXTUAL_SEARCH_DISABLED = "false";
     private static final String CONTEXTUAL_SEARCH_ENABLED = "true";
+
+    // The key to store whether the Location Permission was automatically added for the search
+    // engine set as default.
+    public static final String LOCATION_AUTO_ALLOWED = "search_engine_location_auto_allowed";
 
     /**
      * Structure that holds all the version information about the current Chrome browser.
@@ -85,33 +106,6 @@ public final class PrefServiceBridge {
         void onGotProfilePath(String profilePath);
     }
 
-    /**
-     * Website popup exception entry.
-     */
-    public static class PopupExceptionInfo {
-        private final String mPattern;
-        private final String mSetting;
-        private final String mSource;
-
-        private PopupExceptionInfo(String pattern, String setting, String source) {
-            mPattern = pattern;
-            mSetting = setting;
-            mSource = source;
-        }
-
-        public String getPattern() {
-            return mPattern;
-        }
-
-        public String getSetting() {
-            return mSetting;
-        }
-
-        public String getSource() {
-            return mSource;
-        }
-    }
-
     @CalledByNative
     private static AboutVersionStrings createAboutVersionStrings(
             String applicationVersion, String webkitVersion, String javascriptVersion,
@@ -140,6 +134,98 @@ public final class PrefServiceBridge {
      */
     public static boolean isInitialized() {
         return sInstance != null;
+    }
+
+    /**
+     * Migrates (synchronously) the preferences to the most recent version.
+     */
+    public void migratePreferences(Context context) {
+        SharedPreferences preferences = PreferenceManager.getDefaultSharedPreferences(context);
+        int currentVersion = preferences.getInt(MIGRATION_PREF_KEY, 0);
+        if (currentVersion == MIGRATION_CURRENT_VERSION) return;
+        if (currentVersion > MIGRATION_CURRENT_VERSION) {
+            Log.e(LOG_TAG, "Saved preferences version is newer than supported.  Attempting to "
+                    + "run an older version of Chrome without clearing data is unsupported and "
+                    + "the results may be unpredictable.");
+        }
+
+        if (currentVersion < 1) {
+            nativeMigrateJavascriptPreference();
+        }
+        // Step 2 intentionally skipped.
+        preferences.edit().putInt(MIGRATION_PREF_KEY, MIGRATION_CURRENT_VERSION).commit();
+    }
+
+    /**
+     * Add a permission entry for Location for the default search engine.
+     * @param allowed Whether to create an Allowed permission or a Denied permission.
+     * @param context The current context to use.
+     */
+    public static void maybeCreatePermissionForDefaultSearchEngine(
+            boolean allowed, Context context) {
+        TemplateUrlService templateUrlService = TemplateUrlService.getInstance();
+        String url = templateUrlService.getSearchEngineUrlFromTemplateUrl(
+                templateUrlService.getDefaultSearchEngineIndex());
+        if (allowed && !url.startsWith("https:")) return;
+        GeolocationInfo locationSettings = new GeolocationInfo(url, null);
+        ContentSetting locationPermission = locationSettings.getContentSetting();
+        if (locationPermission == null || locationPermission == ContentSetting.ASK) {
+            WebsitePreferenceBridge.nativeSetGeolocationSettingForOrigin(
+                    url, url, allowed
+                            ? ContentSetting.ALLOW.toInt() : ContentSetting.BLOCK.toInt());
+            SharedPreferences sharedPreferences =
+                    PreferenceManager.getDefaultSharedPreferences(context);
+            sharedPreferences.edit().putBoolean(LOCATION_AUTO_ALLOWED, true).apply();
+        }
+    }
+
+    /**
+     * Whether the geo header is allowed to be sent for the current URL.
+     * @param context The Context used to get the device location.
+     * @param url The URL of the request with which this header will be sent.
+     * @param isIncognito Whether the request will happen in an incognito tab.
+     */
+    public static boolean isGeoHeaderEnabledForUrl(
+            Context context, String url, boolean isIncognito) {
+        // TODO(finnur): delete this method once GeolocationHeader has been upstreamed.
+        // Only send the Geo header in normal mode.
+        if (isIncognito) return false;
+
+        // Only send the Geo header to Google domains.
+        if (!UrlUtilities.nativeIsGoogleSearchUrl(url)) return false;
+
+        Uri uri = Uri.parse(url);
+        if (!HTTPS_SCHEME.equals(uri.getScheme())) return false;
+
+        // Only send Geo header if the user hasn't disabled geolocation for url.
+        if (isLocationDisabledForUrl(uri)) return false;
+
+        return true;
+    }
+
+    /**
+     * Returns true if the user has disabled sharing their location with url (e.g. via the
+     * geolocation infobar). If the user has not chosen a preference for url and url uses the https
+     * scheme, this considers the user's preference for url with the http scheme instead.
+     */
+    public static boolean isLocationDisabledForUrl(Uri uri) {
+        // TODO(finnur): Delete this method once GeolocationHeader has been upstreamed.
+        GeolocationInfo locationSettings = new GeolocationInfo(uri.toString(), null);
+        ContentSetting locationPermission = locationSettings.getContentSetting();
+
+        // If no preference has been chosen and the scheme is https, fall back to the preference for
+        // this same host over http with no explicit port number.
+        if (locationPermission == null || locationPermission == ContentSetting.ASK) {
+            String scheme = uri.getScheme();
+            if (scheme != null && scheme.toLowerCase(Locale.US).equals("https")
+                    && uri.getAuthority() != null && uri.getUserInfo() == null) {
+                String urlWithHttp = "http://" + uri.getHost();
+                locationSettings = new GeolocationInfo(urlWithHttp, null);
+                locationPermission = locationSettings.getContentSetting();
+            }
+        }
+
+        return locationPermission == ContentSetting.BLOCK;
     }
 
     /**
@@ -186,11 +272,19 @@ public final class PrefServiceBridge {
         return nativeGetRememberPasswordsEnabled();
     }
 
+    public boolean isPasswordManagerAutoSigninEnabled() {
+        return nativeGetPasswordManagerAutoSigninEnabled();
+    }
+
     /**
      * @return whether password storage is configured by policy
      */
     public boolean isRememberPasswordsManaged() {
         return nativeGetRememberPasswordsManaged();
+    }
+
+    public boolean isPasswordManagerAutoSigninManaged() {
+        return nativeGetPasswordManagerAutoSigninManaged();
     }
 
     /**
@@ -249,7 +343,7 @@ public final class PrefServiceBridge {
     }
 
     /**
-     * @return whether Javascript is managed by policy
+     * @return whether JavaScript is managed by policy
      */
     public boolean javaScriptManaged() {
         return nativeGetJavaScriptManaged();
@@ -323,6 +417,15 @@ public final class PrefServiceBridge {
      */
     public void setCrashReporting(boolean reporting) {
         nativeSetCrashReporting(reporting);
+    }
+
+    /**
+     * Allow fullscreen without asking user for permission.
+     *
+     * @param allowed Whether to allow fullscreen without user permission.
+     */
+    public void setFullscreenAllowed(boolean allowed) {
+        nativeSetFullscreenAllowed(allowed);
     }
 
     /**
@@ -447,6 +550,20 @@ public final class PrefServiceBridge {
     }
 
     /**
+     * @return whether fullscreen is configured by policy.
+     */
+    public boolean isFullscreenManaged() {
+        return nativeGetFullscreenManaged();
+    }
+
+    /**
+     * @return whether fullscreen is allowed.
+     */
+    public boolean isFullscreenAllowed() {
+        return nativeGetFullscreenAllowed();
+    }
+
+    /**
      * @return whether the web service to resolve navigation error is enabled.
      */
     public boolean isResolveNavigationErrorEnabled() {
@@ -509,6 +626,13 @@ public final class PrefServiceBridge {
         nativeClearBrowsingData(history, cache, cookiesAndSiteData, passwords, formData);
     }
 
+    /*
+     * Whether browser history can be deleted by the user.
+     */
+    public boolean canDeleteBrowsingHistory() {
+        return nativeCanDeleteBrowsingHistory();
+    }
+
     @CalledByNative
     private void browsingDataCleared() {
         if (mClearBrowsingDataListener != null) {
@@ -531,6 +655,10 @@ public final class PrefServiceBridge {
 
     public void setRememberPasswordsEnabled(boolean allow) {
         nativeSetRememberPasswordsEnabled(allow);
+    }
+
+    public void setPasswordManagerAutoSigninEnabled(boolean enabled) {
+        nativeSetPasswordManagerAutoSigninEnabled(enabled);
     }
 
     public void setPushNotificationsEnabled(boolean allow) {
@@ -626,13 +754,57 @@ public final class PrefServiceBridge {
     }
 
     /**
+     * Sets whether JavaScript is allowed to run on the given website/domain.
+     *
+     * @param pattern A pattern that matches one or multiple domains. For
+     *        details see examples in content_settings_pattern.h.
+     * @param allow Whether to allow JavaScript on the given site/domain.
+     */
+    public void setJavaScriptAllowed(String pattern, boolean allow) {
+        nativeSetJavaScriptAllowed(
+                pattern, allow ? ContentSetting.ALLOW.toInt() : ContentSetting.BLOCK.toInt());
+    }
+
+    /**
+     * Removes a JavaScript exception.
+     *
+     * @param pattern attribute for the popup exception pattern
+     */
+    public void removeJavaScriptException(String pattern) {
+        nativeSetJavaScriptAllowed(pattern, ContentSetting.DEFAULT.toInt());
+    }
+
+    /**
+     * get all the currently saved JavaScript exceptions.
+     *
+     * @return List of all the exceptions and their settings
+     */
+    public List<JavaScriptExceptionInfo> getJavaScriptExceptions() {
+        List<JavaScriptExceptionInfo> list = new ArrayList<JavaScriptExceptionInfo>();
+        nativeGetJavaScriptExceptions(list);
+        return list;
+    }
+
+    @CalledByNative
+    private static void addJavaScriptExceptionToList(
+            ArrayList<JavaScriptExceptionInfo> list,
+            String pattern,
+            String setting,
+            String source) {
+        JavaScriptExceptionInfo exception = new JavaScriptExceptionInfo(pattern, setting, source);
+        list.add(exception);
+    }
+
+    /**
      * Adds/Edit a popup exception
      *
      * @param pattern attribute for the popup exception pattern
      * @param allow attribute to specify whether to allow or block pattern
      */
     public void setPopupException(String pattern, boolean allow) {
-        nativeSetPopupException(pattern, allow);
+        nativeSetPopupException(pattern, allow
+                ? ContentSetting.ALLOW.toInt()
+                : ContentSetting.BLOCK.toInt());
     }
 
     /**
@@ -641,7 +813,7 @@ public final class PrefServiceBridge {
      * @param pattern attribute for the popup exception pattern
      */
     public void removePopupException(String pattern) {
-        nativeRemovePopupException(pattern);
+        nativeSetPopupException(pattern, ContentSetting.DEFAULT.toInt());
     }
 
     /**
@@ -722,7 +894,9 @@ public final class PrefServiceBridge {
     private native boolean nativeGetBlockThirdPartyCookiesEnabled();
     private native boolean nativeGetBlockThirdPartyCookiesManaged();
     private native boolean nativeGetRememberPasswordsEnabled();
+    private native boolean nativeGetPasswordManagerAutoSigninEnabled();
     private native boolean nativeGetRememberPasswordsManaged();
+    private native boolean nativeGetPasswordManagerAutoSigninManaged();
     private native boolean nativeGetAllowLocationUserModifiable();
     private native boolean nativeGetAllowLocationManagedByCustodian();
     private native boolean nativeGetDoNotTrackEnabled();
@@ -731,6 +905,8 @@ public final class PrefServiceBridge {
     private native boolean nativeGetJavaScriptManaged();
     private native boolean nativeGetCameraMicUserModifiable();
     private native boolean nativeGetCameraMicManagedByCustodian();
+    private native boolean nativeGetFullscreenAllowed();
+    private native boolean nativeGetFullscreenManaged();
     private native boolean nativeGetTranslateEnabled();
     private native boolean nativeGetTranslateManaged();
     private native boolean nativeGetResolveNavigationErrorEnabled();
@@ -746,12 +922,18 @@ public final class PrefServiceBridge {
     private native void nativeResetTranslateDefaults();
     private native boolean nativeGetJavaScriptEnabled();
     private native void nativeSetJavaScriptEnabled(boolean enabled);
+    private native void nativeMigrateJavascriptPreference();
+    private native void nativeSetJavaScriptAllowed(String pattern, int setting);
+    private native void nativeGetJavaScriptExceptions(List<JavaScriptExceptionInfo> list);
     private native void nativeClearBrowsingData(boolean history, boolean cache,
             boolean cookiesAndSiteData, boolean passwords, boolean formData);
+    private native boolean nativeCanDeleteBrowsingHistory();
     private native void nativeSetAllowCookiesEnabled(boolean allow);
     private native void nativeSetBlockThirdPartyCookiesEnabled(boolean enabled);
     private native void nativeSetDoNotTrackEnabled(boolean enabled);
+    private native void nativeSetFullscreenAllowed(boolean allowed);
     private native void nativeSetRememberPasswordsEnabled(boolean allow);
+    private native void nativeSetPasswordManagerAutoSigninEnabled(boolean enabled);
     private native void nativeSetProtectedMediaIdentifierEnabled(boolean enabled);
     private native boolean nativeGetAllowLocationEnabled();
     private native boolean nativeGetPushNotificationsEnabled();
@@ -762,8 +944,7 @@ public final class PrefServiceBridge {
     private native boolean nativeGetAllowPopupsEnabled();
     private native boolean nativeGetAllowPopupsManaged();
     private native void nativeSetAllowPopupsEnabled(boolean allow);
-    private native void nativeSetPopupException(String pattern, boolean allow);
-    private native void nativeRemovePopupException(String pattern);
+    private native void nativeSetPopupException(String pattern, int setting);
     private native void nativeGetPopupExceptions(Object list);
     private native boolean nativeGetCameraMicEnabled();
     private native boolean nativeGetAutologinEnabled();

@@ -41,9 +41,18 @@ void TestMediaTransferProtocolManagerLinux::CloseStorage(
   callback.Run(true);
 }
 
+void TestMediaTransferProtocolManagerLinux::CreateDirectory(
+    const std::string& storage_handle,
+    const uint32 parent_id,
+    const std::string& directory_name,
+    const CreateDirectoryCallback& callback) {
+  callback.Run(true /* error */);
+}
+
 void TestMediaTransferProtocolManagerLinux::ReadDirectory(
     const std::string& storage_handle,
-    uint32 file_id,
+    const uint32 file_id,
+    const size_t max_size,
     const ReadDirectoryCallback& callback) {
   callback.Run(std::vector<MtpFileEntry>(),
                false /* no more entries*/,
@@ -64,6 +73,30 @@ void TestMediaTransferProtocolManagerLinux::GetFileInfo(
     uint32 file_id,
     const GetFileInfoCallback& callback) {
   callback.Run(MtpFileEntry(), true);
+}
+
+void TestMediaTransferProtocolManagerLinux::RenameObject(
+    const std::string& storage_handle,
+    const uint32 object_id,
+    const std::string& new_name,
+    const RenameObjectCallback& callback) {
+  callback.Run(true /* error */);
+}
+
+void TestMediaTransferProtocolManagerLinux::CopyFileFromLocal(
+    const std::string& storage_handle,
+    const int source_file_descriptor,
+    const uint32 parent_id,
+    const std::string& file_name,
+    const CopyFileFromLocalCallback& callback) {
+  callback.Run(true /* error */);
+}
+
+void TestMediaTransferProtocolManagerLinux::DeleteObject(
+    const std::string& storage_handle,
+    const uint32 object_id,
+    const DeleteObjectCallback& callback) {
+  callback.Run(true /* error */);
 }
 
 }  // namespace storage_monitor

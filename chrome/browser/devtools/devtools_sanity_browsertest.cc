@@ -9,11 +9,13 @@
 #include "base/memory/ref_counted.h"
 #include "base/path_service.h"
 #include "base/prefs/pref_service.h"
+#include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/test/test_timeouts.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/devtools/browser_list_tabcontents_provider.h"
+#include "chrome/browser/devtools/device/self_device_provider.h"
 #include "chrome/browser/devtools/devtools_window_testing.h"
 #include "chrome/browser/extensions/extension_apitest.h"
 #include "chrome/browser/extensions/extension_browsertest.h"
@@ -27,6 +29,7 @@
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
+#include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/test_switches.h"
@@ -85,6 +88,8 @@ const char kReloadSharedWorkerTestPage[] =
     "files/workers/debug_shared_worker_initialization.html";
 const char kReloadSharedWorkerTestWorker[] =
     "files/workers/debug_shared_worker_initialization.js";
+
+const int kRemoteDebuggingPort = 9225;
 
 void RunTestFunction(DevToolsWindow* window, const char* test_name) {
   std::string result;
@@ -349,7 +354,7 @@ class DevToolsExtensionTest : public DevToolsSanityTest,
 
     content::NotificationRegistrar registrar;
     registrar.Add(this,
-                  extensions::NOTIFICATION_EXTENSION_HOST_DID_STOP_LOADING,
+                  extensions::NOTIFICATION_EXTENSION_HOST_DID_STOP_FIRST_LOAD,
                   content::NotificationService::AllSources());
     base::CancelableClosure timeout(
         base::Bind(&TimeoutCallback, "Extension host load timed out."));
@@ -358,11 +363,11 @@ class DevToolsExtensionTest : public DevToolsSanityTest,
 
     extensions::ProcessManager* manager =
         extensions::ProcessManager::Get(browser()->profile());
-    extensions::ProcessManager::ViewSet all_views = manager->GetAllViews();
-    for (extensions::ProcessManager::ViewSet::const_iterator iter =
-             all_views.begin();
-         iter != all_views.end();) {
-      if (!(*iter)->IsLoading())
+    extensions::ProcessManager::FrameSet all_frames = manager->GetAllFrames();
+    for (extensions::ProcessManager::FrameSet::const_iterator iter =
+             all_frames.begin();
+         iter != all_frames.end();) {
+      if (!content::WebContents::FromRenderFrameHost(*iter)->IsLoading())
         ++iter;
       else
         content::RunMessageLoop();
@@ -377,7 +382,7 @@ class DevToolsExtensionTest : public DevToolsSanityTest,
                const content::NotificationDetails& details) override {
     switch (type) {
       case extensions::NOTIFICATION_EXTENSION_LOADED_DEPRECATED:
-      case extensions::NOTIFICATION_EXTENSION_HOST_DID_STOP_LOADING:
+      case extensions::NOTIFICATION_EXTENSION_HOST_DID_STOP_FIRST_LOAD:
         base::MessageLoopForUI::current()->Quit();
         break;
       default:
@@ -812,7 +817,6 @@ IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, DISABLED_TestDeviceEmulation) {
   RunTest("testDeviceMetricsOverrides", "about:blank");
 }
 
-
 // Tests that external navigation from inspector page is always handled by
 // DevToolsWindow and results in inspected page navigation.
 IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, TestDevToolsExternalNavigation) {
@@ -855,7 +859,8 @@ IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, TestToolboxNotLoadedDocked) {
 
 // Tests that inspector will reattach to inspected page when it is reloaded
 // after a crash. See http://crbug.com/101952
-IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, TestReattachAfterCrash) {
+// Disabled. it doesn't check anything right now: http://crbug.com/461790
+IN_PROC_BROWSER_TEST_F(DevToolsSanityTest, DISABLED_TestReattachAfterCrash) {
   RunTest("testReattachAfterCrash", std::string());
 }
 
@@ -925,7 +930,7 @@ IN_PROC_BROWSER_TEST_F(DevToolsAgentHostTest, TestAgentHostReleased) {
       << "DevToolsAgentHost is not released when the tab is closed";
 }
 
-class RemoteDebuggingTest: public ExtensionApiTest {
+class RemoteDebuggingTest : public ExtensionApiTest {
   void SetUpCommandLine(base::CommandLine* command_line) override {
     ExtensionApiTest::SetUpCommandLine(command_line);
     command_line->AppendSwitchASCII(switches::kRemoteDebuggingPort, "9222");
@@ -951,4 +956,33 @@ IN_PROC_BROWSER_TEST_F(RemoteDebuggingTest, MAYBE_RemoteDebugger) {
 #endif
 
   ASSERT_TRUE(RunExtensionTest("target_list")) << message_;
+}
+
+using DevToolsPolicyTest = InProcessBrowserTest;
+IN_PROC_BROWSER_TEST_F(DevToolsPolicyTest, PolicyTrue) {
+  browser()->profile()->GetPrefs()->SetBoolean(prefs::kDevToolsDisabled, true);
+  ui_test_utils::NavigateToURL(browser(), GURL("about:blank"));
+  content::WebContents* web_contents =
+      browser()->tab_strip_model()->GetWebContentsAt(0);
+  scoped_refptr<content::DevToolsAgentHost> agent(
+      content::DevToolsAgentHost::GetOrCreateFor(web_contents));
+  DevToolsWindow::OpenDevToolsWindow(web_contents);
+  DevToolsWindow* window = DevToolsWindow::FindDevToolsWindow(agent.get());
+  ASSERT_FALSE(window);
+}
+
+class RemoteWebSocketTest : public DevToolsSanityTest {
+  void SetUpCommandLine(base::CommandLine* command_line) override {
+    DevToolsSanityTest::SetUpCommandLine(command_line);
+    command_line->AppendSwitchASCII(switches::kRemoteDebuggingPort,
+        base::IntToString(kRemoteDebuggingPort));
+  }
+};
+
+IN_PROC_BROWSER_TEST_F(RemoteWebSocketTest, TestWebSocket) {
+  AndroidDeviceManager::DeviceProviders device_providers;
+  device_providers.push_back(new SelfAsDeviceProvider(kRemoteDebuggingPort));
+  DevToolsAndroidBridge::Factory::GetForProfile(browser()->profile())->
+      set_device_providers_for_test(device_providers);
+  RunTest("testRemoteWebSocket", "about:blank");
 }

@@ -14,6 +14,7 @@
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/path.h"
+#include "ui/gfx/shadow_value.h"
 #include "ui/resources/grit/ui_resources.h"
 #include "ui/strings/grit/ui_strings.h"
 #include "ui/views/animation/bounds_animator.h"
@@ -109,9 +110,7 @@ SpeechView::SpeechView(AppListViewDelegate* delegate)
     : delegate_(delegate),
       logo_(NULL) {
   SetBorder(scoped_ptr<views::Border>(
-      new views::ShadowBorder(kCardShadowBlur, kCardShadowColor,
-                              kCardShadowYOffset,  // Vertical offset.
-                              0)));
+      new views::ShadowBorder(GetShadowForZHeight(1))));
 
   // To keep the painting order of the border and the background, this class
   // actually has a single child of 'container' which has white background and
@@ -141,9 +140,9 @@ SpeechView::SpeechView(AppListViewDelegate* delegate)
   ui::ResourceBundle& bundle = ui::ResourceBundle::GetSharedInstance();
   speech_result_ = new views::Label(
       base::string16(), bundle.GetFontList(ui::ResourceBundle::LargeFont));
+  speech_result_->SetMultiLine(true);
   speech_result_->SetHorizontalAlignment(gfx::ALIGN_LEFT);
 
-  speech_result_->SetMultiLine(true);
   container->AddChildView(speech_result_);
 
   AddChildView(container);
@@ -185,7 +184,6 @@ void SpeechView::Layout() {
   mic_button_->SetBoundsRect(gfx::Rect(mic_origin, mic_size));
 
   int speech_width = contents_bounds.width() - kTextMargin * 2;
-  speech_result_->SizeToFit(speech_width);
   int speech_height = speech_result_->GetHeightForWidth(speech_width);
   speech_result_->SetBounds(
       contents_bounds.x() + kTextMargin,
@@ -224,6 +222,7 @@ void SpeechView::OnSpeechResult(const base::string16& result,
                                 bool is_final) {
   speech_result_->SetText(result);
   speech_result_->SetEnabledColor(kResultTextColor);
+  Layout();
 }
 
 void SpeechView::OnSpeechRecognitionStateChanged(

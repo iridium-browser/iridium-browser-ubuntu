@@ -28,11 +28,17 @@ HTMLImportTreeRoot::HTMLImportTreeRoot(Document* document)
 HTMLImportTreeRoot::~HTMLImportTreeRoot()
 {
 #if !ENABLE(OILPAN)
+    dispose();
+#endif
+}
+
+void HTMLImportTreeRoot::dispose()
+{
     for (size_t i = 0; i < m_imports.size(); ++i)
-        m_imports[i]->importDestroyed();
+        m_imports[i]->dispose();
     m_imports.clear();
     m_document = nullptr;
-#endif
+    m_recalcTimer.stop();
 }
 
 Document* HTMLImportTreeRoot::document() const
@@ -40,9 +46,9 @@ Document* HTMLImportTreeRoot::document() const
     return m_document;
 }
 
-bool HTMLImportTreeRoot::isDone() const
+bool HTMLImportTreeRoot::hasFinishedLoading() const
 {
-    return !m_document->parsing() && m_document->styleEngine()->haveStylesheetsLoaded();
+    return !m_document->parsing() && m_document->styleEngine().haveStylesheetsLoaded();
 }
 
 void HTMLImportTreeRoot::stateWillChange()
@@ -93,6 +99,7 @@ HTMLImportChild* HTMLImportTreeRoot::find(const KURL& url) const
 void HTMLImportTreeRoot::recalcTimerFired(Timer<HTMLImportTreeRoot>*)
 {
     ASSERT(m_document);
+    RefPtrWillBeRawPtr<Document> protect(m_document.get());
 
     do {
         m_recalcTimer.stop();
@@ -100,7 +107,7 @@ void HTMLImportTreeRoot::recalcTimerFired(Timer<HTMLImportTreeRoot>*)
     } while (m_recalcTimer.isActive());
 }
 
-void HTMLImportTreeRoot::trace(Visitor* visitor)
+DEFINE_TRACE(HTMLImportTreeRoot)
 {
     visitor->trace(m_document);
     visitor->trace(m_imports);

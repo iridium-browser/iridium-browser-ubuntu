@@ -15,10 +15,6 @@
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
 #include "base/time/time.h"
-#include "chrome/browser/chrome_notification_types.h"
-#include "chrome/browser/history/history_database.h"
-#include "chrome/browser/history/history_notifications.h"
-#include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/predictors/predictor_database.h"
 #include "chrome/browser/predictors/predictor_database_factory.h"
@@ -26,12 +22,11 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/url_constants.h"
+#include "components/history/core/browser/history_database.h"
 #include "components/history/core/browser/history_db_task.h"
+#include "components/history/core/browser/history_service.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/navigation_controller.h"
-#include "content/public/browser/notification_service.h"
-#include "content/public/browser/notification_source.h"
-#include "content/public/browser/notification_types.h"
 #include "content/public/browser/resource_request_info.h"
 #include "content/public/browser/web_contents.h"
 #include "net/base/mime_util.h"
@@ -437,43 +432,12 @@ void ResourcePrefetchPredictor::FinishedPrefetchForNavigation(
   }
 }
 
-void ResourcePrefetchPredictor::Observe(
-    int type,
-    const content::NotificationSource& source,
-    const content::NotificationDetails& details) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
-
-  switch (type) {
-    case chrome::NOTIFICATION_HISTORY_URLS_DELETED: {
-      DCHECK_EQ(initialization_state_, INITIALIZED);
-      const content::Details<const history::URLsDeletedDetails>
-          urls_deleted_details =
-              content::Details<const history::URLsDeletedDetails>(details);
-      if (urls_deleted_details->all_history) {
-        DeleteAllUrls();
-        UMA_HISTOGRAM_ENUMERATION("ResourcePrefetchPredictor.ReportingEvent",
-                                  REPORTING_EVENT_ALL_HISTORY_CLEARED,
-                                  REPORTING_EVENT_COUNT);
-      } else {
-        DeleteUrls(urls_deleted_details->rows);
-        UMA_HISTOGRAM_ENUMERATION("ResourcePrefetchPredictor.ReportingEvent",
-                                  REPORTING_EVENT_PARTIAL_HISTORY_CLEARED,
-                                  REPORTING_EVENT_COUNT);
-      }
-      break;
-    }
-
-    default:
-      NOTREACHED() << "Unexpected notification observed.";
-      break;
-  }
-}
-
 void ResourcePrefetchPredictor::Shutdown() {
   if (prefetch_manager_.get()) {
     prefetch_manager_->ShutdownOnUIThread();
     prefetch_manager_ = NULL;
   }
+  history_service_observer_.RemoveAll();
 }
 
 void ResourcePrefetchPredictor::OnMainFrameRequest(
@@ -604,8 +568,9 @@ void ResourcePrefetchPredictor::OnNavigationComplete(
   inflight_navigations_.erase(nav_it);
 
   // Kick off history lookup to determine if we should record the URL.
-  HistoryService* history_service = HistoryServiceFactory::GetForProfile(
-      profile_, Profile::EXPLICIT_ACCESS);
+  history::HistoryService* history_service =
+      HistoryServiceFactory::GetForProfile(profile_,
+                                           ServiceAccessType::EXPLICIT_ACCESS);
   DCHECK(history_service);
   history_service->ScheduleDBTask(
       scoped_ptr<history::HistoryDBTask>(
@@ -709,7 +674,7 @@ void ResourcePrefetchPredictor::StopPrefetching(
 void ResourcePrefetchPredictor::StartInitialization() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
-  DCHECK_EQ(initialization_state_, NOT_INITIALIZED);
+  DCHECK_EQ(NOT_INITIALIZED, initialization_state_);
   initialization_state_ = INITIALIZING;
 
   // Create local caches using the database as loaded.
@@ -731,7 +696,7 @@ void ResourcePrefetchPredictor::CreateCaches(
     scoped_ptr<PrefetchDataMap> host_data_map) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
-  DCHECK_EQ(initialization_state_, INITIALIZING);
+  DCHECK_EQ(INITIALIZING, initialization_state_);
   DCHECK(!url_table_cache_);
   DCHECK(!host_table_cache_);
   DCHECK(inflight_navigations_.empty());
@@ -749,19 +714,13 @@ void ResourcePrefetchPredictor::CreateCaches(
 
 void ResourcePrefetchPredictor::OnHistoryAndCacheLoaded() {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  DCHECK_EQ(initialization_state_, INITIALIZING);
-
-  notification_registrar_.Add(this,
-                              chrome::NOTIFICATION_HISTORY_URLS_DELETED,
-                              content::Source<Profile>(profile_));
+  DCHECK_EQ(INITIALIZING, initialization_state_);
 
   // Initialize the prefetch manager only if prefetching is enabled.
   if (config_.IsPrefetchingEnabled(profile_)) {
     prefetch_manager_ = new ResourcePrefetcherManager(
         this, config_, profile_->GetRequestContext());
   }
-
-  history_service_observer_.RemoveAll();
   initialization_state_ = INITIALIZED;
 }
 
@@ -807,15 +766,14 @@ void ResourcePrefetchPredictor::DeleteUrls(const history::URLRows& urls) {
   // in the cache.
   std::vector<std::string> urls_to_delete, hosts_to_delete;
 
-  for (history::URLRows::const_iterator it = urls.begin(); it != urls.end();
-       ++it) {
-    const std::string url_spec = it->url().spec();
+  for (const auto& it : urls) {
+    const std::string& url_spec = it.url().spec();
     if (url_table_cache_->find(url_spec) != url_table_cache_->end()) {
       urls_to_delete.push_back(url_spec);
       url_table_cache_->erase(url_spec);
     }
 
-    const std::string host = it->url().host();
+    const std::string& host = it.url().host();
     if (host_table_cache_->find(host) != host_table_cache_->end()) {
       hosts_to_delete.push_back(host);
       host_table_cache_->erase(host);
@@ -1339,16 +1297,40 @@ void ResourcePrefetchPredictor::ReportPredictedAccuracyStatsHelper(
 #undef RPP_PREDICTED_HISTOGRAM_COUNTS
 }
 
+void ResourcePrefetchPredictor::OnURLsDeleted(
+    history::HistoryService* history_service,
+    bool all_history,
+    bool expired,
+    const history::URLRows& deleted_rows,
+    const std::set<GURL>& favicon_urls) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  if (INITIALIZED != initialization_state_)
+    return;
+
+  if (all_history) {
+    DeleteAllUrls();
+    UMA_HISTOGRAM_ENUMERATION("ResourcePrefetchPredictor.ReportingEvent",
+                              REPORTING_EVENT_ALL_HISTORY_CLEARED,
+                              REPORTING_EVENT_COUNT);
+  } else {
+    DeleteUrls(deleted_rows);
+    UMA_HISTOGRAM_ENUMERATION("ResourcePrefetchPredictor.ReportingEvent",
+                              REPORTING_EVENT_PARTIAL_HISTORY_CLEARED,
+                              REPORTING_EVENT_COUNT);
+  }
+}
+
 void ResourcePrefetchPredictor::OnHistoryServiceLoaded(
-    HistoryService* history_service) {
+    history::HistoryService* history_service) {
   OnHistoryAndCacheLoaded();
   history_service_observer_.Remove(history_service);
 }
 
 void ResourcePrefetchPredictor::ConnectToHistoryService() {
   // Register for HistoryServiceLoading if it is not ready.
-  HistoryService* history_service =
-      HistoryServiceFactory::GetForProfile(profile_, Profile::EXPLICIT_ACCESS);
+  history::HistoryService* history_service =
+      HistoryServiceFactory::GetForProfile(profile_,
+                                           ServiceAccessType::EXPLICIT_ACCESS);
   if (!history_service)
     return;
   if (history_service->BackendLoaded()) {

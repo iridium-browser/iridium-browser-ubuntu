@@ -213,12 +213,36 @@ class GLES2_IMPL_EXPORT GLES2Implementation
   void GetProgramInfoCHROMIUMHelper(GLuint program, std::vector<int8>* result);
   GLint GetAttribLocationHelper(GLuint program, const char* name);
   GLint GetUniformLocationHelper(GLuint program, const char* name);
+  GLint GetFragDataLocationHelper(GLuint program, const char* name);
   bool GetActiveAttribHelper(
       GLuint program, GLuint index, GLsizei bufsize, GLsizei* length,
       GLint* size, GLenum* type, char* name);
   bool GetActiveUniformHelper(
       GLuint program, GLuint index, GLsizei bufsize, GLsizei* length,
       GLint* size, GLenum* type, char* name);
+  void GetUniformBlocksCHROMIUMHelper(
+      GLuint program, std::vector<int8>* result);
+  void GetUniformsES3CHROMIUMHelper(
+      GLuint program, std::vector<int8>* result);
+  GLuint GetUniformBlockIndexHelper(GLuint program, const char* name);
+  bool GetActiveUniformBlockNameHelper(
+      GLuint program, GLuint index, GLsizei bufsize,
+      GLsizei* length, char* name);
+  bool GetActiveUniformBlockivHelper(
+      GLuint program, GLuint index, GLenum pname, GLint* params);
+  void GetTransformFeedbackVaryingsCHROMIUMHelper(
+      GLuint program, std::vector<int8>* result);
+  bool GetTransformFeedbackVaryingHelper(
+      GLuint program, GLuint index, GLsizei bufsize, GLsizei* length,
+      GLint* size, GLenum* type, char* name);
+  bool GetUniformIndicesHelper(
+      GLuint program, GLsizei count, const char* const* names, GLuint* indices);
+  bool GetActiveUniformsivHelper(
+      GLuint program, GLsizei count, const GLuint* indices,
+      GLenum pname, GLint* params);
+  bool GetSyncivHelper(
+      GLsync sync, GLenum pname, GLsizei bufsize, GLsizei* length,
+      GLint* values);
 
   void FreeUnusedSharedMemory();
   void FreeEverything();
@@ -435,14 +459,22 @@ class GLES2_IMPL_EXPORT GLES2Implementation
   bool IsTransformFeedbackReservedId(GLuint id) { return false; }
 
   void BindBufferHelper(GLenum target, GLuint buffer);
+  void BindBufferBaseHelper(GLenum target, GLuint index, GLuint buffer);
+  void BindBufferRangeHelper(GLenum target, GLuint index, GLuint buffer,
+                             GLintptr offset, GLsizeiptr size);
   void BindFramebufferHelper(GLenum target, GLuint framebuffer);
   void BindRenderbufferHelper(GLenum target, GLuint renderbuffer);
+  void BindSamplerHelper(GLuint unit, GLuint sampler);
   void BindTextureHelper(GLenum target, GLuint texture);
+  void BindTransformFeedbackHelper(GLenum target, GLuint transformfeedback);
   void BindVertexArrayOESHelper(GLuint array);
   void BindValuebufferCHROMIUMHelper(GLenum target, GLuint valuebuffer);
   void UseProgramHelper(GLuint program);
 
   void BindBufferStub(GLenum target, GLuint buffer);
+  void BindBufferBaseStub(GLenum target, GLuint index, GLuint buffer);
+  void BindBufferRangeStub(GLenum target, GLuint index, GLuint buffer,
+                           GLintptr offset, GLsizeiptr size);
   void BindFramebufferStub(GLenum target, GLuint framebuffer);
   void BindRenderbufferStub(GLenum target, GLuint renderbuffer);
   void BindTextureStub(GLenum target, GLuint texture);
@@ -470,6 +502,7 @@ class GLES2_IMPL_EXPORT GLES2Implementation
   void DeleteSamplersHelper(GLsizei n, const GLuint* samplers);
   void DeleteTransformFeedbacksHelper(
       GLsizei n, const GLuint* transformfeedbacks);
+  void DeleteSyncHelper(GLsync sync);
 
   void DeleteBuffersStub(GLsizei n, const GLuint* buffers);
   void DeleteFramebuffersStub(GLsizei n, const GLuint* framebuffers);
@@ -482,6 +515,7 @@ class GLES2_IMPL_EXPORT GLES2Implementation
   void DeleteSamplersStub(GLsizei n, const GLuint* samplers);
   void DeleteTransformFeedbacksStub(
       GLsizei n, const GLuint* transformfeedbacks);
+  void DeleteSyncStub(GLsizei n, const GLuint* syncs);
 
   void BufferDataHelper(
       GLenum target, GLsizeiptr size, const void* data, GLenum usage);
@@ -526,6 +560,7 @@ class GLES2_IMPL_EXPORT GLES2Implementation
 
   // Helpers for query functions.
   bool GetHelper(GLenum pname, GLint* params);
+  GLuint GetBoundBufferHelper(GLenum target);
   bool GetBooleanvHelper(GLenum pname, GLboolean* params);
   bool GetBufferParameterivHelper(GLenum target, GLenum pname, GLint* params);
   bool GetFloatvHelper(GLenum pname, GLfloat* params);
@@ -608,6 +643,13 @@ class GLES2_IMPL_EXPORT GLES2Implementation
       GLuint buffer_id,
       const char* function_name, GLuint offset, GLsizei size);
 
+  // Pack 2D arrays of char into a bucket.
+  // Helper function for ShaderSource(), TransformFeedbackVaryings(), etc.
+  bool PackStringsToBucket(GLsizei count,
+                           const char* const* str,
+                           const GLint* length,
+                           const char* func_name);
+
   const std::string& GetLogPrefix() const;
 
 #if defined(GL_CLIENT_FAIL_GL_ERRORS)
@@ -617,6 +659,13 @@ class GLES2_IMPL_EXPORT GLES2Implementation
   void CheckGLError() { }
   void FailGLError(GLenum /* error */) { }
 #endif
+
+  void RemoveMappedBufferRangeByTarget(GLenum target);
+  void RemoveMappedBufferRangeById(GLuint buffer);
+  void ClearMappedBufferRangeMap();
+
+  void DrawElementsImpl(GLenum mode, GLsizei count, GLenum type,
+                        const void* indices, const char* func_name);
 
   GLES2Util util_;
   GLES2CmdHelper* helper_;
@@ -725,6 +774,10 @@ class GLES2_IMPL_EXPORT GLES2Implementation
 
   typedef std::map<const void*, MappedBuffer> MappedBufferMap;
   MappedBufferMap mapped_buffers_;
+
+  // TODO(zmo): Consolidate |mapped_buffers_| and |mapped_buffer_range_map_|.
+  typedef base::hash_map<GLuint, MappedBuffer> MappedBufferRangeMap;
+  MappedBufferRangeMap mapped_buffer_range_map_;
 
   typedef std::map<const void*, MappedTexture> MappedTextureMap;
   MappedTextureMap mapped_textures_;

@@ -12,7 +12,7 @@
 #include "cc/base/cc_export.h"
 
 namespace base {
-namespace debug {
+namespace trace_event {
 class ConvertableToTraceFormat;
 class TracedValue;
 }
@@ -40,7 +40,6 @@ struct CC_EXPORT BeginFrameArgs {
   enum BeginFrameArgsType {
     INVALID,
     NORMAL,
-    SYNCHRONOUS,
     MISSED,
     // Not a real type, but used by the IPC system. Should always remain the
     // *last* value in this enum.
@@ -77,8 +76,8 @@ struct CC_EXPORT BeginFrameArgs {
 
   bool IsValid() const { return interval >= base::TimeDelta(); }
 
-  scoped_refptr<base::debug::ConvertableToTraceFormat> AsValue() const;
-  void AsValueInto(base::debug::TracedValue* dict) const;
+  scoped_refptr<base::trace_event::ConvertableToTraceFormat> AsValue() const;
+  void AsValueInto(base::trace_event::TracedValue* dict) const;
 
   base::TimeTicks frame_time;
   base::TimeTicks deadline;

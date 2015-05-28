@@ -10,6 +10,7 @@
 
 #include "base/bind.h"
 #include "base/guid.h"
+#include "base/memory/scoped_vector.h"
 #include "base/profiler/scoped_tracker.h"
 #include "base/strings/stringprintf.h"
 #include "base/time/time.h"
@@ -30,6 +31,7 @@
 #include "net/http/http_response_headers.h"
 #include "net/http/http_response_info.h"
 #include "net/http/http_util.h"
+#include "storage/browser/blob/blob_data_builder.h"
 #include "storage/browser/blob/blob_data_handle.h"
 #include "storage/browser/blob/blob_storage_context.h"
 #include "storage/browser/blob/blob_url_request_job_factory.h"
@@ -110,7 +112,9 @@ bool ServiceWorkerURLRequestJob::GetMimeType(std::string* mime_type) const {
 void ServiceWorkerURLRequestJob::GetResponseInfo(net::HttpResponseInfo* info) {
   if (!http_info())
     return;
+  const base::Time request_time = info->request_time;
   *info = *http_info();
+  info->request_time = request_time;
   info->response_time = response_time_;
 }
 
@@ -417,27 +421,35 @@ bool ServiceWorkerURLRequestJob::CreateRequestBodyBlob(std::string* blob_uuid,
   if (!body_.get() || !blob_storage_context_)
     return false;
 
+  // To ensure the blobs stick around until the end of the reading.
+  ScopedVector<storage::BlobDataHandle> handles;
+  ScopedVector<storage::BlobDataSnapshot> snapshots;
+  // TODO(dmurph): Allow blobs to be added below, so that the context can
+  // efficiently re-use blob items for the new blob.
   std::vector<const ResourceRequestBody::Element*> resolved_elements;
-  for (size_t i = 0; i < body_->elements()->size(); ++i) {
-    const ResourceRequestBody::Element& element = (*body_->elements())[i];
+  for (const ResourceRequestBody::Element& element : (*body_->elements())) {
     if (element.type() != ResourceRequestBody::Element::TYPE_BLOB) {
       resolved_elements.push_back(&element);
       continue;
     }
     scoped_ptr<storage::BlobDataHandle> handle =
         blob_storage_context_->GetBlobDataFromUUID(element.blob_uuid());
-    if (handle->data()->items().empty())
+    scoped_ptr<storage::BlobDataSnapshot> snapshot = handle->CreateSnapshot();
+    if (snapshot->items().empty())
       continue;
-    for (size_t i = 0; i < handle->data()->items().size(); ++i) {
-      const storage::BlobData::Item& item = handle->data()->items().at(i);
-      DCHECK_NE(storage::BlobData::Item::TYPE_BLOB, item.type());
-      resolved_elements.push_back(&item);
+    const auto& items = snapshot->items();
+    for (const auto& item : items) {
+      DCHECK_NE(storage::DataElement::TYPE_BLOB, item->type());
+      resolved_elements.push_back(item->data_element_ptr());
     }
+    handles.push_back(handle.release());
+    snapshots.push_back(snapshot.release());
   }
 
   const std::string uuid(base::GenerateGUID());
   uint64 total_size = 0;
-  scoped_refptr<storage::BlobData> blob_data = new storage::BlobData(uuid);
+
+  storage::BlobDataBuilder blob_builder(uuid);
   for (size_t i = 0; i < resolved_elements.size(); ++i) {
     const ResourceRequestBody::Element& element = *resolved_elements[i];
     if (total_size != kuint64max && element.length() != kuint64max)
@@ -446,23 +458,21 @@ bool ServiceWorkerURLRequestJob::CreateRequestBodyBlob(std::string* blob_uuid,
       total_size = kuint64max;
     switch (element.type()) {
       case ResourceRequestBody::Element::TYPE_BYTES:
-        blob_data->AppendData(element.bytes(), element.length());
+        blob_builder.AppendData(element.bytes(), element.length());
         break;
       case ResourceRequestBody::Element::TYPE_FILE:
-        blob_data->AppendFile(element.path(),
-                              element.offset(),
-                              element.length(),
-                              element.expected_modification_time());
+        blob_builder.AppendFile(element.path(), element.offset(),
+                                element.length(),
+                                element.expected_modification_time());
         break;
       case ResourceRequestBody::Element::TYPE_BLOB:
         // Blob elements should be resolved beforehand.
         NOTREACHED();
         break;
       case ResourceRequestBody::Element::TYPE_FILE_FILESYSTEM:
-        blob_data->AppendFileSystemFile(element.filesystem_url(),
-                                        element.offset(),
-                                        element.length(),
-                                        element.expected_modification_time());
+        blob_builder.AppendFileSystemFile(element.filesystem_url(),
+                                          element.offset(), element.length(),
+                                          element.expected_modification_time());
         break;
       default:
         NOTIMPLEMENTED();
@@ -470,7 +480,7 @@ bool ServiceWorkerURLRequestJob::CreateRequestBodyBlob(std::string* blob_uuid,
   }
 
   request_body_blob_data_handle_ =
-      blob_storage_context_->AddFinishedBlob(blob_data.get());
+      blob_storage_context_->AddFinishedBlob(&blob_builder);
   *blob_uuid = uuid;
   *blob_size = total_size;
   return true;
@@ -483,7 +493,8 @@ void ServiceWorkerURLRequestJob::DidPrepareFetchEvent() {
 void ServiceWorkerURLRequestJob::DidDispatchFetchEvent(
     ServiceWorkerStatusCode status,
     ServiceWorkerFetchEventResult fetch_result,
-    const ServiceWorkerResponse& response) {
+    const ServiceWorkerResponse& response,
+    scoped_refptr<ServiceWorkerVersion> version) {
   fetch_dispatcher_.reset();
 
   // Check if we're not orphaned.
@@ -530,11 +541,27 @@ void ServiceWorkerURLRequestJob::DidDispatchFetchEvent(
   fetch_end_time_ = base::TimeTicks::Now();
   load_timing_info_.send_end = fetch_end_time_;
 
+  // Creates a new HttpResponseInfo using the the ServiceWorker script's
+  // HttpResponseInfo to show HTTPS padlock.
+  // TODO(horo): When we support mixed-content (HTTP) no-cors requests from a
+  // ServiceWorker, we have to check the security level of the responses.
+  DCHECK(!http_response_info_);
+  DCHECK(version);
+  const net::HttpResponseInfo* main_script_http_info =
+      version->GetMainScriptHttpResponseInfo();
+  if (main_script_http_info) {
+    // In normal case |main_script_http_info| must be set while starting the
+    // ServiceWorker. But when the ServiceWorker registration database was not
+    // written correctly, it may be null.
+    // TODO(horo): Change this line to DCHECK when crbug.com/485900 is fixed.
+    http_response_info_.reset(
+        new net::HttpResponseInfo(*main_script_http_info));
+  }
+
   // Set up a request for reading the stream.
   if (response.stream_url.is_valid()) {
     DCHECK(response.blob_uuid.empty());
-    DCHECK(provider_host_->active_version());
-    streaming_version_ = provider_host_->active_version();
+    streaming_version_ = version;
     streaming_version_->AddStreamingURLRequestJob(this);
     response_url_ = response.url;
     service_worker_response_type_ = response.response_type;
@@ -602,8 +629,11 @@ void ServiceWorkerURLRequestJob::CreateResponseHeader(
 }
 
 void ServiceWorkerURLRequestJob::CommitResponseHeader() {
-  http_response_info_.reset(new net::HttpResponseInfo());
+  if (!http_response_info_)
+    http_response_info_.reset(new net::HttpResponseInfo());
   http_response_info_->headers.swap(http_response_headers_);
+  http_response_info_->vary_data = net::HttpVaryData();
+  http_response_info_->metadata = nullptr;
   NotifyHeadersComplete();
 }
 

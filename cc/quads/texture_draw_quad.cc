@@ -4,8 +4,8 @@
 
 #include "cc/quads/texture_draw_quad.h"
 
-#include "base/debug/trace_event_argument.h"
 #include "base/logging.h"
+#include "base/trace_event/trace_event_argument.h"
 #include "base/values.h"
 #include "cc/base/math_util.h"
 #include "ui/gfx/geometry/vector2d_f.h"
@@ -91,16 +91,12 @@ const TextureDrawQuad* TextureDrawQuad::MaterialCast(const DrawQuad* quad) {
   return static_cast<const TextureDrawQuad*>(quad);
 }
 
-void TextureDrawQuad::ExtendValue(base::debug::TracedValue* value) const {
+void TextureDrawQuad::ExtendValue(base::trace_event::TracedValue* value) const {
   value->SetInteger("resource_id", resource_id);
   value->SetBoolean("premultiplied_alpha", premultiplied_alpha);
-  value->BeginArray("uv_top_left");
-  MathUtil::AddToTracedValue(uv_top_left, value);
-  value->EndArray();
 
-  value->BeginArray("uv_bottom_right");
-  MathUtil::AddToTracedValue(uv_bottom_right, value);
-  value->EndArray();
+  MathUtil::AddToTracedValue("uv_top_left", uv_top_left, value);
+  MathUtil::AddToTracedValue("uv_bottom_right", uv_bottom_right, value);
 
   value->SetInteger("background_color", background_color);
 

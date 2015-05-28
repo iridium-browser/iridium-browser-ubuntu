@@ -105,6 +105,8 @@ class MEDIA_EXPORT Pipeline : public DemuxerHost {
   //   |duration_change_cb| optional callback that will be executed whenever the
   //                        presentation duration changes.
   //   |add_text_track_cb| will be executed whenever a text track is added.
+  //   |waiting_for_decryption_key_cb| will be executed whenever the key needed
+  //                                   to decrypt the stream is not available.
   // It is an error to call this method after the pipeline has already started.
   void Start(Demuxer* demuxer,
              scoped_ptr<Renderer> renderer,
@@ -115,7 +117,8 @@ class MEDIA_EXPORT Pipeline : public DemuxerHost {
              const BufferingStateCB& buffering_state_cb,
              const PaintCB& paint_cb,
              const base::Closure& duration_change_cb,
-             const AddTextTrackCB& add_text_track_cb);
+             const AddTextTrackCB& add_text_track_cb,
+             const base::Closure& waiting_for_decryption_key_cb);
 
   // Asynchronously stops the pipeline, executing |stop_cb| when the pipeline
   // teardown has completed.
@@ -278,9 +281,8 @@ class MEDIA_EXPORT Pipeline : public DemuxerHost {
   // Kicks off initialization for each media object, executing |done_cb| with
   // the result when completed.
   void InitializeDemuxer(const PipelineStatusCB& done_cb);
-  void InitializeRenderer(const base::Closure& done_cb);
+  void InitializeRenderer(const PipelineStatusCB& done_cb);
 
-  void OnStateTransition(PipelineStatus status);
   void StateTransitionTask(PipelineStatus status);
 
   // Initiates an asynchronous pause-flush-seek-preroll call sequence
@@ -337,8 +339,6 @@ class MEDIA_EXPORT Pipeline : public DemuxerHost {
   // The following data members are only accessed by tasks posted to
   // |task_runner_|.
 
-  bool is_initialized_;
-
   // Member that tracks the current state.
   State state_;
 
@@ -363,6 +363,7 @@ class MEDIA_EXPORT Pipeline : public DemuxerHost {
   PaintCB paint_cb_;
   base::Closure duration_change_cb_;
   AddTextTrackCB add_text_track_cb_;
+  base::Closure waiting_for_decryption_key_cb_;
 
   // Holds the initialized demuxer. Used for seeking. Owned by client.
   Demuxer* demuxer_;

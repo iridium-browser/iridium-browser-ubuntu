@@ -13,6 +13,7 @@
 #include "chrome/browser/ui/views/location_bar/location_bar_view.h"
 #include "extensions/browser/extension_registry.h"
 #include "ui/accessibility/ax_view_state.h"
+#include "ui/compositor/paint_context.h"
 #include "ui/events/event.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/image/image.h"
@@ -107,11 +108,11 @@ void PageActionImageView::UpdateVisibility(content::WebContents* contents) {
   SetVisible(true);
 }
 
-void PageActionImageView::PaintChildren(gfx::Canvas* canvas,
-                                        const views::CullSet& cull_set) {
-  View::PaintChildren(canvas, cull_set);
+void PageActionImageView::PaintChildren(const ui::PaintContext& context) {
+  View::PaintChildren(context);
   int tab_id = SessionTabHelper::IdForTab(GetCurrentWebContents());
   if (tab_id >= 0) {
+    gfx::Canvas* canvas = context.canvas();
     view_controller_->extension_action()->PaintBadge(
         canvas, GetLocalBounds(), tab_id);
   }
@@ -152,9 +153,4 @@ views::MenuButton* PageActionImageView::GetContextMenuButton() {
 
 content::WebContents* PageActionImageView::GetCurrentWebContents() const {
   return owner_->GetWebContents();
-}
-
-void PageActionImageView::HideActivePopup() {
-  // The only popup that will be active is this popup.
-  view_controller_->HidePopup();
 }

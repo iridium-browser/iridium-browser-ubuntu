@@ -1,3 +1,7 @@
+# Copyright 2015 Google Inc.
+#
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
 #
 {
   'conditions' : [
@@ -18,6 +22,9 @@
             'xml.gyp:xml',
           ],
           'sources': [
+            '../bench/CodecBench.cpp',
+            '../bench/DecodingBench.cpp',
+            '../bench/DecodingSubsetBench.cpp',
             '../bench/GMBench.cpp',
             '../bench/RecordingBench.cpp',
             '../bench/SKPBench.cpp',

@@ -15,7 +15,7 @@
 #include "ui/app_list/views/app_list_main_view.h"
 #include "ui/app_list/views/apps_container_view.h"
 #include "ui/app_list/views/apps_grid_view.h"
-#include "ui/app_list/views/contents_animator.h"
+#include "ui/app_list/views/custom_launcher_page_view.h"
 #include "ui/app_list/views/search_box_view.h"
 #include "ui/app_list/views/search_result_list_view.h"
 #include "ui/app_list/views/search_result_page_view.h"
@@ -24,19 +24,16 @@
 #include "ui/events/event.h"
 #include "ui/resources/grit/ui_resources.h"
 #include "ui/views/view_model.h"
-#include "ui/views/view_model_utils.h"
 #include "ui/views/widget/widget.h"
 
 namespace app_list {
 
 ContentsView::ContentsView(AppListMainView* app_list_main_view)
     : apps_container_view_(nullptr),
-      search_results_list_view_(nullptr),
       search_results_page_view_(nullptr),
       start_page_view_(nullptr),
       custom_page_view_(nullptr),
       app_list_main_view_(app_list_main_view),
-      view_model_(new views::ViewModel),
       page_before_search_(0) {
   pagination_model_.SetTransitionDurations(kPageTransitionDurationInMs,
                                            kOverscrollPageTransitionDurationMs);
@@ -62,37 +59,34 @@ void ContentsView::Init(AppListModel* model) {
       // Only the first launcher page is considered to represent
       // STATE_CUSTOM_LAUNCHER_PAGE.
       if (it == custom_page_views.begin()) {
-        custom_page_view_ = *it;
+        custom_page_view_ = new CustomLauncherPageView(*it);
 
-        AddLauncherPage(*it, AppListModel::STATE_CUSTOM_LAUNCHER_PAGE);
+        AddLauncherPage(custom_page_view_,
+                        AppListModel::STATE_CUSTOM_LAUNCHER_PAGE);
       } else {
-        AddLauncherPage(*it);
+        AddLauncherPage(new CustomLauncherPageView(*it));
       }
     }
 
     // Start page.
     start_page_view_ = new StartPageView(app_list_main_view_, view_delegate);
     AddLauncherPage(start_page_view_, AppListModel::STATE_START);
+  }
 
-    // Search results UI.
-    search_results_page_view_ = new SearchResultPageView();
+  // Search results UI.
+  search_results_page_view_ = new SearchResultPageView();
 
-    AppListModel::SearchResults* results = view_delegate->GetModel()->results();
-    search_results_page_view_->AddSearchResultContainerView(
-        results, new SearchResultListView(app_list_main_view_, view_delegate));
+  AppListModel::SearchResults* results = view_delegate->GetModel()->results();
+  search_results_page_view_->AddSearchResultContainerView(
+      results, new SearchResultListView(app_list_main_view_, view_delegate));
+
+  if (app_list::switches::IsExperimentalAppListEnabled()) {
     search_results_page_view_->AddSearchResultContainerView(
         results,
         new SearchResultTileItemListView(GetSearchBoxView()->search_box()));
-
-    AddLauncherPage(search_results_page_view_,
-                    AppListModel::STATE_SEARCH_RESULTS);
-  } else {
-    search_results_list_view_ =
-        new SearchResultListView(app_list_main_view_, view_delegate);
-    AddLauncherPage(search_results_list_view_,
-                    AppListModel::STATE_SEARCH_RESULTS);
-    search_results_list_view_->SetResults(model->results());
   }
+  AddLauncherPage(search_results_page_view_,
+                  AppListModel::STATE_SEARCH_RESULTS);
 
   apps_container_view_ = new AppsContainerView(app_list_main_view_, model);
 
@@ -106,18 +100,15 @@ void ContentsView::Init(AppListModel* model) {
   page_before_search_ = initial_page_index;
   // Must only call SetTotalPages once all the launcher pages have been added
   // (as it will trigger a SelectedPageChanged call).
-  pagination_model_.SetTotalPages(view_model_->view_size());
+  pagination_model_.SetTotalPages(app_list_pages_.size());
+
+  // Page 0 is selected by SetTotalPages and needs to be 'hidden' when selecting
+  // the initial page.
+  app_list_pages_[GetActivePageIndex()]->OnWillBeHidden();
+
   pagination_model_.SelectPage(initial_page_index, false);
 
   ActivePageChanged();
-
-  // Populate the contents animators.
-  AddAnimator(AppListModel::STATE_START, AppListModel::STATE_APPS,
-              scoped_ptr<ContentsAnimator>(new StartToAppsAnimator(this)));
-  AddAnimator(AppListModel::STATE_START,
-              AppListModel::STATE_CUSTOM_LAUNCHER_PAGE,
-              scoped_ptr<ContentsAnimator>(new StartToCustomAnimator(this)));
-  default_animator_.reset(new DefaultAnimator(this));
 }
 
 void ContentsView::CancelDrag() {
@@ -136,15 +127,15 @@ void ContentsView::SetDragAndDropHostOfCurrentAppList(
   apps_container_view_->SetDragAndDropHostOfCurrentAppList(drag_and_drop_host);
 }
 
-void ContentsView::SetActivePage(int page_index) {
-  SetActivePage(page_index, true);
+void ContentsView::SetActiveState(AppListModel::State state) {
+  SetActiveState(state, true);
 }
 
-void ContentsView::SetActivePage(int page_index, bool animate) {
-  if (GetActivePageIndex() == page_index)
+void ContentsView::SetActiveState(AppListModel::State state, bool animate) {
+  if (IsStateActive(state))
     return;
 
-  SetActivePageInternal(page_index, false, animate);
+  SetActiveStateInternal(GetPageIndexForState(state), false, animate);
 }
 
 int ContentsView::GetActivePageIndex() const {
@@ -185,11 +176,17 @@ int ContentsView::NumLauncherPages() const {
   return pagination_model_.total_pages();
 }
 
-void ContentsView::SetActivePageInternal(int page_index,
-                                         bool show_search_results,
-                                         bool animate) {
+void ContentsView::SetActiveStateInternal(int page_index,
+                                          bool show_search_results,
+                                          bool animate) {
+  if (!GetPageView(page_index)->visible())
+    return;
+
   if (!show_search_results)
     page_before_search_ = page_index;
+
+  app_list_pages_[GetActivePageIndex()]->OnWillBeHidden();
+
   // Start animating to the new page.
   pagination_model_.SelectPage(page_index, animate);
   ActivePageChanged();
@@ -201,13 +198,12 @@ void ContentsView::SetActivePageInternal(int page_index,
 void ContentsView::ActivePageChanged() {
   AppListModel::State state = AppListModel::INVALID_STATE;
 
-  // TODO(calamity): This does not report search results being shown in the
-  // experimental app list as a boolean is currently used to indicate whether
-  // search results are showing. See http://crbug.com/427787/.
   std::map<int, AppListModel::State>::const_iterator it =
-      view_to_state_.find(pagination_model_.SelectedTargetPage());
+      view_to_state_.find(GetActivePageIndex());
   if (it != view_to_state_.end())
     state = it->second;
+
+  app_list_pages_[GetActivePageIndex()]->OnWillBeShown();
 
   app_list_main_view_->model()->SetState(state);
 
@@ -224,26 +220,14 @@ void ContentsView::ActivePageChanged() {
     app_list_main_view_->model()->ClearCustomLauncherPageSubpages();
   }
 
-  // TODO(xiyuan): Highlight default match instead of the first.
-  if (state == AppListModel::STATE_SEARCH_RESULTS &&
-      search_results_list_view_ && search_results_list_view_->visible()) {
-    search_results_list_view_->OnContainerSelected(false);
-  }
-
-  if (search_results_list_view_)
-    search_results_list_view_->UpdateAutoLaunchState();
-
-  if (custom_page_view_) {
-    custom_page_view_->SetFocusable(state ==
-                                    AppListModel::STATE_CUSTOM_LAUNCHER_PAGE);
-  }
+  app_list_main_view_->search_box_view()->ResetTabFocus(false);
 }
 
 void ContentsView::ShowSearchResults(bool show) {
   int search_page = GetPageIndexForState(AppListModel::STATE_SEARCH_RESULTS);
   DCHECK_GE(search_page, 0);
 
-  SetActivePageInternal(show ? search_page : page_before_search_, show, true);
+  SetActiveStateInternal(show ? search_page : page_before_search_, show, true);
 }
 
 bool ContentsView::IsShowingSearchResults() const {
@@ -281,48 +265,65 @@ void ContentsView::UpdatePageBounds() {
 
   NotifyCustomLauncherPageAnimationChanged(progress, current_page, target_page);
 
-  bool reverse;
-  ContentsAnimator* animator =
-      GetAnimatorForTransition(current_page, target_page, &reverse);
+  AppListModel::State current_state = GetStateForPageIndex(current_page);
+  AppListModel::State target_state = GetStateForPageIndex(target_page);
 
-  // Animate linearly (the PaginationModel handles easing).
-  if (reverse)
-    animator->Update(1 - progress, target_page, current_page);
-  else
-    animator->Update(progress, current_page, target_page);
+  // Update app list pages.
+  for (AppListPage* page : app_list_pages_) {
+    gfx::Rect to_rect = page->GetPageBoundsForState(target_state);
+    gfx::Rect from_rect = page->GetPageBoundsForState(current_state);
+    if (from_rect == to_rect)
+      continue;
+
+    // Animate linearly (the PaginationModel handles easing).
+    gfx::Rect bounds(
+        gfx::Tween::RectValueBetween(progress, from_rect, to_rect));
+
+    page->SetBoundsRect(bounds);
+    page->OnAnimationUpdated(progress, current_state, target_state);
+  }
+
+  // Update the search box.
+  UpdateSearchBox(progress, current_state, target_state);
+}
+
+void ContentsView::UpdateSearchBox(double progress,
+                                   AppListModel::State current_state,
+                                   AppListModel::State target_state) {
+  AppListPage* from_page = GetPageView(GetPageIndexForState(current_state));
+  AppListPage* to_page = GetPageView(GetPageIndexForState(target_state));
+
+  SearchBoxView* search_box = GetSearchBoxView();
+
+  gfx::Rect search_box_from(from_page->GetSearchBoxBounds());
+  gfx::Rect search_box_to(to_page->GetSearchBoxBounds());
+  gfx::Rect search_box_rect =
+      gfx::Tween::RectValueBetween(progress, search_box_from, search_box_to);
+
+  int original_z_height = from_page->GetSearchBoxZHeight();
+  int target_z_height = to_page->GetSearchBoxZHeight();
+
+  if (original_z_height != target_z_height) {
+    gfx::ShadowValue original_shadow = GetShadowForZHeight(original_z_height);
+    gfx::ShadowValue target_shadow = GetShadowForZHeight(target_z_height);
+
+    gfx::Vector2d offset(gfx::Tween::LinearIntValueBetween(
+                             progress, original_shadow.x(), target_shadow.x()),
+                         gfx::Tween::LinearIntValueBetween(
+                             progress, original_shadow.y(), target_shadow.y()));
+    search_box->SetShadow(gfx::ShadowValue(
+        offset, gfx::Tween::LinearIntValueBetween(
+                    progress, original_shadow.blur(), target_shadow.blur()),
+        gfx::Tween::ColorValueBetween(progress, original_shadow.color(),
+                                      target_shadow.color())));
+  }
+  search_box->GetWidget()->SetBounds(
+      search_box->GetViewBoundsForSearchBoxContentsBounds(
+          ConvertRectToWidget(search_box_rect)));
 }
 
 PaginationModel* ContentsView::GetAppsPaginationModel() {
   return apps_container_view_->apps_grid_view()->pagination_model();
-}
-
-void ContentsView::AddAnimator(AppListModel::State from_state,
-                               AppListModel::State to_state,
-                               scoped_ptr<ContentsAnimator> animator) {
-  int from_page = GetPageIndexForState(from_state);
-  int to_page = GetPageIndexForState(to_state);
-  contents_animators_.insert(
-      std::make_pair(std::make_pair(from_page, to_page),
-                     linked_ptr<ContentsAnimator>(animator.release())));
-}
-
-ContentsAnimator* ContentsView::GetAnimatorForTransition(int from_page,
-                                                         int to_page,
-                                                         bool* reverse) const {
-  auto it = contents_animators_.find(std::make_pair(from_page, to_page));
-  if (it != contents_animators_.end()) {
-    *reverse = false;
-    return it->second.get();
-  }
-
-  it = contents_animators_.find(std::make_pair(to_page, from_page));
-  if (it != contents_animators_.end()) {
-    *reverse = true;
-    return it->second.get();
-  }
-
-  *reverse = false;
-  return default_animator_.get();
 }
 
 void ContentsView::ShowFolderContent(AppListFolderItem* item) {
@@ -333,27 +334,23 @@ void ContentsView::Prerender() {
   apps_container_view_->apps_grid_view()->Prerender();
 }
 
-views::View* ContentsView::GetPageView(int index) const {
-  return view_model_->view_at(index);
+AppListPage* ContentsView::GetPageView(int index) const {
+  DCHECK_GT(static_cast<int>(app_list_pages_.size()), index);
+  return app_list_pages_[index];
 }
 
 SearchBoxView* ContentsView::GetSearchBoxView() const {
   return app_list_main_view_->search_box_view();
 }
 
-void ContentsView::AddBlankPageForTesting() {
-  AddLauncherPage(new views::View);
-  pagination_model_.SetTotalPages(view_model_->view_size());
-}
-
-int ContentsView::AddLauncherPage(views::View* view) {
-  int page_index = view_model_->view_size();
+int ContentsView::AddLauncherPage(AppListPage* view) {
+  view->set_contents_view(this);
   AddChildView(view);
-  view_model_->Add(view, page_index);
-  return page_index;
+  app_list_pages_.push_back(view);
+  return app_list_pages_.size() - 1;
 }
 
-int ContentsView::AddLauncherPage(views::View* view,
+int ContentsView::AddLauncherPage(AppListPage* view,
                                   AppListModel::State state) {
   int page_index = AddLauncherPage(view);
   bool success =
@@ -370,46 +367,22 @@ gfx::Rect ContentsView::GetDefaultSearchBoxBounds() const {
   gfx::Rect search_box_bounds(0, 0, GetDefaultContentsSize().width(),
                               GetSearchBoxView()->GetPreferredSize().height());
   if (switches::IsExperimentalAppListEnabled()) {
-    search_box_bounds.set_y(kExperimentalWindowPadding);
-    search_box_bounds.Inset(kExperimentalWindowPadding, 0);
+    search_box_bounds.set_y(kExperimentalSearchBoxPadding);
+    search_box_bounds.Inset(kExperimentalSearchBoxPadding, 0);
   }
   return search_box_bounds;
 }
 
 gfx::Rect ContentsView::GetSearchBoxBoundsForState(
     AppListModel::State state) const {
-  // On the start page, the search box is in a different location.
-  if (state == AppListModel::STATE_START) {
-    DCHECK(start_page_view_);
-    // Convert to ContentsView space, assuming that the StartPageView is in the
-    // ContentsView's default bounds.
-    return start_page_view_->GetSearchBoxBounds() +
-           GetDefaultContentsBounds().OffsetFromOrigin();
-  }
-
-  return GetDefaultSearchBoxBounds();
-}
-
-gfx::Rect ContentsView::GetSearchBoxBoundsForPageIndex(int index) const {
-  return GetSearchBoxBoundsForState(GetStateForPageIndex(index));
+  AppListPage* page = GetPageView(GetPageIndexForState(state));
+  return page->GetSearchBoxBounds();
 }
 
 gfx::Rect ContentsView::GetDefaultContentsBounds() const {
   gfx::Rect bounds(gfx::Point(0, GetDefaultSearchBoxBounds().bottom()),
                    GetDefaultContentsSize());
   return bounds;
-}
-
-gfx::Rect ContentsView::GetCustomPageCollapsedBounds() const {
-  gfx::Rect bounds(GetContentsBounds());
-  int page_height = bounds.height();
-  bounds.set_y(page_height - kCustomPageCollapsedHeight);
-  return bounds;
-}
-
-bool ContentsView::ShouldShowCustomPageClickzone() const {
-  return custom_page_view_ && IsStateActive(AppListModel::STATE_START) &&
-         app_list_main_view_->model()->custom_launcher_page_enabled();
 }
 
 bool ContentsView::Back() {
@@ -422,19 +395,19 @@ bool ContentsView::Back() {
       if (app_list_main_view_->model()->PopCustomLauncherPageSubpage())
         app_list_main_view_->view_delegate()->CustomLauncherPagePopSubpage();
       else
-        SetActivePage(GetPageIndexForState(AppListModel::STATE_START));
+        SetActiveState(AppListModel::STATE_START);
       break;
     case AppListModel::STATE_APPS:
       if (apps_container_view_->IsInFolderView())
         apps_container_view_->app_list_folder_view()->CloseFolderPage();
       else
-        SetActivePage(GetPageIndexForState(AppListModel::STATE_START));
+        SetActiveState(AppListModel::STATE_START);
       break;
     case AppListModel::STATE_SEARCH_RESULTS:
       GetSearchBoxView()->ClearSearch();
       ShowSearchResults(false);
       break;
-    case AppListModel::INVALID_STATE:
+    case AppListModel::INVALID_STATE:  // Falls through.
       NOTREACHED();
       break;
   }
@@ -442,15 +415,7 @@ bool ContentsView::Back() {
 }
 
 gfx::Size ContentsView::GetDefaultContentsSize() const {
-  const gfx::Size container_size =
-      apps_container_view_->apps_grid_view()->GetPreferredSize();
-  const gfx::Size results_size =
-      search_results_list_view_ ? search_results_list_view_->GetPreferredSize()
-                                : gfx::Size();
-
-  int width = std::max(container_size.width(), results_size.width());
-  int height = std::max(container_size.height(), results_size.height());
-  return gfx::Size(width, height);
+  return apps_container_view_->apps_grid_view()->GetPreferredSize();
 }
 
 gfx::Size ContentsView::GetPreferredSize() const {
@@ -464,84 +429,57 @@ gfx::Size ContentsView::GetPreferredSize() const {
 }
 
 void ContentsView::Layout() {
-  // The search box is contained in a widget so set the bounds of the widget
-  // rather than the SearchBoxView. In athena, the search box widget will be the
-  // same as the app list widget so don't move it.
-  views::Widget* search_box_widget = GetSearchBoxView()->GetWidget();
-  if (search_box_widget && search_box_widget != GetWidget()) {
-    search_box_widget->SetBounds(
-        ConvertRectToWidget(GetSearchBoxBoundsForState(GetActiveState())));
-  }
-
   // Immediately finish all current animations.
   pagination_model_.FinishAnimation();
 
-  // Move the current view onto the screen, and all other views off screen to
-  // the left. (Since we are not animating, we don't need to be careful about
-  // which side we place the off-screen views onto.)
-  gfx::Rect rect(GetDefaultContentsBounds());
-  // Custom pages are aligned to the top of the window, not under the search
-  // box.
-  double progress = 0;
-  if (IsStateActive(AppListModel::STATE_CUSTOM_LAUNCHER_PAGE)) {
-    rect = GetContentsBounds();
-    progress = 1;
-  }
+  double progress =
+      IsStateActive(AppListModel::STATE_CUSTOM_LAUNCHER_PAGE) ? 1 : 0;
 
   // Notify the custom launcher page that the active page has changed.
   app_list_main_view_->view_delegate()->CustomLauncherPageAnimationChanged(
       progress);
 
-  if (rect.IsEmpty())
-    return;
-  // TODO(mgiuca): Temporary work-around for http://crbug.com/441962 and
-  // http://crbug.com/446978. This will first be called while ContentsView is
-  // 0x0, which means that the child views will be positioned incorrectly in RTL
-  // mode (the position is based on the parent's size). When the parent is later
-  // resized, the children are not repositioned due to http://crbug.com/446407.
-  // Therefore, we must not position the children until the parent is the
-  // correct size.
-  // NOTE: There is a similar hack in AppsGridView::CalculateIdealBounds; both
-  // should be removed once http://crbug.com/446407 is resolved.
   if (GetContentsBounds().IsEmpty())
     return;
 
-  gfx::Rect offscreen_target(rect);
-  offscreen_target.set_x(-rect.width());
-
-  int current_page = GetActivePageIndex();
-
-  for (int i = 0; i < view_model_->view_size(); ++i) {
-    view_model_->view_at(i)
-        ->SetBoundsRect(i == current_page ? rect : offscreen_target);
+  for (AppListPage* page : app_list_pages_) {
+    page->SetBoundsRect(page->GetPageBoundsForState(GetActiveState()));
   }
 
-  // Custom locations of pages in certain states.
-  // Within the start page, the custom page is given its collapsed bounds.
-  int start_page_index = GetPageIndexForState(AppListModel::STATE_START);
-  if (current_page == start_page_index) {
-    if (custom_page_view_)
-      custom_page_view_->SetBoundsRect(GetCustomPageCollapsedBounds());
+  // The search box is contained in a widget so set the bounds of the widget
+  // rather than the SearchBoxView. In athena, the search box widget will be the
+  // same as the app list widget so don't move it.
+  views::Widget* search_box_widget = GetSearchBoxView()->GetWidget();
+  if (search_box_widget && search_box_widget != GetWidget()) {
+    gfx::Rect search_box_bounds = GetSearchBoxBoundsForState(GetActiveState());
+    search_box_widget->SetBounds(ConvertRectToWidget(
+        GetSearchBoxView()->GetViewBoundsForSearchBoxContentsBounds(
+            search_box_bounds)));
   }
 }
 
 bool ContentsView::OnKeyPressed(const ui::KeyEvent& event) {
-  return view_model_->view_at(GetActivePageIndex())->OnKeyPressed(event);
+  bool handled = app_list_pages_[GetActivePageIndex()]->OnKeyPressed(event);
+
+  if (!handled) {
+    if (event.key_code() == ui::VKEY_TAB && event.IsShiftDown()) {
+      GetSearchBoxView()->MoveTabFocus(true);
+      handled = true;
+    }
+  }
+
+  return handled;
 }
 
 void ContentsView::TotalPagesChanged() {
 }
 
 void ContentsView::SelectedPageChanged(int old_selected, int new_selected) {
-  // TODO(mgiuca): This should be generalized so we call a virtual OnShow and
-  // OnHide method for each page.
-  if (!start_page_view_)
-    return;
+  if (old_selected >= 0)
+    app_list_pages_[old_selected]->OnHidden();
 
-  if (ShouldShowCustomPageClickzone())
-    start_page_view_->OnShow();
-  else
-    start_page_view_->OnHide();
+  if (new_selected >= 0)
+    app_list_pages_[new_selected]->OnShown();
 }
 
 void ContentsView::TransitionStarted() {

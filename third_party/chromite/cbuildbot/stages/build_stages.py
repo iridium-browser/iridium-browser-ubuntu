@@ -92,14 +92,12 @@ class CleanUpStage(generic_stages.BuilderStage):
     debug = (self._run.options.remote_trybot or
              (not self._run.options.buildbot) or
              self._run.options.debug)
-    _, db = self._run.GetCIDBHandle()
+    build_id, db = self._run.GetCIDBHandle()
     if db:
-      statuses = db.GetLastBuildStatuses(self._run.config.name, 2)
-      # The first entry in the history corresponds to the current build.
-      # Skip it.
-      statuses = statuses[1:]
-      for status_dict in statuses:
-        old_version = status_dict['full_version']
+      builds = db.GetBuildHistory(self._run.config.name, 2,
+                                  ignore_build_id=build_id)
+      for build in builds:
+        old_version = build['full_version']
         if old_version is None:
           continue
         for suite_config in self._run.config.hw_tests:
@@ -229,7 +227,7 @@ class SetupBoardStage(generic_stages.BoardSpecificBuilderStage, InitSDKStage):
     # Only update the board if we need to do so.
     chroot_path = os.path.join(self._build_root, constants.DEFAULT_CHROOT_DIR)
     board_path = os.path.join(chroot_path, 'build', self._current_board)
-    if not os.path.isdir(board_path):
+    if not os.path.isdir(board_path) or self._run.config.board_replace:
       usepkg = self._run.config.usepkg_build_packages
       commands.SetupBoard(
           self._build_root, board=self._current_board, usepkg=usepkg,
@@ -286,11 +284,13 @@ class BuildPackagesStage(generic_stages.BoardSpecificBuilderStage,
     packages += ['virtual/target-os-dev']
     # Build test packages by default.
     packages += ['virtual/target-os-test']
-    # Build factory packages by default.
-    packages += ['chromeos-base/chromeos-installshim',
-                 'chromeos-base/chromeos-factory',
-                 'chromeos-base/chromeos-hwid',
-                 'chromeos-base/autotest-factory-install']
+    # Build factory packages if requested by config.
+    if self._run.config.factory:
+      packages += ['chromeos-base/chromeos-installshim',
+                   'chromeos-base/chromeos-factory',
+                   'chromeos-base/chromeos-hwid',
+                   'chromeos-base/autotest-factory-install']
+
     if self._run.ShouldBuildAutotest():
       packages += ['chromeos-base/autotest-all']
 

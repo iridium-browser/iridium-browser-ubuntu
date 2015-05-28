@@ -1,9 +1,11 @@
 <?xml version="1.0" ?><!DOCTYPE translationbundle><translationbundle lang="en-GB">
+<translation id="2774256287122201187">You may continue. If you continue to the page, this warning will not appear again for five minutes.</translation>
 <translation id="7485870689360869515">No data found.</translation>
 <translation id="3884278016824448484">Conflicting device identifier</translation>
 <translation id="6779575937362063477">This type of card is not supported by Google Wallet. Please select a different card.</translation>
 <translation id="5172758083709347301">Machine</translation>
 <translation id="7180611975245234373">Refresh</translation>
+<translation id="8208216423136871611">Don't save</translation>
 <translation id="777702478322588152">Prefecture</translation>
 <translation id="7600965453749440009">Never translate <ph name="LANGUAGE"/></translation>
 <translation id="2262243747453050782">HTTP error</translation>
@@ -11,6 +13,7 @@
 <translation id="7298195798382681320">Recommended</translation>
 <translation id="4058922952496707368">Key &quot;<ph name="SUBKEY"/>&quot;: <ph name="ERROR"/></translation>
 <translation id="6980028882292583085">JavaScript Alert</translation>
+<translation id="4081383687659939437">Save info</translation>
 <translation id="5299298092464848405">Error parsing policy</translation>
 <translation id="6628463337424475685"><ph name="ENGINE"/> Search</translation>
 <translation id="2498091847651709837">Scan new card</translation>
@@ -37,6 +40,7 @@
 <translation id="2704283930420550640">Value doesn't match format.</translation>
 <translation id="4850886885716139402">View</translation>
 <translation id="8091372947890762290">Activation is pending on the server</translation>
+<translation id="4607653538520819196">This page cannot be proxied by Data Saver.</translation>
 <translation id="719464814642662924">Visa</translation>
 <translation id="6839929833149231406">Area</translation>
 <translation id="1871208020102129563">Proxy is set to use fixed proxy servers, not a .pac script URL.</translation>
@@ -48,6 +52,7 @@
 <translation id="7441627299479586546">Wrong policy subject</translation>
 <translation id="3885155851504623709">Parish</translation>
 <translation id="6973656660372572881">Both fixed proxy servers and a .pac script URL are specified.</translation>
+<translation id="1426410128494586442">Yes</translation>
 <translation id="4506176782989081258">Validation error: <ph name="VALIDATION_ERROR"/></translation>
 <translation id="7108649287766967076">The translation to <ph name="TARGET_LANGUAGE"/> failed.</translation>
 <translation id="4103249731201008433">Device serial number is invalid</translation>
@@ -66,11 +71,15 @@
 <translation id="1132774398110320017">Chrome Auto-fill settings...</translation>
 <translation id="6458467102616083041">Ignored because default search is disabled by policy.</translation>
 <translation id="1227224963052638717">Unknown policy.</translation>
+<translation id="4250680216510889253">No</translation>
 <translation id="9207861905230894330">Failed to add article.</translation>
+<translation id="5872918882028971132">Parent Suggestions</translation>
 <translation id="337363190475750230">Deprovisioned</translation>
 <translation id="2367567093518048410">Level</translation>
 <translation id="7977590112176369853">&lt;enter query&gt;</translation>
+<translation id="552553974213252141">Was the text extracted correctly?</translation>
 <translation id="7610193165460212391">Value is out of range <ph name="VALUE"/>.</translation>
+<translation id="3739623965217189342">Link that you copied</translation>
 <translation id="8311778656528046050">Are you sure you want to reload this page?</translation>
 <translation id="370665806235115550">Loading...</translation>
 <translation id="2096368010154057602">Department</translation>
@@ -78,7 +87,6 @@
 <translation id="3024663005179499861">Wrong policy type</translation>
 <translation id="2030481566774242610">Did you mean <ph name="LINK"/>?</translation>
 <translation id="3450660100078934250">MasterCard</translation>
-<translation id="2107287771748948380"><ph name="OBFUSCATED_CC_NUMBER"/>, Exp: <ph name="CC_EXPIRATION_DATE"/></translation>
 <translation id="4148925816941278100">American Express</translation>
 <translation id="225207911366869382">This value is deprecated for this policy.</translation>
 <translation id="3145945101586104090">Failed to decode response</translation>
@@ -107,6 +115,7 @@
 <translation id="5455374756549232013">Bad policy timestamp</translation>
 <translation id="2025623846716345241">Confirm Reload</translation>
 <translation id="1962204205936693436"><ph name="DOMAIN"/> Bookmarks</translation>
+<translation id="4300246636397505754">Parent suggestions</translation>
 <translation id="111844081046043029">Are you sure that you want to leave this page?</translation>
 <translation id="1973335181906896915">Serialisation error</translation>
 <translation id="5989320800837274978">Neither fixed proxy servers nor a .pac script URL are specified.</translation>
@@ -126,6 +135,7 @@
 <translation id="3228969707346345236">The translation failed because the page is already in <ph name="LANGUAGE"/>.</translation>
 <translation id="7521387064766892559">JavaScript</translation>
 <translation id="8034522405403831421">This page is in <ph name="SOURCE_LANGUAGE"/>. Translate it to <ph name="TARGET_LANGUAGE"/>?</translation>
+<translation id="1734864079702812349">Amex</translation>
 <translation id="8891727572606052622">Invalid proxy mode.</translation>
 <translation id="6008256403891681546">JCB</translation>
 <translation id="7752995774971033316">Unmanaged</translation>
@@ -142,6 +152,7 @@
 <translation id="5629630648637658800">Failed to load policy settings</translation>
 <translation id="2354001756790975382">Other bookmarks</translation>
 <translation id="3650584904733503804">Validation successful</translation>
+<translation id="2359808026110333948">Continue</translation>
 <translation id="6915804003454593391">User:</translation>
 <translation id="3377188786107721145">Policy parse error</translation>
 <translation id="2270192940992995399">Failed to find article.</translation>
@@ -174,6 +185,7 @@
 <translation id="2479410451996844060">Invalid search URL.</translation>
 <translation id="5509780412636533143">Managed bookmarks</translation>
 <translation id="8866481888320382733">Error parsing policy settings</translation>
+<translation id="4120075327926916474">Do you want Chrome to save this credit card information for completing web forms?</translation>
 <translation id="6644283850729428850">This policy has been deprecated.</translation>
 <translation id="1693754753824026215">The page at <ph name="SITE"/> says:</translation>
 <translation id="4269787794583293679">(No username)</translation>
@@ -197,12 +209,15 @@
 <translation id="8713130696108419660">Bad intial signature</translation>
 <translation id="20817612488360358">System proxy settings are set to be used but an explicit proxy configuration is also specified.</translation>
 <translation id="2639739919103226564">Status:</translation>
+<translation id="4968547170521245791">Cannot Proxy</translation>
+<translation id="385051799172605136">Back</translation>
 <translation id="5095208057601539847">Province</translation>
 <translation id="2581221116934462656">Would you like <ph name="PRODUCT_NAME"/> to offer to translate <ph name="LANGUAGE_NAME"/> pages from this site next time?</translation>
 <translation id="3934680773876859118">Failed to load PDF document</translation>
 <translation id="6965382102122355670">OK</translation>
 <translation id="2721148159707890343">Request succeeded</translation>
 <translation id="2455981314101692989">This web page has disabled automatic filling for this form.</translation>
+<translation id="6597614308054261376">You are trying to reach <ph name="BEGIN_BOLD"/><ph name="SITE"/><ph name="END_BOLD"/>. This page cannot be proxied by Data Saver at this time.</translation>
 <translation id="8308427013383895095">The translation failed because of a problem with the network connection.</translation>
 <translation id="5720705177508910913">Current user</translation>
 <translation id="3380864720620200369">Client ID:</translation>

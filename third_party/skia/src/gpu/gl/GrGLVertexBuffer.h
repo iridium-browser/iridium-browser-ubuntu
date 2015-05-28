@@ -31,13 +31,13 @@ public:
     }
 
 protected:
-    virtual void onAbandon() SK_OVERRIDE;
-    virtual void onRelease() SK_OVERRIDE;
+    void onAbandon() override;
+    void onRelease() override;
 
 private:
-    virtual void* onMap() SK_OVERRIDE;
-    virtual void onUnmap() SK_OVERRIDE;
-    virtual bool onUpdateData(const void* src, size_t srcSizeInBytes) SK_OVERRIDE;
+    void* onMap() override;
+    void onUnmap() override;
+    bool onUpdateData(const void* src, size_t srcSizeInBytes) override;
 
     GrGLGpu* getGpuGL() const {
         SkASSERT(!this->wasDestroyed());

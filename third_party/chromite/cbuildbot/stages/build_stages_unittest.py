@@ -1,4 +1,3 @@
-#!/usr/bin/python
 # Copyright (c) 2012 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -9,9 +8,7 @@ from __future__ import print_function
 
 import contextlib
 import os
-import sys
 
-sys.path.insert(0, os.path.abspath('%s/../../..' % os.path.dirname(__file__)))
 from chromite.cbuildbot import cbuildbot_config as config
 from chromite.cbuildbot import commands
 from chromite.cbuildbot import constants
@@ -78,6 +75,7 @@ class InitSDKTest(generic_stages_unittest.RunCommandAbstractStageTest):
     self._PrepareFull(extra_cmd_args=['--nosdk'])
     # Do not force chroot replacement in build config.
     self._run._config.chroot_replace = False
+    self._run._config.separate_debug_symbols = False
     self._run.config.useflags = ['foo']
     self._Run(dir_exists=True)
     self.assertCommandContains([self.cros_sdk], expected=False)
@@ -115,11 +113,11 @@ class SetupBoardTest(generic_stages_unittest.RunCommandAbstractStageTest):
   def _RunBin(self, dir_exists):
     """Helper for testing a binary builder."""
     self._Run(dir_exists)
-    usepkg_toolchain = (self._run.config.usepkg_toolchain and not
-                        self._run.options.latest_toolchain)
+    update_nousepkg = (not self._run.config.usepkg_toolchain or
+                       self._run.options.latest_toolchain)
     self.assertCommandContains(['./update_chroot', '--nousepkg'],
-                               expected=not usepkg_toolchain)
-    run_setup_board = not dir_exists or self._run.options.latest_toolchain
+                               expected=update_nousepkg)
+    run_setup_board = not dir_exists or self._run.config.board_replace
     self.assertCommandContains(['./setup_board'], expected=run_setup_board)
     cmd = ['./setup_board', '--skip_chroot_upgrade']
     self.assertCommandContains(cmd, expected=run_setup_board)
@@ -133,6 +131,12 @@ class SetupBoardTest(generic_stages_unittest.RunCommandAbstractStageTest):
     self._PrepareBin()
     self._RunBin(dir_exists=True)
 
+  def testBinBuildWithBoardReplace(self):
+    """Tests whether we don't create the board when it's there."""
+    self._PrepareBin()
+    self._run.config.board_replace = True
+    self._RunBin(dir_exists=True)
+
   def testBinBuildWithMissingBoard(self):
     """Tests whether we create the board when it's missing."""
     self._PrepareBin()
@@ -143,6 +147,12 @@ class SetupBoardTest(generic_stages_unittest.RunCommandAbstractStageTest):
     self._PrepareBin()
     self._run.options.latest_toolchain = True
     self._RunBin(dir_exists=False)
+
+  def testBinBuildWithLatestToolchainAndDirExists(self):
+    """Tests whether we use --nousepkg for creating the board."""
+    self._PrepareBin()
+    self._run.options.latest_toolchain = True
+    self._RunBin(dir_exists=True)
 
   def testBinBuildWithNoToolchainPackages(self):
     """Tests whether we use --nousepkg for creating the board."""
@@ -324,7 +334,3 @@ class BuildImageStageTest(BuildPackagesStageTest):
     # TODO: This test is broken atm with tag=None.
     steps = [lambda tag=x: task(tag) for x in (release_tag,)]
     parallel.RunParallelSteps(steps)
-
-
-if __name__ == '__main__':
-  cros_test_lib.main()

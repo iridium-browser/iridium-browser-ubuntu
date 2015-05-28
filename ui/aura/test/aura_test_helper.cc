@@ -34,8 +34,7 @@ namespace test {
 
 AuraTestHelper::AuraTestHelper(base::MessageLoopForUI* message_loop)
     : setup_called_(false),
-      teardown_called_(false),
-      owns_host_(false) {
+      teardown_called_(false) {
   DCHECK(message_loop);
   message_loop_ = message_loop;
   // Disable animations during tests.
@@ -61,8 +60,7 @@ void AuraTestHelper::SetUp(ui::ContextFactory* context_factory) {
   Env::GetInstance()->set_context_factory(context_factory);
   // Unit tests generally don't want to query the system, rather use the state
   // from RootWindow.
-  EnvTestHelper(Env::GetInstance()).SetInputStateLookup(
-      scoped_ptr<InputStateLookup>());
+  EnvTestHelper(Env::GetInstance()).SetInputStateLookup(nullptr);
 
   ui::InitializeInputMethodForTesting();
 

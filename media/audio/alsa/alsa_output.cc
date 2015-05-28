@@ -37,10 +37,10 @@
 #include <algorithm>
 
 #include "base/bind.h"
-#include "base/debug/trace_event.h"
 #include "base/logging.h"
 #include "base/stl_util.h"
 #include "base/time/time.h"
+#include "base/trace_event/trace_event.h"
 #include "media/audio/alsa/alsa_util.h"
 #include "media/audio/alsa/alsa_wrapper.h"
 #include "media/audio/alsa/audio_manager_alsa.h"
@@ -57,6 +57,10 @@ static const int kPcmRecoverIsSilent = 1;
 #else
 static const int kPcmRecoverIsSilent = 0;
 #endif
+
+// The output channel layout if we set up downmixing for the kDefaultDevice
+// device.
+static const ChannelLayout kDefaultOutputChannelLayout = CHANNEL_LAYOUT_STEREO;
 
 // While the "default" device may support multi-channel audio, in Alsa, only
 // the device names surround40, surround41, surround50, etc, have a defined
@@ -368,11 +372,32 @@ void AlsaPcmOutputStream::BufferPacket(bool* source_exhausted) {
     // TODO(dalecurtis): Channel downmixing, upmixing, should be done in mixer;
     // volume adjust should use SSE optimized vector_fmul() prior to interleave.
     AudioBus* output_bus = audio_bus_.get();
+    ChannelLayout output_channel_layout = channel_layout_;
     if (channel_mixer_) {
       output_bus = mixed_audio_bus_.get();
       channel_mixer_->Transform(audio_bus_.get(), output_bus);
+      output_channel_layout = kDefaultOutputChannelLayout;
       // Adjust packet size for downmix.
       packet_size = packet_size / bytes_per_frame_ * bytes_per_output_frame_;
+    }
+
+    // Reorder channels for 5.0, 5.1, and 7.1 to match ALSA's channel order,
+    // which has front center at channel index 4 and LFE at channel index 5.
+    // See http://ffmpeg.org/pipermail/ffmpeg-cvslog/2011-June/038454.html.
+    switch (output_channel_layout) {
+      case media::CHANNEL_LAYOUT_5_0:
+      case media::CHANNEL_LAYOUT_5_0_BACK:
+        output_bus->SwapChannels(2, 3);
+        output_bus->SwapChannels(3, 4);
+        break;
+      case media::CHANNEL_LAYOUT_5_1:
+      case media::CHANNEL_LAYOUT_5_1_BACK:
+      case media::CHANNEL_LAYOUT_7_1:
+        output_bus->SwapChannels(2, 4);
+        output_bus->SwapChannels(3, 5);
+        break;
+      default:
+        break;
     }
 
     // Note: If this ever changes to output raw float the data must be clipped
@@ -677,8 +702,8 @@ snd_pcm_t* AlsaPcmOutputStream::AutoSelectDevice(unsigned int latency) {
   // downmixing.
   uint32 default_channels = channels_;
   if (default_channels > 2) {
-    channel_mixer_.reset(new ChannelMixer(
-        channel_layout_, CHANNEL_LAYOUT_STEREO));
+    channel_mixer_.reset(
+        new ChannelMixer(channel_layout_, kDefaultOutputChannelLayout));
     default_channels = 2;
     mixed_audio_bus_ = AudioBus::Create(
         default_channels, audio_bus_->frames());

@@ -1,4 +1,3 @@
-#!/usr/bin/python
 # Copyright 2014 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -12,20 +11,13 @@ database test instance.
 to the above test instance.
 """
 
-# pylint: disable= W0212
-
-# pylint: disable=bad-continuation
-
 from __future__ import print_function
 
 import datetime
 import glob
 import logging
 import os
-import sys
 import time
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(
-    os.path.abspath(__file__)))))
 
 from chromite.cbuildbot import constants
 from chromite.cbuildbot import metadata_lib
@@ -35,6 +27,10 @@ from chromite.lib import cros_build_lib
 from chromite.lib import cros_test_lib
 from chromite.lib import osutils
 from chromite.lib import parallel
+
+
+# pylint: disable=protected-access
+
 
 SERIES_0_TEST_DATA_PATH = os.path.join(
     constants.CHROMITE_DIR, 'cidb', 'test_data', 'series_0')
@@ -85,6 +81,7 @@ class CIDBIntegrationTest(cros_test_lib.TestCase):
 
     return db
 
+
 class CIDBMigrationsTest(CIDBIntegrationTest):
   """Test that all migrations apply correctly."""
 
@@ -92,14 +89,13 @@ class CIDBMigrationsTest(CIDBIntegrationTest):
     """Test that all migrations apply in bulk correctly."""
     self._PrepareFreshDatabase()
 
-
   def testIncrementalMigrations(self):
     """Test that all migrations apply incrementally correctly."""
     db = self._PrepareFreshDatabase(0)
     migrations = db._GetMigrationScripts()
     max_version = migrations[-1][0]
 
-    for i in range(1, max_version+1):
+    for i in range(1, max_version + 1):
       db.ApplySchemaMigrations(i)
 
   def testActions(self):
@@ -122,8 +118,8 @@ class CIDBMigrationsTest(CIDBIntegrationTest):
     db.InsertCLActions(build_id, [a1])
     db.InsertCLActions(build_id, [a2, a3])
 
-    action_count = db._GetEngine().execute('select count(*) from clActionTable'
-                                           ).fetchall()[0][0]
+    action_count = db._GetEngine().execute(
+        'select count(*) from clActionTable').fetchall()[0][0]
     self.assertEqual(action_count, 3)
 
     # Test that all known CL action types can be inserted
@@ -132,6 +128,7 @@ class CIDBMigrationsTest(CIDBIntegrationTest):
         clactions.CLAction.FromGerritPatchAndAction(fakepatch, action)
         for action in constants.CL_ACTIONS]
     db.InsertCLActions(build_id, all_actions_list)
+
 
 class CIDBAPITest(CIDBIntegrationTest):
   """Tests of the CIDB API."""
@@ -244,9 +241,9 @@ class DataSeries0Test(CIDBIntegrationTest):
     #|         511 | pass   |
     #|         481 | pass   |
     # From 1929 because we always go back one build first.
-    last_status = readonly_db.GetLastBuildStatuses('master-paladin', 1)
+    last_status = readonly_db.GetBuildHistory('master-paladin', 1)
     self.assertEqual(len(last_status), 1)
-    last_status = readonly_db.GetLastBuildStatuses('master-paladin', 5)
+    last_status = readonly_db.GetBuildHistory('master-paladin', 5)
     self.assertEqual(len(last_status), 5)
     # Make sure keys are sorted correctly.
     build_ids = []
@@ -323,9 +320,9 @@ class DataSeries0Test(CIDBIntegrationTest):
     min_start_time = db._GetEngine().execute(
         'select min(start_time) from buildTable').fetchall()[0][0]
     max_fin_time = db._GetEngine().execute(
-          'select max(finish_time) from buildTable').fetchall()[0][0]
+        'select max(finish_time) from buildTable').fetchall()[0][0]
     min_fin_time = db._GetEngine().execute(
-          'select min(finish_time) from buildTable').fetchall()[0][0]
+        'select min(finish_time) from buildTable').fetchall()[0][0]
     self.assertGreater(max_start_time, min_start_time)
     self.assertGreater(max_fin_time, min_fin_time)
 
@@ -334,7 +331,6 @@ class DataSeries0Test(CIDBIntegrationTest):
         'select count(*) from buildTable where finish_time != last_updated'
         ).fetchall()[0][0]
     self.assertEqual(mismatching_times, 0)
-
 
   def simulate_builds(self, db, metadatas):
     """Simulate a series of Commit Queue master and slave builds.
@@ -366,7 +362,7 @@ class DataSeries0Test(CIDBIntegrationTest):
 
       def simulate_slave(slave_metadata):
         build_id = _SimulateBuildStart(db, slave_metadata,
-                                        master_build_id)
+                                       master_build_id)
         _SimulateCQBuildFinish(db, slave_metadata, build_id)
         logging.debug('Simulated slave build %s on pid %s', build_id,
                       os.getpid())
@@ -392,7 +388,7 @@ class BuildStagesAndFailureTest(CIDBIntegrationTest):
 
   def runTest(self):
     """Test basic buildStageTable and failureTable functionality."""
-    self._PrepareFreshDatabase(32)
+    self._PrepareFreshDatabase()
 
     bot_db = cidb.CIDBConnection(TEST_DB_CRED_BOT)
 
@@ -422,10 +418,11 @@ class BuildStagesAndFailureTest(CIDBIntegrationTest):
     self.assertEqual(True, values['final'])
     self.assertEqual(constants.BUILDER_STATUS_PASSED, values['status'])
 
+    self.assertFalse(bot_db.HasBuildStageFailed(build_stage_id))
     for category in constants.EXCEPTION_CATEGORY_ALL_CATEGORIES:
       e = ValueError('The value was erroneous.')
-      bot_db.InsertFailure(build_stage_id, e, category)
-
+      bot_db.InsertFailure(build_stage_id, type(e).__name__, str(e), category)
+      self.assertTrue(bot_db.HasBuildStageFailed(build_stage_id))
 
 class BuildTableTest(CIDBIntegrationTest):
   """Test buildTable functionality not tested by the DataSeries tests."""
@@ -481,7 +478,6 @@ class BuildTableTest(CIDBIntegrationTest):
     self.assertEqual(0, bot_db.GetTimeToDeadline(build_id))
     self.assertEqual(0, bot_db.ExtendDeadline(build_id, 10 * 60))
     self.assertEqual(0, bot_db.GetTimeToDeadline(build_id))
-
 
     build_id = bot_db.InsertBuild('build_name',
                                   constants.WATERFALL_INTERNAL,
@@ -637,9 +633,7 @@ def _SimulateCQBuildFinish(db, metadata, build_id):
   db.FinishBuild(build_id, status, summary)
 
 
-# TODO(akeshet): Allow command line args to specify alternate CIDB instance
-# for testing.
-if __name__ == '__main__':
-  logging.root.setLevel(logging.DEBUG)
-  logging.root.addHandler(logging.StreamHandler())
-  cros_test_lib.main()
+def main(_argv):
+  # TODO(akeshet): Allow command line args to specify alternate CIDB instance
+  # for testing.
+  cros_test_lib.main(module=__name__)

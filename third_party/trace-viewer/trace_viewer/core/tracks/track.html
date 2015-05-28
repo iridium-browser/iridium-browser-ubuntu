@@ -6,7 +6,6 @@ found in the LICENSE file.
 -->
 <link rel="stylesheet" href="/core/tracks/track.css">
 <link rel="import" href="/base/ui.html">
-<link rel="import" href="/base/ui.html">
 <link rel="import" href="/base/ui/container_that_decorates_its_children.html">
 
 <script>
@@ -48,6 +47,9 @@ tv.exportTo('tv.c.tracks', function() {
         cur = cur.parentElement;
       }
       return undefined;
+    },
+
+    get eventContainer() {
     },
 
     invalidateDrawingContainer: function() {
@@ -99,6 +101,9 @@ tv.exportTo('tv.c.tracks', function() {
     },
 
     addEventsToTrackMap: function(eventToTrackMap) {
+    },
+
+    addContainersToTrackMap: function(containerToTrackMap) {
     },
 
     addIntersectingItemsInRangeToSelection: function(

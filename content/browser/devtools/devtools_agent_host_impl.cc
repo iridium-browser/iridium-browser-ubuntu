@@ -9,10 +9,15 @@
 
 #include "base/basictypes.h"
 #include "base/guid.h"
+#include "base/json/json_writer.h"
 #include "base/lazy_instance.h"
 #include "content/browser/devtools/devtools_manager.h"
 #include "content/browser/devtools/forwarding_agent_host.h"
+#include "content/browser/devtools/protocol/devtools_protocol_handler.h"
+#include "content/browser/devtools/render_frame_devtools_agent_host.h"
+#include "content/browser/devtools/service_worker_devtools_agent_host.h"
 #include "content/browser/devtools/service_worker_devtools_manager.h"
+#include "content/browser/devtools/shared_worker_devtools_agent_host.h"
 #include "content/browser/devtools/shared_worker_devtools_manager.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/devtools_manager_delegate.h"
@@ -32,26 +37,47 @@ base::LazyInstance<AgentStateCallbacks>::Leaky g_callbacks =
 // static
 DevToolsAgentHost::List DevToolsAgentHost::GetOrCreateAll() {
   List result;
-  SharedWorkerDevToolsManager::GetInstance()->AddAllAgentHosts(&result);
-  ServiceWorkerDevToolsManager::GetInstance()->AddAllAgentHosts(&result);
-  std::vector<WebContents*> wc_list =
-      DevToolsAgentHostImpl::GetInspectableWebContents();
-  for (std::vector<WebContents*>::iterator it = wc_list.begin();
-      it != wc_list.end(); ++it) {
-    result.push_back(GetOrCreateFor(*it));
-  }
+  SharedWorkerDevToolsAgentHost::List shared_list;
+  SharedWorkerDevToolsManager::GetInstance()->AddAllAgentHosts(&shared_list);
+  for (const auto& host : shared_list)
+    result.push_back(host);
+
+  ServiceWorkerDevToolsAgentHost::List service_list;
+  ServiceWorkerDevToolsManager::GetInstance()->AddAllAgentHosts(&service_list);
+  for (const auto& host : service_list)
+    result.push_back(host);
+
+  RenderFrameDevToolsAgentHost::AddAllAgentHosts(&result);
   return result;
 }
 
+// Called on the UI thread.
+// static
+scoped_refptr<DevToolsAgentHost> DevToolsAgentHost::GetForWorker(
+    int worker_process_id,
+    int worker_route_id) {
+  if (scoped_refptr<DevToolsAgentHost> host =
+      SharedWorkerDevToolsManager::GetInstance()
+          ->GetDevToolsAgentHostForWorker(worker_process_id,
+                                          worker_route_id)) {
+    return host;
+  }
+  return ServiceWorkerDevToolsManager::GetInstance()
+      ->GetDevToolsAgentHostForWorker(worker_process_id, worker_route_id);
+}
+
 DevToolsAgentHostImpl::DevToolsAgentHostImpl()
-    : id_(base::GenerateGUID()),
+    : protocol_handler_(new DevToolsProtocolHandler(
+          base::Bind(&DevToolsAgentHostImpl::SendMessageToClient,
+                     base::Unretained(this)))),
+      id_(base::GenerateGUID()),
       client_(NULL) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   g_instances.Get()[id_] = this;
 }
 
 DevToolsAgentHostImpl::~DevToolsAgentHostImpl() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   g_instances.Get().erase(g_instances.Get().find(id_));
 }
 
@@ -196,6 +222,29 @@ void DevToolsAgentHostImpl::Inspect(BrowserContext* browser_context) {
   DevToolsManager* manager = DevToolsManager::GetInstance();
   if (manager->delegate())
     manager->delegate()->Inspect(browser_context, this);
+}
+
+bool DevToolsAgentHostImpl::DispatchProtocolMessage(
+    const std::string& message) {
+  scoped_ptr<base::DictionaryValue> command =
+      protocol_handler_->ParseCommand(message);
+  if (!command)
+    return true;
+
+  DevToolsManagerDelegate* delegate =
+      DevToolsManager::GetInstance()->delegate();
+  if (delegate) {
+    scoped_ptr<base::DictionaryValue> response(
+        delegate->HandleCommand(this, command.get()));
+    if (response) {
+      std::string json_response;
+      base::JSONWriter::Write(response.get(), &json_response);
+      SendMessageToClient(json_response);
+      return true;
+    }
+  }
+
+  return protocol_handler_->HandleOptionalCommand(command.Pass());
 }
 
 }  // namespace content

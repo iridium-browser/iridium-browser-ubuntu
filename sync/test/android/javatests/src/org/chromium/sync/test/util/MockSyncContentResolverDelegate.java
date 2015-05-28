@@ -13,7 +13,7 @@ import android.os.AsyncTask;
 import junit.framework.Assert;
 
 import org.chromium.base.ThreadUtils;
-import org.chromium.sync.notifier.SyncContentResolverDelegate;
+import org.chromium.sync.SyncContentResolverDelegate;
 
 import java.util.HashMap;
 import java.util.HashSet;
@@ -114,10 +114,6 @@ public class MockSyncContentResolverDelegate implements SyncContentResolverDeleg
         synchronized (mSyncableMapLock) {
             switch (syncable) {
                 case 0:
-                    if (mSyncAutomaticallySet.contains(key)) {
-                        mSyncAutomaticallySet.remove(key);
-                    }
-
                     mIsSyncableMap.put(key, false);
                     break;
                 case 1:
@@ -141,7 +137,7 @@ public class MockSyncContentResolverDelegate implements SyncContentResolverDeleg
         String key = createKey(account, authority);
         synchronized (mSyncableMapLock) {
             if (mIsSyncableMap.containsKey(key)) {
-                return mIsSyncableMap.containsKey(key) ? 1 : 0;
+                return mIsSyncableMap.get(key) ? 1 : 0;
             } else {
                 return -1;
             }

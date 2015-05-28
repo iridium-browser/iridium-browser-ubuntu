@@ -228,21 +228,7 @@ enum NotificationType {
   // the LoginHandler that should be cancelled.
   NOTIFICATION_AUTH_CANCELLED,
 
-  // History -----------------------------------------------------------------
-
-  // Sent when one or more URLs are deleted.
-  //
-  // The source is the profile owning the history service that changed, and
-  // the details is history::URLsDeletedDetails that lists the deleted URLs.
-  NOTIFICATION_HISTORY_URLS_DELETED,
-
-  // Sent when a keyword search term is updated. The source is the Profile and
-  // the details is history::KeywordSearchUpdatedDetails.
-  NOTIFICATION_HISTORY_KEYWORD_SEARCH_TERM_UPDATED,
-
-  // Sent when a keyword search term is deleted. The source is the Profile and
-  // the details is history::KeywordSearchDeletedDetails.
-  NOTIFICATION_HISTORY_KEYWORD_SEARCH_TERM_DELETED,
+  // Favicon ------------------------------------------------------------------
 
   // Sent by FaviconTabHelper when a tab's favicon has been successfully
   // updated. The details are a bool indicating whether the
@@ -277,17 +263,6 @@ enum NotificationType {
   // Sent after the URLRequestContextGetter for a Profile has been initialized.
   // The details are none and the source is a Profile*.
   NOTIFICATION_PROFILE_URL_REQUEST_CONTEXT_GETTER_INITIALIZED,
-
-  // TopSites ----------------------------------------------------------------
-
-  // Sent by TopSites when it finishes loading. The source is the profile the
-  // details the TopSites.
-  NOTIFICATION_TOP_SITES_LOADED,
-
-  // Sent by TopSites when the either one of the most visited urls changed, or
-  // one of the images changes. The source is the TopSites, the details not
-  // used.
-  NOTIFICATION_TOP_SITES_CHANGED,
 
   // Task Manager ------------------------------------------------------------
 
@@ -583,13 +558,6 @@ enum NotificationType {
   // Sent when a ProtocolHandlerRegistry is changed. The source is the profile.
   NOTIFICATION_PROTOCOL_HANDLER_REGISTRY_CHANGED,
 
-  // Sent when the cached profile info has changed.
-  NOTIFICATION_PROFILE_CACHED_INFO_CHANGED,
-
-  // Sent when the cached profile has finished writing a profile picture to
-  // disk.
-  NOTIFICATION_PROFILE_CACHE_PICTURE_SAVED,
-
   // Sent when the browser enters or exits fullscreen mode.
   NOTIFICATION_FULLSCREEN_CHANGED,
 
@@ -640,25 +608,10 @@ enum NotificationType {
   // all error UIs should update.
   NOTIFICATION_GLOBAL_ERRORS_CHANGED,
 
-  // BrowsingDataRemover ----------------------------------------------------
-  // Sent on the UI thread after BrowsingDataRemover has removed browsing data
-  // but before it has notified its explicit observers. The source is a
-  // Source<Profile> containing the profile in which browsing data was removed,
-  // and the detail is a BrowsingDataRemover::NotificationDetail containing the
-  // removal mask and the start of the removal timeframe with which
-  // BrowsingDataRemove::Remove was called.
-  NOTIFICATION_BROWSING_DATA_REMOVED,
-
   // The user accepted or dismissed a SSL client authentication request.
   // The source is a Source<net::HttpNetworkSession>.  Details is a
   // (std::pair<net::SSLCertRequestInfo*, net::X509Certificate*>).
   NOTIFICATION_SSL_CLIENT_AUTH_CERT_SELECTED,
-
-  // Session Restore --------------------------------------------------------
-
-  // Sent when synchronous (startup) session restore completes. No details or
-  // source.
-  NOTIFICATION_SESSION_RESTORE_DONE,
 
   // Note:-
   // Currently only Content and Chrome define and use notifications.

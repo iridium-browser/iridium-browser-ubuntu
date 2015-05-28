@@ -90,39 +90,40 @@ public:
 
     virtual ~GrConicEffect();
 
-    virtual const char* name() const SK_OVERRIDE { return "Conic"; }
+    const char* name() const override { return "Conic"; }
 
-    inline const GrAttribute* inPosition() const { return fInPosition; }
-    inline const GrAttribute* inConicCoeffs() const { return fInConicCoeffs; }
+    inline const Attribute* inPosition() const { return fInPosition; }
+    inline const Attribute* inConicCoeffs() const { return fInConicCoeffs; }
     inline bool isAntiAliased() const { return GrProcessorEdgeTypeIsAA(fEdgeType); }
     inline bool isFilled() const { return GrProcessorEdgeTypeIsFill(fEdgeType); }
     inline GrPrimitiveEdgeType getEdgeType() const { return fEdgeType; }
 
     virtual void getGLProcessorKey(const GrBatchTracker& bt,
                                    const GrGLCaps& caps,
-                                   GrProcessorKeyBuilder* b) const SK_OVERRIDE;
+                                   GrProcessorKeyBuilder* b) const override;
 
-    virtual GrGLGeometryProcessor* createGLInstance(const GrBatchTracker& bt) const SK_OVERRIDE;
+    virtual GrGLPrimitiveProcessor* createGLInstance(const GrBatchTracker& bt,
+                                                     const GrGLCaps&) const override;
 
-    void initBatchTracker(GrBatchTracker*, const InitBT&) const SK_OVERRIDE;
+    void initBatchTracker(GrBatchTracker*, const GrPipelineInfo&) const override;
     bool onCanMakeEqual(const GrBatchTracker&,
                         const GrGeometryProcessor&,
-                        const GrBatchTracker&) const SK_OVERRIDE;
+                        const GrBatchTracker&) const override;
 
 private:
     GrConicEffect(GrColor, const SkMatrix& viewMatrix, uint8_t coverage, GrPrimitiveEdgeType,
                   const SkMatrix& localMatrix);
 
-    virtual bool onIsEqual(const GrGeometryProcessor& other) const SK_OVERRIDE;
+    bool onIsEqual(const GrGeometryProcessor& other) const override;
 
-    virtual void onGetInvariantOutputCoverage(GrInitInvariantOutput* out) const SK_OVERRIDE {
+    void onGetInvariantOutputCoverage(GrInitInvariantOutput* out) const override {
         out->setUnknownSingleComponent();
     }
 
     uint8_t               fCoverageScale;
     GrPrimitiveEdgeType   fEdgeType;
-    const GrAttribute*    fInPosition;
-    const GrAttribute*    fInConicCoeffs;
+    const Attribute*    fInPosition;
+    const Attribute*    fInConicCoeffs;
 
     GR_DECLARE_GEOMETRY_PROCESSOR_TEST;
 
@@ -174,39 +175,40 @@ public:
 
     virtual ~GrQuadEffect();
 
-    virtual const char* name() const SK_OVERRIDE { return "Quad"; }
+    const char* name() const override { return "Quad"; }
 
-    inline const GrAttribute* inPosition() const { return fInPosition; }
-    inline const GrAttribute* inHairQuadEdge() const { return fInHairQuadEdge; }
+    inline const Attribute* inPosition() const { return fInPosition; }
+    inline const Attribute* inHairQuadEdge() const { return fInHairQuadEdge; }
     inline bool isAntiAliased() const { return GrProcessorEdgeTypeIsAA(fEdgeType); }
     inline bool isFilled() const { return GrProcessorEdgeTypeIsFill(fEdgeType); }
     inline GrPrimitiveEdgeType getEdgeType() const { return fEdgeType; }
 
     virtual void getGLProcessorKey(const GrBatchTracker& bt,
                                    const GrGLCaps& caps,
-                                   GrProcessorKeyBuilder* b) const SK_OVERRIDE;
+                                   GrProcessorKeyBuilder* b) const override;
 
-    virtual GrGLGeometryProcessor* createGLInstance(const GrBatchTracker& bt) const SK_OVERRIDE;
+    virtual GrGLPrimitiveProcessor* createGLInstance(const GrBatchTracker& bt,
+                                                     const GrGLCaps&) const override;
 
-    void initBatchTracker(GrBatchTracker*, const InitBT&) const SK_OVERRIDE;
+    void initBatchTracker(GrBatchTracker*, const GrPipelineInfo&) const override;
     bool onCanMakeEqual(const GrBatchTracker&,
                         const GrGeometryProcessor&,
-                        const GrBatchTracker&) const SK_OVERRIDE;
+                        const GrBatchTracker&) const override;
 
 private:
     GrQuadEffect(GrColor, const SkMatrix& viewMatrix, uint8_t coverage, GrPrimitiveEdgeType,
                  const SkMatrix& localMatrix);
 
-    virtual bool onIsEqual(const GrGeometryProcessor& other) const SK_OVERRIDE;
+    bool onIsEqual(const GrGeometryProcessor& other) const override;
 
-    virtual void onGetInvariantOutputCoverage(GrInitInvariantOutput* out) const SK_OVERRIDE {
+    void onGetInvariantOutputCoverage(GrInitInvariantOutput* out) const override {
         out->setUnknownSingleComponent();
     }
 
     uint8_t               fCoverageScale;
     GrPrimitiveEdgeType   fEdgeType;
-    const GrAttribute*    fInPosition;
-    const GrAttribute*    fInHairQuadEdge;
+    const Attribute*    fInPosition;
+    const Attribute*    fInHairQuadEdge;
 
     GR_DECLARE_GEOMETRY_PROCESSOR_TEST;
 
@@ -254,37 +256,38 @@ public:
 
     virtual ~GrCubicEffect();
 
-    virtual const char* name() const SK_OVERRIDE { return "Cubic"; }
+    const char* name() const override { return "Cubic"; }
 
-    inline const GrAttribute* inPosition() const { return fInPosition; }
-    inline const GrAttribute* inCubicCoeffs() const { return fInCubicCoeffs; }
+    inline const Attribute* inPosition() const { return fInPosition; }
+    inline const Attribute* inCubicCoeffs() const { return fInCubicCoeffs; }
     inline bool isAntiAliased() const { return GrProcessorEdgeTypeIsAA(fEdgeType); }
     inline bool isFilled() const { return GrProcessorEdgeTypeIsFill(fEdgeType); }
     inline GrPrimitiveEdgeType getEdgeType() const { return fEdgeType; }
 
     virtual void getGLProcessorKey(const GrBatchTracker& bt,
                                    const GrGLCaps& caps,
-                                   GrProcessorKeyBuilder* b) const SK_OVERRIDE;
+                                   GrProcessorKeyBuilder* b) const override;
 
-    virtual GrGLGeometryProcessor* createGLInstance(const GrBatchTracker& bt) const SK_OVERRIDE;
+    virtual GrGLPrimitiveProcessor* createGLInstance(const GrBatchTracker& bt,
+                                                     const GrGLCaps&) const override;
 
-    void initBatchTracker(GrBatchTracker*, const InitBT&) const SK_OVERRIDE;
+    void initBatchTracker(GrBatchTracker*, const GrPipelineInfo&) const override;
     bool onCanMakeEqual(const GrBatchTracker&,
                         const GrGeometryProcessor&,
-                        const GrBatchTracker&) const SK_OVERRIDE;
+                        const GrBatchTracker&) const override;
 
 private:
     GrCubicEffect(GrColor, const SkMatrix& viewMatrix, GrPrimitiveEdgeType);
 
-    virtual bool onIsEqual(const GrGeometryProcessor& other) const SK_OVERRIDE;
+    bool onIsEqual(const GrGeometryProcessor& other) const override;
 
-    virtual void onGetInvariantOutputCoverage(GrInitInvariantOutput* out) const SK_OVERRIDE {
+    void onGetInvariantOutputCoverage(GrInitInvariantOutput* out) const override {
         out->setUnknownSingleComponent();
     }
 
     GrPrimitiveEdgeType   fEdgeType;
-    const GrAttribute*    fInPosition;
-    const GrAttribute*    fInCubicCoeffs;
+    const Attribute*    fInPosition;
+    const Attribute*    fInCubicCoeffs;
 
     GR_DECLARE_GEOMETRY_PROCESSOR_TEST;
 

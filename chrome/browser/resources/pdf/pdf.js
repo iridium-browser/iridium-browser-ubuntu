@@ -31,6 +31,27 @@ function getFilenameFromURL(url) {
 }
 
 /**
+ * Called when navigation happens in the current tab.
+ * @param {string} url The url to be opened in the current tab.
+ */
+function onNavigateInCurrentTab(url) {
+  window.location.href = url;
+}
+
+/**
+ * Called when navigation happens in the new tab.
+ * @param {string} url The url to be opened in the new tab.
+ */
+function onNavigateInNewTab(url) {
+  // Prefer the tabs API because it guarantees we can just open a new tab.
+  // window.open doesn't have this guarantee.
+  if (chrome.tabs)
+    chrome.tabs.create({ url: url});
+  else
+    window.open(url);
+}
+
+/**
  * The minimum number of pixels to offset the toolbar by from the bottom and
  * right side of the screen.
  */
@@ -39,6 +60,7 @@ PDFViewer.MIN_TOOLBAR_OFFSET = 15;
 /**
  * Creates a new PDFViewer. There should only be one of these objects per
  * document.
+ * @constructor
  * @param {Object} streamDetails The stream object which points to the data
  *     contained in the PDF.
  */
@@ -46,6 +68,12 @@ function PDFViewer(streamDetails) {
   this.streamDetails_ = streamDetails;
   this.loaded_ = false;
   this.parentWindow_ = null;
+
+  this.delayedScriptingMessages_ = [];
+
+  this.isPrintPreview_ =
+      this.streamDetails_.originalUrl.indexOf('chrome://print') == 0;
+  this.isMaterial_ = location.pathname.substring(1) === 'index-material.html';
 
   // The sizer element is placed behind the plugin element to cause scrollbars
   // to be displayed in the window. It is sized according to the document size
@@ -66,6 +94,7 @@ function PDFViewer(streamDetails) {
                                 this.beforeZoom_.bind(this),
                                 this.afterZoom_.bind(this),
                                 getScrollbarWidth());
+
   // Create the plugin object dynamically so we can set its src. The plugin
   // element is sized to fill the entire window and is set to be fixed
   // positioning, acting as a viewport. The plugin renders into this viewport
@@ -94,21 +123,58 @@ function PDFViewer(streamDetails) {
   }
   this.plugin_.setAttribute('headers', headers);
 
+  if (this.isMaterial_)
+    this.plugin_.setAttribute('is-material', '');
+
   if (!this.streamDetails_.embedded)
     this.plugin_.setAttribute('full-frame', '');
   document.body.appendChild(this.plugin_);
 
   // Setup the button event listeners.
-  $('fit-to-width-button').addEventListener('click',
-      this.viewport_.fitToWidth.bind(this.viewport_));
-  $('fit-to-page-button').addEventListener('click',
-      this.viewport_.fitToPage.bind(this.viewport_));
-  $('zoom-in-button').addEventListener('click',
-      this.viewport_.zoomIn.bind(this.viewport_));
-  $('zoom-out-button').addEventListener('click',
-      this.viewport_.zoomOut.bind(this.viewport_));
-  $('save-button').addEventListener('click', this.save_.bind(this));
-  $('print-button').addEventListener('click', this.print_.bind(this));
+  if (!this.isMaterial_) {
+    $('fit-to-width-button').addEventListener('click',
+        this.viewport_.fitToWidth.bind(this.viewport_));
+    $('fit-to-page-button').addEventListener('click',
+        this.viewport_.fitToPage.bind(this.viewport_));
+    $('zoom-in-button').addEventListener('click',
+        this.viewport_.zoomIn.bind(this.viewport_));
+    $('zoom-out-button').addEventListener('click',
+        this.viewport_.zoomOut.bind(this.viewport_));
+    $('save-button').addEventListener('click', this.save_.bind(this));
+    $('print-button').addEventListener('click', this.print_.bind(this));
+  }
+
+  if (this.isMaterial_) {
+    this.bookmarksPane_ = $('bookmarks-pane');
+
+    this.zoomSelector_ = $('zoom-selector');
+    this.zoomSelector_.zoomMin = Viewport.ZOOM_FACTOR_RANGE.min * 100;
+    this.zoomSelector_.zoomMax = Viewport.ZOOM_FACTOR_RANGE.max * 100;
+    this.zoomSelector_.addEventListener('zoom', function(e) {
+      this.viewport_.setZoom(e.detail.zoom);
+    }.bind(this));
+    this.zoomSelector_.addEventListener('fit-to-width',
+        this.viewport_.fitToWidth.bind(this.viewport_));
+    this.zoomSelector_.addEventListener('fit-to-page',
+        this.viewport_.fitToPage.bind(this.viewport_));
+
+    this.materialToolbar_ = $('material-toolbar');
+    this.materialToolbar_.docTitle = document.title;
+    this.materialToolbar_.addEventListener('save', this.save_.bind(this));
+    this.materialToolbar_.addEventListener('print', this.print_.bind(this));
+    this.materialToolbar_.addEventListener('rotate-right',
+        this.rotateClockwise_.bind(this));
+    this.materialToolbar_.addEventListener('toggle-bookmarks', function() {
+      this.bookmarksPane_.buttonToggle();
+    }.bind(this));
+
+    document.body.addEventListener('change-page', function(e) {
+      this.viewport_.goToPage(e.detail.page);
+    }.bind(this));
+
+    this.uiManager_ = new UiManager(window, this.materialToolbar_,
+                                    [this.bookmarksPane_]);
+  }
 
   // Setup the keyboard event listener.
   document.onkeydown = this.handleKeyEvent_.bind(this);
@@ -136,8 +202,13 @@ function PDFViewer(streamDetails) {
   }
 
   // Parse open pdf parameters.
-  var paramsParser = new OpenPDFParamsParser(this.streamDetails_.originalUrl);
-  this.urlParams_ = paramsParser.urlParams;
+  this.paramsParser_ =
+      new OpenPDFParamsParser(this.getNamedDestination_.bind(this));
+  this.navigator_ = new Navigator(this.streamDetails_.originalUrl,
+                                  this.viewport_, this.paramsParser_,
+                                  onNavigateInCurrentTab, onNavigateInNewTab);
+  this.viewportScroller_ =
+      new ViewportScroller(this.viewport_, this.plugin_, window);
 }
 
 PDFViewer.prototype = {
@@ -150,7 +221,7 @@ PDFViewer.prototype = {
   handleKeyEvent_: function(e) {
     var position = this.viewport_.position;
     // Certain scroll events may be sent from outside of the extension.
-    var fromScriptingAPI = e.type == 'scriptingKeypress';
+    var fromScriptingAPI = e.fromScriptingAPI;
 
     var pageUpHandler = function() {
       // Go to the previous page if we are fit-to-page.
@@ -191,7 +262,7 @@ PDFViewer.prototype = {
       case 37:  // Left arrow key.
         if (!(e.altKey || e.ctrlKey || e.metaKey || e.shiftKey)) {
           // Go to the previous page if there are no horizontal scrollbars.
-          if (!this.viewport_.documentHasScrollbars().x) {
+          if (!this.viewport_.documentHasScrollbars().horizontal) {
             this.viewport_.goToPage(this.viewport_.getMostVisiblePage() - 1);
             // Since we do the movement of the page.
             e.preventDefault();
@@ -210,7 +281,7 @@ PDFViewer.prototype = {
       case 39:  // Right arrow key.
         if (!(e.altKey || e.ctrlKey || e.metaKey || e.shiftKey)) {
           // Go to the next page if there are no horizontal scrollbars.
-          if (!this.viewport_.documentHasScrollbars().x) {
+          if (!this.viewport_.documentHasScrollbars().horizontal) {
             this.viewport_.goToPage(this.viewport_.getMostVisiblePage() + 1);
             // Since we do the movement of the page.
             e.preventDefault();
@@ -229,32 +300,56 @@ PDFViewer.prototype = {
       case 65:  // a key.
         if (e.ctrlKey || e.metaKey) {
           this.plugin_.postMessage({
-            type: 'selectAll',
+            type: 'selectAll'
           });
+          // Since we do selection ourselves.
+          e.preventDefault();
         }
         return;
-      case 80:  // p key.
-        if (e.ctrlKey || e.metaKey) {
-          this.print_();
-          // Since we do the printing of the page.
+      case 71: // g key.
+        if (this.isMaterial_ && (e.ctrlKey || e.metaKey)) {
+          this.materialToolbar_.selectPageNumber();
+          // To prevent the default "find text" behaviour in Chrome.
           e.preventDefault();
         }
         return;
       case 219:  // left bracket.
-        if (e.ctrlKey) {
-          this.plugin_.postMessage({
-            type: 'rotateCounterclockwise',
-          });
-        }
+        if (e.ctrlKey)
+          this.rotateCounterClockwise_();
         return;
       case 221:  // right bracket.
-        if (e.ctrlKey) {
-          this.plugin_.postMessage({
-            type: 'rotateClockwise',
-          });
-        }
+        if (e.ctrlKey)
+          this.rotateClockwise_();
         return;
     }
+
+    // Give print preview a chance to handle the key event.
+    if (!fromScriptingAPI && this.isPrintPreview_) {
+      this.sendScriptingMessage_({
+        type: 'sendKeyEvent',
+        keyEvent: SerializeKeyEvent(e)
+      });
+    }
+  },
+
+  /**
+   * @private
+   * Rotate the plugin clockwise.
+   */
+  rotateClockwise_: function() {
+    this.plugin_.postMessage({
+      type: 'rotateClockwise'
+    });
+  },
+
+  /**
+   * @private
+   * Rotate the plugin counter-clockwise.
+   */
+  rotateCounterClockwise_: function() {
+    this.plugin_.postMessage({
+      type: 'rotateCounterclockwise'
+    });
   },
 
   /**
@@ -263,7 +358,7 @@ PDFViewer.prototype = {
    */
   print_: function() {
     this.plugin_.postMessage({
-      type: 'print',
+      type: 'print'
     });
   },
 
@@ -273,7 +368,19 @@ PDFViewer.prototype = {
    */
   save_: function() {
     this.plugin_.postMessage({
-      type: 'save',
+      type: 'save'
+    });
+  },
+
+  /**
+   * Fetches the page number corresponding to the given named destination from
+   * the plugin.
+   * @param {string} name The namedDestination to fetch page number from plugin.
+   */
+  getNamedDestination_: function(name) {
+    this.plugin_.postMessage({
+      type: 'getNamedDestination',
+      namedDestination: name
     });
   },
 
@@ -282,19 +389,21 @@ PDFViewer.prototype = {
    * Handle open pdf parameters. This function updates the viewport as per
    * the parameters mentioned in the url while opening pdf. The order is
    * important as later actions can override the effects of previous actions.
+   * @param {Object} viewportPosition The initial position of the viewport to be
+   *     displayed.
    */
-  handleURLParams_: function() {
-    if (this.urlParams_.page)
-      this.viewport_.goToPage(this.urlParams_.page);
-    if (this.urlParams_.position) {
+  handleURLParams_: function(viewportPosition) {
+    if (viewportPosition.page != undefined)
+      this.viewport_.goToPage(viewportPosition.page);
+    if (viewportPosition.position) {
       // Make sure we don't cancel effect of page parameter.
       this.viewport_.position = {
-        x: this.viewport_.position.x + this.urlParams_.position.x,
-        y: this.viewport_.position.y + this.urlParams_.position.y
+        x: this.viewport_.position.x + viewportPosition.position.x,
+        y: this.viewport_.position.y + viewportPosition.position.y
       };
     }
-    if (this.urlParams_.zoom)
-      this.viewport_.setZoom(this.urlParams_.zoom);
+    if (viewportPosition.zoom)
+      this.viewport_.setZoom(viewportPosition.zoom);
   },
 
   /**
@@ -304,12 +413,17 @@ PDFViewer.prototype = {
    * @param {number} progress the progress as a percentage.
    */
   updateProgress_: function(progress) {
-    this.progressBar_.progress = progress;
+    if (this.isMaterial_)
+      this.materialToolbar_.loadProgress = progress;
+    else
+      this.progressBar_.progress = progress;
+
     if (progress == -1) {
       // Document load failed.
       this.errorScreen_.style.visibility = 'visible';
       this.sizer_.style.display = 'none';
-      this.toolbar_.style.visibility = 'hidden';
+      if (!this.isMaterial_)
+        this.toolbar_.style.visibility = 'hidden';
       if (this.passwordScreen_.active) {
         this.passwordScreen_.deny();
         this.passwordScreen_.active = false;
@@ -318,11 +432,17 @@ PDFViewer.prototype = {
       // Document load complete.
       if (this.lastViewportPosition_)
         this.viewport_.position = this.lastViewportPosition_;
-      this.handleURLParams_();
+      this.paramsParser_.getViewportFromUrlParams(
+          this.streamDetails_.originalUrl, this.handleURLParams_.bind(this));
       this.loaded_ = true;
       this.sendScriptingMessage_({
         type: 'documentLoaded'
       });
+      while (this.delayedScriptingMessages_.length > 0)
+        this.handleScriptingMessage(this.delayedScriptingMessages_.shift());
+
+      if (this.isMaterial_)
+        this.uiManager_.hideUiAfterTimeout();
     }
   },
 
@@ -354,16 +474,20 @@ PDFViewer.prototype = {
         if (this.passwordScreen_.active)
           this.passwordScreen_.accept();
 
-        this.pageIndicator_.initialFadeIn();
-        this.toolbar_.initialFadeIn();
+        if (this.isMaterial_) {
+          this.materialToolbar_.docLength =
+              this.documentDimensions_.pageDimensions.length;
+        } else {
+          this.pageIndicator_.initialFadeIn();
+          this.toolbar_.initialFadeIn();
+        }
+
         break;
       case 'email':
         var href = 'mailto:' + message.data.to + '?cc=' + message.data.cc +
             '&bcc=' + message.data.bcc + '&subject=' + message.data.subject +
             '&body=' + message.data.body;
-        var w = window.open(href, '_blank', 'width=1,height=1');
-        if (w)
-          w.close();
+        window.location.href = href;
         break;
       case 'getAccessibilityJSONReply':
         this.sendScriptingMessage_(message.data);
@@ -376,6 +500,9 @@ PDFViewer.prototype = {
         else
           this.passwordScreen_.deny();
         break;
+      case 'getSelectedTextReply':
+        this.sendScriptingMessage_(message.data);
+        break;
       case 'goToPage':
         this.viewport_.goToPage(message.data.page);
         break;
@@ -383,27 +510,45 @@ PDFViewer.prototype = {
         this.updateProgress_(message.data.progress);
         break;
       case 'navigate':
-        if (message.data.newTab)
-          window.open(message.data.url);
+        // If in print preview, always open a new tab.
+        if (this.isPrintPreview_)
+          this.navigator_.navigate(message.data.url, true);
         else
-          window.location.href = message.data.url;
+          this.navigator_.navigate(message.data.url, message.data.newTab);
         break;
       case 'setScrollPosition':
         var position = this.viewport_.position;
-        if (message.data.x != undefined)
+        if (message.data.x !== undefined)
           position.x = message.data.x;
-        if (message.data.y != undefined)
+        if (message.data.y !== undefined)
           position.y = message.data.y;
         this.viewport_.position = position;
         break;
       case 'setTranslatedStrings':
         this.passwordScreen_.text = message.data.getPasswordString;
-        this.progressBar_.text = message.data.loadingString;
-        this.progressBar_.style.visibility = 'visible';
+        if (!this.isMaterial_) {
+          this.progressBar_.text = message.data.loadingString;
+          if (!this.isPrintPreview_)
+            this.progressBar_.style.visibility = 'visible';
+        }
         this.errorScreen_.text = message.data.loadFailedString;
         break;
       case 'cancelStreamUrl':
-        chrome.streamsPrivate.abort(this.streamDetails_.streamUrl);
+        chrome.mimeHandlerPrivate.abortStream();
+        break;
+      case 'bookmarks':
+        this.bookmarks_ = message.data.bookmarks;
+        if (this.isMaterial_ && this.bookmarks_.length !== 0) {
+          $('bookmarks-container').bookmarks = this.bookmarks;
+          this.materialToolbar_.hasBookmarks = true;
+        }
+        break;
+      case 'setIsSelecting':
+        this.viewportScroller_.setEnableScrolling(message.data.isSelecting);
+        break;
+      case 'getNamedDestinationReply':
+        this.paramsParser_.onNamedDestinationReceived(
+            message.data.pageNumber);
         break;
     }
   },
@@ -427,6 +572,8 @@ PDFViewer.prototype = {
   afterZoom_: function() {
     var position = this.viewport_.position;
     var zoom = this.viewport_.zoom;
+    if (this.isMaterial_)
+      this.zoomSelector_.zoomValue = 100 * zoom;
     if (this.shouldManageZoom_() && !this.setZoomInProgress_) {
       this.setZoomInProgress_ = true;
       chrome.tabs.setZoom(this.streamDetails_.tabId, zoom,
@@ -450,7 +597,7 @@ PDFViewer.prototype = {
    */
   setZoomComplete_: function(lastZoom) {
     var zoom = this.viewport_.zoom;
-    if (zoom != lastZoom) {
+    if (zoom !== lastZoom) {
       chrome.tabs.setZoom(this.streamDetails_.tabId, zoom,
                           this.setZoomComplete_.bind(this, zoom));
     } else {
@@ -467,40 +614,49 @@ PDFViewer.prototype = {
       return;
 
     // Update the buttons selected.
-    $('fit-to-page-button').classList.remove('polymer-selected');
-    $('fit-to-width-button').classList.remove('polymer-selected');
-    if (this.viewport_.fittingType == Viewport.FittingType.FIT_TO_PAGE) {
-      $('fit-to-page-button').classList.add('polymer-selected');
-    } else if (this.viewport_.fittingType ==
-               Viewport.FittingType.FIT_TO_WIDTH) {
-      $('fit-to-width-button').classList.add('polymer-selected');
+    if (!this.isMaterial_) {
+      $('fit-to-page-button').classList.remove('polymer-selected');
+      $('fit-to-width-button').classList.remove('polymer-selected');
+      if (this.viewport_.fittingType == Viewport.FittingType.FIT_TO_PAGE) {
+        $('fit-to-page-button').classList.add('polymer-selected');
+      } else if (this.viewport_.fittingType ==
+                 Viewport.FittingType.FIT_TO_WIDTH) {
+        $('fit-to-width-button').classList.add('polymer-selected');
+      }
     }
 
+    // Offset the toolbar position so that it doesn't move if scrollbars appear.
     var hasScrollbars = this.viewport_.documentHasScrollbars();
     var scrollbarWidth = this.viewport_.scrollbarWidth;
-    // Offset the toolbar position so that it doesn't move if scrollbars appear.
+    var verticalScrollbarWidth = hasScrollbars.vertical ? scrollbarWidth : 0;
+    var horizontalScrollbarWidth =
+        hasScrollbars.horizontal ? scrollbarWidth : 0;
     var toolbarRight = Math.max(PDFViewer.MIN_TOOLBAR_OFFSET, scrollbarWidth);
     var toolbarBottom = Math.max(PDFViewer.MIN_TOOLBAR_OFFSET, scrollbarWidth);
-    if (hasScrollbars.vertical)
-      toolbarRight -= scrollbarWidth;
-    if (hasScrollbars.horizontal)
-      toolbarBottom -= scrollbarWidth;
-    this.toolbar_.style.right = toolbarRight + 'px';
-    this.toolbar_.style.bottom = toolbarBottom + 'px';
-    // Hide the toolbar if it doesn't fit in the viewport.
-    if (this.toolbar_.offsetLeft < 0 || this.toolbar_.offsetTop < 0)
-      this.toolbar_.style.visibility = 'hidden';
-    else
-      this.toolbar_.style.visibility = 'visible';
+    toolbarRight -= verticalScrollbarWidth;
+    toolbarBottom -= horizontalScrollbarWidth;
+    if (!this.isMaterial_) {
+      this.toolbar_.style.right = toolbarRight + 'px';
+      this.toolbar_.style.bottom = toolbarBottom + 'px';
+      // Hide the toolbar if it doesn't fit in the viewport.
+      if (this.toolbar_.offsetLeft < 0 || this.toolbar_.offsetTop < 0)
+        this.toolbar_.style.visibility = 'hidden';
+      else
+        this.toolbar_.style.visibility = 'visible';
+    }
 
     // Update the page indicator.
     var visiblePage = this.viewport_.getMostVisiblePage();
-    this.pageIndicator_.index = visiblePage;
-    if (this.documentDimensions_.pageDimensions.length > 1 &&
-        hasScrollbars.vertical) {
-      this.pageIndicator_.style.visibility = 'visible';
+    if (this.isMaterial_) {
+      this.materialToolbar_.pageIndex = visiblePage;
     } else {
-      this.pageIndicator_.style.visibility = 'hidden';
+      this.pageIndicator_.index = visiblePage;
+      if (this.documentDimensions_.pageDimensions.length > 1 &&
+          hasScrollbars.vertical) {
+        this.pageIndicator_.style.visibility = 'visible';
+      } else {
+        this.pageIndicator_.style.visibility = 'hidden';
+      }
     }
 
     var visiblePageDimensions = this.viewport_.getPageScreenRect(visiblePage);
@@ -511,24 +667,63 @@ PDFViewer.prototype = {
       pageY: visiblePageDimensions.y,
       pageWidth: visiblePageDimensions.width,
       viewportWidth: size.width,
-      viewportHeight: size.height,
+      viewportHeight: size.height
     });
   },
 
   /**
-   * @private
    * Handle a scripting message from outside the extension (typically sent by
    * PDFScriptingAPI in a page containing the extension) to interact with the
    * plugin.
    * @param {MessageObject} message the message to handle.
    */
   handleScriptingMessage: function(message) {
+    if (this.parentWindow_ != message.source) {
+      this.parentWindow_ = message.source;
+      // Ensure that we notify the embedder if the document is loaded.
+      if (this.loaded_) {
+        this.sendScriptingMessage_({
+          type: 'documentLoaded'
+        });
+      }
+    }
+
+    if (this.handlePrintPreviewScriptingMessage_(message))
+      return;
+
+    // Delay scripting messages from users of the scripting API until the
+    // document is loaded. This simplifies use of the APIs.
+    if (!this.loaded_) {
+      this.delayedScriptingMessages_.push(message);
+      return;
+    }
+
     switch (message.data.type.toString()) {
       case 'getAccessibilityJSON':
-      case 'loadPreviewPage':
+      case 'getSelectedText':
+      case 'print':
+      case 'selectAll':
         this.plugin_.postMessage(message.data);
         break;
+    }
+  },
+
+  /**
+   * @private
+   * Handle scripting messages specific to print preview.
+   * @param {MessageObject} message the message to handle.
+   * @return {boolean} true if the message was handled, false otherwise.
+   */
+  handlePrintPreviewScriptingMessage_: function(message) {
+    if (!this.isPrintPreview_)
+      return false;
+
+    switch (message.data.type.toString()) {
+      case 'loadPreviewPage':
+        this.plugin_.postMessage(message.data);
+        return true;
       case 'resetPrintPreviewMode':
+        this.loaded_ = false;
         if (!this.inPrintPreviewMode_) {
           this.inPrintPreviewMode_ = true;
           this.viewport_.fitToPage();
@@ -546,7 +741,8 @@ PDFViewer.prototype = {
         if (saveButton)
           saveButton.parentNode.removeChild(saveButton);
 
-        this.pageIndicator_.pageLabels = message.data.pageNumbers;
+        if (!this.isMaterial_)
+          this.pageIndicator_.pageLabels = message.data.pageNumbers;
 
         this.plugin_.postMessage({
           type: 'resetPrintPreviewMode',
@@ -557,26 +753,13 @@ PDFViewer.prototype = {
           pageCount: (message.data.modifiable ?
                       message.data.pageNumbers.length : 0)
         });
-        break;
+        return true;
       case 'sendKeyEvent':
-        var e = document.createEvent('Event');
-        e.initEvent('scriptingKeypress');
-        e.keyCode = message.data.keyCode;
-        this.handleKeyEvent_(e);
-        break;
-      case 'setParentWindow':
-        if (this.parentWindow_ != message.source) {
-          this.parentWindow_ = message.source;
-          // If the document has already loaded, we always send a message that
-          // indicates that so that the embedder is aware.
-          if (this.loaded_) {
-            this.sendScriptingMessage_({
-              type: 'documentLoaded'
-            });
-          }
-        }
-        break;
+        this.handleKeyEvent_(DeserializeKeyEvent(message.data.keyEvent));
+        return true;
     }
+
+    return false;
   },
 
   /**
@@ -606,5 +789,16 @@ PDFViewer.prototype = {
    */
   get viewport() {
     return this.viewport_;
+  },
+
+  /**
+   * Each bookmark is an Object containing a:
+   * - title
+   * - page (optional)
+   * - array of children (themselves bookmarks)
+   * @type {Array} the top-level bookmarks of the PDF.
+   */
+  get bookmarks() {
+    return this.bookmarks_;
   }
 };

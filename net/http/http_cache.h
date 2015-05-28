@@ -25,6 +25,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/threading/non_thread_safe.h"
+#include "base/time/clock.h"
 #include "base/time/time.h"
 #include "net/base/cache_type.h"
 #include "net/base/completion_callback.h"
@@ -71,11 +72,6 @@ class NET_EXPORT HttpCache : public HttpTransactionFactory,
   enum Mode {
     // Normal mode just behaves like a standard web cache.
     NORMAL = 0,
-    // Record mode caches everything for purposes of offline playback.
-    RECORD,
-    // Playback mode replays from a cache without considering any
-    // standard invalidations.
-    PLAYBACK,
     // Disables reads and writes from the cache.
     // Equivalent to setting LOAD_DISABLE_CACHE on every request.
     DISABLE
@@ -125,6 +121,10 @@ class NET_EXPORT HttpCache : public HttpTransactionFactory,
     int max_bytes_;
     scoped_refptr<base::SingleThreadTaskRunner> thread_;
   };
+
+  // The number of minutes after a resource is prefetched that it can be used
+  // again without validation.
+  static const int kPrefetchReuseMins = 5;
 
   // The disk cache is initialized lazily (by CreateTransaction) in this case.
   // The HttpCache takes ownership of the |backend_factory|.
@@ -181,6 +181,12 @@ class NET_EXPORT HttpCache : public HttpTransactionFactory,
   void set_mode(Mode value) { mode_ = value; }
   Mode mode() { return mode_; }
 
+  // Get/Set the cache's clock. These are public only for testing.
+  void SetClockForTesting(scoped_ptr<base::Clock> clock) {
+    clock_.reset(clock.release());
+  }
+  base::Clock* clock() const { return clock_.get(); }
+
   // Close currently active sockets so that fresh page loads will not use any
   // recycled connections.  For sockets currently in use, they may not close
   // immediately, but they will not be reusable. This is for debugging.
@@ -192,9 +198,6 @@ class NET_EXPORT HttpCache : public HttpTransactionFactory,
   // Called whenever an external cache in the system reuses the resource
   // referred to by |url| and |http_method|.
   void OnExternalCacheHit(const GURL& url, const std::string& http_method);
-
-  // Initializes the Infinite Cache, if selected by the field trial.
-  void InitializeInfiniteCache(const base::FilePath& path);
 
   // Causes all transactions created after this point to effectively bypass
   // the cache lock whenever there is lock contention.
@@ -461,6 +464,9 @@ class NET_EXPORT HttpCache : public HttpTransactionFactory,
 
   // The async validations currently in progress, keyed by URL.
   AsyncValidationMap async_validations_;
+
+  // A clock that can be swapped out for testing.
+  scoped_ptr<base::Clock> clock_;
 
   base::WeakPtrFactory<HttpCache> weak_factory_;
 

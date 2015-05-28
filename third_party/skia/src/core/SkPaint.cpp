@@ -171,8 +171,8 @@ void SkPaint::reset() {
     *this = init;
 }
 
-void SkPaint::setFilterLevel(FilterLevel level) {
-    fBitfields.fFilterLevel = level;
+void SkPaint::setFilterQuality(SkFilterQuality quality) {
+    fBitfields.fFilterQuality = quality;
 }
 
 void SkPaint::setHinting(Hinting hintingLevel) {
@@ -802,14 +802,6 @@ static void set_bounds(const SkGlyph& g, SkRect* bounds) {
                 SkIntToScalar(g.fTop),
                 SkIntToScalar(g.fLeft + g.fWidth),
                 SkIntToScalar(g.fTop + g.fHeight));
-}
-
-// 64bits wide, with a 16bit bias. Useful when accumulating lots of 16.16 so
-// we don't overflow along the way
-typedef int64_t Sk48Dot16;
-
-static inline float Sk48Dot16ToScalar(Sk48Dot16 x) {
-    return (float) (x * 1.5258789e-5);   // x * (1 / 65536.0f)
 }
 
 static void join_bounds_x(const SkGlyph& g, SkRect* bounds, Sk48Dot16 dx) {
@@ -1597,6 +1589,147 @@ void SkScalerContext::PostMakeRec(const SkPaint&, SkScalerContext::Rec* rec) {
     #define TEST_DESC
 #endif
 
+static void write_out_descriptor(SkDescriptor* desc, const SkScalerContext::Rec& rec,
+                                 const SkPathEffect* pe, SkWriteBuffer* peBuffer,
+                                 const SkMaskFilter* mf, SkWriteBuffer* mfBuffer,
+                                 const SkRasterizer* ra, SkWriteBuffer* raBuffer,
+                                 size_t descSize) {
+    desc->init();
+    desc->addEntry(kRec_SkDescriptorTag, sizeof(rec), &rec);
+
+    if (pe) {
+        add_flattenable(desc, kPathEffect_SkDescriptorTag, peBuffer);
+    }
+    if (mf) {
+        add_flattenable(desc, kMaskFilter_SkDescriptorTag, mfBuffer);
+    }
+    if (ra) {
+        add_flattenable(desc, kRasterizer_SkDescriptorTag, raBuffer);
+    }
+
+    desc->computeChecksum();
+}
+
+static size_t fill_out_rec(const SkPaint& paint, SkScalerContext::Rec* rec,
+                           const SkDeviceProperties* deviceProperties,
+                           const SkMatrix* deviceMatrix, bool ignoreGamma,
+                           const SkPathEffect* pe, SkWriteBuffer* peBuffer,
+                           const SkMaskFilter* mf, SkWriteBuffer* mfBuffer,
+                           const SkRasterizer* ra, SkWriteBuffer* raBuffer) {
+    SkScalerContext::MakeRec(paint, deviceProperties, deviceMatrix, rec);
+    if (ignoreGamma) {
+        rec->ignorePreBlend();
+    }
+
+    int entryCount = 1;
+    size_t descSize = sizeof(*rec);
+
+    if (pe) {
+        peBuffer->writeFlattenable(pe);
+        descSize += peBuffer->bytesWritten();
+        entryCount += 1;
+        rec->fMaskFormat = SkMask::kA8_Format;  // force antialiasing when we do the scan conversion
+        // seems like we could support kLCD as well at this point...
+    }
+    if (mf) {
+        mfBuffer->writeFlattenable(mf);
+        descSize += mfBuffer->bytesWritten();
+        entryCount += 1;
+        rec->fMaskFormat = SkMask::kA8_Format;   // force antialiasing with maskfilters
+        /* Pre-blend is not currently applied to filtered text.
+           The primary filter is blur, for which contrast makes no sense,
+           and for which the destination guess error is more visible.
+           Also, all existing users of blur have calibrated for linear. */
+        rec->ignorePreBlend();
+    }
+    if (ra) {
+        raBuffer->writeFlattenable(ra);
+        descSize += raBuffer->bytesWritten();
+        entryCount += 1;
+        rec->fMaskFormat = SkMask::kA8_Format;  // force antialiasing when we do the scan conversion
+    }
+
+    ///////////////////////////////////////////////////////////////////////////
+    // Now that we're done tweaking the rec, call the PostMakeRec cleanup
+    SkScalerContext::PostMakeRec(paint, rec);
+
+    descSize += SkDescriptor::ComputeOverhead(entryCount);
+    return descSize;
+}
+
+#ifdef TEST_DESC
+static void test_desc(const SkScalerContext::Rec& rec,
+                      const SkPathEffect* pe, SkWriteBuffer* peBuffer,
+                      const SkMaskFilter* mf, SkWriteBuffer* mfBuffer,
+                      const SkRasterizer* ra, SkWriteBuffer* raBuffer,
+                      const SkDescriptor* desc, size_t descSize) {
+    // Check that we completely write the bytes in desc (our key), and that
+    // there are no uninitialized bytes. If there were, then we would get
+    // false-misses (or worse, false-hits) in our fontcache.
+    //
+    // We do this buy filling 2 others, one with 0s and the other with 1s
+    // and create those, and then check that all 3 are identical.
+    SkAutoDescriptor    ad1(descSize);
+    SkAutoDescriptor    ad2(descSize);
+    SkDescriptor*       desc1 = ad1.getDesc();
+    SkDescriptor*       desc2 = ad2.getDesc();
+
+    memset(desc1, 0x00, descSize);
+    memset(desc2, 0xFF, descSize);
+
+    desc1->init();
+    desc2->init();
+    desc1->addEntry(kRec_SkDescriptorTag, sizeof(rec), &rec);
+    desc2->addEntry(kRec_SkDescriptorTag, sizeof(rec), &rec);
+
+    if (pe) {
+        add_flattenable(desc1, kPathEffect_SkDescriptorTag, peBuffer);
+        add_flattenable(desc2, kPathEffect_SkDescriptorTag, peBuffer);
+    }
+    if (mf) {
+        add_flattenable(desc1, kMaskFilter_SkDescriptorTag, mfBuffer);
+        add_flattenable(desc2, kMaskFilter_SkDescriptorTag, mfBuffer);
+    }
+    if (ra) {
+        add_flattenable(desc1, kRasterizer_SkDescriptorTag, raBuffer);
+        add_flattenable(desc2, kRasterizer_SkDescriptorTag, raBuffer);
+    }
+
+    SkASSERT(descSize == desc1->getLength());
+    SkASSERT(descSize == desc2->getLength());
+    desc1->computeChecksum();
+    desc2->computeChecksum();
+    SkASSERT(!memcmp(desc, desc1, descSize));
+    SkASSERT(!memcmp(desc, desc2, descSize));
+}
+#endif
+
+/* see the note on ignoreGamma on descriptorProc */
+void SkPaint::getScalerContextDescriptor(SkAutoDescriptor* ad,
+                                         const SkDeviceProperties* deviceProperties,
+                                         const SkMatrix* deviceMatrix, bool ignoreGamma) const {
+    SkScalerContext::Rec    rec;
+
+    SkPathEffect*   pe = this->getPathEffect();
+    SkMaskFilter*   mf = this->getMaskFilter();
+    SkRasterizer*   ra = this->getRasterizer();
+
+    SkWriteBuffer   peBuffer, mfBuffer, raBuffer;
+    size_t descSize = fill_out_rec(*this, &rec, deviceProperties, deviceMatrix, ignoreGamma,
+                                   pe, &peBuffer, mf, &mfBuffer, ra, &raBuffer);
+
+    ad->reset(descSize);
+    SkDescriptor* desc = ad->getDesc();
+
+    write_out_descriptor(desc, rec, pe, &peBuffer, mf, &mfBuffer, ra, &raBuffer, descSize);
+
+    SkASSERT(descSize == desc->getLength());
+
+#ifdef TEST_DESC
+    test_desc(rec, pe, &peBuffer, mf, &mfBuffer, ra, &raBuffer, desc, descSize);
+#endif
+}
+
 /*
  *  ignoreGamma tells us that the caller just wants metrics that are unaffected
  *  by gamma correction, so we set the rec to ignore preblend: i.e. gamma = 1,
@@ -1608,110 +1741,23 @@ void SkPaint::descriptorProc(const SkDeviceProperties* deviceProperties,
                              void* context, bool ignoreGamma) const {
     SkScalerContext::Rec    rec;
 
-    SkScalerContext::MakeRec(*this, deviceProperties, deviceMatrix, &rec);
-    if (ignoreGamma) {
-        rec.ignorePreBlend();
-    }
-
-    size_t          descSize = sizeof(rec);
-    int             entryCount = 1;
     SkPathEffect*   pe = this->getPathEffect();
     SkMaskFilter*   mf = this->getMaskFilter();
     SkRasterizer*   ra = this->getRasterizer();
 
-    SkWriteBuffer    peBuffer, mfBuffer, raBuffer;
-
-    if (pe) {
-        peBuffer.writeFlattenable(pe);
-        descSize += peBuffer.bytesWritten();
-        entryCount += 1;
-        rec.fMaskFormat = SkMask::kA8_Format;   // force antialiasing when we do the scan conversion
-        // seems like we could support kLCD as well at this point...
-    }
-    if (mf) {
-        mfBuffer.writeFlattenable(mf);
-        descSize += mfBuffer.bytesWritten();
-        entryCount += 1;
-        rec.fMaskFormat = SkMask::kA8_Format;   // force antialiasing with maskfilters
-        /* Pre-blend is not currently applied to filtered text.
-           The primary filter is blur, for which contrast makes no sense,
-           and for which the destination guess error is more visible.
-           Also, all existing users of blur have calibrated for linear. */
-        rec.ignorePreBlend();
-    }
-    if (ra) {
-        raBuffer.writeFlattenable(ra);
-        descSize += raBuffer.bytesWritten();
-        entryCount += 1;
-        rec.fMaskFormat = SkMask::kA8_Format;   // force antialiasing when we do the scan conversion
-    }
-
-    ///////////////////////////////////////////////////////////////////////////
-    // Now that we're done tweaking the rec, call the PostMakeRec cleanup
-    SkScalerContext::PostMakeRec(*this, &rec);
-
-    descSize += SkDescriptor::ComputeOverhead(entryCount);
+    SkWriteBuffer   peBuffer, mfBuffer, raBuffer;
+    size_t descSize = fill_out_rec(*this, &rec, deviceProperties, deviceMatrix, ignoreGamma,
+                                   pe, &peBuffer, mf, &mfBuffer, ra, &raBuffer);
 
     SkAutoDescriptor    ad(descSize);
     SkDescriptor*       desc = ad.getDesc();
 
-    desc->init();
-    desc->addEntry(kRec_SkDescriptorTag, sizeof(rec), &rec);
-
-    if (pe) {
-        add_flattenable(desc, kPathEffect_SkDescriptorTag, &peBuffer);
-    }
-    if (mf) {
-        add_flattenable(desc, kMaskFilter_SkDescriptorTag, &mfBuffer);
-    }
-    if (ra) {
-        add_flattenable(desc, kRasterizer_SkDescriptorTag, &raBuffer);
-    }
+    write_out_descriptor(desc, rec, pe, &peBuffer, mf, &mfBuffer, ra, &raBuffer, descSize);
 
     SkASSERT(descSize == desc->getLength());
-    desc->computeChecksum();
 
 #ifdef TEST_DESC
-    {
-        // Check that we completely write the bytes in desc (our key), and that
-        // there are no uninitialized bytes. If there were, then we would get
-        // false-misses (or worse, false-hits) in our fontcache.
-        //
-        // We do this buy filling 2 others, one with 0s and the other with 1s
-        // and create those, and then check that all 3 are identical.
-        SkAutoDescriptor    ad1(descSize);
-        SkAutoDescriptor    ad2(descSize);
-        SkDescriptor*       desc1 = ad1.getDesc();
-        SkDescriptor*       desc2 = ad2.getDesc();
-
-        memset(desc1, 0x00, descSize);
-        memset(desc2, 0xFF, descSize);
-
-        desc1->init();
-        desc2->init();
-        desc1->addEntry(kRec_SkDescriptorTag, sizeof(rec), &rec);
-        desc2->addEntry(kRec_SkDescriptorTag, sizeof(rec), &rec);
-
-        if (pe) {
-            add_flattenable(desc1, kPathEffect_SkDescriptorTag, &peBuffer);
-            add_flattenable(desc2, kPathEffect_SkDescriptorTag, &peBuffer);
-        }
-        if (mf) {
-            add_flattenable(desc1, kMaskFilter_SkDescriptorTag, &mfBuffer);
-            add_flattenable(desc2, kMaskFilter_SkDescriptorTag, &mfBuffer);
-        }
-        if (ra) {
-            add_flattenable(desc1, kRasterizer_SkDescriptorTag, &raBuffer);
-            add_flattenable(desc2, kRasterizer_SkDescriptorTag, &raBuffer);
-        }
-
-        SkASSERT(descSize == desc1->getLength());
-        SkASSERT(descSize == desc2->getLength());
-        desc1->computeChecksum();
-        desc2->computeChecksum();
-        SkASSERT(!memcmp(desc, desc1, descSize));
-        SkASSERT(!memcmp(desc, desc2, descSize));
-    }
+    test_desc(rec, pe, &peBuffer, mf, &mfBuffer, ra, &raBuffer, desc, descSize);
 #endif
 
     proc(fTypeface, desc, context);
@@ -1847,7 +1893,7 @@ static FlatFlags unpack_paint_flags(SkPaint* paint, uint32_t packed) {
     paint->setFlags(packed >> 16);
     paint->setHinting((SkPaint::Hinting)((packed >> 14) & BPF_Mask(kHint_BPF)));
     paint->setTextAlign((SkPaint::Align)((packed >> 12) & BPF_Mask(kAlign_BPF)));
-    paint->setFilterLevel((SkPaint::FilterLevel)((packed >> 10) & BPF_Mask(kFilter_BPF)));
+    paint->setFilterQuality((SkFilterQuality)((packed >> 10) & BPF_Mask(kFilter_BPF)));
     return (FlatFlags)(packed & kFlatFlagMask);
 }
 
@@ -1888,7 +1934,7 @@ void SkPaint::flatten(SkWriteBuffer& buffer) const {
     *ptr++ = this->getColor();
 
     *ptr++ = pack_paint_flags(this->getFlags(), this->getHinting(), this->getTextAlign(),
-                              this->getFilterLevel(), flatFlags);
+                              this->getFilterQuality(), flatFlags);
     *ptr++ = pack_4(this->getStrokeCap(), this->getStrokeJoin(),
                     this->getStyle(), this->getTextEncoding());
 
@@ -2003,9 +2049,9 @@ SkMaskFilter* SkPaint::setMaskFilter(SkMaskFilter* filter) {
 
 ///////////////////////////////////////////////////////////////////////////////
 
-bool SkPaint::getFillPath(const SkPath& src, SkPath* dst,
-                          const SkRect* cullRect) const {
-    SkStrokeRec rec(*this);
+bool SkPaint::getFillPath(const SkPath& src, SkPath* dst, const SkRect* cullRect,
+                          SkScalar resScale) const {
+    SkStrokeRec rec(*this, resScale);
 
     const SkPath* srcPtr = &src;
     SkPath tmpPath;
@@ -2084,7 +2130,7 @@ void SkPaint::toString(SkString* str) const {
     if (typeface) {
         SkDynamicMemoryWStream ostream;
         typeface->serialize(&ostream);
-        SkAutoTUnref<SkStreamAsset> istream(ostream.detachAsStream());
+        SkAutoTDelete<SkStreamAsset> istream(ostream.detachAsStream());
         SkFontDescriptor descriptor(istream);
 
         str->append("<dt>Font Family Name:</dt><dd>");
@@ -2113,6 +2159,7 @@ void SkPaint::toString(SkString* str) const {
     SkPathEffect* pathEffect = this->getPathEffect();
     if (pathEffect) {
         str->append("<dt>PathEffect:</dt><dd>");
+        pathEffect->toString(str);
         str->append("</dd>");
     }
 
@@ -2207,8 +2254,8 @@ void SkPaint::toString(SkString* str) const {
     str->append(")</dd>");
 
     str->append("<dt>FilterLevel:</dt><dd>");
-    static const char* gFilterLevelStrings[] = { "None", "Low", "Medium", "High" };
-    str->append(gFilterLevelStrings[this->getFilterLevel()]);
+    static const char* gFilterQualityStrings[] = { "None", "Low", "Medium", "High" };
+    str->append(gFilterQualityStrings[this->getFilterQuality()]);
     str->append("</dd>");
 
     str->append("<dt>TextAlign:</dt><dd>");

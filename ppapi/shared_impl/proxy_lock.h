@@ -59,12 +59,11 @@ class PPAPI_SHARED_EXPORT ProxyLock {
   // We have some unit tests where one thread pretends to be the host and one
   // pretends to be the plugin. This allows the lock to do nothing on only one
   // thread to support these tests. See TwoWayTest for more information.
-  static void DisableLockingOnThreadForTest();
-
-  // Enables locking on the current thread. Although locking is enabled by
-  // default, unit tests that rely on the lock being enabled should *still*
-  // call this, since a previous test may have disabled locking.
-  static void EnableLockingOnThreadForTest();
+  class PPAPI_SHARED_EXPORT LockingDisablerForTest {
+   public:
+    LockingDisablerForTest();
+    ~LockingDisablerForTest();
+  };
 
  private:
   friend class content::HostGlobals;
@@ -176,9 +175,6 @@ class RunWhileLockedHelper<void()> {
   typedef base::Callback<void()> CallbackType;
   explicit RunWhileLockedHelper(const CallbackType& callback)
       : callback_(new CallbackType(callback)) {
-    // Copying |callback| may adjust reference counts for bound Vars or
-    // Resources; we should have the lock already.
-    ProxyLock::AssertAcquired();
     // CallWhileLocked and destruction might happen on a different thread from
     // creation.
     thread_checker_.DetachFromThread();
@@ -239,7 +235,6 @@ class RunWhileLockedHelper<void(P1)> {
   typedef base::Callback<void(P1)> CallbackType;
   explicit RunWhileLockedHelper(const CallbackType& callback)
       : callback_(new CallbackType(callback)) {
-    ProxyLock::AssertAcquired();
     thread_checker_.DetachFromThread();
   }
   void CallWhileLocked(P1 p1) {
@@ -269,7 +264,6 @@ class RunWhileLockedHelper<void(P1, P2)> {
   typedef base::Callback<void(P1, P2)> CallbackType;
   explicit RunWhileLockedHelper(const CallbackType& callback)
       : callback_(new CallbackType(callback)) {
-    ProxyLock::AssertAcquired();
     thread_checker_.DetachFromThread();
   }
   void CallWhileLocked(P1 p1, P2 p2) {
@@ -299,7 +293,6 @@ class RunWhileLockedHelper<void(P1, P2, P3)> {
   typedef base::Callback<void(P1, P2, P3)> CallbackType;
   explicit RunWhileLockedHelper(const CallbackType& callback)
       : callback_(new CallbackType(callback)) {
-    ProxyLock::AssertAcquired();
     thread_checker_.DetachFromThread();
   }
   void CallWhileLocked(P1 p1, P2 p2, P3 p3) {

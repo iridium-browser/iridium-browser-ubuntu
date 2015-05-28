@@ -7,41 +7,31 @@
 
 #include "core/animation/LengthStyleInterpolation.h"
 #include "core/css/CSSBorderImageSliceValue.h"
+#include "core/css/Rect.h"
 
 namespace blink {
 
 class LengthBoxStyleInterpolation : public StyleInterpolation {
 public:
-    static PassRefPtrWillBeRawPtr<LengthBoxStyleInterpolation> create(const CSSValue& start, const CSSValue& end, CSSPropertyID id)
-    {
-        return adoptRefWillBeNoop(new LengthBoxStyleInterpolation(lengthBoxtoInterpolableValue(start), lengthBoxtoInterpolableValue(end), id, false));
-    }
+    static PassRefPtrWillBeRawPtr<LengthBoxStyleInterpolation> maybeCreateFrom(CSSValue&, CSSValue&, CSSPropertyID);
 
-    static PassRefPtrWillBeRawPtr<LengthBoxStyleInterpolation> createFromBorderImageSlice(CSSValue& start, CSSValue& end, CSSPropertyID id)
-    {
-        return adoptRefWillBeNoop(new LengthBoxStyleInterpolation(borderImageSlicetoInterpolableValue(start), borderImageSlicetoInterpolableValue(end), id, toCSSBorderImageSliceValue(start).m_fill));
-    }
-
-    static bool canCreateFrom(const CSSValue&);
-
-    static bool matchingFill(CSSValue&, CSSValue&);
-    static bool canCreateFromBorderImageSlice(CSSValue&);
+    static bool usesDefaultInterpolation(const CSSValue&, const CSSValue&);
 
     virtual void apply(StyleResolverState&) const override;
-    virtual void trace(Visitor*) override;
+    DECLARE_VIRTUAL_TRACE();
 
 private:
-    LengthBoxStyleInterpolation(PassOwnPtrWillBeRawPtr<InterpolableValue> start, PassOwnPtrWillBeRawPtr<InterpolableValue> end, CSSPropertyID id, bool fill)
-        : StyleInterpolation(start, end, id)
-        , m_fill(fill)
+    LengthBoxStyleInterpolation(PassOwnPtrWillBeRawPtr<InterpolableValue> startInterpolation, PassOwnPtrWillBeRawPtr<InterpolableValue> endInterpolation, CSSPropertyID id, CSSValue* startCSS, CSSValue* endCSS)
+        : StyleInterpolation(startInterpolation, endInterpolation, id)
+        , m_startCSSValue(startCSS)
+        , m_endCSSValue(endCSS)
     { }
 
-    static PassOwnPtrWillBeRawPtr<InterpolableValue> lengthBoxtoInterpolableValue(const CSSValue&);
-    static PassOwnPtrWillBeRawPtr<InterpolableValue> borderImageSlicetoInterpolableValue(CSSValue&);
-    static PassRefPtrWillBeRawPtr<CSSValue> interpolableValueToLengthBox(InterpolableValue*);
-    static PassRefPtrWillBeRawPtr<CSSValue> interpolableValueToBorderImageSlice(InterpolableValue*, bool);
+    static PassOwnPtrWillBeRawPtr<InterpolableValue> lengthBoxtoInterpolableValue(const CSSValue&, const CSSValue&, bool);
+    static PassRefPtrWillBeRawPtr<CSSValue> interpolableValueToLengthBox(InterpolableValue*, const CSSValue&, const CSSValue&);
 
-    bool m_fill;
+    RefPtrWillBeMember<CSSValue> m_startCSSValue;
+    RefPtrWillBeMember<CSSValue> m_endCSSValue;
 
     friend class AnimationLengthBoxStyleInterpolationTest;
 };
@@ -49,5 +39,3 @@ private:
 } // namespace blink
 
 #endif // LengthBoxStyleInterpolation_h
-
-

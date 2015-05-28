@@ -42,7 +42,8 @@ SUMMARY_RESULT_OUTPUT_CONTEXT = 'summary-result-output-context'
 class Value(object):
   """An abstract value produced by a telemetry page test.
   """
-  def __init__(self, page, name, units, important, description):
+  def __init__(self, page, name, units, important, description,
+               tir_label):
     """A generic Value object.
 
     Args:
@@ -56,17 +57,35 @@ class Value(object):
           by default in downstream UIs.
       description: A string explaining in human-understandable terms what this
           value represents.
+      tir_label: The string label of the TimelineInteractionRecord with
+          which this value is associated.
     """
+    # TODO(eakuefner): Check user story here after migration (crbug.com/442036)
+    if not isinstance(name, basestring):
+      raise ValueError('name field of Value must be string.')
+    if not isinstance(units, basestring):
+      raise ValueError('units field of Value must be string.')
+    if not isinstance(important, bool):
+      raise ValueError('important field of Value must be bool.')
+    if not ((description is None) or isinstance(description, basestring)):
+      raise ValueError('description field of Value must absent or string.')
+    if not ((tir_label is None) or
+            isinstance(tir_label, basestring)):
+      raise ValueError('tir_label field of Value must absent or '
+                       'string.')
+
     self.page = page
     self.name = name
     self.units = units
     self.important = important
     self.description = description
+    self.tir_label = tir_label
 
   def IsMergableWith(self, that):
     return (self.units == that.units and
             type(self) == type(that) and
-            self.important == that.important)
+            self.important == that.important and
+            self.tir_label == that.tir_label)
 
   @classmethod
   def MergeLikeValuesFromSamePage(cls, values):
@@ -186,6 +205,9 @@ class Value(object):
     if self.description:
       d['description'] = self.description
 
+    if self.tir_label:
+      d['tir_label'] = self.tir_label
+
     if self.page:
       d['page_id'] = self.page.id
 
@@ -271,6 +293,12 @@ class Value(object):
       d['page'] = None
 
     d['important'] = False
+
+    tir_label = value_dict.get('tir_label', None)
+    if tir_label:
+      d['tir_label'] = tir_label
+    else:
+      d['tir_label'] = None
 
     return d
 

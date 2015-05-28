@@ -38,19 +38,19 @@ StyleSheetList::StyleSheetList(TreeScope* treeScope)
 
 DEFINE_EMPTY_DESTRUCTOR_WILL_BE_REMOVED(StyleSheetList);
 
-inline const WillBeHeapVector<RefPtrWillBeMember<StyleSheet> >& StyleSheetList::styleSheets()
+inline const WillBeHeapVector<RefPtrWillBeMember<StyleSheet>>& StyleSheetList::styleSheets()
 {
 #if !ENABLE(OILPAN)
     if (!m_treeScope)
         return m_detachedStyleSheets;
 #endif
-    return document()->styleEngine()->styleSheetsForStyleSheetList(*m_treeScope);
+    return document()->styleEngine().styleSheetsForStyleSheetList(*m_treeScope);
 }
 
 #if !ENABLE(OILPAN)
 void StyleSheetList::detachFromDocument()
 {
-    m_detachedStyleSheets = document()->styleEngine()->styleSheetsForStyleSheetList(*m_treeScope);
+    m_detachedStyleSheets = document()->styleEngine().styleSheetsForStyleSheetList(*m_treeScope);
     m_treeScope = nullptr;
 }
 #endif
@@ -62,7 +62,7 @@ unsigned StyleSheetList::length()
 
 StyleSheet* StyleSheetList::item(unsigned index)
 {
-    const WillBeHeapVector<RefPtrWillBeMember<StyleSheet> >& sheets = styleSheets();
+    const WillBeHeapVector<RefPtrWillBeMember<StyleSheet>>& sheets = styleSheets();
     return index < sheets.size() ? sheets[index].get() : 0;
 }
 
@@ -91,7 +91,7 @@ CSSStyleSheet* StyleSheetList::anonymousNamedGetter(const AtomicString& name)
     return item->sheet();
 }
 
-void StyleSheetList::trace(Visitor* visitor)
+DEFINE_TRACE(StyleSheetList)
 {
     visitor->trace(m_treeScope);
 }

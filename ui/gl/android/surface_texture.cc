@@ -15,8 +15,7 @@
 #include "ui/gl/android/surface_texture_listener.h"
 #include "ui/gl/gl_bindings.h"
 
-// TODO(boliu): Remove this method when when we move off ICS. See
-// http://crbug.com/161864.
+// TODO(boliu): Remove this method when Chromium stops supporting ICS.
 bool GlContextMethodsAvailable() {
   bool available = base::android::BuildInfo::GetInstance()->sdk_int() >= 16;
   if (!available)
@@ -86,19 +85,6 @@ void SurfaceTexture::GetTransformMatrix(float mtx[16]) {
     mtx[i] = static_cast<float>(elements[i]);
   }
   env->ReleaseFloatArrayElements(jmatrix.obj(), elements, JNI_ABORT);
-}
-
-void SurfaceTexture::SetDefaultBufferSize(int width, int height) {
-  JNIEnv* env = base::android::AttachCurrentThread();
-
-  if (width > 0 && height > 0) {
-    Java_SurfaceTexturePlatformWrapper_setDefaultBufferSize(
-        env, j_surface_texture_.obj(), static_cast<jint>(width),
-        static_cast<jint>(height));
-  } else {
-    LOG(WARNING) << "Not setting surface texture buffer size - "
-                    "width or height is 0";
-  }
 }
 
 void SurfaceTexture::AttachToGLContext() {

@@ -3,6 +3,8 @@
 # found in the LICENSE file.
 
 import os
+import json
+import logging
 
 from pylib import constants
 from pylib.base import test_instance
@@ -10,18 +12,37 @@ from pylib.utils import apk_helper
 
 class UirobotTestInstance(test_instance.TestInstance):
 
-  def __init__(self, args):
+  def __init__(self, args, error_func):
     """Constructor.
 
     Args:
       args: Command line arguments.
     """
     super(UirobotTestInstance, self).__init__()
-    self._apk_under_test = os.path.join(
-        constants.GetOutDirectory(), args.apk_under_test)
+    if not args.app_under_test:
+      error_func('Must set --app-under-test.')
+    self._app_under_test = args.app_under_test
     self._minutes = args.minutes
-    self._package_name = apk_helper.GetPackageName(self._apk_under_test)
-    self._suite = 'Android Uirobot'
+
+    if args.remote_device_file:
+      with open(args.remote_device_file) as remote_device_file:
+        device_json = json.load(remote_device_file)
+    else:
+      device_json = {}
+    device_type = device_json.get('device_type', 'Android')
+    if args.device_type:
+      if device_type and device_type != args.device_type:
+        logging.info('Overriding device_type from %s to %s',
+                     device_type, args.device_type)
+      device_type = args.device_type
+
+    if device_type == 'Android':
+      self._suite = 'Android Uirobot'
+      self._package_name = apk_helper.GetPackageName(self._app_under_test)
+    elif device_type == 'iOS':
+      self._suite = 'iOS Uirobot'
+      self._package_name = self._app_under_test
+
 
   #override
   def TestType(self):
@@ -39,9 +60,9 @@ class UirobotTestInstance(test_instance.TestInstance):
     pass
 
   @property
-  def apk_under_test(self):
+  def app_under_test(self):
     """Returns the app to run the test on."""
-    return self._apk_under_test
+    return self._app_under_test
 
   @property
   def minutes(self):

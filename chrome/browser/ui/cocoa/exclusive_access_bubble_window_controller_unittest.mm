@@ -10,6 +10,7 @@
 #include "chrome/browser/ui/cocoa/browser_window_controller.h"
 #include "chrome/browser/ui/cocoa/cocoa_profile_test.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
+#include "chrome/grit/generated_resources.h"
 #include "chrome/test/base/testing_profile.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/site_instance.h"
@@ -17,6 +18,9 @@
 #include "content/public/test/test_utils.h"
 #include "testing/gtest_mac.h"
 #include "ui/base/accelerators/platform_accelerator_cocoa.h"
+#include "ui/base/l10n/l10n_util.h"
+#include "ui/base/l10n/l10n_util_mac.h"
+#import "ui/base/cocoa/controls/hyperlink_text_view.h"
 
 using content::SiteInstance;
 using content::WebContents;
@@ -26,11 +30,13 @@ using content::WebContents;
 + (NSString*)keyCommandString;
 + (NSString*)keyCombinationForAccelerator:
         (const ui::PlatformAcceleratorCocoa&)item;
+- (void)initializeLabelAndButton;
 @end
 
 @interface ExclusiveAccessBubbleWindowController (ExposedForTesting)
 - (NSTextField*)exitLabelPlaceholder;
 - (NSTextView*)exitLabel;
+- (NSString*)denyButtonText;
 @end
 
 @implementation ExclusiveAccessBubbleWindowController (ExposedForTesting)
@@ -38,8 +44,12 @@ using content::WebContents;
   return exitLabelPlaceholder_;
 }
 
-- (NSTextView*)exitLabel {
+- (HyperlinkTextView*)exitLabel {
   return exitLabel_;
+}
+
+- (NSString*)denyButtonText {
+  return [denyButton_ title];
 }
 @end
 
@@ -51,11 +61,12 @@ class ExclusiveAccessBubbleWindowControllerTest : public CocoaProfileTest {
 
     site_instance_ = SiteInstance::Create(profile());
     controller_.reset([[ExclusiveAccessBubbleWindowController alloc]
-        initWithOwner:nil
-              browser:browser()
-                  url:GURL()
-           bubbleType:
-               EXCLUSIVE_ACCESS_BUBBLE_TYPE_BROWSER_FULLSCREEN_EXIT_INSTRUCTION]);
+                   initWithOwner:nil
+        exclusive_access_manager:browser()->exclusive_access_manager()
+                         profile:browser()->profile()
+                             url:GURL()
+                      bubbleType:
+                          EXCLUSIVE_ACCESS_BUBBLE_TYPE_BROWSER_FULLSCREEN_EXIT_INSTRUCTION]);
     EXPECT_TRUE([controller_ window]);
   }
 
@@ -93,7 +104,7 @@ TEST_F(ExclusiveAccessBubbleWindowControllerTest,
     content::WindowedNotificationObserver fullscreen_observer(
         chrome::NOTIFICATION_FULLSCREEN_CHANGED,
         content::NotificationService::AllSources());
-    browser()->ToggleFullscreenModeForTab(fullscreen_tab, true);
+    browser()->EnterFullscreenModeForTab(fullscreen_tab, GURL());
     fullscreen_observer.Wait();
     ASSERT_TRUE(browser()->window()->IsFullscreen());
   }
@@ -128,4 +139,31 @@ TEST_F(ExclusiveAccessBubbleWindowControllerTest, ShortcutText) {
       keyCombinationForAccelerator:cmd_shift_f];
   EXPECT_NSEQ(cmd_shift_f_text, cmd_F_text);
   EXPECT_NSEQ(@"\u2318\u21E7F", cmd_shift_f_text);
+}
+
+// http://crbug.com/139944
+TEST_F(ExclusiveAccessBubbleWindowControllerTest, DenyButtonText) {
+  controller_.reset([[ExclusiveAccessBubbleWindowController alloc]
+                 initWithOwner:nil
+      exclusive_access_manager:browser()->exclusive_access_manager()
+                       profile:browser()->profile()
+                           url:GURL()
+                    bubbleType:EXCLUSIVE_ACCESS_BUBBLE_TYPE_MOUSELOCK_BUTTONS]);
+  [controller_ initializeLabelAndButton];
+  NSString* mouselock_deny_button_text = [controller_ denyButtonText];
+  EXPECT_NSEQ(l10n_util::GetNSString(IDS_FULLSCREEN_DENY),
+    mouselock_deny_button_text);
+
+  controller_.reset([[ExclusiveAccessBubbleWindowController alloc]
+                 initWithOwner:nil
+      exclusive_access_manager:browser()->exclusive_access_manager()
+                       profile:browser()->profile()
+                           url:GURL()
+                    bubbleType:
+                        EXCLUSIVE_ACCESS_BUBBLE_TYPE_FULLSCREEN_MOUSELOCK_BUTTONS]);
+  [controller_ initializeLabelAndButton];
+  NSString* fullscreen_mouselock_deny_button_text =
+      [controller_ denyButtonText];
+  EXPECT_NSEQ(l10n_util::GetNSString(IDS_FULLSCREEN_EXIT),
+    fullscreen_mouselock_deny_button_text);
 }

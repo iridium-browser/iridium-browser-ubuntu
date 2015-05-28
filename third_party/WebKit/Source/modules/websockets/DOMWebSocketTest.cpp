@@ -7,12 +7,15 @@
 
 #include "bindings/core/v8/ExceptionState.h"
 #include "bindings/core/v8/V8Binding.h"
+#include "bindings/core/v8/V8BindingForTesting.h"
 #include "core/dom/DOMTypedArray.h"
 #include "core/dom/Document.h"
 #include "core/dom/ExceptionCode.h"
+#include "core/dom/SecurityContext.h"
 #include "core/fileapi/Blob.h"
 #include "core/frame/ConsoleTypes.h"
 #include "core/testing/DummyPageHolder.h"
+#include "platform/heap/Handle.h"
 #include "wtf/OwnPtr.h"
 #include "wtf/Vector.h"
 #include "wtf/testing/WTFTestHelpers.h"
@@ -31,7 +34,7 @@ namespace blink {
 
 namespace {
 
-typedef testing::StrictMock<testing::MockFunction<void(int)> > Checkpoint;  // NOLINT
+typedef testing::StrictMock<testing::MockFunction<void(int)>> Checkpoint;  // NOLINT
 
 class MockWebSocketChannel : public WebSocketChannel {
 public:
@@ -48,7 +51,7 @@ public:
     MOCK_METHOD1(send, void(const String&));
     MOCK_METHOD3(send, void(const DOMArrayBuffer&, unsigned, unsigned));
     MOCK_METHOD1(send, void(PassRefPtr<BlobDataHandle>));
-    MOCK_METHOD1(send, void(PassOwnPtr<Vector<char> >));
+    MOCK_METHOD1(send, void(PassOwnPtr<Vector<char>>));
     MOCK_CONST_METHOD0(bufferedAmount, unsigned());
     MOCK_METHOD2(close, void(int, const String&));
     MOCK_METHOD4(fail, void(const String&, MessageLevel, const String&, unsigned));
@@ -77,7 +80,7 @@ public:
         return m_channel.get();
     }
 
-    virtual void trace(Visitor* visitor) override
+    DEFINE_INLINE_VIRTUAL_TRACE()
     {
         visitor->trace(m_channel);
         DOMWebSocket::trace(visitor);
@@ -185,6 +188,36 @@ TEST_F(DOMWebSocketTest, invalidSubprotocols)
     EXPECT_EQ(SyntaxError, m_exceptionState.code());
     EXPECT_EQ("The subprotocol '@subprotocol-|'\"x\\u0001\\u0002\\u0003x' is invalid.", m_exceptionState.message());
     EXPECT_EQ(DOMWebSocket::CLOSED, m_websocket->readyState());
+}
+
+TEST_F(DOMWebSocketTest, insecureRequestsUpgrade)
+{
+    {
+        InSequence s;
+        EXPECT_CALL(channel(), connect(KURL(KURL(), "wss://example.com/endpoint"), String())).WillOnce(Return(true));
+    }
+
+    m_pageHolder->document().setInsecureRequestsPolicy(SecurityContext::InsecureRequestsUpgrade);
+    m_websocket->connect("ws://example.com/endpoint", Vector<String>(), m_exceptionState);
+
+    EXPECT_FALSE(m_exceptionState.hadException());
+    EXPECT_EQ(DOMWebSocket::CONNECTING, m_websocket->readyState());
+    EXPECT_EQ(KURL(KURL(), "wss://example.com/endpoint"), m_websocket->url());
+}
+
+TEST_F(DOMWebSocketTest, insecureRequestsDoNotUpgrade)
+{
+    {
+        InSequence s;
+        EXPECT_CALL(channel(), connect(KURL(KURL(), "ws://example.com/endpoint"), String())).WillOnce(Return(true));
+    }
+
+    m_pageHolder->document().setInsecureRequestsPolicy(SecurityContext::InsecureRequestsDoNotUpgrade);
+    m_websocket->connect("ws://example.com/endpoint", Vector<String>(), m_exceptionState);
+
+    EXPECT_FALSE(m_exceptionState.hadException());
+    EXPECT_EQ(DOMWebSocket::CONNECTING, m_websocket->readyState());
+    EXPECT_EQ(KURL(KURL(), "ws://example.com/endpoint"), m_websocket->url());
 }
 
 TEST_F(DOMWebSocketTest, channelConnectSuccess)

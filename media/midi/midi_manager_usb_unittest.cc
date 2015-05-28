@@ -86,6 +86,10 @@ class FakeMidiManagerClient : public MidiManagerClient {
     output_ports_.push_back(info);
   }
 
+  void SetInputPortState(uint32 port_index, MidiPortState state) override {}
+
+  void SetOutputPortState(uint32 port_index, MidiPortState state) override {}
+
   void CompleteStartSession(MidiResult result) override {
     complete_start_session_ = true;
     result_ = result;
@@ -239,15 +243,58 @@ TEST_F(MidiManagerUsbTest, Initialize) {
   ASSERT_EQ(1u, input_ports().size());
   ASSERT_EQ(2u, output_ports().size());
   ASSERT_TRUE(manager_->input_stream());
-  std::vector<UsbMidiInputStream::JackUniqueKey> keys =
-      manager_->input_stream()->RegisteredJackKeysForTesting();
+  std::vector<UsbMidiJack> jacks = manager_->input_stream()->jacks();
   ASSERT_EQ(2u, manager_->output_streams().size());
   EXPECT_EQ(2u, manager_->output_streams()[0]->jack().jack_id);
   EXPECT_EQ(3u, manager_->output_streams()[1]->jack().jack_id);
-  ASSERT_EQ(1u, keys.size());
-  EXPECT_EQ(2, keys[0].endpoint_number);
+  ASSERT_EQ(1u, jacks.size());
+  EXPECT_EQ(2, jacks[0].endpoint_number());
 
   EXPECT_EQ("UsbMidiDevice::GetDescriptor\n", logger_.TakeLog());
+}
+
+TEST_F(MidiManagerUsbTest, InitializeMultipleDevices) {
+  scoped_ptr<FakeUsbMidiDevice> device1(new FakeUsbMidiDevice(&logger_));
+  scoped_ptr<FakeUsbMidiDevice> device2(new FakeUsbMidiDevice(&logger_));
+  uint8 descriptor[] = {
+      0x12, 0x01, 0x10, 0x01, 0x00, 0x00, 0x00, 0x08, 0x86, 0x1a, 0x2d, 0x75,
+      0x54, 0x02, 0x00, 0x02, 0x00, 0x01, 0x09, 0x02, 0x75, 0x00, 0x02, 0x01,
+      0x00, 0x80, 0x30, 0x09, 0x04, 0x00, 0x00, 0x00, 0x01, 0x01, 0x00, 0x00,
+      0x09, 0x24, 0x01, 0x00, 0x01, 0x09, 0x00, 0x01, 0x01, 0x09, 0x04, 0x01,
+      0x00, 0x02, 0x01, 0x03, 0x00, 0x00, 0x07, 0x24, 0x01, 0x00, 0x01, 0x51,
+      0x00, 0x06, 0x24, 0x02, 0x01, 0x02, 0x00, 0x06, 0x24, 0x02, 0x01, 0x03,
+      0x00, 0x06, 0x24, 0x02, 0x02, 0x06, 0x00, 0x09, 0x24, 0x03, 0x01, 0x07,
+      0x01, 0x06, 0x01, 0x00, 0x09, 0x24, 0x03, 0x02, 0x04, 0x01, 0x02, 0x01,
+      0x00, 0x09, 0x24, 0x03, 0x02, 0x05, 0x01, 0x03, 0x01, 0x00, 0x09, 0x05,
+      0x02, 0x02, 0x20, 0x00, 0x00, 0x00, 0x00, 0x06, 0x25, 0x01, 0x02, 0x02,
+      0x03, 0x09, 0x05, 0x82, 0x02, 0x20, 0x00, 0x00, 0x00, 0x00, 0x05, 0x25,
+      0x01, 0x01, 0x07,
+  };
+  device1->SetDescriptor(ToVector(descriptor));
+  device2->SetDescriptor(ToVector(descriptor));
+
+  Initialize();
+  ScopedVector<UsbMidiDevice> devices;
+  devices.push_back(device1.release());
+  devices.push_back(device2.release());
+  EXPECT_FALSE(IsInitializationCallbackInvoked());
+  RunCallbackUntilCallbackInvoked(true, &devices);
+  EXPECT_EQ(MIDI_OK, GetInitializationResult());
+
+  ASSERT_EQ(2u, input_ports().size());
+  ASSERT_EQ(4u, output_ports().size());
+  ASSERT_TRUE(manager_->input_stream());
+  std::vector<UsbMidiJack> jacks = manager_->input_stream()->jacks();
+  ASSERT_EQ(4u, manager_->output_streams().size());
+  EXPECT_EQ(2u, manager_->output_streams()[0]->jack().jack_id);
+  EXPECT_EQ(3u, manager_->output_streams()[1]->jack().jack_id);
+  ASSERT_EQ(2u, jacks.size());
+  EXPECT_EQ(2, jacks[0].endpoint_number());
+
+  EXPECT_EQ(
+      "UsbMidiDevice::GetDescriptor\n"
+      "UsbMidiDevice::GetDescriptor\n",
+      logger_.TakeLog());
 }
 
 TEST_F(MidiManagerUsbTest, InitializeFail) {
@@ -307,12 +354,18 @@ TEST_F(MidiManagerUsbTest, Send) {
   ASSERT_EQ(2u, manager_->output_streams().size());
 
   manager_->DispatchSendMidiData(&client, 1, ToVector(data), 0);
+  // Since UsbMidiDevice::Send is posted as a task, RunLoop should run to
+  // invoke the task.
+  // TODO(crbug.com/467442): AccumulateMidiBytesSent is recorded before
+  // UsbMidiDevice is invoked for now, but this should be after the invocation.
+  base::RunLoop run_loop;
+  run_loop.RunUntilIdle();
   EXPECT_EQ("UsbMidiDevice::GetDescriptor\n"
+            "MidiManagerClient::AccumulateMidiBytesSent size = 7\n"
             "UsbMidiDevice::Send endpoint = 2 data = "
             "0x19 0x90 0x45 0x7f "
             "0x14 0xf0 0x00 0x01 "
-            "0x15 0xf7 0x00 0x00\n"
-            "MidiManagerClient::AccumulateMidiBytesSent size = 7\n",
+            "0x15 0xf7 0x00 0x00\n",
             logger_.TakeLog());
 }
 
@@ -406,6 +459,54 @@ TEST_F(MidiManagerUsbTest, Receive) {
             "data = 0xf0 0x00 0x01\n"
             "MidiManagerClient::ReceiveMidiData port_index = 0 data = 0xf7\n",
             logger_.TakeLog());
+}
+
+TEST_F(MidiManagerUsbTest, AttachDevice) {
+  uint8 descriptor[] = {
+    0x12, 0x01, 0x10, 0x01, 0x00, 0x00, 0x00, 0x08, 0x86, 0x1a,
+    0x2d, 0x75, 0x54, 0x02, 0x00, 0x02, 0x00, 0x01, 0x09, 0x02,
+    0x75, 0x00, 0x02, 0x01, 0x00, 0x80, 0x30, 0x09, 0x04, 0x00,
+    0x00, 0x00, 0x01, 0x01, 0x00, 0x00, 0x09, 0x24, 0x01, 0x00,
+    0x01, 0x09, 0x00, 0x01, 0x01, 0x09, 0x04, 0x01, 0x00, 0x02,
+    0x01, 0x03, 0x00, 0x00, 0x07, 0x24, 0x01, 0x00, 0x01, 0x51,
+    0x00, 0x06, 0x24, 0x02, 0x01, 0x02, 0x00, 0x06, 0x24, 0x02,
+    0x01, 0x03, 0x00, 0x06, 0x24, 0x02, 0x02, 0x06, 0x00, 0x09,
+    0x24, 0x03, 0x01, 0x07, 0x01, 0x06, 0x01, 0x00, 0x09, 0x24,
+    0x03, 0x02, 0x04, 0x01, 0x02, 0x01, 0x00, 0x09, 0x24, 0x03,
+    0x02, 0x05, 0x01, 0x03, 0x01, 0x00, 0x09, 0x05, 0x02, 0x02,
+    0x20, 0x00, 0x00, 0x00, 0x00, 0x06, 0x25, 0x01, 0x02, 0x02,
+    0x03, 0x09, 0x05, 0x82, 0x02, 0x20, 0x00, 0x00, 0x00, 0x00,
+    0x05, 0x25, 0x01, 0x01, 0x07,
+  };
+
+  Initialize();
+  ScopedVector<UsbMidiDevice> devices;
+  EXPECT_FALSE(IsInitializationCallbackInvoked());
+  RunCallbackUntilCallbackInvoked(true, &devices);
+  EXPECT_EQ(MIDI_OK, GetInitializationResult());
+
+  ASSERT_EQ(0u, input_ports().size());
+  ASSERT_EQ(0u, output_ports().size());
+  ASSERT_TRUE(manager_->input_stream());
+  std::vector<UsbMidiJack> jacks = manager_->input_stream()->jacks();
+  ASSERT_EQ(0u, manager_->output_streams().size());
+  ASSERT_EQ(0u, jacks.size());
+  EXPECT_EQ("", logger_.TakeLog());
+
+  scoped_ptr<FakeUsbMidiDevice> new_device(new FakeUsbMidiDevice(&logger_));
+  new_device->SetDescriptor(ToVector(descriptor));
+  manager_->OnDeviceAttached(new_device.Pass());
+
+  ASSERT_EQ(1u, input_ports().size());
+  ASSERT_EQ(2u, output_ports().size());
+  ASSERT_TRUE(manager_->input_stream());
+  jacks = manager_->input_stream()->jacks();
+  ASSERT_EQ(2u, manager_->output_streams().size());
+  EXPECT_EQ(2u, manager_->output_streams()[0]->jack().jack_id);
+  EXPECT_EQ(3u, manager_->output_streams()[1]->jack().jack_id);
+  ASSERT_EQ(1u, jacks.size());
+  EXPECT_EQ(2, jacks[0].endpoint_number());
+  EXPECT_EQ("UsbMidiDevice::GetDescriptor\n", logger_.TakeLog());
 }
 
 }  // namespace

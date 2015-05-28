@@ -5,26 +5,27 @@ import logging
 import os
 import sys
 
-from telemetry import decorators
 from telemetry.core import browser_finder
 from telemetry.core import browser_finder_exceptions
-from telemetry.core import browser_info
+from telemetry.core import browser_info as browser_info_module
 from telemetry.core import exceptions
+from telemetry.core.platform.profiler import profiler_finder
 from telemetry.core import util
 from telemetry.core import wpr_modes
-from telemetry.core.platform.profiler import profiler_finder
+from telemetry import decorators
 from telemetry.page import page_test
 from telemetry.user_story import shared_user_story_state
 from telemetry.util import exception_formatter
 from telemetry.util import file_handle
 from telemetry.value import skip
 from telemetry.web_perf import timeline_based_measurement
+from telemetry.web_perf import timeline_based_page_test
 
 
-def _PrepareFinderOptions(finder_options, test, page_set):
+def _PrepareFinderOptions(finder_options, test, device_type):
   browser_options = finder_options.browser_options
   # Set up user agent.
-  browser_options.browser_user_agent_type = page_set.user_agent_type or None
+  browser_options.browser_user_agent_type = device_type
 
   test.CustomizeBrowserOptions(finder_options.browser_options)
   if finder_options.profiler:
@@ -33,13 +34,17 @@ def _PrepareFinderOptions(finder_options, test, page_set):
                                            finder_options)
 
 class SharedPageState(shared_user_story_state.SharedUserStoryState):
+
+  _device_type = None
+
   def __init__(self, test, finder_options, user_story_set):
     super(SharedPageState, self).__init__(test, finder_options, user_story_set)
     if isinstance(test, timeline_based_measurement.TimelineBasedMeasurement):
-      self._test = timeline_based_measurement.TimelineBasedPageTest(test)
+      self._test = timeline_based_page_test.TimelineBasedPageTest(test)
     else:
       self._test = test
-    _PrepareFinderOptions(finder_options, self._test, user_story_set)
+    device_type = self._device_type or user_story_set.user_agent_type
+    _PrepareFinderOptions(finder_options, self._test, device_type)
     self.browser = None
     self._finder_options = finder_options
     self._possible_browser = self._GetPossibleBrowser(
@@ -55,7 +60,7 @@ class SharedPageState(shared_user_story_state.SharedUserStoryState):
     self._test.SetOptions(self._finder_options)
 
   def _GetPossibleBrowser(self, test, finder_options):
-    ''' Return a possible_browser with the given options. '''
+    """Return a possible_browser with the given options. """
     possible_browser = browser_finder.FindBrowser(finder_options)
     if not possible_browser:
       raise browser_finder_exceptions.BrowserFinderException(
@@ -80,7 +85,8 @@ class SharedPageState(shared_user_story_state.SharedUserStoryState):
   def DidRunUserStory(self, results):
     if self._finder_options.profiler:
       self._StopProfiling(results)
-    util.CloseConnections(self._current_tab)
+    if self._current_tab and self._current_tab.IsAlive():
+      self._current_tab.CloseConnections()
     self._test.CleanUpAfterPage(self._current_page, self._current_tab)
     if self._current_page.credentials and self._did_login_for_current_page:
       self.browser.credentials.LoginNoLongerNeeded(
@@ -195,8 +201,7 @@ class SharedPageState(shared_user_story_state.SharedUserStoryState):
 
   def GetTestExpectationAndSkipValue(self, expectations):
     skip_value = None
-    if not self._current_page.CanRunOnBrowser(
-        browser_info.BrowserInfo(self.browser)):
+    if not self.CanRunOnBrowser(browser_info_module.BrowserInfo(self.browser)):
       skip_value = skip.SkipValue(
           self._current_page,
           'Skipped because browser is not supported '
@@ -208,6 +213,15 @@ class SharedPageState(shared_user_story_state.SharedUserStoryState):
       skip_value = skip.SkipValue(
           self._current_page, 'Skipped by test expectations')
     return expectation, skip_value
+
+  def CanRunOnBrowser(self, browser_info):  # pylint: disable=unused-argument
+    """Override this to returns whether the browser brought up by this state
+    instance is suitable for test runs.
+
+    Args:
+      browser_info: an instance of telemetry.core.browser_info.BrowserInfo
+    """
+    return True
 
   def _PreparePage(self):
     self._current_tab = self._test.TabForPage(self._current_page, self.browser)
@@ -240,11 +254,11 @@ class SharedPageState(shared_user_story_state.SharedUserStoryState):
       self._PreparePage()
       self._ImplicitPageNavigation()
       self._test.RunPage(self._current_page, self._current_tab, results)
-    except exceptions.AppCrashException:
+    except exceptions.Error:
       if self._test.is_multi_tab_test:
         # Avoid trying to recover from an unknown multi-tab state.
         exception_formatter.PrintFormattedException(
-            msg='AppCrashException during multi tab test:')
+            msg='Telemetry Error during multi tab test:')
         raise page_test.MultiTabTestAppCrashError
       raise
 
@@ -272,13 +286,29 @@ class SharedPageState(shared_user_story_state.SharedUserStoryState):
                     self._finder_options.pageset_repeat != 1)
     if is_repeating:
       output_file = util.GetSequentialFileName(output_file)
-    self.platform.profiling_controller.Start(
+    self.browser.profiling_controller.Start(
         self._finder_options.profiler, output_file)
 
   def _StopProfiling(self, results):
     if self.browser:
-      profiler_files = self.platform.profiling_controller.Stop()
+      profiler_files = self.browser.profiling_controller.Stop()
       for f in profiler_files:
         if os.path.isfile(f):
           results.AddProfilingFile(self._current_page,
                                    file_handle.FromFilePath(f))
+
+
+class SharedMobilePageState(SharedPageState):
+  _device_type = 'mobile'
+
+
+class SharedDesktopPageState(SharedPageState):
+  _device_type = 'desktop'
+
+
+class SharedTabletPageState(SharedPageState):
+  _device_type = 'tablet'
+
+
+class Shared10InchTabletPageState(SharedPageState):
+  _device_type = 'tablet_10_inch'

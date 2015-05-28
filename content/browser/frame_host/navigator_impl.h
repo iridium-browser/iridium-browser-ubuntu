@@ -15,7 +15,6 @@
 #include "url/gurl.h"
 
 class GURL;
-struct FrameMsg_Navigate_Params;
 
 namespace content {
 
@@ -51,7 +50,7 @@ class CONTENT_EXPORT NavigatorImpl : public Navigator {
                    const FrameHostMsg_DidCommitProvisionalLoad_Params&
                        input_params) override;
   bool NavigateToPendingEntry(
-      RenderFrameHostImpl* render_frame_host,
+      FrameTreeNode* frame_tree_node,
       NavigationController::ReloadType reload_type) override;
   void RequestOpenURL(RenderFrameHostImpl* render_frame_host,
                       const GURL& url,
@@ -70,9 +69,11 @@ class CONTENT_EXPORT NavigatorImpl : public Navigator {
                           const GlobalRequestID& transferred_global_request_id,
                           bool should_replace_current_entry,
                           bool user_gesture) override;
+  void OnBeforeUnloadACK(FrameTreeNode* frame_tree_node, bool proceed) override;
   void OnBeginNavigation(FrameTreeNode* frame_tree_node,
-                         const FrameHostMsg_BeginNavigation_Params& params,
-                         const CommonNavigationParams& common_params) override;
+                         const CommonNavigationParams& common_params,
+                         const BeginNavigationParams& begin_params,
+                         scoped_refptr<ResourceRequestBody> body) override;
   void CommitNavigation(FrameTreeNode* frame_tree_node,
                         ResourceResponse* response,
                         scoped_ptr<StreamHandle> body) override;
@@ -82,6 +83,7 @@ class CONTENT_EXPORT NavigatorImpl : public Navigator {
       const base::TimeTicks& renderer_before_unload_start_time,
       const base::TimeTicks& renderer_before_unload_end_time) override;
   void CancelNavigation(FrameTreeNode* frame_tree_node) override;
+  bool IsWaitingForBeforeUnloadACK(FrameTreeNode* frame_tree_node) override;
 
   // PlzNavigate
   // Returns the navigation request for a given node. Used in tests.
@@ -98,7 +100,7 @@ class CONTENT_EXPORT NavigatorImpl : public Navigator {
   // Navigates to the given entry, which must be the pending entry.  Private
   // because all callers should use NavigateToPendingEntry.
   bool NavigateToEntry(
-      RenderFrameHostImpl* render_frame_host,
+      FrameTreeNode* frame_tree_node,
       const NavigationEntryImpl& entry,
       NavigationController::ReloadType reload_type);
 
@@ -108,13 +110,17 @@ class CONTENT_EXPORT NavigatorImpl : public Navigator {
     RenderFrameHostImpl* render_frame_host,
     const GURL& url);
 
-  // PlzNavigate: sends a RequestNavigation IPC to the renderer to ask it to
-  // navigate. If no live renderer is present, then the navigation request will
-  // be sent directly to the ResourceDispatcherHost.
-  bool RequestNavigation(FrameTreeNode* frame_tree_node,
+  // PlzNavigate: if needed, sends a BeforeUnload IPC to the renderer to ask it
+  // to execute the beforeUnload event. Otherwise, the navigation request will
+  // be started.
+  void RequestNavigation(FrameTreeNode* frame_tree_node,
                          const NavigationEntryImpl& entry,
                          NavigationController::ReloadType reload_type,
                          base::TimeTicks navigation_start);
+
+  // PlzNavigate: sends the NavigationRequest for |frame_tree_node| to the
+  // network stack so that it can start.
+  void BeginNavigation(FrameTreeNode* frame_tree_node);
 
   void RecordNavigationMetrics(
       const LoadCommittedDetails& details,

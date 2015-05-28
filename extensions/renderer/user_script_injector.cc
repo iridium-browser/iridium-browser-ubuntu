@@ -8,8 +8,10 @@
 
 #include "base/lazy_instance.h"
 #include "content/public/common/url_constants.h"
+#include "content/public/renderer/render_view.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/permissions/permissions_data.h"
+#include "extensions/renderer/injection_host.h"
 #include "extensions/renderer/script_context.h"
 #include "extensions/renderer/scripts_run_info.h"
 #include "grit/extensions_renderer_resources.h"
@@ -54,13 +56,12 @@ base::LazyInstance<GreasemonkeyApiJsString> g_greasemonkey_api =
 
 }  // namespace
 
-UserScriptInjector::UserScriptInjector(
-    const UserScript* script,
-    UserScriptSet* script_list,
-    bool is_declarative)
+UserScriptInjector::UserScriptInjector(const UserScript* script,
+                                       UserScriptSet* script_list,
+                                       bool is_declarative)
     : script_(script),
       script_id_(script_->id()),
-      extension_id_(script_->extension_id()),
+      host_id_(script_->host_id()),
       is_declarative_(is_declarative),
       user_script_set_observer_(this) {
   user_script_set_observer_.Add(script_list);
@@ -70,11 +71,11 @@ UserScriptInjector::~UserScriptInjector() {
 }
 
 void UserScriptInjector::OnUserScriptsUpdated(
-    const std::set<std::string>& changed_extensions,
+    const std::set<HostID>& changed_hosts,
     const std::vector<UserScript*>& scripts) {
-  // If the extension causing this injection changed, then this injection
+  // If the host causing this injection changed, then this injection
   // will be removed, and there's no guarantee the backing script still exists.
-  if (changed_extensions.count(extension_id_) > 0)
+  if (changed_hosts.count(host_id_) > 0)
     return;
 
   for (std::vector<UserScript*>::const_iterator iter = scripts.begin();
@@ -122,38 +123,25 @@ bool UserScriptInjector::ShouldInjectCss(
 }
 
 PermissionsData::AccessType UserScriptInjector::CanExecuteOnFrame(
-    const Extension* extension,
+    const InjectionHost* injection_host,
     blink::WebFrame* web_frame,
     int tab_id,
     const GURL& top_url) const {
-  // If we don't have a tab id, we have no UI surface to ask for user consent.
-  // For now, we treat this as an automatic allow.
-  if (tab_id == -1)
-    return PermissionsData::ACCESS_ALLOWED;
-
   GURL effective_document_url = ScriptContext::GetEffectiveDocumentURL(
       web_frame, web_frame->document().url(), script_->match_about_blank());
+  PermissionsData::AccessType can_execute = injection_host->CanExecuteOnFrame(
+      effective_document_url, top_url, tab_id, is_declarative_);
 
-  // Declarative user scripts use "page access" (from "permissions" section in
-  // manifest) whereas non-declarative user scripts use custom
-  // "content script access" logic.
-  if (is_declarative_) {
-    return extension->permissions_data()->GetPageAccess(
-        extension,
-        effective_document_url,
-        top_url,
-        tab_id,
-        -1,  // no process id
-        NULL /* ignore error */);
-  } else {
-    return extension->permissions_data()->GetContentScriptAccess(
-        extension,
-        effective_document_url,
-        top_url,
-        tab_id,
-        -1,  // no process id
-        NULL /* ignore error */);
-  }
+  if (script_->consumer_instance_type() !=
+      UserScript::ConsumerInstanceType::WEBVIEW ||
+      can_execute == PermissionsData::ACCESS_DENIED)
+    return can_execute;
+
+  int routing_id = content::RenderView::FromWebView(web_frame->top()->view())
+                      ->GetRoutingID();
+  return script_->routing_info().render_view_id == routing_id
+      ? PermissionsData::ACCESS_ALLOWED
+      : PermissionsData::ACCESS_DENIED;
 }
 
 std::vector<blink::WebScriptSource> UserScriptInjector::GetJsSources(
@@ -204,23 +192,27 @@ std::vector<std::string> UserScriptInjector::GetCssSources(
   return sources;
 }
 
-void UserScriptInjector::OnInjectionComplete(
-    scoped_ptr<base::ListValue> execution_results,
+void UserScriptInjector::GetRunInfo(
     ScriptsRunInfo* scripts_run_info,
-    UserScript::RunLocation run_location) {
+    UserScript::RunLocation run_location) const {
   if (ShouldInjectJs(run_location)) {
     const UserScript::FileList& js_scripts = script_->js_scripts();
     scripts_run_info->num_js += js_scripts.size();
     for (UserScript::FileList::const_iterator iter = js_scripts.begin();
          iter != js_scripts.end();
          ++iter) {
-      scripts_run_info->executing_scripts[extension_id_].insert(
+      scripts_run_info->executing_scripts[host_id_.id()].insert(
           iter->url().path());
     }
   }
 
   if (ShouldInjectCss(run_location))
     scripts_run_info->num_css += script_->css_scripts().size();
+}
+
+void UserScriptInjector::OnInjectionComplete(
+    scoped_ptr<base::ListValue> execution_results,
+    UserScript::RunLocation run_location) {
 }
 
 void UserScriptInjector::OnWillNotInject(InjectFailureReason reason) {

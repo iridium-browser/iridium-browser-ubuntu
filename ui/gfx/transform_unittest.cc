@@ -2435,6 +2435,29 @@ TEST(XFormTest, verifyFlattenTo2d) {
   EXPECT_ROW4_EQ(13.0f, 17.0f, 0.0f, 25.0f, A);
 }
 
+TEST(XFormTest, IsFlat) {
+  Transform transform;
+  InitializeTestMatrix(&transform);
+
+  // A transform with all entries non-zero isn't flat.
+  EXPECT_FALSE(transform.IsFlat());
+
+  transform.matrix().set(0, 2, 0.f);
+  transform.matrix().set(1, 2, 0.f);
+  transform.matrix().set(2, 2, 1.f);
+  transform.matrix().set(3, 2, 0.f);
+
+  EXPECT_FALSE(transform.IsFlat());
+
+  transform.matrix().set(2, 0, 0.f);
+  transform.matrix().set(2, 1, 0.f);
+  transform.matrix().set(2, 3, 0.f);
+
+  // Since the third column and row are both (0, 0, 1, 0), the transform is
+  // flat.
+  EXPECT_TRUE(transform.IsFlat());
+}
+
 // Another implementation of Preserves2dAxisAlignment that isn't as fast,
 // good for testing the faster implementation.
 static bool EmpiricallyPreserves2dAxisAlignment(const Transform& transform) {
@@ -2702,6 +2725,30 @@ TEST(XFormTest, TransformBoxReverse) {
   Transform singular;
   singular.Scale3d(0.f, 0.f, 0.f);
   EXPECT_FALSE(singular.TransformBoxReverse(&box));
+}
+
+TEST(XFormTest, RoundTranslationComponents) {
+  Transform translation;
+  Transform expected;
+
+  translation.RoundTranslationComponents();
+  EXPECT_EQ(expected.ToString(), translation.ToString());
+
+  translation.Translate(1.0f, 1.0f);
+  expected.Translate(1.0f, 1.0f);
+  translation.RoundTranslationComponents();
+  EXPECT_EQ(expected.ToString(), translation.ToString());
+
+  translation.Translate(0.5f, 0.4f);
+  expected.Translate(1.0f, 0.0f);
+  translation.RoundTranslationComponents();
+  EXPECT_EQ(expected.ToString(), translation.ToString());
+
+  // Rounding should only affect 2d translation components.
+  translation.Translate3d(0.f, 0.f, 0.5f);
+  expected.Translate3d(0.f, 0.f, 0.5f);
+  translation.RoundTranslationComponents();
+  EXPECT_EQ(expected.ToString(), translation.ToString());
 }
 
 }  // namespace

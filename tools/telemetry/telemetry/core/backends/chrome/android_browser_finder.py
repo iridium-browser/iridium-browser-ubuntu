@@ -7,53 +7,58 @@
 import logging
 import os
 
-from telemetry import decorators
+from telemetry.core.backends import adb_commands
+from telemetry.core.backends import android_browser_backend_settings
+from telemetry.core.backends.chrome import android_browser_backend
 from telemetry.core import browser
 from telemetry.core import exceptions
-from telemetry.core import possible_browser
 from telemetry.core import platform
-from telemetry.core import util
-from telemetry.core.backends import adb_commands
 from telemetry.core.platform import android_device
-from telemetry.core.backends.chrome import android_browser_backend
+from telemetry.core import possible_browser
+from telemetry.core import util
+from telemetry import decorators
 
 
 CHROME_PACKAGE_NAMES = {
   'android-content-shell':
       ['org.chromium.content_shell_apk',
-       android_browser_backend.ContentShellBackendSettings,
+       android_browser_backend_settings.ContentShellBackendSettings,
        'ContentShell.apk'],
   'android-chrome-shell':
       ['org.chromium.chrome.shell',
-       android_browser_backend.ChromeShellBackendSettings,
+       android_browser_backend_settings.ChromeShellBackendSettings,
        'ChromeShell.apk'],
   'android-webview':
       ['org.chromium.telemetry_shell',
-       android_browser_backend.WebviewBackendSettings,
+       android_browser_backend_settings.WebviewBackendSettings,
        None],
   'android-webview-shell':
       ['org.chromium.android_webview.shell',
-       android_browser_backend.WebviewShellBackendSettings,
+       android_browser_backend_settings.WebviewShellBackendSettings,
        'AndroidWebView.apk'],
   'android-chrome':
       ['com.google.android.apps.chrome',
-       android_browser_backend.ChromeBackendSettings,
+       android_browser_backend_settings.ChromeBackendSettings,
        'Chrome.apk'],
+  'android-chrome-work':
+      ['com.chrome.work',
+       android_browser_backend_settings.ChromeBackendSettings,
+       None],
   'android-chrome-beta':
       ['com.chrome.beta',
-       android_browser_backend.ChromeBackendSettings,
+       android_browser_backend_settings.ChromeBackendSettings,
        None],
   'android-chrome-dev':
       ['com.google.android.apps.chrome_dev',
-       android_browser_backend.ChromeBackendSettings,
+       android_browser_backend_settings.ChromeBackendSettings,
        None],
   'android-chrome-canary':
       ['com.chrome.canary',
-       android_browser_backend.ChromeBackendSettings,
+       android_browser_backend_settings.ChromeBackendSettings,
        None],
   'android-jb-system-chrome':
       ['com.android.chrome',
-       android_browser_backend.ChromeBackendSettings,
+       android_browser_backend_settings.ChromeBackendSettings,
        None]
 }
 
@@ -102,14 +107,9 @@ class PossibleAndroidBrowser(possible_browser.PossibleBrowser):
 
   def Create(self, finder_options):
     self._InitPlatformIfNeeded()
-
-    use_rndis_forwarder = (finder_options.android_rndis or
-                           finder_options.browser_options.netsim or
-                           platform.GetHostPlatform().GetOSName() != 'linux')
     browser_backend = android_browser_backend.AndroidBrowserBackend(
         self._platform_backend,
         finder_options.browser_options, self._backend_settings,
-        use_rndis_forwarder,
         output_profile_path=finder_options.output_profile_path,
         extensions_to_load=finder_options.extensions_to_load,
         target_arch=finder_options.target_arch)
@@ -200,14 +200,13 @@ def _FindAllPossibleBrowsers(finder_options, android_platform):
   return possible_browsers
 
 
-def FindAllAvailableBrowsers(finder_options):
+def FindAllAvailableBrowsers(finder_options, device):
   """Finds all the possible browsers on one device.
 
   The device is either the only device on the host platform,
   or |finder_options| specifies a particular device.
   """
-  device = android_device.GetDevice(finder_options)
-  if not device:
+  if not isinstance(device, android_device.AndroidDevice):
     return []
-  android_platform = platform.GetPlatformForDevice(device)
+  android_platform = platform.GetPlatformForDevice(device, finder_options)
   return _FindAllPossibleBrowsers(finder_options, android_platform)

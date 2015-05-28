@@ -22,7 +22,7 @@
 #define CSSComputedStyleDeclaration_h
 
 #include "core/css/CSSStyleDeclaration.h"
-#include "core/rendering/style/RenderStyleConstants.h"
+#include "core/style/ComputedStyleConstants.h"
 #include "platform/fonts/FixedPitchFontType.h"
 #include "wtf/HashMap.h"
 #include "wtf/RefPtr.h"
@@ -37,14 +37,12 @@ class CSSValueList;
 class ExceptionState;
 class MutableStylePropertySet;
 class Node;
-class RenderObject;
-class RenderStyle;
+class LayoutObject;
+class ComputedStyle;
 class ShadowData;
 class ShadowList;
 class StyleColor;
 class StylePropertyShorthand;
-
-enum EUpdateLayout { DoNotUpdateLayout = false, UpdateLayout = true };
 
 class CSSComputedStyleDeclaration final : public CSSStyleDeclaration {
 public:
@@ -64,14 +62,13 @@ public:
 
     virtual PassRefPtrWillBeRawPtr<MutableStylePropertySet> copyProperties() const override;
 
-    PassRefPtrWillBeRawPtr<CSSValue> getPropertyCSSValue(CSSPropertyID, EUpdateLayout = UpdateLayout) const;
+    PassRefPtrWillBeRawPtr<CSSValue> getPropertyCSSValue(CSSPropertyID) const;
     PassRefPtrWillBeRawPtr<CSSValue> getFontSizeCSSValuePreferringKeyword() const;
     FixedPitchFontType fixedPitchFontType() const;
-    PassRefPtrWillBeRawPtr<CSSValue> getSVGPropertyCSSValue(CSSPropertyID, EUpdateLayout) const;
 
     PassRefPtrWillBeRawPtr<MutableStylePropertySet> copyPropertiesInSet(const Vector<CSSPropertyID>&) const;
 
-    virtual void trace(Visitor*) override;
+    DECLARE_VIRTUAL_TRACE();
 
 private:
     CSSComputedStyleDeclaration(PassRefPtrWillBeRawPtr<Node>, bool allowVisitedStyle, const String&);
@@ -87,7 +84,7 @@ private:
     virtual CSSRule* parentRule() const override;
     virtual unsigned length() const override;
     virtual String item(unsigned index) const override;
-    PassRefPtr<RenderStyle> computeRenderStyle() const;
+    const ComputedStyle* computeComputedStyle() const;
     virtual String getPropertyValue(const String& propertyName) override;
     virtual String getPropertyPriority(const String& propertyName) override;
     virtual String getPropertyShorthand(const String& propertyName) override;

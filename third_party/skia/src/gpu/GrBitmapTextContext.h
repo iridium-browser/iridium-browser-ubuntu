@@ -10,7 +10,8 @@
 
 #include "GrTextContext.h"
 
-class GrGeometryProcessor;
+#include "GrGeometryProcessor.h"
+
 class GrTextStrike;
 
 /*
@@ -18,7 +19,7 @@ class GrTextStrike;
  */
 class GrBitmapTextContext : public GrTextContext {
 public:
-    static GrBitmapTextContext* Create(GrContext*, const SkDeviceProperties&);
+    static GrBitmapTextContext* Create(GrContext*, SkGpuDevice*,  const SkDeviceProperties&);
 
     virtual ~GrBitmapTextContext() {}
 
@@ -32,24 +33,26 @@ private:
     GrTexture*                        fCurrTexture;
     GrMaskFormat                      fCurrMaskFormat;
     SkAutoTUnref<const GrGeometryProcessor> fCachedGeometryProcessor;
-    SkAutoTUnref<const GrFragmentProcessor> fCachedTextureProcessor;
     // Used to check whether fCachedEffect is still valid.
     uint32_t                          fEffectTextureUniqueID;
     SkMatrix                          fLocalMatrix;
 
-    GrBitmapTextContext(GrContext*, const SkDeviceProperties&);
+    GrBitmapTextContext(GrContext*, SkGpuDevice*, const SkDeviceProperties&);
 
-    virtual bool canDraw(const SkPaint& paint, const SkMatrix& viewMatrix) SK_OVERRIDE;
+    bool canDraw(const GrRenderTarget*, const GrClip&, const GrPaint&,
+                 const SkPaint&, const SkMatrix& viewMatrix) override;
 
-    virtual void onDrawText(const GrPaint&, const SkPaint&, const SkMatrix& viewMatrix,
-                            const char text[], size_t byteLength,
-                            SkScalar x, SkScalar y) SK_OVERRIDE;
-    virtual void onDrawPosText(const GrPaint&, const SkPaint&, const SkMatrix& viewMatrix,
-                               const char text[], size_t byteLength,
-                               const SkScalar pos[], int scalarsPerPosition,
-                               const SkPoint& offset) SK_OVERRIDE;
+    void onDrawText(GrRenderTarget*, const GrClip&, const GrPaint&, const SkPaint&,
+                    const SkMatrix& viewMatrix, const char text[], size_t byteLength,
+                    SkScalar x, SkScalar y, const SkIRect& regionClipBounds) override;
+    void onDrawPosText(GrRenderTarget*, const GrClip&, const GrPaint&, const SkPaint&,
+                       const SkMatrix& viewMatrix,
+                       const char text[], size_t byteLength,
+                       const SkScalar pos[], int scalarsPerPosition,
+                       const SkPoint& offset, const SkIRect& regionClipBounds) override;
 
-    void init(const GrPaint&, const SkPaint&);
+    void init(GrRenderTarget*, const GrClip&, const GrPaint&, const SkPaint&,
+              const SkIRect& regionClipBounds);
     void appendGlyph(GrGlyph::PackedID, SkFixed left, SkFixed top, GrFontScaler*);
     bool uploadGlyph(GrGlyph*, GrFontScaler*);
     void flush();                 // automatically called by destructor

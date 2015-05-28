@@ -11,18 +11,18 @@
 
 namespace net {
 
-#define ENDPOINT (is_server_ ? "Server: " : " Client: ")
+#define ENDPOINT \
+  (perspective_ == Perspective::IS_SERVER ? "Server: " : "Client: ")
 
 QuicFlowController::QuicFlowController(QuicConnection* connection,
                                        QuicStreamId id,
-                                       bool is_server,
+                                       Perspective perspective,
                                        QuicStreamOffset send_window_offset,
                                        QuicStreamOffset receive_window_offset,
                                        QuicByteCount max_receive_window)
     : connection_(connection),
       id_(id),
-      is_enabled_(true),
-      is_server_(is_server),
+      perspective_(perspective),
       bytes_consumed_(0),
       highest_received_byte_offset_(0),
       bytes_sent_(0),
@@ -39,10 +39,6 @@ QuicFlowController::QuicFlowController(QuicConnection* connection,
 }
 
 void QuicFlowController::AddBytesConsumed(QuicByteCount bytes_consumed) {
-  if (!IsEnabled()) {
-    return;
-  }
-
   bytes_consumed_ += bytes_consumed;
   DVLOG(1) << ENDPOINT << "Stream " << id_ << " consumed: " << bytes_consumed_;
 
@@ -51,10 +47,6 @@ void QuicFlowController::AddBytesConsumed(QuicByteCount bytes_consumed) {
 
 bool QuicFlowController::UpdateHighestReceivedOffset(
     QuicStreamOffset new_offset) {
-  if (!IsEnabled()) {
-    return false;
-  }
-
   // Only update if offset has increased.
   if (new_offset <= highest_received_byte_offset_) {
     return false;
@@ -68,10 +60,6 @@ bool QuicFlowController::UpdateHighestReceivedOffset(
 }
 
 void QuicFlowController::AddBytesSent(QuicByteCount bytes_sent) {
-  if (!IsEnabled()) {
-    return;
-  }
-
   if (bytes_sent_ + bytes_sent > send_window_offset_) {
     LOG(DFATAL) << ENDPOINT << "Stream " << id_ << " Trying to send an extra "
                 << bytes_sent << " bytes, when bytes_sent = " << bytes_sent_
@@ -88,10 +76,6 @@ void QuicFlowController::AddBytesSent(QuicByteCount bytes_sent) {
 }
 
 bool QuicFlowController::FlowControlViolation() {
-  if (!IsEnabled()) {
-    return false;
-  }
-
   if (highest_received_byte_offset_ > receive_window_offset_) {
     LOG(ERROR) << ENDPOINT << "Flow control violation on stream "
                << id_ << ", receive window offset: "
@@ -104,10 +88,6 @@ bool QuicFlowController::FlowControlViolation() {
 }
 
 void QuicFlowController::MaybeSendWindowUpdate() {
-  if (!IsEnabled()) {
-    return;
-  }
-
   // Send WindowUpdate to increase receive window if
   // (receive window offset - consumed bytes) < (max window / 2).
   // This is behaviour copied from SPDY.
@@ -132,10 +112,6 @@ void QuicFlowController::MaybeSendWindowUpdate() {
 }
 
 void QuicFlowController::MaybeSendBlocked() {
-  if (!IsEnabled()) {
-    return;
-  }
-
   if (SendWindowSize() == 0 &&
       last_blocked_send_window_offset_ < send_window_offset_) {
     DVLOG(1) << ENDPOINT << "Stream " << id_ << " is flow control blocked. "
@@ -154,10 +130,6 @@ void QuicFlowController::MaybeSendBlocked() {
 
 bool QuicFlowController::UpdateSendWindowOffset(
     QuicStreamOffset new_send_window_offset) {
-  if (!IsEnabled()) {
-    return false;
-  }
-
   // Only update if send window has increased.
   if (new_send_window_offset <= send_window_offset_) {
     return false;
@@ -173,16 +145,8 @@ bool QuicFlowController::UpdateSendWindowOffset(
   return blocked;
 }
 
-void QuicFlowController::Disable() {
-  is_enabled_ = false;
-}
-
-bool QuicFlowController::IsEnabled() const {
-  return is_enabled_;
-}
-
 bool QuicFlowController::IsBlocked() const {
-  return IsEnabled() && SendWindowSize() == 0;
+  return SendWindowSize() == 0;
 }
 
 uint64 QuicFlowController::SendWindowSize() const {

@@ -5,8 +5,8 @@
 #include "cc/output/output_surface.h"
 
 #include "base/bind.h"
-#include "base/debug/trace_event.h"
 #include "base/message_loop/message_loop.h"
+#include "base/trace_event/trace_event.h"
 #include "cc/output/managed_memory_policy.h"
 #include "cc/output/output_surface_client.h"
 #include "gpu/GLES2/gl2extchromium.h"
@@ -18,16 +18,12 @@
 namespace cc {
 
 OutputSurface::OutputSurface(
-    const scoped_refptr<ContextProvider>& context_provider)
+    const scoped_refptr<ContextProvider>& context_provider,
+    const scoped_refptr<ContextProvider>& worker_context_provider,
+    scoped_ptr<SoftwareOutputDevice> software_device)
     : client_(NULL),
       context_provider_(context_provider),
-      device_scale_factor_(-1),
-      external_stencil_test_enabled_(false),
-      weak_ptr_factory_(this) {
-}
-
-OutputSurface::OutputSurface(scoped_ptr<SoftwareOutputDevice> software_device)
-    : client_(NULL),
+      worker_context_provider_(worker_context_provider),
       software_device_(software_device.Pass()),
       device_scale_factor_(-1),
       external_stencil_test_enabled_(false),
@@ -35,14 +31,24 @@ OutputSurface::OutputSurface(scoped_ptr<SoftwareOutputDevice> software_device)
 }
 
 OutputSurface::OutputSurface(
+    const scoped_refptr<ContextProvider>& context_provider)
+    : OutputSurface(context_provider, nullptr, nullptr) {
+}
+
+OutputSurface::OutputSurface(
+    const scoped_refptr<ContextProvider>& context_provider,
+    const scoped_refptr<ContextProvider>& worker_context_provider)
+    : OutputSurface(context_provider, worker_context_provider, nullptr) {
+}
+
+OutputSurface::OutputSurface(scoped_ptr<SoftwareOutputDevice> software_device)
+    : OutputSurface(nullptr, nullptr, software_device.Pass()) {
+}
+
+OutputSurface::OutputSurface(
     const scoped_refptr<ContextProvider>& context_provider,
     scoped_ptr<SoftwareOutputDevice> software_device)
-    : client_(NULL),
-      context_provider_(context_provider),
-      software_device_(software_device.Pass()),
-      device_scale_factor_(-1),
-      external_stencil_test_enabled_(false),
-      weak_ptr_factory_(this) {
+    : OutputSurface(context_provider, nullptr, software_device.Pass()) {
 }
 
 void OutputSurface::CommitVSyncParameters(base::TimeTicks timebase,
@@ -109,6 +115,18 @@ bool OutputSurface::BindToClient(OutputSurfaceClient* client) {
       SetUpContext3d();
   }
 
+  if (success && worker_context_provider_.get()) {
+    success = worker_context_provider_->BindToCurrentThread();
+    if (success) {
+      worker_context_provider_->SetupLock();
+      // The destructor resets the context lost callback, so base::Unretained
+      // is safe, as long as the worker threads stop using the context before
+      // the output surface is destroyed.
+      worker_context_provider_->SetLostContextCallback(base::Bind(
+          &OutputSurface::DidLoseOutputSurface, base::Unretained(this)));
+    }
+  }
+
   if (!success)
     client_ = NULL;
 
@@ -116,21 +134,33 @@ bool OutputSurface::BindToClient(OutputSurfaceClient* client) {
 }
 
 bool OutputSurface::InitializeAndSetContext3d(
-    scoped_refptr<ContextProvider> context_provider) {
+    scoped_refptr<ContextProvider> context_provider,
+    scoped_refptr<ContextProvider> worker_context_provider) {
   DCHECK(!context_provider_.get());
   DCHECK(context_provider.get());
   DCHECK(client_);
 
-  bool success = false;
-  if (context_provider->BindToCurrentThread()) {
+  bool success = context_provider->BindToCurrentThread();
+  if (success) {
     context_provider_ = context_provider;
     SetUpContext3d();
-    client_->DeferredInitialize();
-    success = true;
+  }
+  if (success && worker_context_provider.get()) {
+    success = worker_context_provider->BindToCurrentThread();
+    if (success) {
+      worker_context_provider_ = worker_context_provider;
+      // The destructor resets the context lost callback, so base::Unretained
+      // is safe, as long as the worker threads stop using the context before
+      // the output surface is destroyed.
+      worker_context_provider_->SetLostContextCallback(base::Bind(
+          &OutputSurface::DidLoseOutputSurface, base::Unretained(this)));
+    }
   }
 
   if (!success)
     ResetContext3d();
+  else
+    client_->DeferredInitialize();
 
   return success;
 }
@@ -167,7 +197,12 @@ void OutputSurface::ResetContext3d() {
     context_provider_->SetMemoryPolicyChangedCallback(
         ContextProvider::MemoryPolicyChangedCallback());
   }
+  if (worker_context_provider_.get()) {
+    worker_context_provider_->SetLostContextCallback(
+        ContextProvider::LostContextCallback());
+  }
   context_provider_ = NULL;
+  worker_context_provider_ = NULL;
 }
 
 void OutputSurface::EnsureBackbuffer() {

@@ -32,7 +32,7 @@ struct PixelUnpackState;
 namespace rx
 {
 class Renderer11;
-class RenderTarget;
+class RenderTargetD3D;
 
 class PixelTransfer11
 {
@@ -45,7 +45,7 @@ class PixelTransfer11
     // destRenderTarget: individual slice/layer of a target texture
     // destinationFormat/sourcePixelsType: determines shaders + shader parameters
     // destArea: the sub-section of destRenderTarget to copy to
-    gl::Error copyBufferToTexture(const gl::PixelUnpackState &unpack, unsigned int offset, RenderTarget *destRenderTarget,
+    gl::Error copyBufferToTexture(const gl::PixelUnpackState &unpack, unsigned int offset, RenderTargetD3D *destRenderTarget,
                                   GLenum destinationFormat, GLenum sourcePixelsType, const gl::Box &destArea);
 
   private:
@@ -60,6 +60,7 @@ class PixelTransfer11
         float PositionScale[2];
         int TexLocationOffset[2];
         int TexLocationScale[2];
+        unsigned int FirstSlice;
     };
 
     static void setBufferToTextureCopyParams(const gl::Box &destArea, const gl::Extents &destSize, GLenum internalFormat,

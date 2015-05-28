@@ -60,7 +60,7 @@ class IDBDatabase final
 public:
     static IDBDatabase* create(ExecutionContext*, PassOwnPtr<WebIDBDatabase>, IDBDatabaseCallbacks*);
     virtual ~IDBDatabase();
-    virtual void trace(Visitor*) override;
+    DECLARE_VIRTUAL_TRACE();
 
     void setMetadata(const IDBDatabaseMetadata& metadata) { m_metadata = metadata; }
     void indexCreated(int64_t objectStoreId, const IDBIndexMetadata&);
@@ -115,9 +115,6 @@ public:
 
     static int64_t nextTransactionId();
 
-    // Acknowledge receipt of the blobs (referenced by their UUID's).
-    void ackReceivedBlobs(const Vector<String>& uuids);
-
     static const char indexDeletedErrorMessage[];
     static const char isKeyCursorErrorMessage[];
     static const char noKeyOrKeyRangeErrorMessage[];
@@ -143,7 +140,7 @@ private:
     IDBDatabaseMetadata m_metadata;
     OwnPtr<WebIDBDatabase> m_backend;
     Member<IDBTransaction> m_versionChangeTransaction;
-    typedef HeapHashMap<int64_t, Member<IDBTransaction> > TransactionMap;
+    typedef HeapHashMap<int64_t, Member<IDBTransaction>> TransactionMap;
     TransactionMap m_transactions;
 
     bool m_closePending;
@@ -151,7 +148,7 @@ private:
 
     // Keep track of the versionchange events waiting to be fired on this
     // database so that we can cancel them if the database closes.
-    WillBeHeapVector<RefPtrWillBeMember<Event> > m_enqueuedEvents;
+    WillBeHeapVector<RefPtrWillBeMember<Event>> m_enqueuedEvents;
 
     Member<IDBDatabaseCallbacks> m_databaseCallbacks;
 };

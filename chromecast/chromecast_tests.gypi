@@ -13,7 +13,7 @@
       'conditions': [
         ['chromecast_branding=="Chrome"', {
           'dependencies': [
-            '<(cast_internal_gyp):cast_tests_internal',
+            'internal/chromecast_internal.gyp:cast_tests_internal',
           ],
         }],
       ],
@@ -23,7 +23,6 @@
       'target_name': 'cast_test_generator',
       'type': 'none',
       'dependencies': [
-        'media/media.gyp:cast_media_unittests',
         '../base/base.gyp:base_unittests',
         '../third_party/cacheinvalidation/cacheinvalidation.gyp:cacheinvalidation_unittests',
         '../content/content_shell_and_tests.gyp:content_unittests',
@@ -38,14 +37,60 @@
         '../ui/base/ui_base_tests.gyp:ui_base_unittests',
         '../url/url.gyp:url_unittests',
       ],
-      'variables': {
-        'filters': [
-          # Disable OutOfMemoryDeathTest.ViaSharedLibraries due to gTrusty eglibc incompatibility
-          # See: crbug/428211
-          'base_unittests --gtest_filter=-OutOfMemoryDeathTest.ViaSharedLibraries',
-        ],
-      },
       'conditions': [
+        ['target_arch=="arm" and OS!="android"', {
+          'variables': {
+            'filters': [
+              # Run net_unittests first to avoid random failures due to slow python startup
+              # KeygenHandlerTest.SmokeTest and KeygenHandlerTest.ConcurrencyTest fail due to
+              # readonly certdb (b/8153161)
+              # URLRequestTestHTTP.GetTest_ManyCookies takes roughly 55s to run. Increase
+              # timeout to 75s from 45s to allow it to pass (b/19821476)
+              # ProxyScriptFetcherImplTest.HttpMimeType is flaking (b/19848784)
+             'net_unittests --gtest_filter=-KeygenHandlerTest.SmokeTest:KeygenHandlerTest.ConcurrencyTest:ProxyScriptFetcherImplTest.HttpMimeType --test-launcher-timeout=75000',
+              # Disable OutOfMemoryDeathTest.ViaSharedLibraries due to gTrusty eglibc incompatibility (crbug/428211)
+              # Disable ProcessMetricsTest.GetNumberOfThreads (b/15610509)
+              # Disable ProcessUtilTest.* (need to define OS_ANDROID)
+              # Disable StackContainer.BufferAlignment (don't support 16-byte alignment)
+              # Disable SystemMetrics2Test.GetSystemMemoryInfo (buffers>0 can't be guaranteed)
+              'base_unittests --gtest_filter=-OutOfMemoryDeathTest.ViaSharedLibraries:ProcessMetricsTest.GetNumberOfThreads:ProcessUtilTest.*:StackContainer.BufferAlignment:SystemMetrics2Test.GetSystemMemoryInfo',
+              # DesktopCaptureDeviceTest.*: No capture device on Eureka
+              # Disable PepperGamepadHostTest.WaitForReply (pepper not supported on Eureka)
+              # Disable GpuDataManagerImplPrivateTest.SetGLStrings and
+              # RenderWidgetHostTest.Background because we disable the blacklist to enable WebGL (b/16142554)
+              'content_unittests --gtest_filter=-DOMStorageDatabaseTest.TestCanOpenAndReadWebCoreDatabase:DesktopCaptureDeviceTest.Capture:GamepadProviderTest.PollingAccess:GpuDataManagerImplPrivateTest.SetGLStrings:PepperGamepadHostTest.WaitForReply:RenderWidgetHostTest.Background',
+              # Disable VP9 related tests (b/18593324)
+              #   PipelineIntegrationTest.BasicPlayback_MediaSource_VP9_WebM
+              #   PipelineIntegrationTest.BasicPlayback_VideoOnly_VP9_WebM
+              #   PipelineIntegrationTest.BasicPlayback_VP9*
+              #   PipelineIntegrationTest.P444_VP9_WebM
+              # Disable VP8A tests (b/18593324)
+              #   PipelineIntegrationTest.BasicPlayback_VP8A*
+              # Disable OpusAudioDecoderTest/AudioDecoderTest.ProduceAudioSamples/0 (unit
+              # test fails when Opus decoder uses fixed-point)
+              # Due to b/16456550, disable the following four test cases:
+              #   AudioOutputControllerTest.PlayDivertSwitchDeviceRevertClose
+              #   AudioOutputControllerTest.PlaySwitchDeviceClose
+              #   AudioStreamHandlerTest.Play
+              #   SoundsManagerTest.Play
+              # Disable AudioStreamHandlerTest.ConsecutivePlayRequests (b/16539293)
+              'media_unittests --gtest_filter=-AudioOutputControllerTest.PlayDivertSwitchDeviceRevertClose:AudioOutputControllerTest.PlaySwitchDeviceClose:AudioStreamHandlerTest.Play:AudioStreamHandlerTest.ConsecutivePlayRequests:PipelineIntegrationTest.BasicPlayback_MediaSource_VP9_WebM:PipelineIntegrationTest.BasicPlayback_VideoOnly_VP9_WebM:PipelineIntegrationTest.BasicPlayback_VP9*:PipelineIntegrationTest.P444_VP9_WebM:PipelineIntegrationTest.BasicPlayback_VP8A*:OpusAudioDecoderTest/AudioDecoderTest.ProduceAudioSamples/0:SoundsManagerTest.Play',
+              'sync_unit_tests --gtest_filter=-SyncHttpBridgeTest.*',
+              # DoAppendUTF8Invalid fails because of dcheck_always_on flag in Eng builds
+              'url_unittests --gtest_filter=-URLCanonTest.DoAppendUTF8Invalid',
+            ],
+          },
+        }, { # else "x86" or "android"
+          'variables': {
+            'filters': [
+              # Disable OutOfMemoryDeathTest.ViaSharedLibraries due to gTrusty eglibc incompatibility
+              # See: crbug/428211
+              'base_unittests --gtest_filter=-OutOfMemoryDeathTest.ViaSharedLibraries',
+              # Disable PipelineIntegrationTest.BasicPlayback_MediaSource_VP9_WebM (not supported)
+              'media_unittests --gtest_filter=-PipelineIntegrationTest.BasicPlayback_MediaSource_VP9_WebM',
+            ],
+          }
+        }],
         ['disable_display==0', {
           'dependencies': [
             '../gpu/gpu.gyp:gpu_unittests',
@@ -54,10 +99,11 @@
         ['OS!="android"', {
           'dependencies': [
             'cast_shell_browser_test',
+            'media/media.gyp:cast_media_unittests',
           ],
           'variables': {
             'filters': [
-              'cast_shell_browser_test --no-sandbox',
+              'cast_shell_browser_test --no-sandbox --disable-gpu',
             ],
           },
         }],
@@ -177,6 +223,7 @@
             'cast_shell_core',
             '../content/content_shell_and_tests.gyp:content_browser_test_support',
             '../testing/gtest.gyp:gtest',
+            '../third_party/mojo/mojo_public.gyp:mojo_cpp_bindings',
           ],
           'sources': [
             'browser/test/chromecast_browser_test.cc',

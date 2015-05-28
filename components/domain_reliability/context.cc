@@ -30,6 +30,9 @@ typedef BeaconDeque::iterator BeaconIterator;
 typedef BeaconDeque::const_iterator BeaconConstIterator;
 }  // namespace
 
+DomainReliabilityContext::Factory::~Factory() {
+}
+
 class DomainReliabilityContext::ResourceState {
  public:
   ResourceState(DomainReliabilityContext* context,
@@ -159,9 +162,7 @@ void DomainReliabilityContext::OnBeacon(const GURL& url,
 }
 
 void DomainReliabilityContext::ClearBeacons() {
-  ResourceStateVector::iterator it;
-  for (it = states_.begin(); it != states_.end(); ++it) {
-    ResourceState* state = *it;
+  for (auto& state : states_) {
     state->successful_requests = 0;
     state->failed_requests = 0;
     state->uploading_successful_requests = 0;
@@ -201,9 +202,8 @@ void DomainReliabilityContext::GetRequestCountsForTesting(
 }
 
 void DomainReliabilityContext::InitializeResourceStates() {
-  ScopedVector<DomainReliabilityConfig::Resource>::const_iterator it;
-  for (it = config_->resources.begin(); it != config_->resources.end(); ++it)
-    states_.push_back(new ResourceState(this, *it));
+  for (auto& resource : config_->resources)
+    states_.push_back(new ResourceState(this, resource));
 }
 
 void DomainReliabilityContext::ScheduleUpload(
@@ -250,12 +250,18 @@ void DomainReliabilityContext::OnUploadComplete(
     CommitUpload();
   else
     RollbackUpload();
+  base::TimeTicks first_beacon_time = scheduler_.first_beacon_time();
   scheduler_.OnUploadComplete(result);
   UMA_HISTOGRAM_BOOLEAN("DomainReliability.UploadSuccess",
       result.is_success());
+  base::TimeTicks now = time_->NowTicks();
+  UMA_HISTOGRAM_LONG_TIMES("DomainReliability.UploadLatency",
+                           now - first_beacon_time);
   DCHECK(!upload_time_.is_null());
   UMA_HISTOGRAM_MEDIUM_TIMES("DomainReliability.UploadDuration",
-                             time_->NowTicks() - upload_time_);
+                             now - upload_time_);
+  UMA_HISTOGRAM_LONG_TIMES("DomainReliability.UploadCollectorRetryDelay",
+                           scheduler_.last_collector_retry_delay());
   last_upload_time_ = upload_time_;
   upload_time_ = base::TimeTicks();
 }
@@ -263,12 +269,14 @@ void DomainReliabilityContext::OnUploadComplete(
 scoped_ptr<const Value> DomainReliabilityContext::CreateReport(
     base::TimeTicks upload_time) const {
   scoped_ptr<ListValue> beacons_value(new ListValue());
-  for (BeaconConstIterator it = beacons_.begin(); it != beacons_.end(); ++it)
-    beacons_value->Append(it->ToValue(upload_time, *last_network_change_time_));
+  for (const auto& beacon : beacons_) {
+    beacons_value->Append(
+        beacon.ToValue(upload_time, *last_network_change_time_));
+  }
 
   scoped_ptr<ListValue> resources_value(new ListValue());
-  for (ResourceStateIterator it = states_.begin(); it != states_.end(); ++it) {
-    scoped_ptr<Value> resource_report = (*it)->ToValue(upload_time);
+  for (const auto& state : states_) {
+    scoped_ptr<Value> resource_report = state->ToValue(upload_time);
     if (resource_report)
       resources_value->Append(resource_report.release());
   }
@@ -285,16 +293,16 @@ scoped_ptr<const Value> DomainReliabilityContext::CreateReport(
 }
 
 void DomainReliabilityContext::MarkUpload() {
-  for (ResourceStateIterator it = states_.begin(); it != states_.end(); ++it)
-    (*it)->MarkUpload();
+  for (auto& state : states_)
+    state->MarkUpload();
   DCHECK_EQ(0u, uploading_beacons_size_);
   uploading_beacons_size_ = beacons_.size();
   DCHECK_NE(0u, uploading_beacons_size_);
 }
 
 void DomainReliabilityContext::CommitUpload() {
-  for (ResourceStateIterator it = states_.begin(); it != states_.end(); ++it)
-    (*it)->CommitUpload();
+  for (auto& state : states_)
+    state->CommitUpload();
   BeaconIterator begin = beacons_.begin();
   BeaconIterator end = begin + uploading_beacons_size_;
   beacons_.erase(begin, end);
@@ -303,8 +311,8 @@ void DomainReliabilityContext::CommitUpload() {
 }
 
 void DomainReliabilityContext::RollbackUpload() {
-  for (ResourceStateIterator it = states_.begin(); it != states_.end(); ++it)
-    (*it)->RollbackUpload();
+  for (auto& state : states_)
+    state->RollbackUpload();
   DCHECK_NE(0u, uploading_beacons_size_);
   uploading_beacons_size_ = 0;
 }

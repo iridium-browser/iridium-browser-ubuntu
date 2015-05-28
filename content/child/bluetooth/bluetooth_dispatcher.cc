@@ -9,7 +9,6 @@
 #include "base/message_loop/message_loop.h"
 #include "base/thread_task_runner_handle.h"
 #include "content/child/thread_safe_sender.h"
-#include "content/child/worker_thread_task_runner.h"
 #include "content/common/bluetooth/bluetooth_messages.h"
 #include "third_party/WebKit/public/platform/WebBluetoothDevice.h"
 #include "third_party/WebKit/public/platform/WebBluetoothError.h"
@@ -18,6 +17,7 @@ using blink::WebBluetoothDevice;
 using blink::WebBluetoothError;
 using blink::WebBluetoothRequestDeviceCallbacks;
 using blink::WebString;
+using blink::WebVector;
 
 namespace content {
 
@@ -45,6 +45,20 @@ WebBluetoothError::ErrorType WebBluetoothErrorFromBluetoothError(
   return WebBluetoothError::NotFoundError;
 }
 
+WebBluetoothDevice::VendorIDSource GetWebVendorIdSource(
+    device::BluetoothDevice::VendorIDSource vendor_id_source) {
+  switch (vendor_id_source) {
+    case device::BluetoothDevice::VENDOR_ID_UNKNOWN:
+      return WebBluetoothDevice::VendorIDSource::Unknown;
+    case device::BluetoothDevice::VENDOR_ID_BLUETOOTH:
+      return WebBluetoothDevice::VendorIDSource::Bluetooth;
+    case device::BluetoothDevice::VENDOR_ID_USB:
+      return WebBluetoothDevice::VendorIDSource::USB;
+  }
+  NOTREACHED();
+  return WebBluetoothDevice::VendorIDSource::Unknown;
+}
+
 }  // namespace
 
 BluetoothDispatcher::BluetoothDispatcher(ThreadSafeSender* sender)
@@ -66,7 +80,7 @@ BluetoothDispatcher* BluetoothDispatcher::GetOrCreateThreadSpecificInstance(
     return g_dispatcher_tls.Pointer()->Get();
 
   BluetoothDispatcher* dispatcher = new BluetoothDispatcher(thread_safe_sender);
-  if (WorkerTaskRunner::Instance()->CurrentWorkerId())
+  if (CurrentWorkerId())
     WorkerTaskRunner::Instance()->AddStopObserver(dispatcher);
   return dispatcher;
 }
@@ -104,16 +118,26 @@ void BluetoothDispatcher::OnWorkerRunLoopStopped() {
 void BluetoothDispatcher::OnRequestDeviceSuccess(
     int thread_id,
     int request_id,
-    const std::string& device_instance_id) {
+    const BluetoothDevice& device) {
+  DCHECK(pending_requests_.Lookup(request_id)) << request_id;
+
+  WebVector<WebString> uuids(device.uuids.size());
+  for (size_t i = 0; i < device.uuids.size(); ++i)
+    uuids[i] = WebString::fromUTF8(device.uuids[i].c_str());
+
   pending_requests_.Lookup(request_id)
-      ->onSuccess(
-          new WebBluetoothDevice(WebString::fromUTF8(device_instance_id)));
+      ->onSuccess(new WebBluetoothDevice(
+          WebString::fromUTF8(device.instance_id), WebString(device.name),
+          device.device_class, GetWebVendorIdSource(device.vendor_id_source),
+          device.vendor_id, device.product_id, device.product_version,
+          device.paired, device.connected, uuids));
   pending_requests_.Remove(request_id);
 }
 
 void BluetoothDispatcher::OnRequestDeviceError(int thread_id,
                                                int request_id,
                                                BluetoothError error_type) {
+  DCHECK(pending_requests_.Lookup(request_id)) << request_id;
   pending_requests_.Lookup(request_id)
       ->onError(new WebBluetoothError(
           WebBluetoothErrorFromBluetoothError(error_type), ""));

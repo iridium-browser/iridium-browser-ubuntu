@@ -17,6 +17,7 @@
 #include "base/posix/eintr_wrapper.h"
 #include "base/thread_task_runner_handle.h"
 #include "base/threading/thread_restrictions.h"
+#include "components/device_event_log/device_event_log.h"
 #include "device/hid/hid_service.h"
 
 // These are already defined in newer versions of linux/hidraw.h.
@@ -29,12 +30,13 @@
 
 namespace device {
 
-class HidConnectionLinux::Helper : public base::MessagePumpLibevent::Watcher {
+class HidConnectionLinux::FileThreadHelper
+    : public base::MessagePumpLibevent::Watcher {
  public:
-  Helper(base::PlatformFile platform_file,
-         scoped_refptr<HidDeviceInfo> device_info,
-         base::WeakPtr<HidConnectionLinux> connection,
-         scoped_refptr<base::SingleThreadTaskRunner> task_runner)
+  FileThreadHelper(base::PlatformFile platform_file,
+                   scoped_refptr<HidDeviceInfo> device_info,
+                   base::WeakPtr<HidConnectionLinux> connection,
+                   scoped_refptr<base::SingleThreadTaskRunner> task_runner)
       : platform_file_(platform_file),
         connection_(connection),
         task_runner_(task_runner) {
@@ -43,7 +45,9 @@ class HidConnectionLinux::Helper : public base::MessagePumpLibevent::Watcher {
     has_report_id_ = device_info->has_report_id();
   }
 
-  ~Helper() override { DCHECK(thread_checker_.CalledOnValidThread()); }
+  ~FileThreadHelper() override {
+    DCHECK(thread_checker_.CalledOnValidThread());
+  }
 
   // Starts the FileDescriptorWatcher that reads input events from the device.
   // Must be called on a thread that has a base::MessageLoopForIO. The helper
@@ -54,7 +58,7 @@ class HidConnectionLinux::Helper : public base::MessagePumpLibevent::Watcher {
     if (!base::MessageLoopForIO::current()->WatchFileDescriptor(
             platform_file_, true, base::MessageLoopForIO::WATCH_READ,
             &file_watcher_, this)) {
-      LOG(ERROR) << "Failed to start watching device file.";
+      HID_LOG(ERROR) << "Failed to start watching device file.";
     }
   }
 
@@ -77,7 +81,7 @@ class HidConnectionLinux::Helper : public base::MessagePumpLibevent::Watcher {
     ssize_t bytes_read = HANDLE_EINTR(read(platform_file_, data, length));
     if (bytes_read < 0) {
       if (errno != EAGAIN) {
-        VPLOG(1) << "Read failed";
+        HID_PLOG(EVENT) << "Read failed";
         // This assumes that the error is unrecoverable and disables reading
         // from the device until it has been re-opened.
         // TODO(reillyg): Investigate starting and stopping the file descriptor
@@ -122,10 +126,10 @@ HidConnectionLinux::HidConnectionLinux(
 
   // The helper is passed a weak pointer to this connection so that it can be
   // cleaned up after the connection is closed.
-  helper_ = new Helper(device_file_.GetPlatformFile(), device_info,
-                       weak_factory_.GetWeakPtr(), task_runner_);
-  file_task_runner_->PostTask(
-      FROM_HERE, base::Bind(&Helper::Start, base::Unretained(helper_)));
+  helper_ = new FileThreadHelper(device_file_.GetPlatformFile(), device_info,
+                                 weak_factory_.GetWeakPtr(), task_runner_);
+  file_task_runner_->PostTask(FROM_HERE, base::Bind(&FileThreadHelper::Start,
+                                                    base::Unretained(helper_)));
 }
 
 HidConnectionLinux::~HidConnectionLinux() {
@@ -209,12 +213,12 @@ void HidConnectionLinux::FinishWrite(size_t expected_size,
                                      const WriteCallback& callback,
                                      ssize_t result) {
   if (result < 0) {
-    VPLOG(1) << "Write failed";
+    HID_PLOG(EVENT) << "Write failed";
     callback.Run(false);
   } else {
     if (static_cast<size_t>(result) != expected_size) {
-      LOG(WARNING) << "Incomplete HID write: " << result
-                   << " != " << expected_size;
+      HID_LOG(EVENT) << "Incomplete HID write: " << result
+                     << " != " << expected_size;
     }
     callback.Run(true);
   }
@@ -226,10 +230,10 @@ void HidConnectionLinux::FinishGetFeatureReport(
     const ReadCallback& callback,
     int result) {
   if (result < 0) {
-    VPLOG(1) << "Failed to get feature report";
+    HID_PLOG(EVENT) << "Failed to get feature report";
     callback.Run(false, NULL, 0);
   } else if (result == 0) {
-    VLOG(1) << "Get feature result too short.";
+    HID_LOG(EVENT) << "Get feature result too short.";
     callback.Run(false, NULL, 0);
   } else if (report_id == 0) {
     // Linux adds a 0 to the beginning of the data received from the device.
@@ -244,7 +248,7 @@ void HidConnectionLinux::FinishGetFeatureReport(
 void HidConnectionLinux::FinishSendFeatureReport(const WriteCallback& callback,
                                                  int result) {
   if (result < 0) {
-    VPLOG(1) << "Failed to send feature report";
+    HID_PLOG(EVENT) << "Failed to send feature report";
     callback.Run(false);
   } else {
     callback.Run(true);

@@ -54,27 +54,6 @@ public:
     virtual void inspectElementAt(const WebPoint&) = 0;
     virtual void setLayerTreeId(int) = 0;
 
-    virtual void didBeginFrame(int frameId = 0) = 0;
-    virtual void didCancelFrame() = 0;
-    virtual void willComposite() = 0;
-    virtual void didComposite() = 0;
-
-    class GPUEvent {
-    public:
-        GPUEvent(double timestamp, int phase, bool foreign, uint64_t usedGPUMemoryBytes) :
-            timestamp(timestamp),
-            phase(phase),
-            foreign(foreign),
-            usedGPUMemoryBytes(usedGPUMemoryBytes),
-            limitGPUMemoryBytes(0) { }
-        double timestamp;
-        int phase;
-        bool foreign;
-        uint64_t usedGPUMemoryBytes;
-        uint64_t limitGPUMemoryBytes;
-    };
-    virtual void processGPUEvent(const GPUEvent&) = 0;
-
     // Exposed for TestRunner.
     virtual void evaluateInWebInspector(long callId, const WebString& script) = 0;
 
@@ -87,7 +66,6 @@ public:
     // Asynchronously request debugger to pause immediately and run the command.
     BLINK_EXPORT static void interruptAndDispatch(MessageDescriptor*);
     BLINK_EXPORT static bool shouldInterruptForMessage(const WebString&);
-    BLINK_EXPORT static void processPendingMessages();
 
 };
 

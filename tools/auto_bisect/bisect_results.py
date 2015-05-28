@@ -29,7 +29,7 @@ class BisectResults(object):
     culprit_revisions: A list of revisions, which contain the bad change
         introducing the failure.
     other_regressions: A list of tuples representing other regressions, which
-        may have occured.
+        may have occurred.
     regression_size: For performance bisects, this is a relative change of
         the mean metric value. For other bisects this field always contains
         'zero-to-nonzero'.
@@ -58,7 +58,6 @@ class BisectResults(object):
       runtime_warnings: A list of warnings from the bisect run.
       error: Error message. When error is not None, other arguments are ignored.
     """
-
     self.error = error
     self.abort_reason = abort_reason
     if error is not None or abort_reason is not None:
@@ -66,8 +65,8 @@ class BisectResults(object):
 
     assert (bisect_state is not None and depot_registry is not None and
             opts is not None and runtime_warnings is not None), (
-            'Incorrect use of the BisectResults constructor. When error is '
-            'None, all other arguments are required')
+                'Incorrect use of the BisectResults constructor. '
+                'When error is None, all other arguments are required.')
 
     self.state = bisect_state
 
@@ -113,7 +112,7 @@ class BisectResults(object):
       return
 
     confidence_params = (results_reverted[0]['values'],
-        results_tot[0]['values'])
+                         results_tot[0]['values'])
     confidence = BisectResults.ConfidenceScore(*confidence_params)
 
     self.retest_results_tot = RevisionState('ToT', 'n/a', 0)
@@ -127,7 +126,7 @@ class BisectResults(object):
           'Confidence of re-test with reverted CL is not high.'
           ' Check that the regression hasn\'t already recovered. '
           ' There\'s still a chance this is a regression, as performance of'
-          ' local builds may not match official builds.' )
+          ' local builds may not match official builds.')
 
   @staticmethod
   def _GetResultBasedWarnings(culprit_revisions, opts, confidence):
@@ -218,8 +217,10 @@ class BisectResults(object):
           # mean of the current runs, this local regression is in same
           # direction.
           prev_greater_than_current = mean_of_prev_runs > mean_of_current_runs
-          is_same_direction = (prev_greater_than_current if
-              bad_greater_than_good else not prev_greater_than_current)
+          if bad_greater_than_good:
+            is_same_direction = prev_greater_than_current
+          else:
+            is_same_direction = not prev_greater_than_current
 
           # Only report potential regressions with high confidence.
           if is_same_direction and confidence > 50:
@@ -230,6 +231,20 @@ class BisectResults(object):
 
   @staticmethod
   def FindBreakingRevRange(revision_states):
+    """Finds the last known good and first known bad revisions.
+
+    Note that since revision_states is expected to be in reverse chronological
+    order, the last known good revision is the first revision in the list that
+    has the passed property set to 1, therefore the name
+    `first_working_revision`. The inverse applies to `last_broken_revision`.
+
+    Args:
+      revision_states: A list of RevisionState instances.
+
+    Returns:
+      A tuple containing the two revision states at the border. (Last
+      known good and first known bad.)
+    """
     first_working_revision = None
     last_broken_revision = None
 
@@ -287,10 +302,13 @@ class BisectResults(object):
         [working_mean, broken_mean]) /
         max(0.0001, min(mean_of_good_runs, mean_of_bad_runs))) * 100.0
 
-    # Give a "confidence" in the bisect. At the moment we use how distinct the
-    # values are before and after the last broken revision, and how noisy the
-    # overall graph is.
-    confidence_params = (sum(working_means, []), sum(broken_means, []))
+    # Give a "confidence" in the bisect. Currently, we consider the values of
+    # only the revisions at the breaking range (last known good and first known
+    # bad) see the note in the docstring for FindBreakingRange.
+    confidence_params = (
+        sum([first_working_rev.value['values']], []),
+        sum([last_broken_rev.value['values']], [])
+    )
     confidence = cls.ConfidenceScore(*confidence_params)
 
     bad_greater_than_good = mean_of_bad_runs > mean_of_good_runs

@@ -26,7 +26,7 @@ public:
 
     void clearPendingInvalidations();
 
-    void trace(Visitor*);
+    DECLARE_TRACE();
 
 private:
     struct RecursionData {
@@ -87,8 +87,8 @@ private:
         RecursionData* m_data;
     };
 
-    typedef WillBeHeapVector<RefPtrWillBeMember<DescendantInvalidationSet> > InvalidationList;
-    typedef WillBeHeapHashMap<RawPtrWillBeMember<Element>, OwnPtrWillBeMember<InvalidationList> > PendingInvalidationMap;
+    typedef WillBeHeapVector<RefPtrWillBeMember<DescendantInvalidationSet>> InvalidationList;
+    typedef WillBeHeapHashMap<RawPtrWillBeMember<Element>, OwnPtrWillBeMember<InvalidationList>> PendingInvalidationMap;
 
     InvalidationList& ensurePendingInvalidationList(Element&);
 

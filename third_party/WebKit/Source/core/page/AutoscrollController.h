@@ -36,8 +36,8 @@ class FrameView;
 class Node;
 class Page;
 class PlatformMouseEvent;
-class RenderBox;
-class RenderObject;
+class LayoutBox;
+class LayoutObject;
 
 enum AutoscrollType {
     NoAutoscroll,
@@ -56,16 +56,16 @@ public:
 
     void animate(double monotonicFrameBeginTime);
     bool autoscrollInProgress() const;
-    bool autoscrollInProgress(const RenderBox*) const;
+    bool autoscrollInProgress(const LayoutBox*) const;
     bool panScrollInProgress() const;
-    void startAutoscrollForSelection(RenderObject*);
+    void startAutoscrollForSelection(LayoutObject*);
     void stopAutoscroll();
-    void stopAutoscrollIfNeeded(RenderObject*);
+    void stopAutoscrollIfNeeded(LayoutObject*);
     void updateAutoscrollRenderer();
     void updateDragAndDrop(Node* targetNode, const IntPoint& eventPosition, double eventTime);
 #if OS(WIN)
     void handleMouseReleaseForPanScrolling(LocalFrame*, const PlatformMouseEvent&);
-    void startPanScrolling(RenderBox*, const IntPoint&);
+    void startPanScrolling(LayoutBox*, const IntPoint&);
 #endif
 
 private:
@@ -78,7 +78,7 @@ private:
 #endif
 
     Page& m_page;
-    RenderBox* m_autoscrollRenderer;
+    LayoutBox* m_autoscrollRenderer;
     AutoscrollType m_autoscrollType;
     IntPoint m_dragAndDropAutoscrollReferencePosition;
     double m_dragAndDropAutoscrollStartTime;

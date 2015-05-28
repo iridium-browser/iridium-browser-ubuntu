@@ -26,6 +26,7 @@
 #ifndef htmlediting_h
 #define htmlediting_h
 
+#include "core/CoreExport.h"
 #include "core/dom/Position.h"
 #include "core/editing/EditingBoundary.h"
 #include "platform/text/TextDirection.h"
@@ -39,7 +40,6 @@ class Element;
 class HTMLBRElement;
 class HTMLElement;
 class HTMLLIElement;
-class HTMLOListElement;
 class HTMLSpanElement;
 class HTMLUListElement;
 class Node;
@@ -58,7 +58,7 @@ class VisibleSelection;
 
 // Functions returning Node
 
-ContainerNode* highestEditableRoot(const Position&, EditableType = ContentIsEditable);
+CORE_EXPORT ContainerNode* highestEditableRoot(const Position&, EditableType = ContentIsEditable);
 
 Node* highestEnclosingNodeOfType(const Position&, bool (*nodeIsOfType)(const Node*),
     EditingBoundaryCrossingRule = CannotCrossEditingBoundary, Node* stayWithin = nullptr);
@@ -209,7 +209,6 @@ VisiblePosition visiblePositionForIndex(int index, ContainerNode* scope);
 
 PassRefPtrWillBeRawPtr<HTMLElement> createDefaultParagraphElement(Document&);
 PassRefPtrWillBeRawPtr<HTMLBRElement> createBreakElement(Document&);
-PassRefPtrWillBeRawPtr<HTMLOListElement> createOrderedListElement(Document&);
 PassRefPtrWillBeRawPtr<HTMLUListElement> createUnorderedListElement(Document&);
 PassRefPtrWillBeRawPtr<HTMLLIElement> createListItemElement(Document&);
 PassRefPtrWillBeRawPtr<HTMLElement> createHTMLElement(Document&, const QualifiedName&);

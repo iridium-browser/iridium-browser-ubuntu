@@ -6,7 +6,6 @@
 #define CONTENT_TEST_TEST_WEB_CONTENTS_H_
 
 #include "content/browser/web_contents/web_contents_impl.h"
-#include "content/public/common/web_preferences.h"
 #include "content/public/test/web_contents_tester.h"
 #include "content/test/test_render_frame_host.h"
 #include "content/test/test_render_view_host.h"
@@ -48,7 +47,6 @@ class TestWebContents : public WebContentsImpl, public WebContentsTester {
                                    const GURL& url,
                                    const Referrer& referrer,
                                    ui::PageTransition transition) override;
-  WebPreferences TestComputeWebkitPrefs() override;
 
   // State accessor.
   bool cross_navigation_pending() {
@@ -112,9 +110,9 @@ class TestWebContents : public WebContentsImpl, public WebContentsTester {
   void CreateNewFullscreenWidget(int render_process_id, int route_id) override;
   void ShowCreatedWindow(int route_id,
                          WindowOpenDisposition disposition,
-                         const gfx::Rect& initial_pos,
+                         const gfx::Rect& initial_rect,
                          bool user_gesture) override;
-  void ShowCreatedWidget(int route_id, const gfx::Rect& initial_pos) override;
+  void ShowCreatedWidget(int route_id, const gfx::Rect& initial_rect) override;
   void ShowCreatedFullscreenWidget(int route_id) override;
 
   RenderViewHostDelegateView* delegate_view_override_;

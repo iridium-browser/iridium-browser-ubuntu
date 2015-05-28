@@ -20,6 +20,7 @@
 #include "third_party/WebKit/public/platform/WebVector.h"
 #include "third_party/WebKit/public/web/WebDocument.h"
 #include "third_party/WebKit/public/web/WebElement.h"
+#include "third_party/WebKit/public/web/WebFormControlElement.h"
 #include "third_party/WebKit/public/web/WebFormElement.h"
 #include "third_party/WebKit/public/web/WebInputElement.h"
 #include "third_party/WebKit/public/web/WebLocalFrame.h"
@@ -44,6 +45,7 @@ const int kPasswordFillFormDataId = 1234;
 // The name of the username/password element in the form.
 const char kUsernameName[] = "username";
 const char kPasswordName[] = "password";
+const char kEmailName[] = "email";
 
 const char kAliceUsername[] = "alice";
 const char kAlicePassword[] = "password";
@@ -160,6 +162,15 @@ const char kOnChangeDetectionScript[] =
     "  };"
     "</script>";
 
+const char kFormHTMLWithTwoTextFields[] =
+    "<FORM name='LoginTestForm' id='LoginTestForm' "
+    "action='http://www.bidule.com'>"
+    "  <INPUT type='text' id='username'/>"
+    "  <INPUT type='text' id='email'/>"
+    "  <INPUT type='password' id='password'/>"
+    "  <INPUT type='submit' value='Login'/>"
+    "</FORM>";
+
 // Sets the "readonly" attribute of |element| to the value given by |read_only|.
 void SetElementReadOnly(WebInputElement& element, bool read_only) {
   element.setAttribute(WebString::fromUTF8("readonly"),
@@ -265,6 +276,13 @@ class PasswordAutofillAgentTest : public ChromeRenderViewTest {
     element = document.getElementById(WebString::fromUTF8(kPasswordName));
     ASSERT_FALSE(element.isNull());
     password_element_ = element.to<blink::WebInputElement>();
+  }
+
+  blink::WebInputElement GetInputElementByID(const std::string& id) {
+    WebDocument document = GetMainFrame()->document();
+    WebElement element =
+        document.getElementById(WebString::fromUTF8(id.c_str()));
+    return element.to<blink::WebInputElement>();
   }
 
   void ClearUsernameAndPasswordFields() {
@@ -1352,9 +1370,6 @@ TEST_F(PasswordAutofillAgentTest, SendsLoggingStateUpdatePingOnConstruction) {
   EXPECT_TRUE(message);
 }
 
-// TODO(gcasto): Re-enabled these tests after crbug.com/430318 has been fixed.
-#if !defined(OS_ANDROID)
-
 // Tests that one user click on a username field is sufficient to bring up a
 // credential suggestion popup, and the user can autocomplete the password by
 // selecting the credential from the popup.
@@ -1499,8 +1514,6 @@ TEST_F(PasswordAutofillAgentTest, NoCredentialsOnPasswordClick) {
       AutofillHostMsg_ShowPasswordSuggestions::ID));
 }
 
-#endif  // !defined(OS_ANDROID)
-
 // The user types in a username and a password, but then just before sending
 // the form off, a script clears them. This test checks that
 // PasswordAutofillAgent can still remember the username and the password
@@ -1642,6 +1655,56 @@ TEST_F(PasswordAutofillAgentTest,
 // typed by the user.
 TEST_F(PasswordAutofillAgentTest,
        RememberLastTypedUsernameAndPasswordOnSubmit_ScriptChanged) {
+  SimulateInputChangeForElement("temp", true, GetMainFrame(), username_element_,
+                                true);
+  SimulateInputChangeForElement("random", true, GetMainFrame(),
+                                password_element_, true);
+
+  // Simulate that the username and the password value was changed by the
+  // site's JavaScript before submit.
+  username_element_.setValue(WebString("new username"));
+  password_element_.setValue(WebString("new password"));
+  static_cast<content::RenderFrameObserver*>(password_autofill_agent_)
+      ->WillSendSubmitEvent(username_element_.form());
+  static_cast<content::RenderFrameObserver*>(password_autofill_agent_)
+      ->WillSubmitForm(username_element_.form());
+
+  // Observe that the PasswordAutofillAgent still remembered the last typed
+  // username and password and sent that to the browser.
+  ExpectFormSubmittedWithUsernameAndPasswords("temp", "random", "");
+}
+
+// The username/password is autofilled by password manager then just before
+// sending the form off, a script changes them. This test checks that
+// PasswordAutofillAgent can still get the username and the password autofilled.
+TEST_F(PasswordAutofillAgentTest,
+       RememberLastAutofilledUsernameAndPasswordOnSubmit_ScriptChanged) {
+  SimulateOnFillPasswordForm(fill_data_);
+
+  // Simulate that the username and the password value was changed by the
+  // site's JavaScript before submit.
+  username_element_.setValue(WebString("new username"));
+  password_element_.setValue(WebString("new password"));
+  static_cast<content::RenderFrameObserver*>(password_autofill_agent_)
+      ->WillSendSubmitEvent(username_element_.form());
+  static_cast<content::RenderFrameObserver*>(password_autofill_agent_)
+      ->WillSubmitForm(username_element_.form());
+
+  // Observe that the PasswordAutofillAgent still remembered the autofilled
+  // username and password and sent that to the browser.
+  ExpectFormSubmittedWithUsernameAndPasswords(kAliceUsername, kAlicePassword,
+                                              "");
+}
+
+// The username/password is autofilled by password manager then user types in a
+// username and a password. Then just before sending the form off, a script
+// changes them. This test checks that PasswordAutofillAgent can still remember
+// the username and the password typed by the user.
+TEST_F(
+    PasswordAutofillAgentTest,
+    RememberLastTypedAfterAutofilledUsernameAndPasswordOnSubmit_ScriptChanged) {
+  SimulateOnFillPasswordForm(fill_data_);
+
   SimulateInputChangeForElement("temp", true, GetMainFrame(), username_element_,
                                 true);
   SimulateInputChangeForElement("random", true, GetMainFrame(),
@@ -1807,6 +1870,74 @@ TEST_F(PasswordAutofillAgentTest,
   SetElementReadOnly(username_element_, true);
 
   CheckTextFieldsState(std::string("foobar"), false, std::string(), false);
+}
+
+// Test that the last plain text field before a password field is chosen as a
+// username, in a form with 2 plain text fields without username predictions.
+TEST_F(PasswordAutofillAgentTest, FindingUsernameWithoutAutofillPredictions) {
+  LoadHTML(kFormHTMLWithTwoTextFields);
+  UpdateUsernameAndPasswordElements();
+  blink::WebInputElement email_element = GetInputElementByID(kEmailName);
+  SimulateInputChangeForElement("temp", true, GetMainFrame(), username_element_,
+                                true);
+  SimulateInputChangeForElement("temp@google.com", true, GetMainFrame(),
+                                email_element, true);
+  SimulateInputChangeForElement("random", true, GetMainFrame(),
+                                password_element_, true);
+  static_cast<content::RenderFrameObserver*>(password_autofill_agent_)
+      ->WillSendSubmitEvent(username_element_.form());
+  static_cast<content::RenderFrameObserver*>(password_autofill_agent_)
+      ->WillSubmitForm(username_element_.form());
+
+  // Observe that the PasswordAutofillAgent identifies the second field (e-mail)
+  // as username.
+  ExpectFormSubmittedWithUsernameAndPasswords("temp@google.com", "random", "");
+}
+
+// Tests that username predictions are followed when identifying the username
+// in a password form with two plain text fields.
+TEST_F(PasswordAutofillAgentTest, FindingUsernameWithAutofillPredictions) {
+  LoadHTML(kFormHTMLWithTwoTextFields);
+  UpdateUsernameAndPasswordElements();
+  blink::WebInputElement email_element = GetInputElementByID(kEmailName);
+  SimulateInputChangeForElement("temp", true, GetMainFrame(), username_element_,
+                                true);
+  SimulateInputChangeForElement("temp@google.com", true, GetMainFrame(),
+                                email_element, true);
+  SimulateInputChangeForElement("random", true, GetMainFrame(),
+                                password_element_, true);
+
+  // Find FormData for visible password form.
+  blink::WebFormElement form_element = username_element_.form();
+  FormData form_data;
+  ASSERT_TRUE(WebFormElementToFormData(
+      form_element, blink::WebFormControlElement(), REQUIRE_NONE, EXTRACT_NONE,
+      &form_data, nullptr));
+  // Simulate Autofill predictions: the first field is username.
+  std::map<autofill::FormData, autofill::FormFieldData> predictions;
+  predictions[form_data] = form_data.fields[0];
+  AutofillMsg_AutofillUsernameDataReceived msg(0, predictions);
+  static_cast<content::RenderFrameObserver*>(password_autofill_agent_)
+      ->OnMessageReceived(msg);
+
+  // The prediction should still match even if the form changes, as long
+  // as the particular element doesn't change.
+  std::string add_field_to_form =
+      "var form = document.getElementById('LoginTestForm');"
+      "var new_input = document.createElement('input');"
+      "new_input.setAttribute('type', 'text');"
+      "new_input.setAttribute('id', 'other_field');"
+      "form.appendChild(new_input);";
+  ExecuteJavaScript(add_field_to_form.c_str());
+
+  static_cast<content::RenderFrameObserver*>(password_autofill_agent_)
+      ->WillSendSubmitEvent(username_element_.form());
+  static_cast<content::RenderFrameObserver*>(password_autofill_agent_)
+      ->WillSubmitForm(username_element_.form());
+
+  // Observe that the PasswordAutofillAgent identifies the first field as
+  // username.
+  ExpectFormSubmittedWithUsernameAndPasswords("temp", "random", "");
 }
 
 }  // namespace autofill

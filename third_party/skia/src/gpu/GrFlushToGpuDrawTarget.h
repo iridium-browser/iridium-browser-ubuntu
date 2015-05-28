@@ -24,7 +24,7 @@ class GrFlushToGpuDrawTarget : public GrClipTarget {
 public:
     GrFlushToGpuDrawTarget(GrGpu*, GrVertexBufferAllocPool*,GrIndexBufferAllocPool*);
 
-    ~GrFlushToGpuDrawTarget() SK_OVERRIDE;
+    ~GrFlushToGpuDrawTarget() override;
 
     /**
      * Empties the draw buffer of any queued up draws. This must not be called while inside an
@@ -40,13 +40,16 @@ public:
      */
     void flush();
 
-    bool geometryHints(size_t vertexStride, int* vertexCount, int* indexCount) const SK_OVERRIDE;
+    bool geometryHints(size_t vertexStride, int* vertexCount, int* indexCount) const override;
 
 protected:
     GrGpu* getGpu() { return fGpu; }
     const GrGpu* getGpu() const{ return fGpu; }
 
-private:
+    GrVertexBufferAllocPool* getVertexAllocPool() { return fVertexPool; }
+    GrIndexBufferAllocPool* getIndexAllocPool() { return fIndexPool; }
+
+    // TODO all of this goes away when batch is everywhere
     enum {
         kGeoPoolStatePreAllocCnt = 4,
     };
@@ -64,26 +67,29 @@ private:
     };
 
     typedef SkSTArray<kGeoPoolStatePreAllocCnt, GeometryPoolState> GeoPoolStateStack;
+    const GeoPoolStateStack& getGeoPoolStateStack() const { return fGeoPoolStateStack; }
 
+    void willReserveVertexAndIndexSpace(int vertexCount,
+                                        size_t vertexStride,
+                                        int indexCount) override;
+
+private:
     virtual void onReset() = 0;
 
     virtual void onFlush() = 0;
 
-    void setDrawBuffers(DrawInfo*, size_t stride) SK_OVERRIDE;
-    bool onReserveVertexSpace(size_t vertexSize, int vertexCount, void** vertices) SK_OVERRIDE;
-    bool onReserveIndexSpace(int indexCount, void** indices) SK_OVERRIDE;
-    void releaseReservedVertexSpace() SK_OVERRIDE;
-    void releaseReservedIndexSpace() SK_OVERRIDE;
-    void geometrySourceWillPush() SK_OVERRIDE;
-    void geometrySourceWillPop(const GeometrySrcState& restoredState) SK_OVERRIDE;
-    void willReserveVertexAndIndexSpace(int vertexCount,
-                                        size_t vertexStride,
-                                        int indexCount) SK_OVERRIDE;
+    void setDrawBuffers(DrawInfo*, size_t stride) override;
+    bool onReserveVertexSpace(size_t vertexSize, int vertexCount, void** vertices) override;
+    bool onReserveIndexSpace(int indexCount, void** indices) override;
+    void releaseReservedVertexSpace() override;
+    void releaseReservedIndexSpace() override;
+    void geometrySourceWillPush() override;
+    void geometrySourceWillPop(const GeometrySrcState& restoredState) override;
     bool onCanCopySurface(const GrSurface* dst,
                           const GrSurface* src,
                           const SkIRect& srcRect,
-                          const SkIPoint& dstPoint) SK_OVERRIDE;
-    bool onInitCopySurfaceDstDesc(const GrSurface* src, GrSurfaceDesc* desc) SK_OVERRIDE;
+                          const SkIPoint& dstPoint) override;
+    bool onInitCopySurfaceDstDesc(const GrSurface* src, GrSurfaceDesc* desc) override;
 
     GeoPoolStateStack                   fGeoPoolStateStack;
     SkAutoTUnref<GrGpu>                 fGpu;

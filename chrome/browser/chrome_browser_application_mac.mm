@@ -12,6 +12,7 @@
 #import "base/mac/scoped_nsobject.h"
 #import "base/mac/scoped_objc_class_swizzler.h"
 #import "base/metrics/histogram.h"
+#include "base/profiler/scoped_tracker.h"
 #include "base/strings/stringprintf.h"
 #import "base/strings/sys_string_conversions.h"
 #import "chrome/browser/app_controller_mac.h"
@@ -31,6 +32,7 @@ enum ExceptionEventType {
   EXCEPTION_VIEW_NOT_IN_WINDOW,
   EXCEPTION_NSURL_INIT_NIL,
   EXCEPTION_NSDATADETECTOR_NIL_STRING,
+  EXCEPTION_NSREGULAREXPRESSION_NIL_STRING,
 
   // Always keep this at the end.
   EXCEPTION_MAX,
@@ -126,13 +128,22 @@ static IMP gOriginalInitIMP = NULL;
         fatal = NO;
       }
 
-      // TODO(shess): <http://crbug.com/316759> OSX 10.9 is failing
-      // trying to extract structure from a string.
+      // <http://crbug.com/316759> OSX 10.9 fails trying to extract
+      // structure from a string.
       NSString* const kNSDataDetectorNilCheck =
           @"*** -[NSDataDetector enumerateMatchesInString:"
           @"options:range:usingBlock:]: nil argument";
       if ([aReason isEqualToString:kNSDataDetectorNilCheck]) {
         RecordExceptionEvent(EXCEPTION_NSDATADETECTOR_NIL_STRING);
+        fatal = NO;
+      }
+
+      // <http://crbug.com/466076> OSX 10.10 moved the method.
+      NSString* const kNSRegularExpressionNilCheck =
+          @"*** -[NSRegularExpression enumerateMatchesInString:"
+          @"options:range:usingBlock:]: nil argument";
+      if ([aReason isEqualToString:kNSRegularExpressionNilCheck]) {
+        RecordExceptionEvent(EXCEPTION_NSREGULAREXPRESSION_NIL_STRING);
         fatal = NO;
       }
     }
@@ -458,8 +469,88 @@ void SwizzleInit() {
 }
 
 - (void)sendEvent:(NSEvent*)event {
-  base::mac::ScopedSendingEvent sendingEventScoper;
-  [super sendEvent:event];
+  // tracked_objects::ScopedTracker does not support parameterized
+  // instrumentations, so a big switch with each bunch instrumented is required.
+  switch (event.type) {
+    case NSLeftMouseDown:
+    case NSLeftMouseUp:
+    case NSRightMouseDown:
+    case NSRightMouseUp:
+    case NSMouseMoved:
+    case NSLeftMouseDragged:
+    case NSRightMouseDragged:
+    case NSMouseEntered:
+    case NSMouseExited:
+    case NSOtherMouseDown:
+    case NSOtherMouseUp:
+    case NSOtherMouseDragged: {
+      tracked_objects::ScopedTracker tracking_profile(
+          FROM_HERE_WITH_EXPLICIT_FUNCTION(
+              "463272 -[BrowserCrApplication sendEvent:] Mouse"));
+      base::mac::ScopedSendingEvent sendingEventScoper;
+      [super sendEvent:event];
+      break;
+    }
+
+    case NSKeyDown:
+    case NSKeyUp: {
+      tracked_objects::ScopedTracker tracking_profile(
+          FROM_HERE_WITH_EXPLICIT_FUNCTION(
+              "463272 -[BrowserCrApplication sendEvent:] Key"));
+      base::mac::ScopedSendingEvent sendingEventScoper;
+      [super sendEvent:event];
+      break;
+    }
+
+    case NSScrollWheel: {
+      tracked_objects::ScopedTracker tracking_profile(
+          FROM_HERE_WITH_EXPLICIT_FUNCTION(
+              "463272 -[BrowserCrApplication sendEvent:] ScrollWheel"));
+      base::mac::ScopedSendingEvent sendingEventScoper;
+      [super sendEvent:event];
+      break;
+    }
+
+    case NSEventTypeGesture:
+    case NSEventTypeMagnify:
+    case NSEventTypeSwipe:
+    case NSEventTypeRotate:
+    case NSEventTypeBeginGesture:
+    case NSEventTypeEndGesture: {
+      tracked_objects::ScopedTracker tracking_profile(
+          FROM_HERE_WITH_EXPLICIT_FUNCTION(
+              "463272 -[BrowserCrApplication sendEvent:] Gesture"));
+      base::mac::ScopedSendingEvent sendingEventScoper;
+      [super sendEvent:event];
+      break;
+    }
+
+    case NSAppKitDefined: {
+      tracked_objects::ScopedTracker tracking_profile(
+          FROM_HERE_WITH_EXPLICIT_FUNCTION(
+              "463272 -[BrowserCrApplication sendEvent:] AppKit"));
+      base::mac::ScopedSendingEvent sendingEventScoper;
+      [super sendEvent:event];
+      break;
+    }
+
+    case NSSystemDefined: {
+      tracked_objects::ScopedTracker tracking_profile(
+          FROM_HERE_WITH_EXPLICIT_FUNCTION(
+              "463272 -[BrowserCrApplication sendEvent:] System"));
+      base::mac::ScopedSendingEvent sendingEventScoper;
+      [super sendEvent:event];
+      break;
+    }
+
+    default: {
+      tracked_objects::ScopedTracker tracking_profile(
+          FROM_HERE_WITH_EXPLICIT_FUNCTION(
+              "463272 -[BrowserCrApplication sendEvent:] Other"));
+      base::mac::ScopedSendingEvent sendingEventScoper;
+      [super sendEvent:event];
+    }
+  }
 }
 
 // NSExceptions which are caught by the event loop are logged here.
@@ -560,27 +651,13 @@ void SwizzleInit() {
 }
 
 - (id)_removeWindow:(NSWindow*)window {
+  // Note _removeWindow is called from -[NSWindow dealloc], which can happen at
+  // unpredictable times due to reference counting. Just update state.
   {
     base::AutoLock lock(previousKeyWindowsLock_);
     [self removePreviousKeyWindow:window];
   }
-  id result = [super _removeWindow:window];
-
-  // Ensure app has a key window after a window is removed.
-  // OS wants to make a panel browser window key after closing an app window
-  // because panels use a higher priority window level, but panel windows may
-  // refuse to become key, leaving the app with no key window. The OS does
-  // not seem to consider other windows after the first window chosen refuses
-  // to become key. Force consideration of other windows here.
-  if ([self isActive] && [self keyWindow] == nil) {
-    NSWindow* key =
-        [self makeWindowsPerform:@selector(canBecomeKeyWindow) inOrder:YES];
-    [key makeKeyWindow];
-  }
-
-  // Return result from the super class. It appears to be the app that
-  // owns the removed window (determined via experimentation).
-  return result;
+  return [super _removeWindow:window];
 }
 
 - (id)_setKeyWindow:(NSWindow*)window {

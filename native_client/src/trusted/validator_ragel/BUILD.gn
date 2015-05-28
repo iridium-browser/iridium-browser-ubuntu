@@ -13,7 +13,7 @@ static_library("dfa_validate") {
     "validator_features_validator.c",
     "dfa_validate_common.c",
   ]
-  if (cpu_arch == "x86") {
+  if (current_cpu == "x86") {
     sources += [
       validator32,
       "dfa_validate_32.c",
@@ -39,9 +39,9 @@ static_library("rdfa_validator") {
     validator32,
     validator64,
     "validator_features_all.c",
-    "validator_features_validator.c"
+    "validator_features_validator.c",
   ]
-  defines = ["VALIDATOR_EXPORT=DLLEXPORT"]
+  defines = [ "VALIDATOR_EXPORT=DLLEXPORT" ]
   deps = [
     "//native_client/build/config/nacl:nacl_base",
   ]

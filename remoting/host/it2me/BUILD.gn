@@ -3,20 +3,19 @@
 # found in the LICENSE file.
 
 import("//build/config/features.gni")
-import("//build/config/ui.gni")
-import("//remoting/remoting_version.gni")
+import("//remoting/remoting_host.gni")
+import("//remoting/remoting_srcs.gni")
 
-static_library("common") {
-  gypi_values = exec_script("//build/gypi_to_gn.py",
-                            [ rebase_path("../../remoting_host_srcs.gypi") ],
-                            "scope",
-                            [ "../../remoting_host_srcs.gypi" ])
+source_set("common") {
+  sources = rebase_path(
+          remoting_host_srcs_gypi_values.remoting_it2me_host_static_sources,
+          ".",
+          "//remoting")
 
-  sources = rebase_path(gypi_values.remoting_it2me_host_static_sources,
-                        ".",
-                        "//remoting")
-
-  configs += [ "//build/config/compiler:wexit_time_destructors" ]
+  configs += [
+    "//build/config/compiler:wexit_time_destructors",
+    "//remoting:version",
+  ]
 
   deps = [
     "//base:i18n",
@@ -26,6 +25,34 @@ static_library("common") {
     "//remoting/protocol",
     "//remoting/resources",
   ]
+}
 
-  defines = [ "VERSION=$version_full" ]
+if (!is_win && enable_remoting_host) {
+  executable("remote_assistance_host") {
+    sources = [
+      "it2me_native_messaging_host_entry_point.cc",
+      "it2me_native_messaging_host_main.cc",
+      "it2me_native_messaging_host_main.h",
+    ]
+
+    configs += [
+      "//build/config/compiler:wexit_time_destructors",
+      "//remoting:version",
+    ]
+
+    deps = [
+      ":common",
+      "//remoting/host",
+      "//remoting/host/native_messaging",
+      "//remoting/proto",
+    ]
+
+    if (enable_webrtc) {
+      deps += [ "//third_party/libjingle:libjingle_webrtc" ]
+    }
+
+    if (is_linux) {
+      deps += [ "//build/config/linux/gtk" ]
+    }
+  }
 }

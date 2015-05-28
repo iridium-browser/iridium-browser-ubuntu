@@ -15,7 +15,11 @@
 #include "base/strings/string16.h"
 #include "device/bluetooth/bluetooth_export.h"
 #include "device/bluetooth/bluetooth_uuid.h"
-#include "net/base/net_log.h"
+#include "net/log/net_log.h"
+
+namespace base {
+class BinaryValue;
+}
 
 namespace device {
 
@@ -43,7 +47,8 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothDevice {
   enum VendorIDSource {
     VENDOR_ID_UNKNOWN,
     VENDOR_ID_BLUETOOTH,
-    VENDOR_ID_USB
+    VENDOR_ID_USB,
+    VENDOR_ID_MAX_VALUE = VENDOR_ID_USB
   };
 
   // Possible values that may be returned by GetDeviceType(), representing
@@ -184,6 +189,9 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothDevice {
   // Returns the Bluetooth class of the device, used by GetDeviceType()
   // and metrics logging,
   virtual uint32 GetBluetoothClass() const = 0;
+
+  // Returns the identifier of the bluetooth device.
+  virtual std::string GetIdentifier() const;
 
   // Returns the Bluetooth of address the device. This should be used as
   // a unique key to identify the device and copied where needed.
@@ -398,6 +406,12 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothDevice {
   virtual BluetoothGattService* GetGattService(
       const std::string& identifier) const;
 
+  // Returns service data of a service given its UUID.
+  virtual base::BinaryValue* GetServiceData(BluetoothUUID serviceUUID) const;
+
+  // Returns the list UUIDs of services that have service data.
+  virtual UUIDList GetServiceDataUUIDs() const;
+
   // Returns the |address| in the canonical format: XX:XX:XX:XX:XX:XX, where
   // each 'X' is a hex digit.  If the input |address| is invalid, returns an
   // empty string.
@@ -409,10 +423,22 @@ class DEVICE_BLUETOOTH_EXPORT BluetoothDevice {
   // Returns the internal name of the Bluetooth device, used by GetName().
   virtual std::string GetDeviceName() const = 0;
 
+  // Clears the list of service data.
+  void ClearServiceData();
+
+  // Set the data of a given service designated by its UUID.
+  void SetServiceData(BluetoothUUID serviceUUID, const char* buffer,
+                      size_t size);
+
   // Mapping from the platform-specific GATT service identifiers to
   // BluetoothGattService objects.
   typedef std::map<std::string, BluetoothGattService*> GattServiceMap;
   GattServiceMap gatt_services_;
+
+  // Mapping from service UUID represented as a std::string of a bluetooth
+  // service to
+  // the specific data. The data is stored as BinaryValue.
+  scoped_ptr<base::DictionaryValue> services_data_;
 
  private:
   // Returns a localized string containing the device's bluetooth address and

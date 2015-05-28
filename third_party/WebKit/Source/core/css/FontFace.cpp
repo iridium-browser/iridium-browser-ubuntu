@@ -340,7 +340,7 @@ void FontFace::setLoadStatus(LoadStatus status)
                 m_loadedProperty->reject(m_error.get());
         }
 
-        WillBeHeapVector<RefPtrWillBeMember<LoadFontCallback> > callbacks;
+        WillBeHeapVector<RefPtrWillBeMember<LoadFontCallback>> callbacks;
         m_callbacks.swap(callbacks);
         for (size_t i = 0; i < callbacks.size(); ++i) {
             if (m_status == Loaded)
@@ -393,7 +393,7 @@ void FontFace::loadInternal(ExecutionContext* context)
         return;
 
     m_cssFontFace->load();
-    toDocument(context)->styleEngine()->fontSelector()->fontLoader()->loadPendingFonts();
+    toDocument(context)->styleEngine().fontSelector()->fontLoader()->loadPendingFonts();
 }
 
 FontTraits FontFace::traits() const
@@ -532,7 +532,7 @@ void FontFace::initCSSFontFace(Document* document, PassRefPtrWillBeRawPtr<CSSVal
             if (allowDownloading && item->isSupportedFormat() && document) {
                 FontResource* fetched = item->fetch(document);
                 if (fetched) {
-                    FontLoader* fontLoader = document->styleEngine()->fontSelector()->fontLoader();
+                    FontLoader* fontLoader = document->styleEngine().fontSelector()->fontLoader();
                     source = adoptPtrWillBeNoop(new RemoteFontFaceSource(fetched, fontLoader));
                 }
             }
@@ -560,7 +560,7 @@ void FontFace::initCSSFontFace(const unsigned char* data, unsigned size)
     m_cssFontFace->addSource(source.release());
 }
 
-void FontFace::trace(Visitor* visitor)
+DEFINE_TRACE(FontFace)
 {
     visitor->trace(m_src);
     visitor->trace(m_style);

@@ -110,13 +110,13 @@ AttachmentServiceImpl::GetOrDownloadState::PostResultIfAllRequestsCompleted() {
 }
 
 AttachmentServiceImpl::AttachmentServiceImpl(
-    scoped_refptr<AttachmentStore> attachment_store,
+    scoped_ptr<AttachmentStoreForSync> attachment_store,
     scoped_ptr<AttachmentUploader> attachment_uploader,
     scoped_ptr<AttachmentDownloader> attachment_downloader,
     Delegate* delegate,
     const base::TimeDelta& initial_backoff_delay,
     const base::TimeDelta& max_backoff_delay)
-    : attachment_store_(attachment_store),
+    : attachment_store_(attachment_store.Pass()),
       attachment_uploader_(attachment_uploader.Pass()),
       attachment_downloader_(attachment_downloader.Pass()),
       delegate_(delegate),
@@ -144,24 +144,18 @@ AttachmentServiceImpl::~AttachmentServiceImpl() {
 
 // Static.
 scoped_ptr<syncer::AttachmentService> AttachmentServiceImpl::CreateForTest() {
-  scoped_refptr<syncer::AttachmentStore> attachment_store =
+  scoped_ptr<syncer::AttachmentStore> attachment_store =
       AttachmentStore::CreateInMemoryStore();
   scoped_ptr<AttachmentUploader> attachment_uploader(
       new FakeAttachmentUploader);
   scoped_ptr<AttachmentDownloader> attachment_downloader(
       new FakeAttachmentDownloader());
   scoped_ptr<syncer::AttachmentService> attachment_service(
-      new syncer::AttachmentServiceImpl(attachment_store,
-                                        attachment_uploader.Pass(),
-                                        attachment_downloader.Pass(),
-                                        NULL,
-                                        base::TimeDelta(),
-                                        base::TimeDelta()));
+      new syncer::AttachmentServiceImpl(
+          attachment_store->CreateAttachmentStoreForSync(),
+          attachment_uploader.Pass(), attachment_downloader.Pass(), NULL,
+          base::TimeDelta(), base::TimeDelta()));
   return attachment_service.Pass();
-}
-
-AttachmentStore* AttachmentServiceImpl::GetStore() {
-  return attachment_store_.get();
 }
 
 void AttachmentServiceImpl::GetOrDownloadAttachments(
@@ -172,18 +166,7 @@ void AttachmentServiceImpl::GetOrDownloadAttachments(
       new GetOrDownloadState(attachment_ids, callback));
   attachment_store_->Read(attachment_ids,
                           base::Bind(&AttachmentServiceImpl::ReadDone,
-                                     weak_ptr_factory_.GetWeakPtr(),
-                                     state));
-}
-
-void AttachmentServiceImpl::DropAttachments(
-    const AttachmentIdList& attachment_ids,
-    const DropCallback& callback) {
-  DCHECK(CalledOnValidThread());
-  attachment_store_->Drop(attachment_ids,
-                          base::Bind(&AttachmentServiceImpl::DropDone,
-                                     weak_ptr_factory_.GetWeakPtr(),
-                                     callback));
+                                     weak_ptr_factory_.GetWeakPtr(), state));
 }
 
 void AttachmentServiceImpl::ReadDone(
@@ -234,24 +217,15 @@ void AttachmentServiceImpl::WriteDone(
   }
 }
 
-void AttachmentServiceImpl::DropDone(const DropCallback& callback,
-                                     const AttachmentStore::Result& result) {
-  AttachmentService::DropResult drop_result =
-      AttachmentService::DROP_UNSPECIFIED_ERROR;
-  if (result == AttachmentStore::SUCCESS) {
-    drop_result = AttachmentService::DROP_SUCCESS;
-  }
-  // TODO(maniscalco): Deal with case where an error occurred (bug 361251).
-  base::MessageLoop::current()->PostTask(FROM_HERE,
-                                         base::Bind(callback, drop_result));
-}
-
 void AttachmentServiceImpl::UploadDone(
     const AttachmentUploader::UploadResult& result,
     const AttachmentId& attachment_id) {
   DCHECK(CalledOnValidThread());
+  AttachmentIdList ids;
+  ids.push_back(attachment_id);
   switch (result) {
     case AttachmentUploader::UPLOAD_SUCCESS:
+      attachment_store_->DropSyncReference(ids);
       upload_task_queue_->MarkAsSucceeded(attachment_id);
       if (delegate_) {
         delegate_->OnAttachmentUploaded(attachment_id);
@@ -263,6 +237,7 @@ void AttachmentServiceImpl::UploadDone(
       break;
     case AttachmentUploader::UPLOAD_UNSPECIFIED_ERROR:
       // TODO(pavely): crbug/372622: Deal with UploadAttachment failures.
+      attachment_store_->DropSyncReference(ids);
       upload_task_queue_->MarkAsFailed(attachment_id);
       break;
   }
@@ -300,14 +275,15 @@ void AttachmentServiceImpl::BeginUpload(const AttachmentId& attachment_id) {
 }
 
 void AttachmentServiceImpl::UploadAttachments(
-    const AttachmentIdSet& attachment_ids) {
+    const AttachmentIdList& attachment_ids) {
   DCHECK(CalledOnValidThread());
   if (!attachment_uploader_.get()) {
     return;
   }
-  AttachmentIdSet::const_iterator iter = attachment_ids.begin();
-  AttachmentIdSet::const_iterator end = attachment_ids.end();
-  for (; iter != end; ++iter) {
+  attachment_store_->SetSyncReference(attachment_ids);
+
+  for (auto iter = attachment_ids.begin(); iter != attachment_ids.end();
+       ++iter) {
     upload_task_queue_->AddToQueue(*iter);
   }
 }
@@ -332,6 +308,7 @@ void AttachmentServiceImpl::ReadDoneNowUpload(
     for (; iter != end; ++iter) {
       upload_task_queue_->Cancel(*iter);
     }
+    attachment_store_->DropSyncReference(*unavailable_attachment_ids);
   }
 
   AttachmentMap::const_iterator iter = attachments->begin();

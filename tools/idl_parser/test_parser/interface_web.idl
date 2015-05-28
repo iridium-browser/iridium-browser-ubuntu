@@ -65,6 +65,30 @@ interface MyIFaceMissingArgument {
 };
 
 /* TREE
+ *Error(Unexpected keyword "double" after keyword "readonly".)
+ */
+interface MyIFaceMissingAttribute {
+  readonly double foo;
+};
+
+/* TREE
+ *Interface(MyIFaceContainsUnresolvedConflictDiff)
+ *  Operation(foo)
+ *    Arguments()
+ *    Type()
+ *      PrimitiveType(DOMString)
+ *  Error(Unexpected "<" after ";".)
+ */
+interface MyIFaceContainsUnresolvedConflictDiff {
+    DOMString foo();
+<<<<<< ours
+    DOMString bar();
+    iterable<long>;
+======
+>>>>>> theirs
+};
+
+/* TREE
  *Interface(MyIFaceBig)
  *  Const(setString)
  *    PrimitiveType(DOMString)
@@ -72,6 +96,23 @@ interface MyIFaceMissingArgument {
  */
 interface MyIFaceBig {
   const DOMString? setString = null;
+};
+
+/* TREE
+ *Interface(MyIfaceEmptySequenceDefalutValue)
+ *  Operation(foo)
+ *    Arguments()
+ *      Argument(arg)
+ *        Type()
+ *          Sequence()
+ *            Type()
+ *              PrimitiveType(DOMString)
+ *        Default()
+ *    Type()
+ *      PrimitiveType(void)
+ */
+interface MyIfaceEmptySequenceDefalutValue {
+  void foo(optional sequence<DOMString> arg = []);
 };
 
 /* TREE
@@ -281,4 +322,50 @@ interface MyIfaceMaplike {
 interface MyIfaceSetlike {
   readonly setlike<long>;
   setlike<double>;
+};
+
+/* TREE
+ *Interface(MyIfaceSerializer)
+ *  Serializer()
+ *  Serializer()
+ *    Operation(toJSON)
+ *      Arguments()
+ *      Type()
+ *        Any()
+ *  Serializer()
+ *  Serializer()
+ *    Map()
+ *  Serializer()
+ *    Map()
+ *  Serializer()
+ *    Map()
+ *  Serializer()
+ *    Map()
+ *  Serializer()
+ *    Map()
+ *  Serializer()
+ *    Map()
+ *  Serializer()
+ *    Map()
+ *  Serializer()
+ *    List()
+ *  Serializer()
+ *    List()
+ *  Serializer()
+ *    List()
+ */
+interface MyIfaceSerializer {
+  serializer;
+  serializer any toJSON();
+  serializer = name;
+  serializer = {};
+  serializer = { getter };
+  serializer = { attribute };
+  serializer = { inherit, attribute };
+  serializer = { inherit };
+  serializer = { inherit, name1, name2 };
+  serializer = { name1, name2 };
+  serializer = [];
+  serializer = [getter];
+  serializer = [name1, name2];
 };

@@ -40,13 +40,12 @@
 #include "core/frame/LocalDOMWindow.h"
 #include "core/frame/LocalFrame.h"
 #include "core/html/parser/TextResourceDecoder.h"
-#include "core/inspector/InspectorController.h"
 #include "core/inspector/InspectorFrontendClient.h"
+#include "core/layout/LayoutTheme.h"
 #include "core/loader/FrameLoader.h"
 #include "core/page/ContextMenuController.h"
 #include "core/page/ContextMenuProvider.h"
 #include "core/page/Page.h"
-#include "core/rendering/RenderTheme.h"
 #include "platform/ContextMenu.h"
 #include "platform/ContextMenuItem.h"
 #include "platform/SharedBuffer.h"
@@ -70,7 +69,7 @@ public:
         ASSERT(!m_devtoolsHost);
     }
 
-    virtual void trace(Visitor* visitor) override
+    DEFINE_INLINE_VIRTUAL_TRACE()
     {
         visitor->trace(m_devtoolsHost);
         ContextMenuProvider::trace(visitor);
@@ -127,9 +126,9 @@ private:
     Vector<ContextMenuItem> m_items;
 };
 
-DevToolsHost::DevToolsHost(InspectorFrontendClient* client, Page* frontendPage)
+DevToolsHost::DevToolsHost(InspectorFrontendClient* client, LocalFrame* frontendFrame)
     : m_client(client)
-    , m_frontendPage(frontendPage)
+    , m_frontendFrame(frontendFrame)
     , m_menuProvider(nullptr)
 {
 }
@@ -139,9 +138,9 @@ DevToolsHost::~DevToolsHost()
     ASSERT(!m_client);
 }
 
-void DevToolsHost::trace(Visitor* visitor)
+DEFINE_TRACE(DevToolsHost)
 {
-    visitor->trace(m_frontendPage);
+    visitor->trace(m_frontendFrame);
     visitor->trace(m_menuProvider);
 }
 
@@ -152,23 +151,18 @@ void DevToolsHost::disconnectClient()
         m_menuProvider->disconnect();
         m_menuProvider = nullptr;
     }
-    m_frontendPage = nullptr;
+    m_frontendFrame = nullptr;
 }
 
 float DevToolsHost::zoomFactor()
 {
-    if (!m_frontendPage)
-        return 1;
-    if (LocalFrame* frame = m_frontendPage->deprecatedLocalMainFrame())
-        return frame->pageZoomFactor();
-    return 1;
+    return m_frontendFrame ? m_frontendFrame->pageZoomFactor() : 1;
 }
 
 void DevToolsHost::setInjectedScriptForOrigin(const String& origin, const String& script)
 {
-    if (!m_frontendPage)
-        return;
-    m_frontendPage->inspectorController().setInjectedScriptForOrigin(origin, script);
+    if (m_client)
+        m_client->setInjectedScriptForOrigin(origin, script);
 }
 
 void DevToolsHost::copyText(const String& text)
@@ -213,17 +207,18 @@ void DevToolsHost::sendMessageToEmbedder(const String& message)
         m_client->sendMessageToEmbedder(escapeUnicodeNonCharacters(message));
 }
 
-void DevToolsHost::showContextMenu(Page* page, float x, float y, const Vector<ContextMenuItem>& items)
+void DevToolsHost::showContextMenu(LocalFrame* targetFrame, float x, float y, const Vector<ContextMenuItem>& items)
 {
-    ASSERT(m_frontendPage);
-    ScriptState* frontendScriptState = ScriptState::forMainWorld(m_frontendPage->deprecatedLocalMainFrame());
+    ASSERT(m_frontendFrame);
+    ScriptState* frontendScriptState = ScriptState::forMainWorld(m_frontendFrame);
     ScriptValue devtoolsApiObject = frontendScriptState->getFromGlobalObject("DevToolsAPI");
     ASSERT(devtoolsApiObject.isObject());
 
     RefPtrWillBeRawPtr<FrontendMenuProvider> menuProvider = FrontendMenuProvider::create(this, devtoolsApiObject, items);
     m_menuProvider = menuProvider.get();
-    float zoom = page->deprecatedLocalMainFrame()->pageZoomFactor();
-    page->inspectorController().showContextMenu(x * zoom, y * zoom, menuProvider);
+    float zoom = targetFrame->pageZoomFactor();
+    if (m_client)
+        m_client->showContextMenu(targetFrame, x * zoom, y * zoom, menuProvider);
 }
 
 void DevToolsHost::showContextMenu(Event* event, const Vector<ContextMenuItem>& items)
@@ -231,12 +226,12 @@ void DevToolsHost::showContextMenu(Event* event, const Vector<ContextMenuItem>& 
     if (!event)
         return;
 
-    ASSERT(m_frontendPage);
-    ScriptState* frontendScriptState = ScriptState::forMainWorld(m_frontendPage->deprecatedLocalMainFrame());
+    ASSERT(m_frontendFrame);
+    ScriptState* frontendScriptState = ScriptState::forMainWorld(m_frontendFrame);
     ScriptValue devtoolsApiObject = frontendScriptState->getFromGlobalObject("DevToolsAPI");
     ASSERT(devtoolsApiObject.isObject());
 
-    Page* targetPage = m_frontendPage;
+    Page* targetPage = m_frontendFrame->page();
     if (event->target() && event->target()->executionContext() && event->target()->executionContext()->executingWindow()) {
         LocalDOMWindow* window = event->target()->executionContext()->executingWindow();
         if (window->document() && window->document()->page())
@@ -250,12 +245,12 @@ void DevToolsHost::showContextMenu(Event* event, const Vector<ContextMenuItem>& 
 
 String DevToolsHost::getSelectionBackgroundColor()
 {
-    return RenderTheme::theme().activeSelectionBackgroundColor().serialized();
+    return LayoutTheme::theme().activeSelectionBackgroundColor().serialized();
 }
 
 String DevToolsHost::getSelectionForegroundColor()
 {
-    return RenderTheme::theme().activeSelectionForegroundColor().serialized();
+    return LayoutTheme::theme().activeSelectionForegroundColor().serialized();
 }
 
 bool DevToolsHost::isUnderTest()

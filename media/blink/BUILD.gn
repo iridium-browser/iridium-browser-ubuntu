@@ -1,6 +1,9 @@
 # Copyright 2014 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
+
+import("//testing/test.gni")
+
 component("blink") {
   output_name = "media_blink"
 
@@ -12,6 +15,7 @@ component("blink") {
     "//media",
     "//media:shared_memory_support",
     "//net",
+    "//skia",
     "//third_party/WebKit/public:blink",
     "//ui/gfx",
     "//ui/gfx/geometry",
@@ -88,6 +92,7 @@ if (!is_mac) {
       "//base/test:test_support",
       "//cc",
       "//cc/blink",
+      "//gin",
       "//media",
       "//media:shared_memory_support",
       "//media/base:test_support",
@@ -99,6 +104,8 @@ if (!is_mac) {
       "//ui/gfx:test_support",
       "//url",
     ]
+
+    configs += [ "//build/config/compiler:no_size_t_to_int_warning" ]
 
     sources = [
       "buffered_data_source_host_impl_unittest.cc",

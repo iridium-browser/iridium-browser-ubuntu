@@ -155,7 +155,7 @@ void IDBParseKeyPath(const String& keyPath, Vector<String>& elements, IDBKeyPath
     while (1) {
         switch (state) {
         case Identifier : {
-            IDBKeyPathLexer::TokenType tokenType = lexer.currentTokenType();
+            tokenType = lexer.currentTokenType();
             ASSERT(tokenType == IDBKeyPathLexer::TokenIdentifier);
 
             String element = lexer.currentElement();
@@ -173,7 +173,7 @@ void IDBParseKeyPath(const String& keyPath, Vector<String>& elements, IDBKeyPath
             break;
         }
         case Dot: {
-            IDBKeyPathLexer::TokenType tokenType = lexer.currentTokenType();
+            tokenType = lexer.currentTokenType();
             ASSERT(tokenType == IDBKeyPathLexer::TokenDot);
 
             tokenType = lexer.nextTokenType();
@@ -227,6 +227,41 @@ IDBKeyPath::IDBKeyPath(const StringOrStringSequence& keyPath)
             ASSERT(!m_array[i].isNull());
 #endif
     }
+}
+
+IDBKeyPath::IDBKeyPath(const WebIDBKeyPath& keyPath)
+{
+    switch (keyPath.keyPathType()) {
+    case WebIDBKeyPathTypeNull:
+        m_type = NullType;
+        return;
+
+    case WebIDBKeyPathTypeString:
+        m_type = StringType;
+        m_string = keyPath.string();
+        return;
+
+    case WebIDBKeyPathTypeArray:
+        m_type = ArrayType;
+        for (size_t i = 0, size = keyPath.array().size(); i < size; ++i)
+            m_array.append(keyPath.array()[i]);
+        return;
+    }
+    ASSERT_NOT_REACHED();
+}
+
+IDBKeyPath::operator WebIDBKeyPath() const
+{
+    switch (m_type) {
+    case NullType:
+        return WebIDBKeyPath();
+    case StringType:
+        return WebIDBKeyPath(WebString(m_string));
+    case ArrayType:
+        return WebIDBKeyPath(m_array);
+    }
+    ASSERT_NOT_REACHED();
+    return WebIDBKeyPath();
 }
 
 bool IDBKeyPath::isValid() const

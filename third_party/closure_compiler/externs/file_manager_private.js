@@ -6,14 +6,6 @@
 
 /**
  * @typedef {{
- *   scale1xUrl: string,
- *   scale2xUrl: string
- * }}
- */
-var ImageSet;
-
-/**
- * @typedef {{
  *   taskId: string,
  *   title: string,
  *   iconUrl: string,
@@ -24,19 +16,19 @@ var FileTask;
 
 /**
  * @typedef {{
- *   fileSize: (number|undefined),
- *   lastModifiedTime: (number|undefined),
+ *   size: (number|undefined),
+ *   modificationTime: (number|undefined),
  *   thumbnailUrl: (string|undefined),
  *   externalFileUrl: (string|undefined),
  *   imageWidth: (number|undefined),
  *   imageHeight: (number|undefined),
  *   imageRotation: (number|undefined),
- *   isPinned: (boolean|undefined),
- *   isPresent: (boolean|undefined),
- *   isHosted: (boolean|undefined),
- *   isDirty: (boolean|undefined),
- *   isAvailableOffline: (boolean|undefined),
- *   isAvailableWhenMetered: (boolean|undefined),
+ *   pinned: (boolean|undefined),
+ *   present: (boolean|undefined),
+ *   hosted: (boolean|undefined),
+ *   dirty: (boolean|undefined),
+ *   availableOffline: (boolean|undefined),
+ *   availableWhenMetered: (boolean|undefined),
  *   customIconUrl: (string|undefined),
  *   contentMimeType: (string|undefined),
  *   sharedWithMe: (boolean|undefined),
@@ -76,7 +68,8 @@ var ProfileInfo;
  *   isParentDevice: (boolean|undefined),
  *   isReadOnly: boolean,
  *   hasMedia: boolean,
- *   mountCondition: (string|undefined)
+ *   mountCondition: (string|undefined),
+ *   mountContext: (string|undefined)
  * }}
  */
 var VolumeMetadata;
@@ -96,8 +89,8 @@ var MountCompletedEvent;
  *   fileUrl: string,
  *   transferState: string,
  *   transferType: string,
- *   processed: (number|undefined),
- *   total: (number|undefined),
+ *   processed: number,
+ *   total: number,
  *   num_total_jobs: number
  * }}
  */
@@ -277,21 +270,18 @@ chrome.fileManagerPrivate.addFileWatch = function(fileUrl, callback) {};
 chrome.fileManagerPrivate.removeFileWatch = function(fileUrl, callback) {};
 
 /**
- * Requests access to a file system volume. |volumeId| The ID of the file
- * system volume to request. The volume ID is     delivered to JavaScript as
- * part of VolumeMetadata. By specifying     "compatible", this function
- * behaves in the compatible mode, where the     returned FileSystem object
- * gives access to all file system volumes such     as Downloads folder and
- * removal media like SD cards (i.e. all volumes     are provided inside the
- * single FileSystem object). In the new     "per-volume FileSystem object
- * model" crbug.com/322305, a separate     FileSystem object is created for
- * each volume. "compatible" parameter     will be removed once Files.app is
- * switched to the per-volume FileSystem     object model. |callback|
- * @param {string} volumeId
- * @param {Function} callback |fileSystem| A DOMFileSystem instance for local
- * file system access. null if the caller has no appropriate permissions.
+ * Enables the extenal file scheme necessary to initiate drags to the browser
+ * window for files on the external backend.
  */
-chrome.fileManagerPrivate.requestFileSystem = function(volumeId, callback) {};
+chrome.fileManagerPrivate.enableExternalFileScheme = function() {};
+
+/**
+ * Requests R/W access to the specified entries as |entryUrls|. Note, that only
+ * files backed by external file system backend will be granted the access.
+ * @param {!Array<string>} entryUrls
+ * @param {function()} callback Completion callback.
+ */
+chrome.fileManagerPrivate.grantAccess = function(entryUrls, callback) {};
 
 /**
  * Selects multiple files. |selectedPaths| Array of selected paths
@@ -319,11 +309,12 @@ chrome.fileManagerPrivate.selectFile = function(selectedPath, index, forOpening,
 /**
  * Requests additional properties for files. |fileUrls| list of URLs of files
  * |callback|
- * @param {Array} fileUrls
- * @param {Function} callback |entryProperties| A dictionary containing
+ * @param {!Array<string>} fileUrls
+ * @param {!Array<string>} names
+ * @param {!Function} callback |entryProperties| A dictionary containing
  * properties of the requested entries.
  */
-chrome.fileManagerPrivate.getEntryProperties = function(fileUrls, callback) {};
+chrome.fileManagerPrivate.getEntryProperties = function(fileUrls, names, callback) {};
 
 /**
  * Pins/unpins a Drive file in the cache. |fileUrl| URL of a file to pin/unpin.
@@ -442,6 +433,15 @@ chrome.fileManagerPrivate.searchDrive = function(searchParams, callback) {};
 chrome.fileManagerPrivate.searchDriveMetadata = function(searchParams, callback) {};
 
 /**
+ * Search for files in the given volume, whose content hash matches the list of
+ * given hashes.
+ * @param {string} volumeId
+ * @param {!Array<string>} hashes
+ * @param {function(!Object<string, !Array<string>>)} callback
+ */
+chrome.fileManagerPrivate.searchFilesByHashes = function(volumeId, hashes, callback) {};
+
+/**
  * Create a zip file for the selected files. |dirURL| URL of the directory
  * containing the selected files. |selectionUrls| URLs of the selected files.
  * The files must be under the     directory specified by dirURL. |destName|
@@ -537,18 +537,48 @@ chrome.fileManagerPrivate.installWebstoreItem = function(itemId, silentInstallat
 chrome.fileManagerPrivate.getProfiles = function(callback) {};
 
 /**
- * Moves the window to other user's desktop.
- * @param {string} profileId
- * @param {Function=} callback Callback that does not take arguments.
- */
-chrome.fileManagerPrivate.visitDesktop = function(profileId, callback) {};
-
-/**
  * Opens inspector window. |type| InspectionType which specifies how to open
  * inspector.
  * @param {string} type
  */
 chrome.fileManagerPrivate.openInspector = function(type) {};
+
+/**
+ * Computes an MD5 checksum for the given file.
+ * @param {string} fileUrl
+ * @param {function(string)} callback
+ */
+chrome.fileManagerPrivate.computeChecksum = function(fileUrl, callback) {};
+
+/**
+ * Gets the MIME type of a file.
+ * @param {string} fileUrl File url.
+ * @param {function(string)} callback Callback that MIME type of the file is
+ *     passed.
+ */
+chrome.fileManagerPrivate.getMimeType = function(fileUrl, callback) {};
+
+/**
+ * Gets a flag indicating whether user metrics reporting is enabled.
+ * @param {function(boolean)} callback
+ */
+chrome.fileManagerPrivate.isUMAEnabled = function(callback) {};
+
+/**
+ * Sets a tag on a file or a directory. Only Drive files are supported.
+ * @param {string} entryURL
+ * @param {string} visibility 'private' or 'public'
+ * @param {string} key
+ * @param {string} value
+ * @param {function()} callback
+ */
+chrome.fileManagerPrivate.setEntryTag = function(entryURL, visibility, key, value, callback) {};
+
+/**
+ * Gets a flag indicating whether PiexLoader is enabled.
+ * @param {function(boolean)} callback
+ */
+chrome.fileManagerPrivate.isPiexLoaderEnabled = function(callback) {};
 
 /** @type {!ChromeEvent} */
 chrome.fileManagerPrivate.onMountCompleted;

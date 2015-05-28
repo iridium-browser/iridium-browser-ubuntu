@@ -22,7 +22,6 @@
 #include "chrome/test/base/in_process_browser_test.h"
 #include "components/search_engines/template_url_service.h"
 #include "components/signin/core/common/profile_management_switches.h"
-#include "components/signin/core/common/profile_management_switches.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/test/test_utils.h"
 
@@ -76,8 +75,15 @@ IN_PROC_BROWSER_TEST_F(BrowserCommandControllerBrowserTest, DisableFind) {
 
 // Note that a Browser's destructor, when the browser's profile is guest, will
 // create and execute a BrowsingDataRemover.
+// Flakes on Linux: http://crbug.com/471953
+#if defined(OS_LINUX)
+#define MAYBE_NewAvatarMenuEnabledInGuestMode \
+    DISABLED_NewAvatarMenuEnabledInGuestMode
+#else
+#define MAYBE_NewAvatarMenuEnabledInGuestMode NewAvatarMenuEnabledInGuestMode
+#endif
 IN_PROC_BROWSER_TEST_F(BrowserCommandControllerBrowserTest,
-                       NewAvatarMenuEnabledInGuestMode) {
+                       MAYBE_NewAvatarMenuEnabledInGuestMode) {
   switches::EnableNewAvatarMenuForTesting(
       base::CommandLine::ForCurrentProcess());
 

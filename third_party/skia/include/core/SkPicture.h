@@ -80,7 +80,7 @@ public:
 
     /**
      *  Recreate a picture that was serialized into a stream.
-     *  @param SkStream Serialized picture data.
+     *  @param SkStream Serialized picture data. Ownership is unchanged by this call.
      *  @param proc Function pointer for installing pixelrefs on SkBitmaps representing the
      *              encoded bitmap data from the stream.
      *  @return A new SkPicture representing the serialized data, or NULL if the stream is
@@ -137,20 +137,6 @@ public:
     /** Return a non-zero, unique value representing the picture.
      */
     uint32_t uniqueID() const { return fUniqueID; }
-
-    /**
-     *  Function to encode an SkBitmap to an SkData. A function with this
-     *  signature can be passed to serialize() and SkWriteBuffer.
-     *  Returning NULL will tell the SkWriteBuffer to use
-     *  SkBitmap::flatten() to store the bitmap.
-     *
-     *  @param pixelRefOffset DEPRECATED -- caller assumes it will return 0.
-     *  @return SkData If non-NULL, holds encoded data representing the passed
-     *      in bitmap. The caller is responsible for calling unref().
-     *
-     *  TODO: No longer used by SkPicture. Still used by PDF though. Move into PDF.
-     */
-    typedef SkData* (*EncodeBitmap)(size_t* pixelRefOffset, const SkBitmap& bm);
 
     /**
      *  Serialize to a stream. If non NULL, serializer will be used to serialize
@@ -257,13 +243,14 @@ private:
     // V37: Added shadow only option to SkDropShadowImageFilter (last version to record CLEAR)
     // V38: Added PictureResolution option to SkPictureImageFilter
     // V39: Added FilterLevel option to SkPictureImageFilter
+    // V40: Remove UniqueID serialization from SkImageFilter.
 
     // Note: If the picture version needs to be increased then please follow the
     // steps to generate new SKPs in (only accessible to Googlers): http://goo.gl/qATVcw
 
     // Only SKPs within the min/current picture version range (inclusive) can be read.
     static const uint32_t MIN_PICTURE_VERSION = 35;     // Produced by Chrome M39.
-    static const uint32_t CURRENT_PICTURE_VERSION = 39;
+    static const uint32_t CURRENT_PICTURE_VERSION = 40;
 
     void createHeader(SkPictInfo* info) const;
     static bool IsValidPictInfo(const SkPictInfo& info);

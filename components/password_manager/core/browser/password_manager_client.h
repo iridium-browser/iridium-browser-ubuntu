@@ -6,7 +6,7 @@
 #define COMPONENTS_PASSWORD_MANAGER_CORE_BROWSER_PASSWORD_MANAGER_CLIENT_H_
 
 #include "base/callback.h"
-#include "base/metrics/field_trial.h"
+#include "base/memory/scoped_vector.h"
 #include "components/autofill/core/common/password_form.h"
 #include "components/password_manager/core/browser/password_store.h"
 
@@ -29,6 +29,12 @@ enum CustomPassphraseState {
   ONLY_CUSTOM_PASSPHRASE
 };
 
+enum class CredentialSourceType {
+  CREDENTIAL_SOURCE_PASSWORD_MANAGER = 0,
+  CREDENTIAL_SOURCE_API,
+  CREDENTIAL_SOURCE_LAST = CREDENTIAL_SOURCE_API
+};
+
 // An abstraction of operations that depend on the embedders (e.g. Chrome)
 // environment.
 class PasswordManagerClient {
@@ -46,11 +52,6 @@ class PasswordManagerClient {
   // always returns true.
   virtual bool IsPasswordManagerEnabledForCurrentPage() const;
 
-  // Return true if "Allow to collect URL?" should be shown.
-  // TODO(vabr): If http://crbug.com/437528 gets fixed, make this a const
-  // method.
-  virtual bool ShouldAskUserToSubmitURL(const GURL& url);
-
   // Return true if |form| should not be available for autofill.
   virtual bool ShouldFilterAutofillResult(
       const autofill::PasswordForm& form) = 0;
@@ -61,35 +62,37 @@ class PasswordManagerClient {
 
   // Returns true if |username| and |origin| correspond to the account which is
   // syncing.
-  virtual bool IsSyncAccountCredential(
-      const std::string& username, const std::string& origin) const = 0;
-
-  // This should be called if the password manager encounters a problem on
-  // |url|. The implementation should show the "Allow to collect URL?" bubble
-  // and, if the user confirms, report the |url|.
-  virtual void AskUserAndMaybeReportURL(const GURL& url) const;
+  virtual bool IsSyncAccountCredential(const std::string& username,
+                                       const std::string& origin) const = 0;
 
   // Called when all autofill results have been computed. Client can use
   // this signal to report statistics. Default implementation is a noop.
-  virtual void AutofillResultsComputed() {}
+  virtual void AutofillResultsComputed();
 
   // Informs the embedder of a password form that can be saved if the user
   // allows it. The embedder is not required to prompt the user if it decides
   // that this form doesn't need to be saved.
   // Returns true if the prompt was indeed displayed.
   virtual bool PromptUserToSavePassword(
-      scoped_ptr<PasswordFormManager> form_to_save) = 0;
+      scoped_ptr<PasswordFormManager> form_to_save,
+      CredentialSourceType type) = 0;
 
   // Informs the embedder of a password forms that the user should choose from.
   // Returns true if the prompt is indeed displayed. If the prompt is not
   // displayed, returns false and does not call |callback|.
   // |callback| should be invoked with the chosen form.
-  // Note: The implementation takes ownership of all PasswordForms in
-  // |local_forms| and |federated_forms|.
   virtual bool PromptUserToChooseCredentials(
-      const std::vector<autofill::PasswordForm*>& local_forms,
-      const std::vector<autofill::PasswordForm*>& federated_forms,
+      ScopedVector<autofill::PasswordForm> local_forms,
+      ScopedVector<autofill::PasswordForm> federated_forms,
+      const GURL& origin,
       base::Callback<void(const CredentialInfo&)> callback) = 0;
+
+  // Informs the embedder that automatic signing in just happened. The form
+  // returned to the site is |local_forms[0]|. |local_forms| and
+  // |federated_forms| contain all the local and federated credentials for the
+  // site.
+  virtual void NotifyUserAutoSignin(
+      ScopedVector<autofill::PasswordForm> local_forms) = 0;
 
   // Called when a password is saved in an automated fashion. Embedder may
   // inform the user that this save has occured.
@@ -101,30 +104,25 @@ class PasswordManagerClient {
   // save this to the PasswordStore, for example. Default implementation is a
   // noop.
   virtual void PasswordWasAutofilled(
-      const autofill::PasswordFormMap& best_matches) const {}
+      const autofill::PasswordFormMap& best_matches) const;
 
   // Called when password autofill is blocked by the blacklist. |best_matches|
   // contains the PasswordForm that flags the current site as being on the
   // blacklist. The client may choose to remove this from the PasswordStore in
   // order to unblacklist a site, for example. Default implementation is a noop.
   virtual void PasswordAutofillWasBlocked(
-      const autofill::PasswordFormMap& best_matches) const {}
+      const autofill::PasswordFormMap& best_matches) const;
 
   // Gets prefs associated with this embedder.
   virtual PrefService* GetPrefs() = 0;
 
   // Returns the PasswordStore associated with this instance.
-  virtual PasswordStore* GetPasswordStore() = 0;
-
-  // Returns the probability that the experiment identified by |experiment_name|
-  // should be enabled. The default implementation returns 0.
-  virtual base::FieldTrial::Probability GetProbabilityForExperiment(
-      const std::string& experiment_name);
+  virtual PasswordStore* GetPasswordStore() const = 0;
 
   // Returns true if password sync is enabled in the embedder. Return value for
   // custom passphrase users depends on |state|. The default implementation
   // always returns false.
-  virtual bool IsPasswordSyncEnabled(CustomPassphraseState state);
+  virtual bool IsPasswordSyncEnabled(CustomPassphraseState state) const;
 
   // Only for clients which registered with a LogRouter: If called with
   // |router_can_be_used| set to false, the client may no longer use the
@@ -149,10 +147,10 @@ class PasswordManagerClient {
 
   // Returns whether any SSL certificate errors were encountered as a result of
   // the last page load.
-  virtual bool DidLastPageLoadEncounterSSLErrors();
+  virtual bool DidLastPageLoadEncounterSSLErrors() const;
 
   // If this browsing session should not be persisted.
-  virtual bool IsOffTheRecord();
+  virtual bool IsOffTheRecord() const;
 
   // Returns the PasswordManager associated with this client.
   virtual PasswordManager* GetPasswordManager();
@@ -161,7 +159,7 @@ class PasswordManagerClient {
   virtual autofill::AutofillManager* GetAutofillManagerForMainFrame();
 
   // Returns the main frame URL.
-  virtual const GURL& GetMainFrameURL();
+  virtual const GURL& GetMainFrameURL() const;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(PasswordManagerClient);

@@ -30,7 +30,7 @@
 #include "core/fetch/FetchInitiatorInfo.h"
 #include "core/fetch/ResourceFetcher.h"
 #include "core/html/imports/HTMLImport.h"
-#include "core/rendering/RenderObject.h"
+#include "core/layout/LayoutObject.h"
 #include "public/platform/Platform.h"
 
 namespace blink {
@@ -74,7 +74,7 @@ PassOwnPtrWillBeRawPtr<HTMLResourcePreloader> HTMLResourcePreloader::create(Docu
     return adoptPtrWillBeNoop(new HTMLResourcePreloader(document));
 }
 
-void HTMLResourcePreloader::trace(Visitor* visitor)
+DEFINE_TRACE(HTMLResourcePreloader)
 {
     visitor->trace(m_document);
 }

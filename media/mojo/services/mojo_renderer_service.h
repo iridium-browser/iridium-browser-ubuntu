@@ -6,15 +6,17 @@
 #define MEDIA_MOJO_SERVICES_MOJO_RENDERER_SERVICE_H_
 
 #include "base/callback.h"
+#include "base/compiler_specific.h"
 #include "base/macros.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/timer/timer.h"
 #include "media/base/audio_decoder_config.h"
 #include "media/base/buffering_state.h"
+#include "media/base/media_export.h"
 #include "media/base/pipeline_status.h"
 #include "media/mojo/interfaces/media_renderer.mojom.h"
-#include "mojo/public/cpp/bindings/interface_impl.h"
+#include "third_party/mojo/src/mojo/public/cpp/bindings/interface_impl.h"
 
 namespace mojo {
 class ApplicationConnection;
@@ -24,18 +26,19 @@ namespace media {
 
 class AudioRendererSink;
 class DemuxerStreamProviderShim;
-class MojoDemuxerStreamAdapter;
 class Renderer;
 
 // A mojo::MediaRenderer implementation that uses media::AudioRenderer to
 // decode and render audio to a sink obtained from the ApplicationConnection.
-class MojoRendererService : public mojo::InterfaceImpl<mojo::MediaRenderer> {
+class MEDIA_EXPORT MojoRendererService
+    : NON_EXPORTED_BASE(public mojo::InterfaceImpl<mojo::MediaRenderer>) {
  public:
   MojoRendererService();
   ~MojoRendererService() override;
 
   // mojo::MediaRenderer implementation.
-  void Initialize(mojo::DemuxerStreamPtr audio,
+  void Initialize(mojo::MediaRendererClientPtr client,
+                  mojo::DemuxerStreamPtr audio,
                   mojo::DemuxerStreamPtr video,
                   const mojo::Closure& callback) override;
   void Flush(const mojo::Closure& callback) override;
@@ -52,12 +55,13 @@ class MojoRendererService : public mojo::InterfaceImpl<mojo::MediaRenderer> {
     STATE_ERROR
   };
 
-  // Called when the MojoDemuxerStreamAdapter is ready to go (has a config,
+  // Called when the DemuxerStreamProviderShim is ready to go (has a config,
   // pipe handle, etc) and can be handed off to a renderer for use.
   void OnStreamReady(const mojo::Closure& callback);
 
   // Called when |audio_renderer_| initialization has completed.
-  void OnRendererInitializeDone(const mojo::Closure& callback);
+  void OnRendererInitializeDone(const mojo::Closure& callback,
+                                PipelineStatus status);
 
   // Callback executed by filters to update statistics.
   void OnUpdateStatistics(const PipelineStatistics& stats);
@@ -90,6 +94,8 @@ class MojoRendererService : public mojo::InterfaceImpl<mojo::MediaRenderer> {
 
   base::RepeatingTimer<MojoRendererService> time_update_timer_;
   uint64_t last_media_time_usec_;
+
+  mojo::MediaRendererClientPtr client_;
 
   base::WeakPtr<MojoRendererService> weak_this_;
   base::WeakPtrFactory<MojoRendererService> weak_factory_;

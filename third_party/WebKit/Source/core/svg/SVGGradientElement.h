@@ -22,7 +22,6 @@
 #define SVGGradientElement_h
 
 #include "core/SVGNames.h"
-#include "core/svg/SVGAnimatedBoolean.h"
 #include "core/svg/SVGAnimatedEnumeration.h"
 #include "core/svg/SVGAnimatedTransformList.h"
 #include "core/svg/SVGElement.h"
@@ -46,26 +45,18 @@ class SVGGradientElement : public SVGElement,
     DEFINE_WRAPPERTYPEINFO();
     WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(SVGGradientElement);
 public:
-    enum {
-        SVG_SPREADMETHOD_UNKNOWN = SVGSpreadMethodUnknown,
-        SVG_SPREADMETHOD_PAD = SVGSpreadMethodReflect,
-        SVG_SPREADMETHOD_REFLECT = SVGSpreadMethodRepeat,
-        SVG_SPREADMETHOD_REPEAT = SVGSpreadMethodUnknown
-    };
-
     Vector<Gradient::ColorStop> buildStops();
 
     SVGAnimatedTransformList* gradientTransform() { return m_gradientTransform.get(); }
     SVGAnimatedEnumeration<SVGSpreadMethodType>* spreadMethod() { return m_spreadMethod.get(); }
     SVGAnimatedEnumeration<SVGUnitTypes::SVGUnitType>* gradientUnits() { return m_gradientUnits.get(); }
 
-    virtual void trace(Visitor*) override;
+    DECLARE_VIRTUAL_TRACE();
 
 protected:
     SVGGradientElement(const QualifiedName&, Document&);
 
     bool isSupportedAttribute(const QualifiedName&);
-    virtual void parseAttribute(const QualifiedName&, const AtomicString&) override;
     virtual void svgAttributeChanged(const QualifiedName&) override;
 
 private:
@@ -74,8 +65,8 @@ private:
     virtual void childrenChanged(const ChildrenChange&) override final;
 
     RefPtrWillBeMember<SVGAnimatedTransformList> m_gradientTransform;
-    RefPtrWillBeMember<SVGAnimatedEnumeration<SVGSpreadMethodType> > m_spreadMethod;
-    RefPtrWillBeMember<SVGAnimatedEnumeration<SVGUnitTypes::SVGUnitType> > m_gradientUnits;
+    RefPtrWillBeMember<SVGAnimatedEnumeration<SVGSpreadMethodType>> m_spreadMethod;
+    RefPtrWillBeMember<SVGAnimatedEnumeration<SVGUnitTypes::SVGUnitType>> m_gradientUnits;
 };
 
 inline bool isSVGGradientElement(const SVGElement& element)

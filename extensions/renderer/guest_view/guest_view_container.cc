@@ -7,8 +7,8 @@
 #include "content/public/renderer/render_frame.h"
 #include "content/public/renderer/render_frame_observer.h"
 #include "content/public/renderer/render_view.h"
-#include "extensions/common/extension_messages.h"
 #include "extensions/common/guest_view/guest_view_constants.h"
+#include "extensions/common/guest_view/guest_view_messages.h"
 
 namespace extensions {
 
@@ -39,7 +39,6 @@ void GuestViewContainer::RenderFrameLifetimeObserver::OnDestruct() {
 
 GuestViewContainer::GuestViewContainer(content::RenderFrame* render_frame)
     : element_instance_id_(guestview::kInstanceIDNone),
-      render_view_routing_id_(render_frame->GetRenderView()->GetRoutingID()),
       render_frame_(render_frame) {
   render_frame_lifetime_observer_.reset(
       new RenderFrameLifetimeObserver(this, render_frame_));
@@ -50,10 +49,10 @@ GuestViewContainer::~GuestViewContainer() {}
 // static.
 bool GuestViewContainer::HandlesMessage(const IPC::Message& msg) {
   switch (msg.type()) {
-    case ExtensionMsg_CreateMimeHandlerViewGuestACK::ID:
-    case ExtensionMsg_GuestAttached::ID:
-    case ExtensionMsg_GuestDetached::ID:
-    case ExtensionMsg_MimeHandlerViewGuestOnLoadCompleted::ID:
+    case GuestViewMsg_CreateMimeHandlerViewGuestACK::ID:
+    case GuestViewMsg_GuestAttached::ID:
+    case GuestViewMsg_GuestDetached::ID:
+    case GuestViewMsg_MimeHandlerViewGuestOnLoadCompleted::ID:
       return true;
     default:
       return false;
@@ -61,6 +60,7 @@ bool GuestViewContainer::HandlesMessage(const IPC::Message& msg) {
 }
 
 void GuestViewContainer::RenderFrameDestroyed() {
+  OnRenderFrameDestroyed();
   render_frame_ = nullptr;
 }
 

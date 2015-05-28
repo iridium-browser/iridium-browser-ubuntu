@@ -43,6 +43,7 @@
 #include "ui/compositor/layer.h"
 #include "ui/compositor/layer_animator.h"
 #include "ui/compositor/scoped_animation_duration_scale_mode.h"
+#include "ui/events/event_utils.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/geometry/point.h"
 #include "ui/views/animation/bounds_animator.h"
@@ -306,6 +307,15 @@ void ReflectItemStatus(const ShelfItem& item, ShelfButton* button) {
       button->AddState(ShelfButton::STATE_ATTENTION);
       break;
   }
+}
+
+void RecordIconActivatedAction(const ui::Event& event) {
+  if (event.IsMouseEvent())
+    Shell::GetInstance()->metrics()->RecordUserMetricsAction(
+        UMA_LAUNCHER_BUTTON_PRESSED_WITH_MOUSE);
+  else if (event.IsGestureEvent())
+    Shell::GetInstance()->metrics()->RecordUserMetricsAction(
+        UMA_LAUNCHER_BUTTON_PRESSED_WITH_TOUCH);
 }
 
 }  // namespace
@@ -621,7 +631,8 @@ bool ShelfView::StartDrag(const std::string& app_id,
   gfx::Point point_in_root = location_in_screen_coordinates;
   ::wm::ConvertPointFromScreen(
       ash::wm::GetRootWindowAt(location_in_screen_coordinates), &point_in_root);
-  ui::MouseEvent event(ui::ET_MOUSE_PRESSED, pt, point_in_root, 0, 0);
+  ui::MouseEvent event(ui::ET_MOUSE_PRESSED, pt, point_in_root,
+                       ui::EventTimeForNow(), 0, 0);
   PointerPressedOnButton(drag_and_drop_view,
                          ShelfButtonHost::DRAG_AND_DROP,
                          event);
@@ -643,7 +654,8 @@ bool ShelfView::Drag(const gfx::Point& location_in_screen_coordinates) {
   gfx::Point point_in_root = location_in_screen_coordinates;
   ::wm::ConvertPointFromScreen(
       ash::wm::GetRootWindowAt(location_in_screen_coordinates), &point_in_root);
-  ui::MouseEvent event(ui::ET_MOUSE_DRAGGED, pt, point_in_root, 0, 0);
+  ui::MouseEvent event(ui::ET_MOUSE_DRAGGED, pt, point_in_root,
+                       ui::EventTimeForNow(), 0, 0);
   PointerDraggedOnButton(drag_and_drop_view,
                          ShelfButtonHost::DRAG_AND_DROP,
                          event);
@@ -728,10 +740,8 @@ void ShelfView::CalculateIdealBounds(IdealBounds* bounds) const {
     }
 
     view_model_->set_ideal_bounds(i, gfx::Rect(x, y, w, h));
-    if (i != last_button_index) {
-      x = layout_manager_->PrimaryAxisValue(x + w + button_spacing, x);
-      y = layout_manager_->PrimaryAxisValue(y, y + h + button_spacing);
-    }
+    x = layout_manager_->PrimaryAxisValue(x + w + button_spacing, x);
+    y = layout_manager_->PrimaryAxisValue(y, y + h + button_spacing);
   }
 
   if (is_overflow_mode()) {
@@ -773,9 +783,27 @@ void ShelfView::CalculateIdealBounds(IdealBounds* bounds) const {
       last_hidden_index_ >= first_panel_index;
 
   // Create Space for the overflow button
-  if (show_overflow &&
-      last_visible_index_ > 0 && last_visible_index_ < last_button_index)
-    --last_visible_index_;
+  if (show_overflow) {
+    // The following code makes sure that platform apps icons (aligned to left /
+    // top) are favored over panel apps icons (aligned to right / bottom).
+    if (last_visible_index_ > 0 && last_visible_index_ < last_button_index) {
+      // This condition means that we will take one platform app and replace it
+      // with the overflow button and put the app in the overflow bubble.
+      // This happens when the space needed for platform apps exceeds the
+      // reserved area for non-panel icons,
+      // (i.e. |last_icon_position| > |reserved_icon_space|).
+      --last_visible_index_;
+    } else if (last_hidden_index_ >= first_panel_index &&
+               last_hidden_index_ < view_model_->view_size() - 1) {
+      // This condition means that we will take a panel app icon and replace it
+      // with the overflow button.
+      // This happens when there is still room for platform apps in the reserved
+      // area for non-panel icons,
+      // (i.e. |last_icon_position| < |reserved_icon_space|).
+      ++last_hidden_index_;
+    }
+  }
+
   for (int i = 0; i < view_model_->view_size(); ++i) {
     bool visible = i <= last_visible_index_ || i > last_hidden_index_;
     // To receive drag event continuously from |drag_view_| during the dragging
@@ -1664,6 +1692,7 @@ void ShelfView::ButtonPressed(views::Button* sender, const ui::Event& event) {
 
   if (sender == overflow_button_) {
     ToggleOverflowBubble();
+    RecordIconActivatedAction(event);
     return;
   }
 
@@ -1722,10 +1751,16 @@ void ShelfView::ButtonPressed(views::Button* sender, const ui::Event& event) {
         break;
     }
 
+    RecordIconActivatedAction(event);
+
     ShelfItemDelegate* item_delegate =
         item_manager_->GetShelfItemDelegate(model_->items()[view_index].id);
-    if (!item_delegate->ItemSelected(event))
+    if (!item_delegate->ItemSelected(event)) {
       ShowListMenuForView(model_->items()[view_index], sender, event);
+    } else {
+      Shell::GetInstance()->metrics()->RecordUserMetricsAction(
+          UMA_LAUNCHER_LAUNCH_TASK);
+    }
   }
 }
 

@@ -28,7 +28,10 @@
 #ifndef LocalFrame_h
 #define LocalFrame_h
 
+#include "core/CoreExport.h"
 #include "core/frame/Frame.h"
+#include "core/frame/LocalFrameLifecycleNotifier.h"
+#include "core/frame/LocalFrameLifecycleObserver.h"
 #include "core/loader/FrameLoader.h"
 #include "core/loader/NavigationScheduler.h"
 #include "core/page/FrameTree.h"
@@ -47,27 +50,26 @@ namespace blink {
     class Editor;
     class Element;
     class EventHandler;
-    class FetchContext;
     class FloatSize;
     class FrameConsole;
-    class FrameDestructionObserver;
     class FrameSelection;
     class FrameView;
     class HTMLPlugInElement;
     class InputMethodController;
     class IntPoint;
     class IntSize;
+    class InstrumentingAgents;
     class LocalDOMWindow;
     class Node;
     class Range;
-    class RenderView;
+    class LayoutView;
     class TreeScope;
     class ScriptController;
     class SpellChecker;
     class TreeScope;
     class VisiblePosition;
 
-    class LocalFrame : public Frame, public WillBeHeapSupplementable<LocalFrame> {
+    class CORE_EXPORT LocalFrame : public Frame, public LocalFrameLifecycleNotifier, public WillBeHeapSupplementable<LocalFrame> {
         WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(LocalFrame);
     public:
         static PassRefPtrWillBeRawPtr<LocalFrame> create(FrameLoaderClient*, FrameHost*, FrameOwner*);
@@ -80,19 +82,17 @@ namespace blink {
 
         // Frame overrides:
         virtual ~LocalFrame();
-        virtual void trace(Visitor*) override;
+        DECLARE_VIRTUAL_TRACE();
         virtual bool isLocalFrame() const override { return true; }
         virtual DOMWindow* domWindow() const override;
+        WindowProxy* windowProxy(DOMWrapperWorld&) override;
         virtual void navigate(Document& originDocument, const KURL&, bool lockBackForwardList) override;
         virtual void reload(ReloadPolicy, ClientRedirectPolicy) override;
         virtual void detach() override;
         virtual void disconnectOwnerElement() override;
         virtual SecurityContext* securityContext() const override;
-        bool checkLoadComplete() override;
         void printNavigationErrorMessage(const Frame&, const char* reason) override;
-
-        void addDestructionObserver(FrameDestructionObserver*);
-        void removeDestructionObserver(FrameDestructionObserver*);
+        bool isLoadingAsChild() const override;
 
         void willDetachFrameHost();
 
@@ -103,7 +103,7 @@ namespace blink {
         void setPagePopupOwner(Element&);
         Element* pagePopupOwner() const { return m_pagePopupOwner.get(); }
 
-        RenderView* contentRenderer() const; // Root of the render tree for the document contained in this frame.
+        LayoutView* contentRenderer() const; // Root of the render tree for the document contained in this frame.
 
         Editor& editor() const;
         EventHandler& eventHandler() const;
@@ -111,7 +111,6 @@ namespace blink {
         NavigationScheduler& navigationScheduler() const;
         FrameSelection& selection() const;
         InputMethodController& inputMethodController() const;
-        FetchContext& fetchContext() const { return loader().fetchContext(); }
         ScriptController& script() const;
         SpellChecker& spellChecker() const;
         FrameConsole& console() const;
@@ -124,11 +123,11 @@ namespace blink {
         // should be updated to avoid storing things on the main frame.
         LocalFrame* localFrameRoot();
 
+        InstrumentingAgents* instrumentingAgents() const { return m_instrumentingAgents.get(); }
+
     // ======== All public functions below this point are candidates to move out of LocalFrame into another class. ========
 
         bool inScope(TreeScope*) const;
-
-        void countObjectsNeedingLayout(unsigned& needsLayoutObjects, unsigned& totalObjects, bool& isPartial);
 
         // See GraphicsLayerClient.h for accepted flags.
         String layerTreeAsText(unsigned flags = 0) const;
@@ -146,7 +145,7 @@ namespace blink {
         float textZoomFactor() const { return m_textZoomFactor; }
         void setPageAndTextZoomFactors(float pageZoomFactor, float textZoomFactor);
 
-        void deviceOrPageScaleFactorChanged();
+        void deviceScaleFactorChanged();
         double devicePixelRatio() const;
 
         PassOwnPtr<DragImage> nodeImage(Node&);
@@ -163,28 +162,39 @@ namespace blink {
         bool shouldReuseDefaultView(const KURL&) const;
         void removeSpellingMarkersUnderWords(const Vector<String>& words);
 
+        // FIXME: once scroll customization is enabled everywhere
+        // (crbug.com/416862), this should take a ScrollState object.
+        bool applyScrollDelta(const FloatSize& delta, bool isScrollBegin);
+
 #if ENABLE(OILPAN)
         void registerPluginElement(HTMLPlugInElement*);
         void unregisterPluginElement(HTMLPlugInElement*);
         void clearWeakMembers(Visitor*);
 #endif
+        DisplayItemClient displayItemClient() const { return toDisplayItemClient(this); }
+        String debugName() const { return "LocalFrame"; }
+
+        void setShouldSendDPRHint() { m_shouldSendDPRHint = true; }
+        void setShouldSendRWHint() { m_shouldSendRWHint = true; }
+        bool shouldSendDPRHint() { return m_shouldSendDPRHint; }
+        bool shouldSendRWHint() { return m_shouldSendRWHint; }
 
     // ========
 
     private:
         LocalFrame(FrameLoaderClient*, FrameHost*, FrameOwner*);
 
-        String localLayerTreeAsText(unsigned flags) const;
+        // Internal Frame helper overrides:
+        WindowProxyManager* windowProxyManager() const override;
 
-        DisplayItemClient displayItemClient() const { return static_cast<DisplayItemClientInternalVoid*>((void*)this); }
+        String localLayerTreeAsText(unsigned flags) const;
 
         void detachView();
 
         // Paints the area for the given rect into a DragImage, with the given displayItemClient id attached.
         // The rect is in the coordinate space of the frame.
-        PassOwnPtr<DragImage> paintIntoDragImage(DisplayItemClient, DisplayItem::Type, RespectImageOrientationEnum shouldRespectImageOrientation, IntRect paintingRect);
+        PassOwnPtr<DragImage> paintIntoDragImage(const DisplayItemClientWrapper&, DisplayItem::Type, RespectImageOrientationEnum shouldRespectImageOrientation, IntRect paintingRect);
 
-        WillBeHeapHashSet<RawPtrWillBeWeakMember<FrameDestructionObserver>> m_destructionObservers;
         mutable FrameLoader m_loader;
         mutable NavigationScheduler m_navigationScheduler;
 
@@ -222,6 +232,11 @@ namespace blink {
         float m_textZoomFactor;
 
         bool m_inViewSourceMode;
+
+        RefPtrWillBeMember<InstrumentingAgents> m_instrumentingAgents;
+
+        bool m_shouldSendDPRHint;
+        bool m_shouldSendRWHint;
     };
 
     inline void LocalFrame::init()

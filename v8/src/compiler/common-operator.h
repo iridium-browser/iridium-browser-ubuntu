@@ -153,25 +153,42 @@ size_t hash_value(FrameStateCallInfo const&);
 std::ostream& operator<<(std::ostream&, FrameStateCallInfo const&);
 
 
+size_t ProjectionIndexOf(const Operator* const);
+
+
 // Interface for building common operators that can be used at any level of IR,
 // including JavaScript, mid-level, and low-level.
 class CommonOperatorBuilder FINAL : public ZoneObject {
  public:
   explicit CommonOperatorBuilder(Zone* zone);
 
+  // Special operator used only in Branches to mark them as always taken, but
+  // still unfoldable. This is required to properly connect non terminating
+  // loops to end (in both the sea of nodes and the CFG).
+  const Operator* Always();
+
   const Operator* Dead();
   const Operator* End();
   const Operator* Branch(BranchHint = BranchHint::kNone);
   const Operator* IfTrue();
   const Operator* IfFalse();
+  const Operator* IfSuccess();
+  const Operator* IfException();
+  const Operator* Switch(size_t control_output_count);
+  const Operator* IfValue(int32_t value);
+  const Operator* IfDefault();
   const Operator* Throw();
-  const Operator* Terminate(int effects);
+  const Operator* Deoptimize();
   const Operator* Return();
 
   const Operator* Start(int num_formal_parameters);
   const Operator* Loop(int control_input_count);
   const Operator* Merge(int control_input_count);
   const Operator* Parameter(int index);
+
+  const Operator* OsrNormalEntry();
+  const Operator* OsrLoopEntry();
+  const Operator* OsrValue(int index);
 
   const Operator* Int32Constant(int32_t);
   const Operator* Int64Constant(int64_t);
@@ -182,17 +199,23 @@ class CommonOperatorBuilder FINAL : public ZoneObject {
   const Operator* HeapConstant(const Unique<HeapObject>&);
 
   const Operator* Select(MachineType, BranchHint = BranchHint::kNone);
-  const Operator* Phi(MachineType type, int arguments);
-  const Operator* EffectPhi(int arguments);
+  const Operator* Phi(MachineType type, int value_input_count);
+  const Operator* EffectPhi(int effect_input_count);
+  const Operator* EffectSet(int arguments);
   const Operator* ValueEffect(int arguments);
   const Operator* Finish(int arguments);
   const Operator* StateValues(int arguments);
+  const Operator* TypedStateValues(const ZoneVector<MachineType>* types);
   const Operator* FrameState(
       FrameStateType type, BailoutId bailout_id,
       OutputFrameStateCombine state_combine,
       MaybeHandle<JSFunction> jsfunction = MaybeHandle<JSFunction>());
   const Operator* Call(const CallDescriptor* descriptor);
   const Operator* Projection(size_t index);
+
+  // Constructs a new merge or phi operator with the same opcode as {op}, but
+  // with {size} inputs.
+  const Operator* ResizeMergeOrPhi(const Operator* op, int size);
 
  private:
   Zone* zone() const { return zone_; }

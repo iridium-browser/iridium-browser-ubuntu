@@ -29,7 +29,7 @@
 #include "config.h"
 #include "modules/accessibility/AXTableColumn.h"
 
-#include "core/rendering/RenderTableCell.h"
+#include "core/layout/LayoutTableCell.h"
 #include "modules/accessibility/AXObjectCacheImpl.h"
 #include "modules/accessibility/AXTableCell.h"
 
@@ -52,6 +52,7 @@ PassRefPtr<AXTableColumn> AXTableColumn::create(AXObjectCacheImpl* axObjectCache
     return adoptRef(new AXTableColumn(axObjectCache));
 }
 
+
 void AXTableColumn::setParent(AXObject* parent)
 {
     AXMockObject::setParent(parent);
@@ -65,88 +66,59 @@ LayoutRect AXTableColumn::elementRect() const
     return m_columnRect;
 }
 
-AXObject* AXTableColumn::headerObject()
+void AXTableColumn::headerObjectsForColumn(AccessibilityChildrenVector& headers)
 {
     if (!m_parent)
-        return 0;
+        return;
 
-    RenderObject* renderer = m_parent->renderer();
-    if (!renderer)
-        return 0;
+    LayoutObject* layoutObject = m_parent->layoutObject();
+    if (!layoutObject)
+        return;
 
     if (!m_parent->isAXTable())
-        return 0;
+        return;
 
-    AXTable* parentTable = toAXTable(m_parent);
-    if (parentTable->isAriaTable()) {
-        AccessibilityChildrenVector rowChildren = children();
-        unsigned childrenCount = rowChildren.size();
-        for (unsigned i = 0; i < childrenCount; ++i) {
-            AXObject* cell = rowChildren[i].get();
-            if (cell->ariaRoleAttribute() == ColumnHeaderRole)
-                return cell;
+    if (toAXTable(m_parent)->isAriaTable()) {
+        for (const auto& cell : children()) {
+            if (cell->roleValue() == ColumnHeaderRole)
+                headers.append(cell);
         }
-
-        return 0;
+        return;
     }
 
-    if (!renderer->isTable())
-        return 0;
+    if (!layoutObject->isTable())
+        return;
 
-    RenderTable* table = toRenderTable(renderer);
+    LayoutTable* table = toLayoutTable(layoutObject);
+    LayoutTableSection* tableSection = table->topSection();
+    for (; tableSection; tableSection = table->sectionBelow(tableSection, SkipEmptySections)) {
+        unsigned numCols = tableSection->numColumns();
+        if (m_columnIndex >= numCols)
+            continue;
+        unsigned numRows = tableSection->numRows();
+        for (unsigned r = 0; r < numRows; r++) {
+            LayoutTableCell* layoutCell = tableSection->primaryCellAt(r, m_columnIndex);
+            if (!layoutCell)
+                continue;
 
-    AXObject* headerObject = 0;
+            AXObject* cell = axObjectCache()->getOrCreate(layoutCell->node());
+            if (!cell || !cell->isTableCell() || headers.contains(cell))
+                continue;
 
-    // try the <thead> section first. this doesn't require th tags
-    headerObject = headerObjectForSection(table->header(), false);
-
-    if (headerObject)
-        return headerObject;
-
-    // now try for <th> tags in the first body
-    headerObject = headerObjectForSection(table->firstBody(), true);
-
-    return headerObject;
+            if (toAXTableCell(cell)->scanToDecideHeaderRole() == ColumnHeaderRole)
+                headers.append(cell);
+        }
+    }
 }
 
-AXObject* AXTableColumn::headerObjectForSection(RenderTableSection* section, bool thTagRequired)
+AXObject* AXTableColumn::headerObject()
 {
-    if (!section)
+    AccessibilityChildrenVector headers;
+    headerObjectsForColumn(headers);
+    if (!headers.size())
         return 0;
 
-    unsigned numCols = section->numColumns();
-    if (m_columnIndex >= numCols)
-        return 0;
-
-    if (!section->numRows())
-        return 0;
-
-    RenderTableCell* cell = 0;
-    // also account for cells that have a span
-    for (int testCol = m_columnIndex; testCol >= 0; --testCol) {
-        RenderTableCell* testCell = section->primaryCellAt(0, testCol);
-        if (!testCell)
-            continue;
-
-        // we've reached a cell that doesn't even overlap our column
-        // it can't be our header
-        if ((testCell->col() + (testCell->colSpan()-1)) < m_columnIndex)
-            break;
-
-        Node* node = testCell->node();
-        if (!node)
-            continue;
-
-        if (thTagRequired && !node->hasTagName(thTag))
-            continue;
-
-        cell = testCell;
-    }
-
-    if (!cell)
-        return 0;
-
-    return axObjectCache()->getOrCreate(cell);
+    return headers[0].get();
 }
 
 bool AXTableColumn::computeAccessibilityIsIgnored() const

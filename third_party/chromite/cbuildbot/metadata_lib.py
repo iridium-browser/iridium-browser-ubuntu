@@ -36,8 +36,7 @@ LATEST_URL = os.path.join(ARCHIVE_ROOT, 'LATEST-master')
 
 
 GerritPatchTuple = clactions.GerritPatchTuple
-GerritChangeTuple = collections.namedtuple('GerritChangeTuple',
-                                           ['gerrit_number', 'internal'])
+GerritChangeTuple = clactions.GerritChangeTuple
 CLActionTuple = collections.namedtuple('CLActionTuple',
                                        ['change', 'action', 'timestamp',
                                         'reason'])
@@ -52,6 +51,12 @@ class _DummyLock(object):
     pass
 
   def release(self):
+    pass
+
+  def __exit__(self, exc_type, exc_value, traceback):
+    pass
+
+  def __enter__(self):
     pass
 
 class CBuildbotMetadata(object):
@@ -641,15 +646,6 @@ class BuildData(object):
         message_list.append('%s: %s' % (','.join(slaves), message))
 
     return ' | '.join(message_list)
-
-  def GetChangelistsStr(self):
-    cl_strs = []
-    for cl_dict in self.metadata_dict['changes']:
-      cl_strs.append('%s%s:%s' %
-                     ('*' if cl_dict['internal'] == 'true' else '',
-                      cl_dict['gerrit_number'], cl_dict['patch_number']))
-
-    return ' '.join(cl_strs)
 
   def GetFailedStages(self, with_urls=False):
     """Get names of all failed stages, optionally with URLs for each.

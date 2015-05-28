@@ -12,16 +12,21 @@ bool BrowserPluginGuestDelegate::CanRunInDetachedState() const {
 
 WebContents* BrowserPluginGuestDelegate::CreateNewGuestWindow(
     const WebContents::CreateParams& create_params) {
-  return NULL;
+  NOTREACHED();
+  return nullptr;
 }
 
 WebContents* BrowserPluginGuestDelegate::GetOwnerWebContents() const {
-  return NULL;
+  return nullptr;
 }
 
 bool BrowserPluginGuestDelegate::Find(int request_id,
                                       const base::string16& search_text,
                                       const blink::WebFindOptions& options) {
+  return false;
+}
+
+bool BrowserPluginGuestDelegate::StopFinding(StopFindAction action) {
   return false;
 }
 

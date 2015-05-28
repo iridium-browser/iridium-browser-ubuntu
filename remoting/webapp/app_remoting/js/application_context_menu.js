@@ -17,10 +17,7 @@ var remoting = remoting || {};
  * @constructor
  */
 remoting.ApplicationContextMenu = function(adapter) {
-  /**
-   * @type {remoting.ContextMenuAdapter}
-   * @private
-   */
+  /** @private {remoting.ContextMenuAdapter} */
   this.adapter_ = adapter;
 
   this.adapter_.create(
@@ -33,10 +30,7 @@ remoting.ApplicationContextMenu = function(adapter) {
       true);
   this.adapter_.addListener(this.onClicked_.bind(this));
 
-  /**
-   * @type {string}
-   * @private
-   */
+  /** @private {string} */
   this.hostId_ = '';
 };
 
@@ -65,7 +59,7 @@ remoting.ApplicationContextMenu.prototype.updateConnectionRTT =
                                  rttText));
 };
 
-/** @param {OnClickData} info */
+/** @param {OnClickData=} info */
 remoting.ApplicationContextMenu.prototype.onClicked_ = function(info) {
   switch (info.menuItemId) {
 

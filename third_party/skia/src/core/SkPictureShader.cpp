@@ -47,7 +47,7 @@ public:
                                       sizeof(fLocalMatrixStorage);
         // This better be packed.
         SkASSERT(sizeof(uint32_t) * (&fEndOfStruct - &fPictureID) == keySize);
-        this->init(&gBitmapSkaderKeyNamespaceLabel, keySize);
+        this->init(&gBitmapSkaderKeyNamespaceLabel, 0, keySize);
     }
 
 private:
@@ -70,8 +70,8 @@ struct BitmapShaderRec : public SkResourceCache::Rec {
     SkAutoTUnref<SkShader> fShader;
     size_t                 fBitmapBytes;
 
-    virtual const Key& getKey() const SK_OVERRIDE { return fKey; }
-    virtual size_t bytesUsed() const SK_OVERRIDE {
+    const Key& getKey() const override { return fKey; }
+    size_t bytesUsed() const override {
         return sizeof(fKey) + sizeof(SkShader) + fBitmapBytes;
     }
 
@@ -152,6 +152,9 @@ SkShader* SkPictureShader::refBitmapShader(const SkMatrix& matrix, const SkMatri
 
     // Use a rotation-invariant scale
     SkPoint scale;
+    //
+    // TODO: replace this with decomposeScale() -- but beware LayoutTest rebaselines!
+    //
     if (!SkDecomposeUpper2x2(m, NULL, &scale, NULL)) {
         // Decomposition failed, use an approximation.
         scale.set(SkScalarSqrt(m.getScaleX() * m.getScaleX() + m.getSkewX() * m.getSkewX()),
@@ -160,8 +163,8 @@ SkShader* SkPictureShader::refBitmapShader(const SkMatrix& matrix, const SkMatri
     SkSize scaledSize = SkSize::Make(SkScalarAbs(scale.x() * fTile.width()),
                                      SkScalarAbs(scale.y() * fTile.height()));
 
-    // Clamp the tile size to about 16M pixels
-    static const SkScalar kMaxTileArea = 4096 * 4096;
+    // Clamp the tile size to about 4M pixels
+    static const SkScalar kMaxTileArea = 2048 * 2048;
     SkScalar tileArea = SkScalarMul(scaledSize.width(), scaledSize.height());
     if (tileArea > kMaxTileArea) {
         SkScalar clampScale = SkScalarSqrt(SkScalarDiv(kMaxTileArea, tileArea));

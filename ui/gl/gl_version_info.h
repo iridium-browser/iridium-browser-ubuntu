@@ -5,6 +5,7 @@
 #ifndef UI_GL_GL_VERSION_INFO_H_
 #define UI_GL_GL_VERSION_INFO_H_
 
+#include <set>
 #include <string>
 #include "base/basictypes.h"
 #include "ui/gl/gl_export.h"
@@ -12,26 +13,42 @@
 namespace gfx {
 
 struct GL_EXPORT GLVersionInfo {
-  GLVersionInfo(const char* version_str, const char* renderer_str);
+  GLVersionInfo(const char* version_str, const char* renderer_str,
+                const char* extensions_str);
 
-  // New flags, such as is_gl4_4 could be introduced as needed.
-  // For now, this level of granularity is enough.
+  GLVersionInfo(const char* version_str, const char* renderer_str,
+                const std::set<std::string>& exts);
+
+  bool IsAtLeastGL(unsigned major, unsigned minor) const {
+    return !is_es && (major_version > major ||
+                      (major_version == major && minor_version >= minor));
+  }
+
+  bool IsAtLeastGLES(unsigned major, unsigned minor) const {
+    return is_es && (major_version > major ||
+                     (major_version == major && minor_version >= minor));
+  }
+
+  bool BehavesLikeGLES() const {
+    return is_es || is_desktop_core_profile;
+  }
+
+  static void ParseVersionString(const char* version_str,
+                                 unsigned* major_version,
+                                 unsigned* minor_version,
+                                 bool* is_es,
+                                 bool* is_es3);
+
   bool is_es;
-  bool is_es1;
-  bool is_es2;
-  bool is_es3;
-#if defined(OS_ANDROID)
-  bool is_es31;
-#endif
-
-  bool is_gl1;
-  bool is_gl2;
-  bool is_gl3;
-  bool is_gl4;
-
   bool is_angle;
+  unsigned major_version;
+  unsigned minor_version;
+  bool is_es3;
+  bool is_desktop_core_profile;
 
  private:
+  GLVersionInfo(const char* version_str, const char* renderer_str);
+
   DISALLOW_COPY_AND_ASSIGN(GLVersionInfo);
 };
 

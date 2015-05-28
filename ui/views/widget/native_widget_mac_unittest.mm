@@ -7,6 +7,13 @@
 #import <Cocoa/Cocoa.h>
 
 #include "base/run_loop.h"
+#include "base/strings/utf_string_conversions.h"
+#import "testing/gtest_mac.h"
+#import "ui/events/test/cocoa_test_event_utils.h"
+#include "ui/events/test/event_generator.h"
+#import "ui/gfx/mac/coordinate_conversion.h"
+#include "ui/views/controls/label.h"
+#include "ui/views/native_cursor.h"
 #include "ui/views/test/test_widget_observer.h"
 #include "ui/views/test/widget_test.h"
 
@@ -156,8 +163,9 @@ class PaintCountView : public View {
 TEST_F(NativeWidgetMacTest, MiniaturizeExternally) {
   Widget* widget = new Widget;
   Widget::InitParams init_params(Widget::InitParams::TYPE_WINDOW);
-  // Don't add a layer, so that calls to paint can be observed synchronously.
-  init_params.layer_type = aura::WINDOW_LAYER_NONE;
+  // Make the layer not drawn, so that calls to paint can be observed
+  // synchronously.
+  init_params.layer_type = ui::LAYER_NOT_DRAWN;
   widget->Init(init_params);
 
   PaintCountView* view = new PaintCountView();
@@ -255,6 +263,105 @@ TEST_F(NativeWidgetMacTest, MiniaturizeExternally) {
 
   // Test closing while minimized.
   widget->CloseNow();
+}
+
+// Simple view for the SetCursor test that overrides View::GetCursor().
+class CursorView : public View {
+ public:
+  CursorView(int x, NSCursor* cursor) : cursor_(cursor) {
+    SetBounds(x, 0, 100, 300);
+  }
+
+  // View:
+  gfx::NativeCursor GetCursor(const ui::MouseEvent& event) override {
+    return cursor_;
+  }
+
+ private:
+  NSCursor* cursor_;
+
+  DISALLOW_COPY_AND_ASSIGN(CursorView);
+};
+
+// Test for Widget::SetCursor(). There is no Widget::GetCursor(), so this uses
+// -[NSCursor currentCursor] to validate expectations. Note that currentCursor
+// is just "the top cursor on the application's cursor stack.", which is why it
+// is safe to use this in a non-interactive UI test with the EventGenerator.
+TEST_F(NativeWidgetMacTest, SetCursor) {
+  NSCursor* arrow = [NSCursor arrowCursor];
+  NSCursor* hand = GetNativeHandCursor();
+  NSCursor* ibeam = GetNativeIBeamCursor();
+
+  Widget* widget = CreateTopLevelPlatformWidget();
+  widget->SetBounds(gfx::Rect(0, 0, 300, 300));
+  widget->GetContentsView()->AddChildView(new CursorView(0, hand));
+  widget->GetContentsView()->AddChildView(new CursorView(100, ibeam));
+  widget->Show();
+
+  // Events used to simulate tracking rectangle updates. These are not passed to
+  // toolkit-views, so it only matters whether they are inside or outside the
+  // content area.
+  NSEvent* event_in_content = cocoa_test_event_utils::MouseEventAtPoint(
+      NSMakePoint(100, 100), NSMouseMoved, 0);
+  NSEvent* event_out_of_content = cocoa_test_event_utils::MouseEventAtPoint(
+      NSMakePoint(-50, -50), NSMouseMoved, 0);
+
+  EXPECT_NE(arrow, hand);
+  EXPECT_NE(arrow, ibeam);
+
+  // At the start of the test, the cursor stack should be empty.
+  EXPECT_FALSE([NSCursor currentCursor]);
+
+  // Use an event generator to ask views code to set the cursor. However, note
+  // that this does not cause Cocoa to generate tracking rectangle updates.
+  ui::test::EventGenerator event_generator(GetContext(),
+                                           widget->GetNativeWindow());
+
+  // Move the mouse over the first view, then simulate a tracking rectangle
+  // update.
+  event_generator.MoveMouseTo(gfx::Point(50, 50));
+  [widget->GetNativeWindow() cursorUpdate:event_in_content];
+  EXPECT_EQ(hand, [NSCursor currentCursor]);
+
+  // A tracking rectangle update not in the content area should forward to
+  // the native NSWindow implementation, which sets the arrow cursor.
+  [widget->GetNativeWindow() cursorUpdate:event_out_of_content];
+  EXPECT_EQ(arrow, [NSCursor currentCursor]);
+
+  // Now move to the second view.
+  event_generator.MoveMouseTo(gfx::Point(150, 50));
+  [widget->GetNativeWindow() cursorUpdate:event_in_content];
+  EXPECT_EQ(ibeam, [NSCursor currentCursor]);
+
+  // Moving to the third view (but remaining in the content area) should also
+  // forward to the native NSWindow implementation.
+  event_generator.MoveMouseTo(gfx::Point(250, 50));
+  [widget->GetNativeWindow() cursorUpdate:event_in_content];
+  EXPECT_EQ(arrow, [NSCursor currentCursor]);
+
+  widget->CloseNow();
+}
+
+// Tests that an accessibility request from the system makes its way through to
+// a views::Label filling the window.
+TEST_F(NativeWidgetMacTest, AccessibilityIntegration) {
+  Widget* widget = CreateTopLevelPlatformWidget();
+  gfx::Rect screen_rect(50, 50, 100, 100);
+  widget->SetBounds(screen_rect);
+
+  const base::string16 test_string = base::ASCIIToUTF16("Green");
+  views::Label* label = new views::Label(test_string);
+  label->SetBounds(0, 0, 100, 100);
+  widget->GetContentsView()->AddChildView(label);
+  widget->Show();
+
+  // Accessibility hit tests come in Cocoa screen coordinates.
+  NSRect nsrect = gfx::ScreenRectToNSRect(screen_rect);
+  NSPoint midpoint = NSMakePoint(NSMidX(nsrect), NSMidY(nsrect));
+
+  id hit = [widget->GetNativeWindow() accessibilityHitTest:midpoint];
+  id title = [hit accessibilityAttributeValue:NSAccessibilityTitleAttribute];
+  EXPECT_NSEQ(title, @"Green");
 }
 
 }  // namespace test

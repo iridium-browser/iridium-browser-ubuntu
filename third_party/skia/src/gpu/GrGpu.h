@@ -15,32 +15,17 @@
 
 class GrContext;
 class GrIndexBufferAllocPool;
-class GrOptDrawState;
 class GrPath;
 class GrPathRange;
 class GrPathRenderer;
 class GrPathRendererChain;
+class GrPipeline;
+class GrPrimitiveProcessor;
 class GrStencilBuffer;
 class GrVertexBufferAllocPool;
 
 class GrGpu : public SkRefCnt {
 public:
-
-    /**
-     * Additional blend coefficients for dual source blending, not exposed
-     * through GrPaint/GrContext.
-     */
-    enum ExtendedBlendCoeffs {
-        // source 2 refers to second output color when
-        // using dual source blending.
-        kS2C_GrBlendCoeff = kPublicGrBlendCoeffCount,
-        kIS2C_GrBlendCoeff,
-        kS2A_GrBlendCoeff,
-        kIS2A_GrBlendCoeff,
-
-        kTotalGrBlendCoeffCount
-    };
-
     /**
      * Create an instance of GrGpu that matches the specified backend. If the requested backend is
      * not supported (at compile-time or run-time) this returns NULL. The context will not be
@@ -51,7 +36,7 @@ public:
     ////////////////////////////////////////////////////////////////////////////
 
     GrGpu(GrContext* context);
-    ~GrGpu() SK_OVERRIDE;
+    ~GrGpu() override;
 
     GrContext* getContext() { return fContext; }
     const GrContext* getContext() const { return fContext; }
@@ -61,9 +46,7 @@ public:
      */
     const GrDrawTargetCaps* caps() const { return fCaps.get(); }
 
-    GrPathRendering* pathRendering() {
-        return fPathRendering.get();
-    }
+    GrPathRendering* pathRendering() { return fPathRendering.get(); }
 
     // Called by GrContext when the underlying backend context has been destroyed.
     // GrGpu should use this to ensure that no backend API calls will be made from
@@ -77,11 +60,7 @@ public:
      * the GrGpu that the state was modified and it shouldn't make assumptions
      * about the state.
      */
-    void markContextDirty(uint32_t state = kAll_GrBackendState) {
-        fResetBits |= state;
-    }
-
-    void unimpl(const char[]);
+    void markContextDirty(uint32_t state = kAll_GrBackendState) { fResetBits |= state; }
 
     /**
      * Creates a texture object. If kRenderTarget_GrSurfaceFlag the texture can
@@ -301,43 +280,10 @@ public:
     // is dirty.
     ResetTimestamp getResetTimestamp() const { return fResetTimestamp; }
 
-    enum DrawType {
-        kDrawPoints_DrawType,
-        kDrawLines_DrawType,
-        kDrawTriangles_DrawType,
-        kDrawPath_DrawType,
-        kDrawPaths_DrawType,
-    };
-
-    static bool IsPathRenderingDrawType(DrawType type) {
-        return kDrawPath_DrawType == type || kDrawPaths_DrawType == type;
-    }
-
-    GrContext::GPUStats* gpuStats() { return &fGPUStats; }
-
-    virtual void buildProgramDesc(const GrOptDrawState&,
-                                  const GrProgramDesc::DescInfo&,
-                                  GrGpu::DrawType,
-                                  GrProgramDesc*) = 0;
-
-    /**
-     * Called at start and end of gpu trace marking
-     * GR_CREATE_GPU_TRACE_MARKER(marker_str, target) will automatically call these at the start
-     * and end of a code block respectively
-     */
-    void addGpuTraceMarker(const GrGpuTraceMarker* marker);
-    void removeGpuTraceMarker(const GrGpuTraceMarker* marker);
-
-    /**
-     * Takes the current active set of markers and stores them for later use. Any current marker
-     * in the active set is removed from the active set and the targets remove function is called.
-     * These functions do not work as a stack so you cannot call save a second time before calling
-     * restore. Also, it is assumed that when restore is called the current active set of markers
-     * is empty. When the stored markers are added back into the active set, the targets add marker
-     * is called.
-     */
-    void saveActiveTraceMarkers();
-    void restoreActiveTraceMarkers();
+    virtual void buildProgramDesc(GrProgramDesc*,
+                                  const GrPrimitiveProcessor&,
+                                  const GrPipeline&,
+                                  const GrBatchTracker&) const = 0;
 
     // Called to determine whether a copySurface call would succeed or not. Derived
     // classes must keep this consistent with their implementation of onCopySurface(). Fallbacks
@@ -358,7 +304,25 @@ public:
                              const SkIRect& srcRect,
                              const SkIPoint& dstPoint) = 0;
 
-    void draw(const GrOptDrawState&, const GrDrawTarget::DrawInfo&);
+    struct DrawArgs {
+        typedef GrDrawTarget::DrawInfo DrawInfo;
+        DrawArgs(const GrPrimitiveProcessor* primProc,
+                 const GrPipeline* pipeline,
+                 const GrProgramDesc* desc,
+                 const GrBatchTracker* batchTracker)
+            : fPrimitiveProcessor(primProc)
+            , fPipeline(pipeline)
+            , fDesc(desc)
+            , fBatchTracker(batchTracker) {
+            SkASSERT(primProc && pipeline && desc && batchTracker);
+        }
+        const GrPrimitiveProcessor* fPrimitiveProcessor;
+        const GrPipeline* fPipeline;
+        const GrProgramDesc* fDesc;
+        const GrBatchTracker* fBatchTracker;
+    };
+
+    void draw(const DrawArgs&, const GrDrawTarget::DrawInfo&);
 
     /** None of these params are optional, pointers used just to avoid making copies. */
     struct StencilPathState {
@@ -371,8 +335,8 @@ public:
 
     void stencilPath(const GrPath*, const StencilPathState&);
 
-    void drawPath(const GrOptDrawState&, const GrPath*, const GrStencilSettings&);
-    void drawPaths(const GrOptDrawState&,
+    void drawPath(const DrawArgs&, const GrPath*, const GrStencilSettings&);
+    void drawPaths(const DrawArgs&,
                    const GrPathRange*,
                    const void* indices,
                    GrDrawTarget::PathIndexType,
@@ -381,22 +345,72 @@ public:
                    int count,
                    const GrStencilSettings&);
 
-    static DrawType PrimTypeToDrawType(GrPrimitiveType type) {
-        switch (type) {
-            case kTriangles_GrPrimitiveType:
-            case kTriangleStrip_GrPrimitiveType:
-            case kTriangleFan_GrPrimitiveType:
-                return kDrawTriangles_DrawType;
-            case kPoints_GrPrimitiveType:
-                return kDrawPoints_DrawType;
-            case kLines_GrPrimitiveType:
-            case kLineStrip_GrPrimitiveType:
-                return kDrawLines_DrawType;
-            default:
-                SkFAIL("Unexpected primitive type");
-                return kDrawTriangles_DrawType;
+    ///////////////////////////////////////////////////////////////////////////
+    // Debugging and Stats
+
+    class Stats {
+    public:
+#if GR_GPU_STATS
+        Stats() { this->reset(); }
+
+        void reset() {
+            fRenderTargetBinds = 0;
+            fShaderCompilations = 0;
+            fTextureCreates = 0;
+            fTextureUploads = 0;
+            fStencilBufferCreates = 0;
         }
-    }
+
+        int renderTargetBinds() const { return fRenderTargetBinds; }
+        void incRenderTargetBinds() { fRenderTargetBinds++; }
+        int shaderCompilations() const { return fShaderCompilations; }
+        void incShaderCompilations() { fShaderCompilations++; }
+        int textureCreates() const { return fTextureCreates; }
+        void incTextureCreates() { fTextureCreates++; }
+        int textureUploads() const { return fTextureUploads; }
+        void incTextureUploads() { fTextureUploads++; }
+        void incStencilBufferCreates() { fStencilBufferCreates++; }
+        void dump(SkString*);
+
+    private:
+        int fRenderTargetBinds;
+        int fShaderCompilations;
+        int fTextureCreates;
+        int fTextureUploads;
+        int fStencilBufferCreates;
+#else
+        void dump(SkString*) {};
+        void incRenderTargetBinds() {}
+        void incShaderCompilations() {}
+        void incTextureCreates() {}
+        void incTextureUploads() {}
+        void incStencilBufferCreates() {}
+#endif
+    };
+
+    Stats* stats() { return &fStats; }
+
+    /**
+     * Called at start and end of gpu trace marking
+     * GR_CREATE_GPU_TRACE_MARKER(marker_str, target) will automatically call these at the start
+     * and end of a code block respectively
+     */
+    void addGpuTraceMarker(const GrGpuTraceMarker* marker);
+    void removeGpuTraceMarker(const GrGpuTraceMarker* marker);
+
+    /**
+     * Takes the current active set of markers and stores them for later use. Any current marker
+     * in the active set is removed from the active set and the targets remove function is called.
+     * These functions do not work as a stack so you cannot call save a second time before calling
+     * restore. Also, it is assumed that when restore is called the current active set of markers
+     * is empty. When the stored markers are added back into the active set, the targets add marker
+     * is called.
+     */
+    void saveActiveTraceMarkers();
+    void restoreActiveTraceMarkers();
+
+    // Given a rt, find or create a stencil buffer and attach it
+    bool attachStencilBufferToRenderTarget(GrRenderTarget* target);
 
 protected:
     // Functions used to map clip-respecting stencil tests into normal
@@ -410,14 +424,12 @@ protected:
                                           unsigned int* ref,
                                           unsigned int* mask);
 
-    const GrTraceMarkerSet& getActiveTraceMarkers() { return fActiveTraceMarkers; }
+    const GrTraceMarkerSet& getActiveTraceMarkers() const { return fActiveTraceMarkers; }
 
-    GrContext::GPUStats         fGPUStats;
-
-    SkAutoTDelete<GrPathRendering> fPathRendering;
-
+    Stats                                   fStats;
+    SkAutoTDelete<GrPathRendering>          fPathRendering;
     // Subclass must initialize this in its constructor.
-    SkAutoTUnref<const GrDrawTargetCaps> fCaps;
+    SkAutoTUnref<const GrDrawTargetCaps>    fCaps;
 
 private:
     // called when the 3D context state is unknown. Subclass should emit any
@@ -441,16 +453,14 @@ private:
 
     // Overridden by backend specific classes to perform a clear of the stencil clip bits.  This is
     // ONLY used by the the clip target
-    virtual void onClearStencilClip(GrRenderTarget*,
-                                    const SkIRect& rect,
-                                    bool insideClip) = 0;
+    virtual void onClearStencilClip(GrRenderTarget*, const SkIRect& rect, bool insideClip) = 0;
 
     // overridden by backend-specific derived class to perform the draw call.
-    virtual void onDraw(const GrOptDrawState&, const GrDrawTarget::DrawInfo&) = 0;
+    virtual void onDraw(const DrawArgs&, const GrDrawTarget::DrawInfo&) = 0;
     virtual void onStencilPath(const GrPath*, const StencilPathState&) = 0;
 
-    virtual void onDrawPath(const GrOptDrawState&, const GrPath*, const GrStencilSettings&) = 0;
-    virtual void onDrawPaths(const GrOptDrawState&,
+    virtual void onDrawPath(const DrawArgs&, const GrPath*, const GrStencilSettings&) = 0;
+    virtual void onDrawPaths(const DrawArgs&,
                              const GrPathRange*,
                              const void* indices,
                              GrDrawTarget::PathIndexType,
@@ -485,9 +495,6 @@ private:
 
     // clears target's entire stencil buffer to 0
     virtual void clearStencil(GrRenderTarget* target) = 0;
-
-    // Given a rt, find or create a stencil buffer and attach it
-    bool attachStencilBufferToRenderTarget(GrRenderTarget* target);
 
     virtual void didAddGpuTraceMarker() = 0;
     virtual void didRemoveGpuTraceMarker() = 0;

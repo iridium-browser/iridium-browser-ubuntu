@@ -13,9 +13,9 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop/message_loop.h"
 #include "jni/CoreImpl_jni.h"
-#include "mojo/public/c/environment/async_waiter.h"
-#include "mojo/public/c/system/core.h"
-#include "mojo/public/cpp/environment/environment.h"
+#include "third_party/mojo/src/mojo/public/c/environment/async_waiter.h"
+#include "third_party/mojo/src/mojo/public/c/system/core.h"
+#include "third_party/mojo/src/mojo/public/cpp/environment/environment.h"
 
 namespace {
 
@@ -84,8 +84,8 @@ static jint WaitMany(JNIEnv* env,
   uint32_t* result_index =
       reinterpret_cast<uint32_t*>(buffer_start + 16 * nb_handles);
   *result_index = static_cast<uint32_t>(-1);
-  return MojoNewWaitMany(handle_start, signals_start, nb_handles, deadline,
-                         result_index, states_start);
+  return MojoWaitMany(handle_start, signals_start, nb_handles, deadline,
+                      result_index, states_start);
 }
 
 static jobject CreateMessagePipe(JNIEnv* env,
@@ -166,7 +166,7 @@ static jint Wait(JNIEnv* env,
             static_cast<size_t>(env->GetDirectBufferCapacity(buffer)));
   struct MojoHandleSignalsState* signals_state =
       static_cast<struct MojoHandleSignalsState*>(buffer_start);
-  return MojoNewWait(mojo_handle, signals, deadline, signals_state);
+  return MojoWait(mojo_handle, signals, deadline, signals_state);
 }
 
 static jint WriteMessage(JNIEnv* env,

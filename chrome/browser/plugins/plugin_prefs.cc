@@ -121,7 +121,7 @@ void PluginPrefs::EnablePluginGroupInternal(
   // Set the desired state for the group.
   plugin_group_state_[group_name] = enabled;
 
-  // Update the state for all plug-ins in the group.
+  // Update the state for all plugins in the group.
   for (size_t i = 0; i < plugins.size(); ++i) {
     scoped_ptr<PluginMetadata> plugin(finder->GetPluginMetadata(plugins[i]));
     if (group_name != plugin->name())
@@ -175,7 +175,7 @@ void PluginPrefs::EnablePluginInternal(
     const base::Callback<void(bool)>& callback,
     const std::vector<content::WebPluginInfo>& plugins) {
   {
-    // Set the desired state for the plug-in.
+    // Set the desired state for the plugin.
     base::AutoLock auto_lock(lock_);
     plugin_state_.Set(path, enabled);
   }
@@ -185,7 +185,7 @@ void PluginPrefs::EnablePluginInternal(
     if (plugins[i].path == path) {
       scoped_ptr<PluginMetadata> plugin_metadata(
           plugin_finder->GetPluginMetadata(plugins[i]));
-      // set the group name for this plug-in.
+      // set the group name for this plugin.
       group_name = plugin_metadata->name();
       DCHECK_EQ(enabled, IsPluginEnabled(plugins[i]));
       break;
@@ -203,7 +203,7 @@ void PluginPrefs::EnablePluginInternal(
   }
 
   if (!group_name.empty()) {
-    // Update the state for the corresponding plug-in group.
+    // Update the state for the corresponding plugin group.
     base::AutoLock auto_lock(lock_);
     plugin_group_state_[group_name] = !all_disabled;
   }
@@ -234,13 +234,13 @@ bool PluginPrefs::IsPluginEnabled(const content::WebPluginInfo& plugin) const {
       PluginFinder::GetInstance()->GetPluginMetadata(plugin));
   base::string16 group_name = plugin_metadata->name();
 
-  // Check if the plug-in or its group is enabled by policy.
+  // Check if the plugin or its group is enabled by policy.
   PolicyStatus plugin_status = PolicyStatusForPlugin(plugin.name);
   PolicyStatus group_status = PolicyStatusForPlugin(group_name);
   if (plugin_status == POLICY_ENABLED || group_status == POLICY_ENABLED)
     return true;
 
-  // Check if the plug-in or its group is disabled by policy.
+  // Check if the plugin or its group is disabled by policy.
   if (plugin_status == POLICY_DISABLED || group_status == POLICY_DISABLED)
     return false;
 
@@ -257,12 +257,12 @@ bool PluginPrefs::IsPluginEnabled(const content::WebPluginInfo& plugin) const {
 #endif
 
   base::AutoLock auto_lock(lock_);
-  // Check user preferences for the plug-in.
+  // Check user preferences for the plugin.
   bool plugin_enabled = false;
   if (plugin_state_.Get(plugin.path, &plugin_enabled))
     return plugin_enabled;
 
-  // Check user preferences for the plug-in group.
+  // Check user preferences for the plugin group.
   std::map<base::string16, bool>::const_iterator group_it(
       plugin_group_state_.find(group_name));
   if (group_it != plugin_group_state_.end())
@@ -277,6 +277,11 @@ void PluginPrefs::UpdatePatternsAndNotify(std::set<base::string16>* patterns,
   base::AutoLock auto_lock(lock_);
   ListValueToStringSet(prefs_->GetList(pref_name.c_str()), patterns);
 
+  NotifyPluginStatusChanged();
+}
+
+void PluginPrefs::EnableNpapi() {
+  PluginService::GetInstance()->EnableNpapiPlugins();
   NotifyPluginStatusChanged();
 }
 
@@ -486,6 +491,9 @@ void PluginPrefs::SetPrefs(PrefService* prefs) {
   ListValueToStringSet(prefs_->GetList(prefs::kPluginsEnabledPlugins),
                        &policy_enabled_plugin_patterns_);
 
+  if (prefs_->GetBoolean(prefs::kEnableNpapi))
+    EnableNpapi();
+
   registrar_.Init(prefs_);
 
   // Because pointers to our own members will remain unchanged for the
@@ -504,6 +512,9 @@ void PluginPrefs::SetPrefs(PrefService* prefs) {
                  base::Bind(&PluginPrefs::UpdatePatternsAndNotify,
                             base::Unretained(this),
                             &policy_enabled_plugin_patterns_));
+  registrar_.Add(prefs::kEnableNpapi,
+                 base::Bind(&PluginPrefs::EnableNpapi,
+                            base::Unretained(this)));
 
   NotifyPluginStatusChanged();
 }
@@ -563,7 +574,7 @@ void PluginPrefs::OnUpdatePreferences(
     group_names.insert(plugin_metadata->name());
   }
 
-  // Add the plug-in groups.
+  // Add the plugin groups.
   for (std::set<base::string16>::const_iterator it = group_names.begin();
       it != group_names.end(); ++it) {
     base::DictionaryValue* summary = new base::DictionaryValue();

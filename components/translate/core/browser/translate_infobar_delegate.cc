@@ -262,11 +262,25 @@ bool TranslateInfoBarDelegate::ShouldShowNeverTranslateShortcut() {
 }
 
 bool TranslateInfoBarDelegate::ShouldShowAlwaysTranslateShortcut() {
+#if defined(OS_IOS)
+  // On mobile, the option to always translate is shown after the translation.
+  DCHECK_EQ(translate::TRANSLATE_STEP_AFTER_TRANSLATE, step_);
+#else
+  // On desktop, the option to always translate is shown before the translation.
   DCHECK_EQ(translate::TRANSLATE_STEP_BEFORE_TRANSLATE, step_);
+#endif
   return !is_off_the_record_ &&
       (prefs_->GetTranslationAcceptedCount(original_language_code()) >=
           kAlwaysTranslateMinCount);
 }
+
+#if defined(OS_IOS)
+void TranslateInfoBarDelegate::ShowNeverTranslateInfobar() {
+  Create(true, translate_manager_, infobar()->owner(), is_off_the_record_,
+         translate::TRANSLATE_STEP_NEVER_TRANSLATE, original_language_code(),
+         target_language_code(), TranslateErrors::NONE, false);
+}
+#endif
 
 // static
 void TranslateInfoBarDelegate::GetAfterTranslateStrings(
@@ -336,22 +350,13 @@ TranslateInfoBarDelegate::TranslateInfoBarDelegate(
     background_animation_ = is_error() ? NORMAL_TO_ERROR : ERROR_TO_NORMAL;
 }
 
-void TranslateInfoBarDelegate::InfoBarDismissed() {
-  if (step_ != translate::TRANSLATE_STEP_BEFORE_TRANSLATE)
-    return;
-
-  // The user closed the infobar without clicking the translate button.
-  TranslationDeclined();
-  UMA_HISTOGRAM_BOOLEAN("Translate.DeclineTranslateCloseInfobar", true);
+infobars::InfoBarDelegate::Type
+TranslateInfoBarDelegate::GetInfoBarType() const {
+  return PAGE_ACTION_TYPE;
 }
 
 int TranslateInfoBarDelegate::GetIconID() const {
   return translate_manager_->translate_client()->GetInfobarIconID();
-}
-
-infobars::InfoBarDelegate::Type TranslateInfoBarDelegate::GetInfoBarType()
-    const {
-  return PAGE_ACTION_TYPE;
 }
 
 bool TranslateInfoBarDelegate::ShouldExpire(
@@ -364,17 +369,18 @@ bool TranslateInfoBarDelegate::ShouldExpire(
   return infobars::InfoBarDelegate::ShouldExpireInternal(details);
 }
 
+void TranslateInfoBarDelegate::InfoBarDismissed() {
+  if (step_ != translate::TRANSLATE_STEP_BEFORE_TRANSLATE)
+    return;
+
+  // The user closed the infobar without clicking the translate button.
+  TranslationDeclined();
+  UMA_HISTOGRAM_BOOLEAN("Translate.DeclineTranslateCloseInfobar", true);
+}
+
 TranslateInfoBarDelegate*
     TranslateInfoBarDelegate::AsTranslateInfoBarDelegate() {
   return this;
 }
-
-#if defined(OS_IOS)
-void TranslateInfoBarDelegate::ShowNeverTranslateInfobar() {
-  Create(true, translate_manager_, infobar()->owner(), is_off_the_record_,
-         translate::TRANSLATE_STEP_NEVER_TRANSLATE, original_language_code(),
-         target_language_code(), TranslateErrors::NONE, false);
-}
-#endif
 
 }  // namespace translate

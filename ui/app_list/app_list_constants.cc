@@ -6,8 +6,10 @@
 
 namespace app_list {
 
-const SkColor kContentsBackgroundColor = SkColorSetRGB(0xF5, 0xF5, 0xF5);
+const SkColor kContentsBackgroundColor = SkColorSetRGB(0xF2, 0xF2, 0xF2);
 const SkColor kSearchBoxBackground = SK_ColorWHITE;
+
+const SkColor kSearchTextColor = SkColorSetRGB(0x33, 0x33, 0x33);
 
 // In Windows, transparent background color will cause ugly text rendering,
 // therefore kContentsBackgroundColor should be used. See crbug.com/406989
@@ -23,10 +25,10 @@ const SkColor kBottomSeparatorColor = SkColorSetRGB(0xC0, 0xC0, 0xC0);
 // The color of the separator used inside dialogs in the app list.
 const SkColor kDialogSeparatorColor = SkColorSetRGB(0xD1, 0xD1, 0xD1);
 
-// The mouse hover colour (3% black over kContentsBackgroundColor).
-const SkColor kHighlightedColor = SkColorSetRGB(0xEE, 0xEE, 0xEE);
-// The keyboard select colour (6% black over kContentsBackgroundColor).
-const SkColor kSelectedColor = SkColorSetRGB(0xE6, 0xE6, 0xE6);
+// The mouse hover colour (3% black).
+const SkColor kHighlightedColor = SkColorSetARGB(8, 0, 0, 0);
+// The keyboard select colour (6% black).
+const SkColor kSelectedColor = SkColorSetARGB(15, 0, 0, 0);
 
 const SkColor kPagerHoverColor = SkColorSetRGB(0xB4, 0xB4, 0xB4);
 const SkColor kPagerNormalColor = SkColorSetRGB(0xE2, 0xE2, 0xE2);
@@ -34,7 +36,7 @@ const SkColor kPagerSelectedColor = SkColorSetRGB(0x46, 0x8F, 0xFC);
 
 const SkColor kResultBorderColor = SkColorSetRGB(0xE5, 0xE5, 0xE5);
 const SkColor kResultDefaultTextColor = SkColorSetRGB(0x33, 0x33, 0x33);
-const SkColor kResultDimmedTextColor = SkColorSetRGB(0x96, 0x96, 0x96);
+const SkColor kResultDimmedTextColor = SkColorSetRGB(0x84, 0x84, 0x84);
 const SkColor kResultURLTextColor = SkColorSetRGB(0x00, 0x99, 0x33);
 
 const SkColor kGridTitleColor = SkColorSetRGB(0x33, 0x33, 0x33);
@@ -50,9 +52,6 @@ const float kFolderBubbleRadius = 23;
 const float kFolderShadowRadius = 23.5;
 const float kFolderShadowOffsetY = 1;
 
-const int kCardShadowBlur = 4;
-const int kCardShadowYOffset = 1;
-const SkColor kCardShadowColor = SkColorSetARGB(0x4C, 0, 0, 0);
 const SkColor kCardBackgroundColor = SK_ColorWHITE;
 
 // Duration in milliseconds for page transition.
@@ -87,7 +86,7 @@ const int kPreferredRows = 4;
 const int kGridIconDimension = 48;
 
 // Preferred search result icon sizes.
-const int kListIconSize = 32;
+const int kListIconSize = 24;
 const int kTileIconSize = 48;
 
 // Preferred number of columns and rows in the centered app list apps grid.
@@ -101,8 +100,13 @@ const int kExperimentalPreferredRows = 4;
 // Radius of the circle, in which if entered, show re-order preview.
 const int kReorderDroppingCircleRadius = 35;
 
-// The padding around the outside of the experimental app list (top and sides).
-const int kExperimentalWindowPadding = 24;
+// The padding around the outside of the experimental app list apps grid
+// (sides).
+const int kExperimentalAppsGridPadding = 24;
+
+// The padding around the outside of the experimental app list search box (top
+// and sides).
+const int kExperimentalSearchBoxPadding = 16;
 
 // Max items allowed in a folder.
 size_t kMaxFolderItems = 16;
@@ -116,7 +120,14 @@ const size_t kMaxFolderNameChars = 40;
 
 // Font style for app item labels.
 const ui::ResourceBundle::FontStyle kItemTextFontStyle =
-    ui::ResourceBundle::SmallBoldFont;
+    ui::ResourceBundle::SmallFont;
+
+// The UMA histogram that logs which page gets opened by the user.
+const char kPageOpenedHistogram[] = "Apps.AppListPageOpened";
+
+// The UMA histogram that logs the type of search result opened.
+const char kSearchResultOpenDisplayTypeHistogram[] =
+    "Apps.AppListSearchResultOpenDisplayType";
 
 #if defined(OS_LINUX)
 #if defined(GOOGLE_CHROME_BUILD)
@@ -125,5 +136,22 @@ const char kAppListWMClass[] = "chrome_app_list";
 const char kAppListWMClass[] = "chromium_app_list";
 #endif
 #endif
+
+gfx::ShadowValue GetShadowForZHeight(int z_height) {
+  if (z_height <= 0)
+    return gfx::ShadowValue();
+
+  switch (z_height) {
+    case 1:
+      return gfx::ShadowValue(gfx::Vector2d(0, 1), 2,
+                              SkColorSetARGB(0x4C, 0, 0, 0));
+    case 2:
+      return gfx::ShadowValue(gfx::Vector2d(0, 2), 4,
+                              SkColorSetARGB(0x33, 0, 0, 0));
+    default:
+      return gfx::ShadowValue(gfx::Vector2d(0, 8), 12,
+                              SkColorSetARGB(0x3F, 0, 0, 0));
+  }
+}
 
 }  // namespace app_list

@@ -11,6 +11,7 @@
 #include "base/memory/weak_ptr.h"
 #include "chrome/browser/ui/webui/options/options_ui.h"
 #include "chromeos/network/network_state_handler_observer.h"
+#include "extensions/browser/extension_registry_observer.h"
 #include "ui/gfx/native_widget_types.h"
 
 class Browser;
@@ -34,42 +35,46 @@ namespace chromeos {
 namespace options {
 
 // ChromeOS internet options page UI handler.
-class InternetOptionsHandler
-    : public ::options::OptionsPageUIHandler,
-      public chromeos::NetworkStateHandlerObserver {
+class InternetOptionsHandler : public ::options::OptionsPageUIHandler,
+                               public chromeos::NetworkStateHandlerObserver,
+                               public extensions::ExtensionRegistryObserver {
  public:
   InternetOptionsHandler();
-  virtual ~InternetOptionsHandler();
+  ~InternetOptionsHandler() override;
 
  private:
   // OptionsPageUIHandler
-  virtual void GetLocalizedValues(
-      base::DictionaryValue* localized_strings) override;
-  virtual void InitializePage() override;
+  void GetLocalizedValues(base::DictionaryValue* localized_strings) override;
+  void InitializePage() override;
 
   // WebUIMessageHandler (from OptionsPageUIHandler)
-  virtual void RegisterMessages() override;
+  void RegisterMessages() override;
+
+  // ExtensionRegistryObserver
+  void OnExtensionLoaded(content::BrowserContext* browser_context,
+                         const extensions::Extension* extension) override;
+  void OnExtensionUnloaded(
+      content::BrowserContext* browser_context,
+      const extensions::Extension* extension,
+      extensions::UnloadedExtensionInfo::Reason reason) override;
+  void OnShutdown(extensions::ExtensionRegistry* registry) override;
 
   // Callbacks to set network state properties.
   void ShowMorePlanInfoCallback(const base::ListValue* args);
-  void SetApnCallback(const base::ListValue* args);
-  void SetApnProperties(const base::ListValue* args,
-                        const std::string& service_path,
-                        const base::DictionaryValue& shill_properties);
   void CarrierStatusCallback();
   void SetCarrierCallback(const base::ListValue* args);
   void SimOperationCallback(const base::ListValue* args);
 
-  // networkingPrvate callbacks
-  void DisableNetworkTypeCallback(const base::ListValue* args);
-  void EnableNetworkTypeCallback(const base::ListValue* args);
-  void GetManagedPropertiesCallback(const base::ListValue* args);
-  void RequestNetworkScanCallback(const base::ListValue* args);
-  void StartConnectCallback(const base::ListValue* args);
-  void StartDisconnectCallback(const base::ListValue* args);
+  // Sets details_guid_ for event forwarding.
+  void SetNetworkGuidCallback(const base::ListValue* args);
 
-  // Retrieves a data url for a resource.
-  std::string GetIconDataUrl(int resource_id) const;
+  // networkingPrvate callbacks
+  void GetManagedPropertiesCallback(const base::ListValue* args);
+  void StartConnectCallback(const base::ListValue* args);
+  void SetPropertiesCallback(const base::ListValue* args);
+
+  // Updates the list of VPN providers enabled in the primary user's profile.
+  void UpdateVPNProviders();
 
   // Refreshes the display of network information.
   void RefreshNetworkData();
@@ -88,39 +93,31 @@ class InternetOptionsHandler
   void UpdateCarrier();
 
   // NetworkStateHandlerObserver
-  virtual void DeviceListChanged() override;
-  virtual void NetworkListChanged() override;
-  virtual void NetworkConnectionStateChanged(
+  void DeviceListChanged() override;
+  void NetworkListChanged() override;
+  void NetworkConnectionStateChanged(
       const chromeos::NetworkState* network) override;
-  virtual void NetworkPropertiesUpdated(
-      const chromeos::NetworkState* network) override;
-  virtual void DevicePropertiesUpdated(
-      const chromeos::DeviceState* device) override;
+  void NetworkPropertiesUpdated(const chromeos::NetworkState* network) override;
+  void DevicePropertiesUpdated(const chromeos::DeviceState* device) override;
 
   // Updates the logged in user type.
   void UpdateLoggedInUserType();
 
-  // Additional callbacks to set network state properties.
-  void SetPropertiesCallback(const base::ListValue* args);
-  void SetIPConfigCallback(const base::ListValue* args);
-  void SetIPConfigProperties(const base::ListValue* args,
-                             const std::string& service_path,
-                             const base::DictionaryValue& shill_properties);
-
   // Gets the native window for hosting dialogs, etc.
   gfx::NativeWindow GetNativeWindow() const;
-
-  // Gets the UI scale factor.
-  float GetScaleFactor() const;
 
   // Gets the user PrefService associated with the WebUI.
   const PrefService* GetPrefs() const;
 
   // Additional callbacks for managing networks.
-  void AddConnection(const base::ListValue* args);
+  void AddVPNConnection(const base::ListValue* args);
+  void AddNonVPNConnection(const base::ListValue* args);
   void ConfigureNetwork(const base::ListValue* args);
   void ActivateNetwork(const base::ListValue* args);
-  void RemoveNetwork(const base::ListValue* args);
+
+  // Requests that a list of VPN providers enabled in the primary user's
+  // profile be sent to JavaScript.
+  void LoadVPNProvidersCallback(const base::ListValue* args);
 
   // Creates the map of wired networks.
   base::ListValue* GetWiredList();
@@ -138,7 +135,7 @@ class InternetOptionsHandler
   void FillNetworkInfo(base::DictionaryValue* dictionary);
 
   // Keep track of the service path for the network shown in the Details view.
-  std::string details_path_;
+  std::string details_guid_;
 
   // Weak pointer factory so we can start connections at a later time
   // without worrying that they will actually try to happen after the lifetime

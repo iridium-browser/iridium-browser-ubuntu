@@ -23,19 +23,18 @@ class DisplayOptionsHandler : public ::options::OptionsPageUIHandler,
                               public ash::DisplayController::Observer {
  public:
   DisplayOptionsHandler();
-  virtual ~DisplayOptionsHandler();
+  ~DisplayOptionsHandler() override;
 
   // OptionsPageUIHandler implementation.
-  virtual void GetLocalizedValues(
-      base::DictionaryValue* localized_strings) override;
-  virtual void InitializePage() override;
+  void GetLocalizedValues(base::DictionaryValue* localized_strings) override;
+  void InitializePage() override;
 
   // WebUIMessageHandler implementation.
-  virtual void RegisterMessages() override;
+  void RegisterMessages() override;
 
   // ash::DisplayController::Observer implementation.
-  virtual void OnDisplayConfigurationChanging() override;
-  virtual void OnDisplayConfigurationChanged() override;
+  void OnDisplayConfigurationChanging() override;
+  void OnDisplayConfigurationChanged() override;
 
  private:
   // Sends all of the current display information to the web_ui of options page.
@@ -43,6 +42,9 @@ class DisplayOptionsHandler : public ::options::OptionsPageUIHandler,
 
   // Sends the specified display information to the web_ui of options page.
   void SendDisplayInfo(const std::vector<gfx::Display>& displays);
+
+  // Enables or disables the display settings UI.
+  void UpdateDisplaySettingsEnabled();
 
   // Called when the fade-out animation for mirroring status change is finished.
   void OnFadeOutForMirroringFinished(bool is_mirroring);

@@ -20,6 +20,7 @@
 
 #include "native_client/src/include/nacl_assert.h"
 #include "native_client/src/trusted/service_runtime/include/sys/nacl_syscalls.h"
+#include "native_client/src/trusted/service_runtime/nacl_config.h"
 
 #define PRINT_HEADER 0
 #define TEXT_LINE_SIZE 1024
@@ -172,6 +173,33 @@ bool test_getcwd() {
   char *rtn = getcwd(dirname, PATH_MAX);
   ASSERT_EQ_MSG(rtn, dirname, "getcwd() failed to return dirname");
   ASSERT_NE_MSG(strlen(dirname), 0, "getcwd() failed to set valid dirname");
+
+  // Call with size == 0 and buf == NULL should return a malloc'd buffer
+  char *rtn2 = getcwd(NULL, 0);
+  ASSERT_NE(rtn2, NULL);
+  ASSERT_EQ(strcmp(rtn, rtn2), 0);
+  free(rtn2);
+
+  // Call with buf == NULL and non-zero size should return a malloc'd buffer
+  // that is 'size' bytes long.
+  rtn2 = getcwd(NULL, PATH_MAX*2);
+  ASSERT_NE(rtn2, NULL);
+  ASSERT_EQ(strcmp(rtn, rtn2), 0);
+  // Overwrite all bytes in the allocation. We have no way to verify that
+  // the allocation really is this big but memory sanitisers should fail here
+  // if it's not.
+  memset(rtn2, 0xba, PATH_MAX*2);
+  free(rtn2);
+
+  // Call with size == 0 and buf != NULL should fail (with EINVAL)
+  rtn = getcwd(dirname, 0);
+  ASSERT_EQ(rtn, NULL);
+  ASSERT_EQ(errno, EINVAL);
+
+  // Check that when size is too small ERANGE gets set
+  rtn = getcwd(dirname, 1);
+  ASSERT_EQ(rtn, NULL);
+  ASSERT_EQ(errno, ERANGE);
 
   // Calculate parent folder.
   strncpy(parent, dirname, PATH_MAX);
@@ -572,10 +600,39 @@ bool test_stat(const char *test_file) {
   ASSERT_EQ(buf.st_size, buf2.st_size);
   ASSERT_EQ(buf.st_blksize, buf2.st_blksize);
   ASSERT_EQ(buf.st_blocks, buf2.st_blocks);
+  ASSERT_EQ(buf.st_ino, buf2.st_ino);
   // Do not check st_atime as it seems to be updated by open or fstat
   // on Windows.
   ASSERT_EQ(buf.st_mtime, buf2.st_mtime);
   ASSERT_EQ(buf.st_ctime, buf2.st_ctime);
+  rc = close(fd);
+  ASSERT_EQ(rc, 0);
+
+  // Open a new file to verify that st_dev matches and st_ino does not.
+  char temp_file[PATH_MAX];
+  snprintf(temp_file, PATH_MAX, "%s.tmp_stat", test_file);
+
+  fd = open(temp_file, O_CREAT, S_IRUSR | S_IWUSR);
+  ASSERT_NE(fd, -1);
+  rc = fstat(fd, &buf2);
+  ASSERT_EQ(rc, 0);
+
+  ASSERT_EQ(buf.st_dev, buf2.st_dev);
+
+  // Non-sfi-nacl mode always masks inode numbers so we should get the same
+  // value for all files.
+  if (NONSFI_MODE && !TESTS_USE_IRT) {
+    ASSERT_EQ(buf.st_ino, NACL_FAKE_INODE_NUM);
+    ASSERT_EQ(buf.st_ino, buf2.st_ino);
+  } else {
+    // Otherwise expect genuine (and therefore different) inode numbers.
+    // Except on Windows where we don't expose any inode numbers and
+    // they will both be zero.
+    if (buf.st_ino != NACL_FAKE_INODE_NUM &&
+        buf2.st_ino != NACL_FAKE_INODE_NUM) {
+      ASSERT_NE(buf.st_ino, buf2.st_ino);
+    }
+  }
   rc = close(fd);
   ASSERT_EQ(rc, 0);
 
@@ -591,7 +648,6 @@ bool test_stat(const char *test_file) {
 #if 0
   char buffer[PATH_MAX];
   snprintf(buffer, PATH_MAX, "%s.readonly", test_file);
-  buffer[PATH_MAX - 1] = '\0';
   unlink(buffer);
   ASSERT_EQ(stat(buffer, &buf), -1);
   int fd = open(buffer, O_RDWR | O_CREAT, S_IRUSR);

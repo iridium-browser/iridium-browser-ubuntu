@@ -83,6 +83,7 @@ void SMILTimeContainer::schedule(SVGSMILElement* animation, SVGElement* target, 
     ASSERT(animation->timeContainer() == this);
     ASSERT(target);
     ASSERT(animation->hasValidAttributeName());
+    ASSERT(animation->hasValidAttributeType());
 
 #if ENABLE(ASSERT)
     ASSERT(!m_preventScheduledAnimationsChanges);
@@ -459,36 +460,31 @@ SMILTime SMILTimeContainer::updateAnimations(SMILTime elapsed, bool seekToTime)
     WillBeHeapHashSet<ElementAttributePair> invalidKeys;
     using AnimationsVector = WillBeHeapVector<RefPtrWillBeMember<SVGSMILElement>>;
     AnimationsVector animationsToApply;
+    AnimationsVector scheduledAnimationsInSameGroup;
     for (const auto& entry : m_scheduledAnimations) {
         if (!entry.key.first || entry.value->isEmpty()) {
             invalidKeys.add(entry.key);
             continue;
         }
 
-        AnimationsLinkedHashSet* scheduled = entry.value.get();
-
         // Sort according to priority. Elements with later begin time have higher priority.
         // In case of a tie, document order decides.
         // FIXME: This should also consider timing relationships between the elements. Dependents
         // have higher priority.
-        AnimationsVector scheduledAnimations;
-        copyToVector(*scheduled, scheduledAnimations);
-        std::sort(scheduledAnimations.begin(), scheduledAnimations.end(), PriorityCompare(elapsed));
+        copyToVector(*entry.value, scheduledAnimationsInSameGroup);
+        std::sort(scheduledAnimationsInSameGroup.begin(), scheduledAnimationsInSameGroup.end(), PriorityCompare(elapsed));
 
         SVGSMILElement* resultElement = nullptr;
-        for (const auto& itAnimation : scheduledAnimations) {
+        for (const auto& itAnimation : scheduledAnimationsInSameGroup) {
             SVGSMILElement* animation = itAnimation.get();
             ASSERT(animation->timeContainer() == this);
             ASSERT(animation->targetElement());
             ASSERT(animation->hasValidAttributeName());
+            ASSERT(animation->hasValidAttributeType());
 
             // Results are accumulated to the first animation that animates and contributes to a particular element/attribute pair.
-            // FIXME: we should ensure that resultElement is of an appropriate type.
-            if (!resultElement) {
-                if (!animation->hasValidAttributeType())
-                    continue;
+            if (!resultElement)
                 resultElement = animation;
-            }
 
             // This will calculate the contribution from the animation and add it to the resultsElement.
             if (!animation->progress(elapsed, resultElement, seekToTime) && resultElement == animation)
@@ -540,7 +536,7 @@ SMILTime SMILTimeContainer::updateAnimations(SMILTime elapsed, bool seekToTime)
     return earliestFireTime;
 }
 
-void SMILTimeContainer::trace(Visitor* visitor)
+DEFINE_TRACE(SMILTimeContainer)
 {
 #if ENABLE(OILPAN)
     visitor->trace(m_scheduledAnimations);

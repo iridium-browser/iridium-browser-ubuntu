@@ -18,12 +18,12 @@
 
 #include "base/basictypes.h"
 #include "base/command_line.h"
-#include "base/debug/trace_event.h"
 #include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/sys_info.h"
+#include "base/trace_event/trace_event.h"
 #include "ui/aura/client/cursor_client.h"
 #include "ui/aura/env.h"
 #include "ui/aura/window.h"
@@ -150,38 +150,15 @@ class TouchEventCalibrate : public ui::PlatformEventObserver {
 
     const int resolution_x = bounds.width();
     const int resolution_y = bounds.height();
-    // The "grace area" (10% in this case) is to make it easier for the user to
-    // navigate to the corner.
-    const double kGraceAreaFraction = 0.1;
     if (left_ || right_) {
       // Offset the x position to the real
       x -= left_;
-      // Check if we are in the grace area of the left side.
-      // Note: We might not want to do this when the gesture is locked?
-      if (x < 0 && x > -left_ * kGraceAreaFraction)
-        x = 0;
-      // Check if we are in the grace area of the right side.
-      // Note: We might not want to do this when the gesture is locked?
-      if (x > resolution_x - left_ &&
-          x < resolution_x - left_ + right_ * kGraceAreaFraction)
-        x = resolution_x - left_;
       // Scale the screen area back to the full resolution of the screen.
       x = (x * resolution_x) / (resolution_x - (right_ + left_));
     }
     if (top_ || bottom_) {
       // When there is a top bezel we add our border,
       y -= top_;
-
-      // Check if we are in the grace area of the top side.
-      // Note: We might not want to do this when the gesture is locked?
-      if (y < 0 && y > -top_ * kGraceAreaFraction)
-        y = 0;
-
-      // Check if we are in the grace area of the bottom side.
-      // Note: We might not want to do this when the gesture is locked?
-      if (y > resolution_y - top_ &&
-          y < resolution_y - top_ + bottom_ * kGraceAreaFraction)
-        y = resolution_y - top_;
       // Scale the screen area back to the full resolution of the screen.
       y = (y * resolution_y) / (resolution_y - (bottom_ + top_));
     }
@@ -281,7 +258,8 @@ WindowTreeHostX11::WindowTreeHostX11(const gfx::Rect& bounds)
   // Likewise, the X server needs to know this window's pid so it knows which
   // program to kill if the window hangs.
   // XChangeProperty() expects "pid" to be long.
-  COMPILE_ASSERT(sizeof(long) >= sizeof(pid_t), pid_t_bigger_than_long);
+  static_assert(sizeof(long) >= sizeof(pid_t),
+                "pid_t should not be larger than long");
   long pid = getpid();
   XChangeProperty(xdisplay_,
                   xwindow_,

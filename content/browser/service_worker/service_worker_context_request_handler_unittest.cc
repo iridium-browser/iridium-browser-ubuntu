@@ -35,7 +35,8 @@ class ServiceWorkerContextRequestHandlerTest : public testing::Test {
       : browser_thread_bundle_(TestBrowserThreadBundle::IO_MAINLOOP) {}
 
   void SetUp() override {
-    helper_.reset(new EmbeddedWorkerTestHelper(kMockRenderProcessId));
+    helper_.reset(
+        new EmbeddedWorkerTestHelper(base::FilePath(), kMockRenderProcessId));
 
     // A new unstored registration/version.
     scope_ = GURL("http://host/scope/");
@@ -48,7 +49,8 @@ class ServiceWorkerContextRequestHandlerTest : public testing::Test {
     // An empty host.
     scoped_ptr<ServiceWorkerProviderHost> host(new ServiceWorkerProviderHost(
         kMockRenderProcessId, MSG_ROUTING_NONE /* render_frame_id */,
-        1 /* provider_id */, context()->AsWeakPtr(), nullptr));
+        1 /* provider_id */, SERVICE_WORKER_PROVIDER_FOR_WINDOW,
+        context()->AsWeakPtr(), nullptr));
     provider_host_ = host->AsWeakPtr();
     context()->AddProviderHost(host.Pass());
 
@@ -86,10 +88,7 @@ TEST_F(ServiceWorkerContextRequestHandlerTest, UpdateBefore24Hours) {
   // Conduct a resource fetch for the main script.
   const GURL kScriptUrl("http://host/script.js");
   scoped_ptr<net::URLRequest> request = url_request_context_.CreateRequest(
-      kScriptUrl,
-      net::DEFAULT_PRIORITY,
-      &url_request_delegate_,
-      nullptr);
+      kScriptUrl, net::DEFAULT_PRIORITY, &url_request_delegate_);
   scoped_ptr<ServiceWorkerContextRequestHandler> handler(
       new ServiceWorkerContextRequestHandler(
           context()->AsWeakPtr(),
@@ -117,10 +116,7 @@ TEST_F(ServiceWorkerContextRequestHandlerTest, UpdateAfter24Hours) {
   // Conduct a resource fetch for the main script.
   const GURL kScriptUrl("http://host/script.js");
   scoped_ptr<net::URLRequest> request = url_request_context_.CreateRequest(
-      kScriptUrl,
-      net::DEFAULT_PRIORITY,
-      &url_request_delegate_,
-      nullptr);
+      kScriptUrl, net::DEFAULT_PRIORITY, &url_request_delegate_);
   scoped_ptr<ServiceWorkerContextRequestHandler> handler(
       new ServiceWorkerContextRequestHandler(
           context()->AsWeakPtr(),

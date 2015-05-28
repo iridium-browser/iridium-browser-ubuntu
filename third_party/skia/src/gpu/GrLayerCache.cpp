@@ -253,9 +253,7 @@ bool GrLayerCache::lock(GrCachedLayer* layer, const GrSurfaceDesc& desc, bool* n
         usage = GrContext::kExact_ScratchTexMatch;
     }
 
-    SkAutoTUnref<GrTexture> tex(
-        fContext->refScratchTexture(desc, usage));
-
+    SkAutoTUnref<GrTexture> tex(fContext->refScratchTexture(desc, usage));
     if (!tex) {
         return false;
     }
@@ -472,7 +470,7 @@ void GrLayerCache::purgeAll() {
 #endif
 
 void GrLayerCache::processDeletedPictures() {
-    SkTDArray<SkPicture::DeletionMessage> deletedPictures;
+    SkTArray<SkPicture::DeletionMessage> deletedPictures;
     fPictDeletionInbox.poll(&deletedPictures);
 
     for (int i = 0; i < deletedPictures.count(); i++) {

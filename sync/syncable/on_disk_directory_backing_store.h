@@ -22,21 +22,20 @@ class SYNC_EXPORT_PRIVATE OnDiskDirectoryBackingStore
   ~OnDiskDirectoryBackingStore() override;
   DirOpenResult Load(Directory::MetahandlesMap* handles_map,
                      JournalIndex* delete_journals,
+                     MetahandleSet* metahandles_to_purge,
                      Directory::KernelLoadInfo* kernel_load_info) override;
-
-  // A helper function that will make one attempt to load the directory.
-  // Unlike Load(), it does not attempt to recover from failure.
-  DirOpenResult TryLoad(
-      Directory::MetahandlesMap* handles_map,
-      JournalIndex* delete_journals,
-      Directory::KernelLoadInfo* kernel_load_info);
 
  protected:
   // Subclasses may override this to avoid a possible DCHECK.
   virtual void ReportFirstTryOpenFailure();
 
  private:
-  FRIEND_TEST_ALL_PREFIXES(DirectoryBackingStoreTest, MinorCorruption);
+  // A helper function that will make one attempt to load the directory.
+  // Unlike Load(), it does not attempt to recover from failure.
+  DirOpenResult TryLoad(Directory::MetahandlesMap* handles_map,
+                        JournalIndex* delete_journals,
+                        MetahandleSet* metahandles_to_purge,
+                        Directory::KernelLoadInfo* kernel_load_info);
 
   bool allow_failure_for_test_;
   base::FilePath backing_filepath_;

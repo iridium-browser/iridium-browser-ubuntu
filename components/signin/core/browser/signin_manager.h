@@ -36,10 +36,10 @@
 #include "components/signin/core/browser/signin_internals_util.h"
 #include "components/signin/core/browser/signin_manager_base.h"
 #include "components/signin/core/browser/signin_metrics.h"
-#include "google_apis/gaia/google_service_auth_error.h"
-#include "google_apis/gaia/merge_session_helper.h"
 #include "net/cookies/canonical_cookie.h"
 
+class GaiaCookieManagerService;
+class GoogleServiceAuthError;
 class PrefService;
 class ProfileOAuth2TokenService;
 class SigninAccountIdHelper;
@@ -54,10 +54,6 @@ class SigninManager : public SigninManagerBase,
   // signin. The callback is passed the just-fetched OAuth login refresh token.
   typedef base::Callback<void(const std::string&)> OAuthTokenFetchedCallback;
 
-  // Returns true if |url| is a web signin URL and should be hosted in an
-  // isolated, privileged signin process.
-  static bool IsWebBasedSigninFlowURL(const GURL& url);
-
   // This is used to distinguish URLs belonging to the special web signin flow
   // running in the special signin process from other URLs on the same domain.
   // We do not grant WebUI privilieges / bindings to this process or to URLs of
@@ -67,7 +63,8 @@ class SigninManager : public SigninManagerBase,
 
   SigninManager(SigninClient* client,
                 ProfileOAuth2TokenService* token_service,
-                AccountTrackerService* account_tracker_service);
+                AccountTrackerService* account_tracker_service,
+                GaiaCookieManagerService* cookie_manager_service);
   ~SigninManager() override;
 
   // Returns true if the username is allowed based on the policy string.
@@ -99,6 +96,9 @@ class SigninManager : public SigninManagerBase,
   // initialization and sign the user out.
   void Initialize(PrefService* local_state) override;
   void Shutdown() override;
+
+  // If applicable, merge the signed in account into the cookie jar.
+  void MergeSigninCredentialIntoCookieJar();
 
   // Invoked from an OAuthTokenFetchedCallback to complete user signin.
   virtual void CompletePendingSignin();
@@ -132,10 +132,6 @@ class SigninManager : public SigninManagerBase,
   // If true, signout is prohibited for this profile (calls to SignOut() are
   // ignored).
   bool IsSignoutProhibited() const;
-
-  // Add or remove observers for the merge session notification.
-  void AddMergeSessionObserver(MergeSessionHelper::Observer* observer);
-  void RemoveMergeSessionObserver(MergeSessionHelper::Observer* observer);
 
  protected:
   // Flag saying whether signing out is allowed.
@@ -216,15 +212,15 @@ class SigninManager : public SigninManagerBase,
   // outlive this object.
   AccountTrackerService* account_tracker_service_;
 
+  // Object used to use the token to push a GAIA cookie into the cookie jar.
+  GaiaCookieManagerService* cookie_manager_service_;
+
   // Helper object to listen for changes to signin preferences stored in non-
   // profile-specific local prefs (like kGoogleServicesUsernamePattern).
   PrefChangeRegistrar local_state_pref_registrar_;
 
   // Helper object to listen for changes to the signin allowed preference.
   BooleanPrefMember signin_allowed_;
-
-  // Helper to merge signed in account into the content area.
-  scoped_ptr<MergeSessionHelper> merge_session_helper_;
 
   // Two gate conditions for when PostSignedIn should be called. Verify
   // that the SigninManager has reached OnSignedIn() and the AccountTracker

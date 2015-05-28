@@ -22,7 +22,8 @@ using std::vector;
 
 namespace net {
 
-#define ENDPOINT (is_server() ? "Server: " : " Client: ")
+#define ENDPOINT \
+  (perspective() == Perspective::IS_SERVER ? "Server: " : " Client: ")
 
 // We want to make sure we delete any closed streams in a safe manner.
 // To avoid deleting a stream in mid-operation, we have a simple shim between
@@ -101,13 +102,14 @@ QuicSession::QuicSession(QuicConnection* connection, const QuicConfig& config)
       visitor_shim_(new VisitorShim(this)),
       config_(config),
       max_open_streams_(config_.MaxStreamsPerConnection()),
-      next_stream_id_(is_server() ? 2 : 5),
+      next_stream_id_(perspective() == Perspective::IS_SERVER ? 2 : 5),
+      write_blocked_streams_(true),
       largest_peer_created_stream_id_(0),
       error_(QUIC_NO_ERROR),
       flow_controller_(new QuicFlowController(
           connection_.get(),
           0,
-          is_server(),
+          perspective(),
           kMinimumFlowControlSendWindow,
           config_.GetInitialSessionFlowControlWindowToSend(),
           config_.GetInitialSessionFlowControlWindowToSend())),
@@ -236,6 +238,10 @@ void QuicSession::OnConnectionClosed(QuicErrorCode error, bool from_peer) {
   }
 }
 
+void QuicSession::OnSuccessfulVersionNegotiation(const QuicVersion& version) {
+  headers_stream_->OnSuccessfulVersionNegotiation(version);
+}
+
 void QuicSession::OnWindowUpdateFrames(
     const vector<QuicWindowUpdateFrame>& frames) {
   bool connection_window_updated = false;
@@ -253,13 +259,6 @@ void QuicSession::OnWindowUpdateFrames(
         connection_window_updated = true;
       }
       continue;
-    }
-
-    if (connection_->version() < QUIC_VERSION_21 &&
-        (stream_id == kCryptoStreamId || stream_id == kHeadersStreamId)) {
-      DLOG(DFATAL) << "WindowUpdate for stream " << stream_id << " in version "
-                   << QuicVersionToString(connection_->version());
-      return;
     }
 
     ReliableQuicStream* stream = GetStream(stream_id);
@@ -366,8 +365,10 @@ size_t QuicSession::WriteHeaders(
     QuicStreamId id,
     const SpdyHeaderBlock& headers,
     bool fin,
+    QuicPriority priority,
     QuicAckNotifier::DelegateInterface* ack_notifier_delegate) {
-  return headers_stream_->WriteHeaders(id, headers, fin, ack_notifier_delegate);
+  return headers_stream_->WriteHeaders(id, headers, fin, priority,
+                                       ack_notifier_delegate);
 }
 
 void QuicSession::SendRstStream(QuicStreamId id,
@@ -413,8 +414,7 @@ void QuicSession::CloseStreamInner(QuicStreamId stream_id,
   // If we haven't received a FIN or RST for this stream, we need to keep track
   // of the how many bytes the stream's flow controller believes it has
   // received, for accurate connection level flow control accounting.
-  if (!stream->HasFinalReceivedByteOffset() &&
-      stream->flow_controller()->IsEnabled()) {
+  if (!stream->HasFinalReceivedByteOffset()) {
     locally_closed_streams_highest_offset_[stream_id] =
         stream->flow_controller()->highest_received_byte_offset();
   }
@@ -462,7 +462,7 @@ void QuicSession::OnConfigNegotiated() {
   connection_->SetFromConfig(config_);
 
   uint32 max_streams = config_.MaxStreamsPerConnection();
-  if (is_server()) {
+  if (perspective() == Perspective::IS_SERVER) {
     // A server should accept a small number of additional streams beyond the
     // limit sent to the client. This helps avoid early connection termination
     // when FIN/RSTs for old streams are lost or arrive out of order.
@@ -498,10 +498,8 @@ void QuicSession::OnNewStreamFlowControlWindow(QuicStreamOffset new_window) {
   }
 
   // Inform all existing streams about the new window.
-  if (connection_->version() >= QUIC_VERSION_21) {
-    GetCryptoStream()->UpdateSendWindowOffset(new_window);
-    headers_stream_->UpdateSendWindowOffset(new_window);
-  }
+  GetCryptoStream()->UpdateSendWindowOffset(new_window);
+  headers_stream_->UpdateSendWindowOffset(new_window);
   for (DataStreamMap::iterator it = stream_map_.begin();
        it != stream_map_.end(); ++it) {
     it->second->UpdateSendWindowOffset(new_window);
@@ -636,7 +634,7 @@ QuicDataStream* QuicSession::GetIncomingDataStream(QuicStreamId stream_id) {
       return nullptr;
     }
     if (largest_peer_created_stream_id_ == 0) {
-      if (is_server()) {
+      if (perspective() == Perspective::IS_SERVER) {
         largest_peer_created_stream_id_ = 3;
       } else {
         largest_peer_created_stream_id_ = 1;
@@ -717,11 +715,6 @@ bool QuicSession::HasDataToWrite() const {
   return write_blocked_streams_.HasWriteBlockedCryptoOrHeadersStream() ||
          write_blocked_streams_.HasWriteBlockedDataStreams() ||
          connection_->HasQueuedData();
-}
-
-bool QuicSession::GetSSLInfo(SSLInfo* ssl_info) const {
-  NOTIMPLEMENTED();
-  return false;
 }
 
 void QuicSession::PostProcessAfterData() {

@@ -3,22 +3,22 @@
 # found in the LICENSE file.
 import sys
 
-from measurements import smoothness
-from metrics import power
-from telemetry import decorators
 from telemetry.core import exceptions
 from telemetry.core import wpr_modes
+from telemetry import decorators
 from telemetry.page import page
 from telemetry.unittest_util import options_for_unittests
 from telemetry.unittest_util import page_test_test_case
+
+from measurements import smoothness
+from metrics import power
+
 
 class FakeTracingController(object):
   def __init__(self):
     self.category_filter = None
   def Start(self, _options, category_filter, _timeout):
     self.category_filter = category_filter
-  def IsDisplayTracingSupported(self):
-    return False
 
 class FakePlatform(object):
   def __init__(self):

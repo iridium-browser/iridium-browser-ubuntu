@@ -14,6 +14,7 @@ class WebString;
 class WebURL;
 
 typedef WebCallbacks<void, void> WebNavigatorConnectCallbacks;
+typedef WebCallbacks<WebMessagePortChannel, void> WebNavigatorConnectPortCallbacks;
 
 class WebNavigatorConnectProvider {
 public:
@@ -25,7 +26,7 @@ public:
     // be a layering violation (platform/ code shouldn't depend on web/ code).
     // Ownership of the WebMessagePortChannel and WebNavigatorConnectCallbacks
     // objects are both transferred to the provider.
-    virtual void connect(const WebURL&, const WebString& origin, WebMessagePortChannel*, WebNavigatorConnectCallbacks*) { }
+    virtual void connect(const WebURL&, const WebString& origin, WebNavigatorConnectPortCallbacks*) { }
 };
 
 } // namespace blink

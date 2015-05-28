@@ -132,7 +132,7 @@ class MockVideoEncoder : public VideoEncoder {
   }
 
   MOCK_METHOD2(SetChannelParameters,
-      int32_t(uint32_t packetLoss, int rtt));
+      int32_t(uint32_t packetLoss, int64_t rtt));
 
   virtual ~MockVideoEncoder() {
   }
@@ -145,15 +145,13 @@ class MockVideoEncoder : public VideoEncoder {
 
 class MockVideoEncoderFactory : public VideoEncoderFactory {
  public:
-  virtual VideoEncoder* Create() OVERRIDE {
+  VideoEncoder* Create() override {
     MockVideoEncoder* encoder = new MockVideoEncoder();
     encoders_.push_back(encoder);
     return encoder;
   }
 
-  virtual void Destroy(VideoEncoder* encoder) OVERRIDE {
-    delete encoder;
-  }
+  void Destroy(VideoEncoder* encoder) override { delete encoder; }
 
   virtual ~MockVideoEncoderFactory() {}
 
@@ -171,11 +169,10 @@ class TestSimulcastEncoderAdapterFakeHelper {
   // Can only be called once as the SimulcastEncoderAdapter will take the
   // ownership of |factory_|.
   VP8Encoder* CreateMockEncoderAdapter() {
-    scoped_ptr<VideoEncoderFactory> scoped_factory(factory_);
-    return new SimulcastEncoderAdapter(scoped_factory.Pass());
+    return new SimulcastEncoderAdapter(factory_);
   }
 
-  void ExpectCallSetChannelParameters(uint32_t packetLoss, int rtt) {
+  void ExpectCallSetChannelParameters(uint32_t packetLoss, int64_t rtt) {
     EXPECT_TRUE(!factory_->encoders().empty());
     for (size_t i = 0; i < factory_->encoders().size(); ++i) {
       EXPECT_CALL(*factory_->encoders()[i],
@@ -282,8 +279,8 @@ class TestSimulcastEncoderAdapterFake : public ::testing::Test {
   }
 
  protected:
-  scoped_ptr<TestSimulcastEncoderAdapterFakeHelper> helper_;
-  scoped_ptr<VP8Encoder> adapter_;
+  rtc::scoped_ptr<TestSimulcastEncoderAdapterFakeHelper> helper_;
+  rtc::scoped_ptr<VP8Encoder> adapter_;
   VideoCodec codec_;
 };
 
@@ -295,7 +292,7 @@ TEST_F(TestSimulcastEncoderAdapterFake, InitEncode) {
 TEST_F(TestSimulcastEncoderAdapterFake, SetChannelParameters) {
   SetupCodec();
   const uint32_t packetLoss = 5;
-  const int rtt = 30;
+  const int64_t rtt = 30;
   helper_->ExpectCallSetChannelParameters(packetLoss, rtt);
   adapter_->SetChannelParameters(packetLoss, rtt);
 }

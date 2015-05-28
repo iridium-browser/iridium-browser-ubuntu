@@ -39,7 +39,7 @@ DaemonControllerDelegateMac::~DaemonControllerDelegateMac() {
 DaemonController::State DaemonControllerDelegateMac::GetState() {
   pid_t job_pid = base::mac::PIDForJob(kServiceName);
   if (job_pid < 0) {
-    return DaemonController::STATE_NOT_INSTALLED;
+    return DaemonController::STATE_UNKNOWN;
   } else if (job_pid == 0) {
     // Service is stopped, or a start attempt failed.
     return DaemonController::STATE_STOPPED;
@@ -62,11 +62,6 @@ scoped_ptr<base::DictionaryValue> DaemonControllerDelegateMac::GetConfig() {
   if (host_config->GetString(kXmppLoginConfigPath, &value))
     config->SetString(kXmppLoginConfigPath, value);
   return config.Pass();
-}
-
-void DaemonControllerDelegateMac::InstallHost(
-    const DaemonController::CompletionCallback& done) {
-  NOTREACHED();
 }
 
 void DaemonControllerDelegateMac::SetConfigAndStart(
@@ -95,35 +90,6 @@ void DaemonControllerDelegateMac::UpdateConfig(
 void DaemonControllerDelegateMac::Stop(
     const DaemonController::CompletionCallback& done) {
   ShowPreferencePane("", done);
-}
-
-void DaemonControllerDelegateMac::SetWindow(void* window_handle) {
-  // noop
-}
-
-std::string DaemonControllerDelegateMac::GetVersion() {
-  std::string version = "";
-  std::string command_line = remoting::kHostHelperScriptPath;
-  command_line += " --host-version";
-  FILE* script_output = popen(command_line.c_str(), "r");
-  if (script_output) {
-    char buffer[100];
-    char* result = fgets(buffer, sizeof(buffer), script_output);
-    pclose(script_output);
-    if (result) {
-      // The string is guaranteed to be null-terminated, but probably contains
-      // a newline character, which we don't want.
-      for (int i = 0; result[i]; ++i) {
-        if (result[i] < ' ') {
-          result[i] = 0;
-          break;
-        }
-      }
-      version = result;
-    }
-  }
-
-  return version;
 }
 
 DaemonController::UsageStatsConsent

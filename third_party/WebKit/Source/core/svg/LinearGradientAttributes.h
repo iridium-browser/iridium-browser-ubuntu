@@ -21,6 +21,7 @@
 #define LinearGradientAttributes_h
 
 #include "core/svg/GradientAttributes.h"
+#include "core/svg/SVGLength.h"
 #include "platform/heap/Handle.h"
 
 namespace blink {
@@ -29,10 +30,10 @@ struct LinearGradientAttributes : GradientAttributes {
     DISALLOW_ALLOCATION();
 public:
     LinearGradientAttributes()
-        : m_x1(SVGLength::create(LengthModeWidth))
-        , m_y1(SVGLength::create(LengthModeWidth))
-        , m_x2(SVGLength::create(LengthModeWidth))
-        , m_y2(SVGLength::create(LengthModeWidth))
+        : m_x1(SVGLength::create(SVGLengthMode::Width))
+        , m_y1(SVGLength::create(SVGLengthMode::Height))
+        , m_x2(SVGLength::create(SVGLengthMode::Width))
+        , m_y2(SVGLength::create(SVGLengthMode::Height))
         , m_x1Set(false)
         , m_y1Set(false)
         , m_x2Set(false)
@@ -56,7 +57,7 @@ public:
     bool hasX2() const { return m_x2Set; }
     bool hasY2() const { return m_y2Set; }
 
-    void trace(Visitor* visitor)
+    DEFINE_INLINE_TRACE()
     {
         visitor->trace(m_x1);
         visitor->trace(m_y1);
@@ -77,6 +78,28 @@ private:
     bool m_x2Set : 1;
     bool m_y2Set : 1;
 };
+
+#if ENABLE(OILPAN)
+// Wrapper object for the LinearGradientAttributes part object.
+class LinearGradientAttributesWrapper : public GarbageCollectedFinalized<LinearGradientAttributesWrapper> {
+public:
+    static LinearGradientAttributesWrapper* create()
+    {
+        return new LinearGradientAttributesWrapper;
+    }
+
+    LinearGradientAttributes& attributes() { return m_attributes; }
+    void set(const LinearGradientAttributes& attributes) { m_attributes = attributes; }
+    DEFINE_INLINE_TRACE() { visitor->trace(m_attributes); }
+
+private:
+    LinearGradientAttributesWrapper()
+    {
+    }
+
+    LinearGradientAttributes m_attributes;
+};
+#endif
 
 } // namespace blink
 

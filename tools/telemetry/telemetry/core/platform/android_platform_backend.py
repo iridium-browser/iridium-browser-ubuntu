@@ -10,11 +10,10 @@ import subprocess
 import tempfile
 import time
 
-from telemetry import decorators
-from telemetry.core import exceptions
-from telemetry.core import util
-from telemetry.core import video
 from telemetry.core.backends import adb_commands
+from telemetry.core import exceptions
+from telemetry.core.forwarders import android_forwarder
+from telemetry.core import platform
 from telemetry.core.platform import android_device
 from telemetry.core.platform import android_platform
 from telemetry.core.platform import linux_based_platform_backend
@@ -24,8 +23,13 @@ from telemetry.core.platform.power_monitor import android_temperature_monitor
 from telemetry.core.platform.power_monitor import monsoon_power_monitor
 from telemetry.core.platform.power_monitor import power_monitor_controller
 from telemetry.core.platform.profiler import android_prebuilt_profiler_helper
+from telemetry.core import util
+from telemetry.core import video
+from telemetry import decorators
 from telemetry.util import exception_formatter
+from telemetry.util import external_modules
 
+psutil = external_modules.ImportOptionalModule('psutil')
 util.AddDirToPythonPath(util.GetChromiumSrcDir(),
                         'third_party', 'webpagereplay')
 import adb_install_cert  # pylint: disable=F0401
@@ -33,26 +37,22 @@ import certutils  # pylint: disable=F0401
 
 # Get build/android scripts into our path.
 util.AddDirToPythonPath(util.GetChromiumSrcDir(), 'build', 'android')
-from pylib import screenshot  # pylint: disable=F0401
 from pylib.device import device_errors  # pylint: disable=F0401
 from pylib.perf import cache_control  # pylint: disable=F0401
 from pylib.perf import perf_control  # pylint: disable=F0401
 from pylib.perf import thermal_throttle  # pylint: disable=F0401
+from pylib.utils import device_temp_file # pylint: disable=F0401
+from pylib import screenshot  # pylint: disable=F0401
 
 try:
   from pylib.perf import surface_stats_collector  # pylint: disable=F0401
 except Exception:
   surface_stats_collector = None
 
-try:
-  import psutil  # pylint: disable=import-error
-except ImportError:
-  psutil = None
-
 
 class AndroidPlatformBackend(
     linux_based_platform_backend.LinuxBasedPlatformBackend):
-  def __init__(self, device):
+  def __init__(self, device, finder_options):
     assert device, (
         'AndroidPlatformBackend can only be initialized from remote device')
     super(AndroidPlatformBackend, self).__init__(device)
@@ -90,6 +90,11 @@ class AndroidPlatformBackend(
     self._device_cert_util = None
     self._is_test_ca_installed = False
 
+    self._use_rndis_forwarder = (
+        finder_options.android_rndis or
+        finder_options.browser_options.netsim or
+        platform.GetHostPlatform().GetOSName() != 'linux')
+
     _FixPossibleAdbInstability()
 
   @classmethod
@@ -97,9 +102,22 @@ class AndroidPlatformBackend(
     return isinstance(device, android_device.AndroidDevice)
 
   @classmethod
-  def CreatePlatformForDevice(cls, device):
+  def CreatePlatformForDevice(cls, device, finder_options):
     assert cls.SupportsDevice(device)
-    return android_platform.AndroidPlatform(AndroidPlatformBackend(device))
+    platform_backend = AndroidPlatformBackend(device, finder_options)
+    return android_platform.AndroidPlatform(platform_backend)
+
+  @property
+  def forwarder_factory(self):
+    if not self._forwarder_factory:
+      self._forwarder_factory = android_forwarder.AndroidForwarderFactory(
+          self._adb, self._use_rndis_forwarder)
+
+    return self._forwarder_factory
+
+  @property
+  def use_rndis_forwarder(self):
+    return self._use_rndis_forwarder
 
   @property
   def adb(self):
@@ -332,7 +350,7 @@ class AndroidPlatformBackend(
     if not self._can_access_protected_file_contents:
       logging.warning('%s cannot be retrieved on non-rooted device.' % fname)
       return ''
-    return '\n'.join(self._device.ReadFile(fname, as_root=True))
+    return self._device.ReadFile(fname, as_root=True)
 
   def GetPsOutput(self, columns, pid=None):
     assert columns == ['pid', 'name'] or columns == ['pid'], \
@@ -340,7 +358,11 @@ class AndroidPlatformBackend(
     command = 'ps'
     if pid:
       command += ' -p %d' % pid
-    ps = self._device.RunShellCommand(command)[1:]
+    with device_temp_file.DeviceTempFile(self._device.adb) as ps_out:
+      command += ' > %s' % ps_out.name
+      self._device.RunShellCommand(command)
+      # Get rid of trailing new line and header.
+      ps = self._device.ReadFile(ps_out.name).split('\n')[1:-1]
     output = []
     for line in ps:
       data = line.split()
@@ -420,12 +442,19 @@ class AndroidPlatformBackend(
     This allows transparent HTTPS testing with WPR server without need
     to tweak application network stack.
     """
+    # TODO(slamm): Move certificate creation related to webpagereplay.py.
+    # The only code that needs to be in platform backend is installing the cert.
     if certutils.openssl_import_error:
       logging.warning(
           'The OpenSSL module is unavailable. '
           'Will fallback to ignoring certificate errors.')
       return
-
+    if not certutils.has_sni():
+      logging.warning(
+          'Web Page Replay requires SNI support (pyOpenSSL 0.13 or greater) '
+          'to generate certificates from a test CA. '
+          'Will fallback to ignoring certificate errors.')
+      return
     try:
       self._wpr_ca_cert_path = os.path.join(tempfile.mkdtemp(), 'testca.pem')
       certutils.write_dummy_ca_cert(*certutils.generate_dummy_ca_cert(),
@@ -436,12 +465,13 @@ class AndroidPlatformBackend(
                    self._adb.device_serial())
       self._device_cert_util.install_cert(overwrite_cert=True)
       self._is_test_ca_installed = True
-    except Exception:
+    except Exception as e:
       # Fallback to ignoring certificate errors.
       self.RemoveTestCa()
-      logging.warning('Unable to install test certificate authority on device: '
-                      '%s. Will fallback to ignoring certificate errors.'
-                      % self._adb.device_serial())
+      logging.warning(
+          'Unable to install test certificate authority on device: %s. '
+          'Will fallback to ignoring certificate errors. Install error: %s',
+          self._adb.device_serial(), e)
 
   @property
   def is_test_ca_installed(self):
@@ -611,6 +641,70 @@ class AndroidPlatformBackend(
                                        stdout=subprocess.PIPE).communicate()[0])
     return ret
 
+  @staticmethod
+  def _IsScreenOn(input_methods):
+    """Parser method of IsScreenOn()
+
+    Args:
+      input_methods: Output from dumpsys input_methods
+
+    Returns:
+      boolean: True if screen is on, false if screen is off.
+
+    Raises:
+      ValueError: An unknown value is found for the screen state.
+      AndroidDeviceParsingError: Error in detecting screen state.
+    """
+    for line in input_methods:
+      if 'mScreenOn' in line or 'mInteractive' in line:
+        for pair in line.strip().split(' '):
+          key, value = pair.split('=', 1)
+          if key == 'mScreenOn' or key == 'mInteractive':
+            if value == 'true':
+              return True
+            elif value == 'false':
+              return False
+            else:
+              raise ValueError('Unknown value for %s: %s' % (key, value))
+    raise exceptions.AndroidDeviceParsingError(str(input_methods))
+
+  def IsScreenOn(self):
+    """Determines if device screen is on."""
+    input_methods = self._device.RunShellCommand('dumpsys input_method')
+    return self._IsScreenOn(input_methods)
+
+  @staticmethod
+  def _IsScreenLocked(input_methods):
+    """Parser method for IsScreenLocked()
+
+    Args:
+      input_methods: Output from dumpsys input_methods
+
+    Returns:
+      boolean: True if screen is locked, false if screen is not locked.
+
+    Raises:
+      ValueError: An unknown value is found for the screen lock state.
+      AndroidDeviceParsingError: Error in detecting screen state.
+
+    """
+    for line in input_methods:
+      if 'mHasBeenInactive' in line:
+        for pair in line.strip().split(' '):
+          key, value = pair.split('=', 1)
+          if key == 'mHasBeenInactive':
+            if value == 'true':
+              return True
+            elif value == 'false':
+              return False
+            else:
+              raise ValueError('Unknown value for %s: %s' % (key, value))
+    raise exceptions.AndroidDeviceParsingError(str(input_methods))
+
+  def IsScreenLocked(self):
+    """Determines if device screen is locked."""
+    input_methods = self._device.RunShellCommand('dumpsys input_method')
+    return self._IsScreenLocked(input_methods)
 
 def _FixPossibleAdbInstability():
   """Host side workaround for crbug.com/268450 (adb instability).
@@ -622,13 +716,9 @@ def _FixPossibleAdbInstability():
   for process in psutil.process_iter():
     try:
       if 'adb' in process.name:
-        if 'cpu_affinity' in dir(process):
-          process.cpu_affinity([0])      # New versions of psutil.
-        elif 'set_cpu_affinity' in dir(process):
+        if 'set_cpu_affinity' in dir(process):
           process.set_cpu_affinity([0])  # Older versions.
         else:
-          logging.warn(
-              'Cannot set CPU affinity due to stale psutil version: %s',
-              '.'.join(str(x) for x in psutil.version_info))
+          process.cpu_affinity([0])  # New versions of psutil.
     except (psutil.NoSuchProcess, psutil.AccessDenied):
       logging.warn('Failed to set adb process CPU affinity')

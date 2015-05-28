@@ -82,7 +82,7 @@ class UserCloudPolicyManagerChromeOSTest : public testing::Test {
         profile_(NULL),
         signin_profile_(NULL) {}
 
-  virtual void SetUp() override {
+  void SetUp() override {
     // The initialization path that blocks on the initial policy fetch requires
     // a signin Profile to use its URLRequestContext.
     profile_manager_.reset(
@@ -120,6 +120,11 @@ class UserCloudPolicyManagerChromeOSTest : public testing::Test {
                     POLICY_LEVEL_MANDATORY, POLICY_SCOPE_USER,
                     new base::FundamentalValue(false),
                     NULL);
+    policy_map_.Set(key::kCaptivePortalAuthenticationIgnoresProxy,
+                    POLICY_LEVEL_MANDATORY,
+                    POLICY_SCOPE_USER,
+                    new base::FundamentalValue(false),
+                    NULL);
     expected_bundle_.Get(PolicyNamespace(POLICY_DOMAIN_CHROME, std::string()))
         .CopyFrom(policy_map_);
 
@@ -144,7 +149,7 @@ class UserCloudPolicyManagerChromeOSTest : public testing::Test {
         .Times(AnyNumber());
   }
 
-  virtual void TearDown() override {
+  void TearDown() override {
     if (token_forwarder_)
       token_forwarder_->Shutdown();
     if (manager_) {
@@ -337,14 +342,9 @@ class UserCloudPolicyManagerChromeOSTest : public testing::Test {
   TestingProfile* profile_;
   TestingProfile* signin_profile_;
 
-  static const char kSigninProfile[];
-
  private:
   DISALLOW_COPY_AND_ASSIGN(UserCloudPolicyManagerChromeOSTest);
 };
-
-const char UserCloudPolicyManagerChromeOSTest::kSigninProfile[] =
-    "signin_profile";
 
 TEST_F(UserCloudPolicyManagerChromeOSTest, BlockingFirstFetch) {
   // Tests the initialization of a manager whose Profile is waiting for the

@@ -25,13 +25,15 @@ class HostEventDispatcher;
 class HostStub;
 class HostVideoDispatcher;
 class InputStub;
+class VideoFeedbackStub;
 class VideoStub;
 
 // This class represents a remote viewer connection to the chromoting
 // host. It sets up all protocol channels and connects them to the
 // stubs.
 class ConnectionToClient : public base::NonThreadSafe,
-                           public Session::EventHandler {
+                           public Session::EventHandler,
+                           public ChannelDispatcherBase::EventHandler {
  public:
   class EventHandler {
    public:
@@ -91,24 +93,27 @@ class ConnectionToClient : public base::NonThreadSafe,
   virtual AudioStub* audio_stub();
   virtual ClientStub* client_stub();
 
-  // Set/get the stubs which will handle messages we receive from the client.
-  // All stubs MUST be set before the session's channels become connected.
+  // Set the stubs which will handle messages we receive from the client. These
+  // must be called in EventHandler::OnConnectionAuthenticated().
   virtual void set_clipboard_stub(ClipboardStub* clipboard_stub);
-  virtual ClipboardStub* clipboard_stub();
   virtual void set_host_stub(HostStub* host_stub);
-  virtual HostStub* host_stub();
   virtual void set_input_stub(InputStub* input_stub);
-  virtual InputStub* input_stub();
+
+  // Sets video feedback stub. Can be called at any time after connection is
+  // authenticated.
+  virtual void set_video_feedback_stub(VideoFeedbackStub* video_feedback_stub);
 
   // Session::EventHandler interface.
   void OnSessionStateChange(Session::State state) override;
   void OnSessionRouteChange(const std::string& channel_name,
                             const TransportRoute& route) override;
 
- private:
-  // Callback for channel initialization.
-  void OnChannelInitialized(bool successful);
+  // ChannelDispatcherBase::EventHandler interface.
+  void OnChannelInitialized(ChannelDispatcherBase* channel_dispatcher) override;
+  void OnChannelError(ChannelDispatcherBase* channel_dispatcher,
+                      ErrorCode error) override;
 
+ private:
   void NotifyIfChannelsReady();
 
   void Close(ErrorCode error);
@@ -118,11 +123,6 @@ class ConnectionToClient : public base::NonThreadSafe,
 
   // Event handler for handling events sent from this object.
   EventHandler* handler_;
-
-  // Stubs that are called for incoming messages.
-  ClipboardStub* clipboard_stub_;
-  HostStub* host_stub_;
-  InputStub* input_stub_;
 
   // The libjingle channel used to send and receive data from the remote client.
   scoped_ptr<Session> session_;

@@ -67,7 +67,7 @@ inline SVGFECompositeElement::SVGFECompositeElement(Document& document)
     addToPropertyMap(m_svgOperator);
 }
 
-void SVGFECompositeElement::trace(Visitor* visitor)
+DEFINE_TRACE(SVGFECompositeElement)
 {
     visitor->trace(m_k1);
     visitor->trace(m_k2);
@@ -94,11 +94,6 @@ bool SVGFECompositeElement::isSupportedAttribute(const QualifiedName& attrName)
         supportedAttributes.add(SVGNames::k4Attr);
     }
     return supportedAttributes.contains<SVGAttributeHashTranslator>(attrName);
-}
-
-void SVGFECompositeElement::parseAttribute(const QualifiedName& name, const AtomicString& value)
-{
-    parseAttributeNew(name, value);
 }
 
 bool SVGFECompositeElement::setFilterEffectAttribute(FilterEffect* effect, const QualifiedName& attrName)

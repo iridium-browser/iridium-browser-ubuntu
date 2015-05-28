@@ -117,10 +117,9 @@ void TestURLRequestContext::Init() {
     context_storage_.set_cookie_store(new CookieMonster(NULL, NULL));
   // In-memory Channel ID service.
   if (!channel_id_service()) {
-    context_storage_.set_channel_id_service(
-        new ChannelIDService(
-            new DefaultChannelIDStore(NULL),
-            base::WorkerPool::GetTaskRunner(true)));
+    context_storage_.set_channel_id_service(make_scoped_ptr(
+        new ChannelIDService(new DefaultChannelIDStore(NULL),
+                             base::WorkerPool::GetTaskRunner(true))));
   }
   if (!http_user_agent_settings()) {
     context_storage_.set_http_user_agent_settings(
@@ -323,6 +322,7 @@ TestNetworkDelegate::TestNetworkDelegate()
       has_load_timing_info_before_auth_(false),
       can_access_files_(true),
       can_throttle_requests_(true),
+      first_party_only_cookies_enabled_(false),
       cancel_request_with_policy_violating_referrer_(false),
       will_be_intercepted_on_next_error_(false) {
 }
@@ -602,6 +602,10 @@ bool TestNetworkDelegate::OnCanAccessFile(const URLRequest& request,
 bool TestNetworkDelegate::OnCanThrottleRequest(
     const URLRequest& request) const {
   return can_throttle_requests_;
+}
+
+bool TestNetworkDelegate::OnFirstPartyOnlyCookieExperimentEnabled() const {
+  return first_party_only_cookies_enabled_;
 }
 
 bool TestNetworkDelegate::OnCancelURLRequestWithPolicyViolatingReferrerHeader(

@@ -229,6 +229,11 @@ class IDLParser(object):
     """Interface : INTERFACE identifier Inheritance '{' InterfaceMembers '}' ';'"""
     p[0] = self.BuildNamed('Interface', p, 2, ListFromConcat(p[3], p[5]))
 
+  # [5.1] Error recovery for interface.
+  def p_InterfaceError(self, p):
+    """Interface : INTERFACE identifier Inheritance '{' error"""
+    p[0] = self.BuildError(p, 'Interface')
+
   # [6]
   def p_Partial(self, p):
     """Partial : PARTIAL PartialDefinition"""
@@ -259,10 +264,16 @@ class IDLParser(object):
       p[2].AddChildren(p[1])
       p[0] = ListFromConcat(p[2], p[3])
 
+  # [9.1] Error recovery for InterfaceMembers
+  def p_InterfaceMembersError(self, p):
+    """InterfaceMembers : error"""
+    p[0] = self.BuildError(p, 'InterfaceMembers')
+
   # [10] Removed unsupported: Serializer
   def p_InterfaceMember(self, p):
     """InterfaceMember : Const
                        | Operation
+                       | Serializer
                        | Stringifier
                        | StaticMember
                        | Iterable
@@ -298,10 +309,15 @@ class IDLParser(object):
 
   # [13]
   def p_DictionaryMember(self, p):
-    """DictionaryMember : Type identifier Default ';'"""
-    p[0] = self.BuildNamed('Key', p, 2, ListFromConcat(p[1], p[3]))
+    """DictionaryMember : Required Type identifier Default ';'"""
+    p[0] = self.BuildNamed('Key', p, 3, ListFromConcat(p[1], p[2], p[4]))
 
-  # [14] NOT IMPLEMENTED (Required)
+  # [14]
+  def p_Required(self, p):
+    """Required : REQUIRED
+                |"""
+    if len(p) > 1:
+      p[0] = self.BuildTrue('REQUIRED')
 
   # [15]
   def p_PartialDictionary(self, p):
@@ -324,8 +340,12 @@ class IDLParser(object):
   # [17]
   def p_DefaultValue(self, p):
     """DefaultValue : ConstValue
-                    | string"""
-    if type(p[1]) == str:
+                    | string
+                    | '[' ']'"""
+    if len(p) == 3:
+      p[0] = ListFromConcat(self.BuildAttribute('TYPE', 'sequence'),
+                            self.BuildAttribute('VALUE', '[]'))
+    elif type(p[1]) == str:
       p[0] = ListFromConcat(self.BuildAttribute('TYPE', 'DOMString'),
                             self.BuildAttribute('NAME', p[1]))
     else:
@@ -453,7 +473,74 @@ class IDLParser(object):
     p[0] = ListFromConcat(self.BuildAttribute('TYPE', 'float'),
                           self.BuildAttribute('VALUE', val))
 
-  # [30-34] NOT IMPLEMENTED (Serializer)
+  # [30]
+  def p_Serializer(self, p):
+    """Serializer : SERIALIZER SerializerRest"""
+    p[0] = self.BuildProduction('Serializer', p, 1, p[2])
+
+  # [31]
+  # TODO(jl): This adds ReturnType and ';', missing from the spec's grammar.
+  # https://www.w3.org/Bugs/Public/show_bug.cgi?id=20361
+  def p_SerializerRest(self, p):
+    """SerializerRest : ReturnType OperationRest
+                      | '=' SerializationPattern ';'
+                      | ';'"""
+    if len(p) == 3:
+      p[2].AddChildren(p[1])
+      p[0] = p[2]
+    elif len(p) == 4:
+      p[0] = p[2]
+
+  # [32]
+  def p_SerializationPattern(self, p):
+    """SerializationPattern : '{' SerializationPatternMap '}'
+                            | '[' SerializationPatternList ']'
+                            | identifier"""
+    if len(p) > 2:
+      p[0] = p[2]
+    else:
+      p[0] = self.BuildAttribute('ATTRIBUTE', p[1])
+
+  # [33]
+  # TODO(jl): This adds the "ATTRIBUTE" and "INHERIT ',' ATTRIBUTE" variants,
+  # missing from the spec's grammar.
+  # https://www.w3.org/Bugs/Public/show_bug.cgi?id=20361
+  def p_SerializationPatternMap(self, p):
+    """SerializationPatternMap : GETTER
+                               | ATTRIBUTE
+                               | INHERIT ',' ATTRIBUTE
+                               | INHERIT Identifiers
+                               | identifier Identifiers
+                               |"""
+    p[0] = self.BuildProduction('Map', p, 0)
+    if len(p) == 4:
+      p[0].AddChildren(self.BuildTrue('INHERIT'))
+      p[0].AddChildren(self.BuildTrue('ATTRIBUTE'))
+    elif len(p) > 1:
+      if p[1] == 'getter':
+        p[0].AddChildren(self.BuildTrue('GETTER'))
+      elif p[1] == 'attribute':
+        p[0].AddChildren(self.BuildTrue('ATTRIBUTE'))
+      else:
+        if p[1] == 'inherit':
+          p[0].AddChildren(self.BuildTrue('INHERIT'))
+          attributes = p[2]
+        else:
+          attributes = ListFromConcat(p[1], p[2])
+        p[0].AddChildren(self.BuildAttribute('ATTRIBUTES', attributes))
+
+  # [34]
+  def p_SerializationPatternList(self, p):
+    """SerializationPatternList : GETTER
+                                | identifier Identifiers
+                                |"""
+    p[0] = self.BuildProduction('List', p, 0)
+    if len(p) > 1:
+      if p[1] == 'getter':
+        p[0].AddChildren(self.BuildTrue('GETTER'))
+      else:
+        attributes = ListFromConcat(p[1], p[2])
+        p[0].AddChildren(self.BuildAttribute('ATTRIBUTES', attributes))
 
   # [35]
   def p_Stringifier(self, p):

@@ -21,10 +21,6 @@ const char kIgnoreResolutionLimitsForAcceleratedVideoDecode[] =
 // Disables the infobar popup for accessing protected media identifier.
 const char kDisableInfobarForProtectedMediaIdentifier[] =
     "disable-infobar-for-protected-media-identifier";
-
-// Enables use of non-compositing MediaDrm decoding by default for Encrypted
-// Media Extensions implementation.
-const char kMediaDrmEnableNonCompositing[] = "mediadrm-enable-non-compositing";
 #endif
 
 #if defined(OS_LINUX) || defined(OS_FREEBSD) || defined(OS_SOLARIS)
@@ -88,6 +84,11 @@ const char kWaveOutBuffers[] = "waveout-buffers";
 const char kUseCras[] = "use-cras";
 #endif
 
+// Enables the audio thread hang monitor.  Allows us to find users in the field
+// who have stuck audio threads.  See crbug.com/422522 and crbug.com/478932.
+// TODO(dalecurtis): This should be removed once those issues are resolved.
+const char kEnableAudioHangMonitor[] = "enable-audio-hang-monitor";
+
 // Use fake device for Media Stream to replace actual camera and microphone.
 const char kUseFakeDeviceForMediaStream[] = "use-fake-device-for-media-stream";
 
@@ -104,5 +105,15 @@ const char kUseFileForFakeAudioCapture[] = "use-file-for-fake-audio-capture";
 
 // Enables support for inband text tracks in media content.
 const char kEnableInbandTextTracks[] = "enable-inband-text-tracks";
+
+// When running tests on a system without the required hardware or libraries,
+// this flag will cause the tests to fail. Otherwise, they silently succeed.
+const char kRequireAudioHardwareForTesting[] =
+    "require-audio-hardware-for-testing";
+
+// Allows clients to override the threshold for when the media renderer will
+// declare the underflow state for the video stream when audio is present.
+// TODO(dalecurtis): Remove once experiments for http://crbug.com/470940 finish.
+const char kVideoUnderflowThresholdMs[] = "video-underflow-threshold-ms";
 
 }  // namespace switches

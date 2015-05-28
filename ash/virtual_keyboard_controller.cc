@@ -8,6 +8,7 @@
 
 #include "ash/shell.h"
 #include "ash/wm/maximize_mode/maximize_mode_controller.h"
+#include "ash_switches.h"
 #include "base/command_line.h"
 #include "base/strings/string_util.h"
 #include "ui/events/devices/device_data_manager.h"
@@ -23,8 +24,12 @@ namespace {
 
 // Checks whether smart deployment is enabled.
 bool IsSmartVirtualKeyboardEnabled() {
-  return base::CommandLine::ForCurrentProcess()->HasSwitch(
-      keyboard::switches::kEnableAutoVirtualKeyboard);
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          keyboard::switches::kEnableVirtualKeyboard)) {
+    return false;
+  }
+  return !base::CommandLine::ForCurrentProcess()->HasSwitch(
+      keyboard::switches::kDisableSmartVirtualKeyboard);
 }
 
 }  // namespace
@@ -45,13 +50,19 @@ VirtualKeyboardController::~VirtualKeyboardController() {
 }
 
 void VirtualKeyboardController::OnMaximizeModeStarted() {
-  if (!IsSmartVirtualKeyboardEnabled())
+  if (!IsSmartVirtualKeyboardEnabled()) {
     SetKeyboardEnabled(true);
+  } else {
+    UpdateKeyboardEnabled();
+  }
 }
 
 void VirtualKeyboardController::OnMaximizeModeEnded() {
-  if (!IsSmartVirtualKeyboardEnabled())
+  if (!IsSmartVirtualKeyboardEnabled()) {
     SetKeyboardEnabled(false);
+  } else {
+    UpdateKeyboardEnabled();
+  }
 }
 
 void VirtualKeyboardController::OnTouchscreenDeviceConfigurationChanged() {
@@ -60,12 +71,6 @@ void VirtualKeyboardController::OnTouchscreenDeviceConfigurationChanged() {
 
 void VirtualKeyboardController::OnKeyboardDeviceConfigurationChanged() {
   UpdateDevices();
-}
-
-void VirtualKeyboardController::OnMouseDeviceConfigurationChanged() {
-}
-
-void VirtualKeyboardController::OnTouchpadDeviceConfigurationChanged() {
 }
 
 void VirtualKeyboardController::ToggleIgnoreExternalKeyboard() {
@@ -104,11 +109,16 @@ void VirtualKeyboardController::UpdateKeyboardEnabled() {
                            ->IsMaximizeModeWindowManagerEnabled());
     return;
   }
-  SetKeyboardEnabled(!has_internal_keyboard_ && has_touchscreen_ &&
+  bool ignore_internal_keyboard = Shell::GetInstance()
+                                      ->maximize_mode_controller()
+                                      ->IsMaximizeModeWindowManagerEnabled();
+  bool is_internal_keyboard_active =
+      has_internal_keyboard_ && !ignore_internal_keyboard;
+  SetKeyboardEnabled(!is_internal_keyboard_active && has_touchscreen_ &&
                      (!has_external_keyboard_ || ignore_external_keyboard_));
   ash::Shell::GetInstance()
       ->system_tray_notifier()
-      ->NotifyVirtualKeyboardSuppressionChanged(!has_internal_keyboard_ &&
+      ->NotifyVirtualKeyboardSuppressionChanged(!is_internal_keyboard_active &&
                                                 has_touchscreen_ &&
                                                 has_external_keyboard_);
 }

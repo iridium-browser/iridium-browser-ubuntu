@@ -4,22 +4,26 @@
 
 import datetime
 import logging
+import os
 import random
 import shutil
-import os
 import sys
 import tempfile
 
-from telemetry import value as value_module
 from telemetry.timeline import trace_data as trace_data_module
+from telemetry.core import util
 from telemetry.util import cloud_storage
 from telemetry.util import file_handle
-import telemetry.web_components # pylint: disable=W0611
+from telemetry import value as value_module
+
+# Bring in tv module for transforming raw trace to html form.
+util.AddDirToPythonPath(
+    util.GetChromiumSrcDir(), 'third_party', 'trace-viewer')
+
 from trace_viewer.build import trace2html
 
 class TraceValue(value_module.Value):
-  def __init__(self, page, trace_data, important=False,
-               description=None):
+  def __init__(self, page, trace_data, important=False, description=None):
     """A value that contains a TraceData object and knows how to
     output it.
 
@@ -29,19 +33,19 @@ class TraceValue(value_module.Value):
     """
     super(TraceValue, self).__init__(
         page, name='trace', units='', important=important,
-        description=description)
-    self._trace_data = trace_data
+        description=description, tir_label=None)
+    self._temp_file = self._GetTempFileHandle(trace_data)
     self._cloud_url = None
     self._serialized_file_handle = None
 
-  def _GetTempFileHandle(self):
+  def _GetTempFileHandle(self, trace_data):
     tf = tempfile.NamedTemporaryFile(delete=False, suffix='.html')
     if self.page:
       title = self.page.display_name
     else:
       title = ''
     trace2html.WriteHTMLForTraceDataToFile(
-        [self._trace_data.GetEventsFor(trace_data_module.CHROME_TRACE_PART)],
+        [trace_data.GetEventsFor(trace_data_module.CHROME_TRACE_PART)],
         title,
         tf)
     tf.close()
@@ -53,6 +57,27 @@ class TraceValue(value_module.Value):
     else:
       page_name = None
     return 'TraceValue(%s, %s)' % (page_name, self.name)
+
+  def CleanUp(self):
+    """Cleans up tempfile after it is no longer needed.
+
+    A cleaned up TraceValue cannot be used for further operations. CleanUp()
+    may be called more than once without error.
+    """
+    if self._temp_file is None:
+      return
+    os.remove(self._temp_file.GetAbsPath())
+    self._temp_file = None
+
+  def __enter__(self):
+    return self
+
+  def __exit__(self, _, __, ___):
+    self.CleanUp()
+
+  @property
+  def cleaned_up(self):
+    return self._temp_file is None
 
   def GetBuildbotDataType(self, output_context):
     return None
@@ -84,6 +109,8 @@ class TraceValue(value_module.Value):
     return None
 
   def AsDict(self):
+    if self._temp_file is None:
+      raise ValueError('Tried to serialize TraceValue without tempfile.')
     d = super(TraceValue, self).AsDict()
     if self._serialized_file_handle:
       d['file_id'] = self._serialized_file_handle.id
@@ -92,21 +119,22 @@ class TraceValue(value_module.Value):
     return d
 
   def Serialize(self, dir_path):
-    fh = self._GetTempFileHandle()
-    file_name = str(fh.id) + fh.extension
+    if self._temp_file is None:
+      raise ValueError('Tried to serialize nonexistent trace.')
+    file_name = str(self._temp_file.id) + self._temp_file.extension
     file_path = os.path.abspath(os.path.join(dir_path, file_name))
-    shutil.move(fh.GetAbsPath(), file_path)
+    shutil.copy(self._temp_file.GetAbsPath(), file_path)
     self._serialized_file_handle = file_handle.FromFilePath(file_path)
     return self._serialized_file_handle
 
   def UploadToCloud(self, bucket):
-    temp_fh = None
+    if self._temp_file is None:
+      raise ValueError('Tried to upload nonexistent trace to Cloud Storage.')
     try:
       if self._serialized_file_handle:
         fh = self._serialized_file_handle
       else:
-        temp_fh = self._GetTempFileHandle()
-        fh = temp_fh
+        fh = self._temp_file
       remote_path = ('trace-file-id_%s-%s-%d%s' % (
           fh.id,
           datetime.datetime.now().strftime('%Y-%m-%d_%H-%M-%S'),
@@ -121,6 +149,3 @@ class TraceValue(value_module.Value):
     except cloud_storage.PermissionError as e:
       logging.error('Cannot upload trace files to cloud storage due to '
                     ' permission error: %s' % e.message)
-    finally:
-      if temp_fh:
-        os.remove(temp_fh.GetAbsPath())

@@ -160,7 +160,7 @@ OPENSSL_EXPORT DSA_SIG *DSA_do_sign(const uint8_t *digest, size_t digest_len,
 OPENSSL_EXPORT int DSA_do_verify(const uint8_t *digest, size_t digest_len,
                                  DSA_SIG *sig, const DSA *dsa);
 
-/* DSA_check_signature sets |*out_valid| to zero. Then it verifies that |sig|
+/* DSA_do_check_signature sets |*out_valid| to zero. Then it verifies that |sig|
  * is a valid signature, by the public key in |dsa| of the hash in |digest|
  * and, if so, it sets |*out_valid| to one.
  *
@@ -364,14 +364,14 @@ struct dsa_st {
 }  /* extern C */
 #endif
 
-#define DSA_F_sign 100
-#define DSA_F_verify 101
-#define DSA_F_dsa_sig_cb 102
-#define DSA_F_DSA_new_method 103
-#define DSA_F_sign_setup 104
-#define DSA_R_NEED_NEW_SETUP_VALUES 100
-#define DSA_R_BAD_Q_VALUE 101
+#define DSA_F_DSA_new_method 100
+#define DSA_F_dsa_sig_cb 101
+#define DSA_F_sign 102
+#define DSA_F_sign_setup 103
+#define DSA_F_verify 104
+#define DSA_R_BAD_Q_VALUE 100
+#define DSA_R_MISSING_PARAMETERS 101
 #define DSA_R_MODULUS_TOO_LARGE 102
-#define DSA_R_MISSING_PARAMETERS 103
+#define DSA_R_NEED_NEW_SETUP_VALUES 103
 
 #endif  /* OPENSSL_HEADER_DSA_H */

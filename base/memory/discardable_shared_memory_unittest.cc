@@ -64,14 +64,14 @@ TEST(DiscardableSharedMemoryTest, LockAndUnlock) {
   memory1.Unlock(0, 0);
 
   // Lock and unlock memory.
-  rv = memory1.Lock(0, 0);
-  EXPECT_TRUE(rv);
+  auto lock_rv = memory1.Lock(0, 0);
+  EXPECT_EQ(DiscardableSharedMemory::SUCCESS, lock_rv);
   memory1.SetNow(Time::FromDoubleT(2));
   memory1.Unlock(0, 0);
 
   // Lock again before duplicating and passing ownership to new instance.
-  rv = memory1.Lock(0, 0);
-  EXPECT_TRUE(rv);
+  lock_rv = memory1.Lock(0, 0);
+  EXPECT_EQ(DiscardableSharedMemory::SUCCESS, lock_rv);
 
   SharedMemoryHandle shared_handle;
   ASSERT_TRUE(
@@ -87,8 +87,8 @@ TEST(DiscardableSharedMemoryTest, LockAndUnlock) {
   memory2.Unlock(0, 0);
 
   // Lock second instance before passing ownership back to first instance.
-  rv = memory2.Lock(0, 0);
-  EXPECT_TRUE(rv);
+  lock_rv = memory2.Lock(0, 0);
+  EXPECT_EQ(DiscardableSharedMemory::SUCCESS, lock_rv);
 
   // Memory should still be resident.
   rv = memory1.IsMemoryResident();
@@ -135,8 +135,8 @@ TEST(DiscardableSharedMemoryTest, Purge) {
   EXPECT_TRUE(rv);
 
   // Lock should fail as memory has been purged.
-  rv = memory2.Lock(0, 0);
-  EXPECT_FALSE(rv);
+  auto lock_rv = memory2.Lock(0, 0);
+  EXPECT_EQ(DiscardableSharedMemory::FAILED, lock_rv);
 
   ASSERT_FALSE(memory2.IsMemoryResident());
 }
@@ -162,8 +162,8 @@ TEST(DiscardableSharedMemoryTest, LastUsed) {
 
   EXPECT_EQ(memory2.last_known_usage(), Time::FromDoubleT(1));
 
-  rv = memory2.Lock(0, 0);
-  EXPECT_TRUE(rv);
+  auto lock_rv = memory2.Lock(0, 0);
+  EXPECT_EQ(DiscardableSharedMemory::SUCCESS, lock_rv);
 
   // This should fail as memory is locked.
   rv = memory1.Purge(Time::FromDoubleT(2));
@@ -232,10 +232,8 @@ TEST(DiscardableSharedMemoryTest, LockShouldAlwaysFailAfterSuccessfulPurge) {
   EXPECT_TRUE(rv);
 
   // Lock should fail as memory has been purged.
-  rv = memory2.Lock(0, 0);
-  EXPECT_FALSE(rv);
-  rv = memory1.Lock(0, 0);
-  EXPECT_FALSE(rv);
+  auto lock_rv = memory2.Lock(0, 0);
+  EXPECT_EQ(DiscardableSharedMemory::FAILED, lock_rv);
 }
 
 TEST(DiscardableSharedMemoryTest, LockAndUnlockRange) {
@@ -263,29 +261,71 @@ TEST(DiscardableSharedMemoryTest, LockAndUnlockRange) {
   rv = memory1.Purge(Time::FromDoubleT(2));
   EXPECT_FALSE(rv);
 
-  // Unlock second page.
+  // Lock first page again.
   memory2.SetNow(Time::FromDoubleT(3));
+  auto lock_rv = memory2.Lock(0, base::GetPageSize());
+  EXPECT_NE(DiscardableSharedMemory::FAILED, lock_rv);
+
+  // Unlock first page.
+  memory2.SetNow(Time::FromDoubleT(4));
+  memory2.Unlock(0, base::GetPageSize());
+
+  rv = memory1.Purge(Time::FromDoubleT(5));
+  EXPECT_FALSE(rv);
+
+  // Unlock second page.
+  memory2.SetNow(Time::FromDoubleT(6));
   memory2.Unlock(base::GetPageSize(), base::GetPageSize());
 
-  rv = memory1.Purge(Time::FromDoubleT(4));
+  rv = memory1.Purge(Time::FromDoubleT(7));
   EXPECT_FALSE(rv);
 
   // Unlock anything onwards.
-  memory2.SetNow(Time::FromDoubleT(5));
+  memory2.SetNow(Time::FromDoubleT(8));
   memory2.Unlock(2 * base::GetPageSize(), 0);
 
   // Memory is unlocked, but our usage timestamp is incorrect.
-  rv = memory1.Purge(Time::FromDoubleT(6));
+  rv = memory1.Purge(Time::FromDoubleT(9));
   EXPECT_FALSE(rv);
 
   // The failed purge attempt should have updated usage time to the correct
   // value.
-  EXPECT_EQ(Time::FromDoubleT(5), memory1.last_known_usage());
+  EXPECT_EQ(Time::FromDoubleT(8), memory1.last_known_usage());
 
   // Purge should now succeed.
-  rv = memory1.Purge(Time::FromDoubleT(7));
+  rv = memory1.Purge(Time::FromDoubleT(10));
   EXPECT_TRUE(rv);
 }
+
+TEST(DiscardableSharedMemoryTest, MappedSize) {
+  const uint32 kDataSize = 1024;
+
+  TestDiscardableSharedMemory memory;
+  bool rv = memory.CreateAndMap(kDataSize);
+  ASSERT_TRUE(rv);
+
+  EXPECT_LE(kDataSize, memory.mapped_size());
+
+  // Mapped size should be 0 after memory segment has been closed.
+  memory.Close();
+  EXPECT_EQ(0u, memory.mapped_size());
+}
+
+#if defined(DISCARDABLE_SHARED_MEMORY_SHRINKING)
+TEST(DiscardableSharedMemoryTest, Shrink) {
+  const uint32 kDataSize = 1024;
+
+  TestDiscardableSharedMemory memory;
+  bool rv = memory.CreateAndMap(kDataSize);
+  ASSERT_TRUE(rv);
+
+  EXPECT_NE(0u, memory.mapped_size());
+
+  // Mapped size should be 0 after shrinking memory segment.
+  memory.Shrink();
+  EXPECT_EQ(0u, memory.mapped_size());
+}
+#endif
 
 }  // namespace
 }  // namespace base

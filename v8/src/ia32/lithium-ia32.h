@@ -103,7 +103,6 @@ class LCodeGen;
   V(LoadContextSlot)                         \
   V(LoadFieldByIndex)                        \
   V(LoadFunctionPrototype)                   \
-  V(LoadGlobalCell)                          \
   V(LoadGlobalGeneric)                       \
   V(LoadKeyed)                               \
   V(LoadKeyedGeneric)                        \
@@ -144,7 +143,6 @@ class LCodeGen;
   V(StoreCodeEntry)                          \
   V(StoreContextSlot)                        \
   V(StoreFrameContext)                       \
-  V(StoreGlobalCell)                         \
   V(StoreKeyed)                              \
   V(StoreKeyedGeneric)                       \
   V(StoreNamedField)                         \
@@ -1344,7 +1342,7 @@ class LConstantD FINAL : public LTemplateInstruction<1, 0, 1> {
   DECLARE_CONCRETE_INSTRUCTION(ConstantD, "constant-d")
   DECLARE_HYDROGEN_ACCESSOR(Constant)
 
-  double value() const { return hydrogen()->DoubleValue(); }
+  uint64_t bits() const { return hydrogen()->DoubleValueAsBits(); }
 };
 
 
@@ -1718,13 +1716,6 @@ class LLoadKeyedGeneric FINAL : public LTemplateInstruction<1, 3, 1> {
 };
 
 
-class LLoadGlobalCell FINAL : public LTemplateInstruction<1, 0, 0> {
- public:
-  DECLARE_CONCRETE_INSTRUCTION(LoadGlobalCell, "load-global-cell")
-  DECLARE_HYDROGEN_ACCESSOR(LoadGlobalCell)
-};
-
-
 class LLoadGlobalGeneric FINAL : public LTemplateInstruction<1, 2, 1> {
  public:
   LLoadGlobalGeneric(LOperand* context, LOperand* global_object,
@@ -1743,19 +1734,6 @@ class LLoadGlobalGeneric FINAL : public LTemplateInstruction<1, 2, 1> {
 
   Handle<Object> name() const { return hydrogen()->name(); }
   bool for_typeof() const { return hydrogen()->for_typeof(); }
-};
-
-
-class LStoreGlobalCell FINAL : public LTemplateInstruction<0, 1, 0> {
- public:
-  explicit LStoreGlobalCell(LOperand* value) {
-    inputs_[0] = value;
-  }
-
-  LOperand* value() { return inputs_[0]; }
-
-  DECLARE_CONCRETE_INSTRUCTION(StoreGlobalCell, "store-global-cell")
-  DECLARE_HYDROGEN_ACCESSOR(StoreGlobalCell)
 };
 
 
@@ -1949,19 +1927,25 @@ class LInvokeFunction FINAL : public LTemplateInstruction<1, 2, 0> {
 };
 
 
-class LCallFunction FINAL : public LTemplateInstruction<1, 2, 0> {
+class LCallFunction FINAL : public LTemplateInstruction<1, 2, 2> {
  public:
-  explicit LCallFunction(LOperand* context, LOperand* function) {
+  LCallFunction(LOperand* context, LOperand* function, LOperand* slot,
+                LOperand* vector) {
     inputs_[0] = context;
     inputs_[1] = function;
+    temps_[0] = slot;
+    temps_[1] = vector;
   }
 
   LOperand* context() { return inputs_[0]; }
   LOperand* function() { return inputs_[1]; }
+  LOperand* temp_slot() { return temps_[0]; }
+  LOperand* temp_vector() { return temps_[1]; }
 
   DECLARE_CONCRETE_INSTRUCTION(CallFunction, "call-function")
   DECLARE_HYDROGEN_ACCESSOR(CallFunction)
 
+  void PrintDataTo(StringStream* stream) OVERRIDE;
   int arity() const { return hydrogen()->argument_count() - 1; }
 };
 
@@ -2228,7 +2212,7 @@ class LStoreNamedGeneric FINAL : public LTemplateInstruction<0, 3, 0> {
 
   void PrintDataTo(StringStream* stream) OVERRIDE;
   Handle<Object> name() const { return hydrogen()->name(); }
-  StrictMode strict_mode() { return hydrogen()->strict_mode(); }
+  LanguageMode language_mode() { return hydrogen()->language_mode(); }
 };
 
 
@@ -2285,7 +2269,7 @@ class LStoreKeyedGeneric FINAL : public LTemplateInstruction<0, 4, 0> {
 
   void PrintDataTo(StringStream* stream) OVERRIDE;
 
-  StrictMode strict_mode() { return hydrogen()->strict_mode(); }
+  LanguageMode language_mode() { return hydrogen()->language_mode(); }
 };
 
 

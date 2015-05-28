@@ -131,9 +131,6 @@
         No network
       </message>
 
-      <message name="IDS_ASH_STATUS_TRAY_NETWORK_NO_VPN" desc="The label used in the tray popup to notify no vpn is configured.">
-        VPN is not configured.
-      </message>
       <message name="IDS_ASH_STATUS_TRAY_NO_NETWORKS" desc="The message to display in the network info bubble when it is otherwise empty.">
         No network information available
       </message>
@@ -196,6 +193,9 @@
       </message>
       <message name="IDS_LOGIN_DEFAULT_USER_DESC_32" desc="Description of the default user icon with a picture of a butterfly upside-down on a flower; the name of the photo is Upside-Down.">
         Upside Down
+      </message>
+      <message name="IDS_LOGIN_DEFAULT_USER_DESC_33" desc="Description of the default user icon with a picture of a cat">
+        Cat
       </message>
 
       <!-- Attribution strings for stock user images, not translateable. -->
@@ -279,6 +279,9 @@
       <message translateable="false" name="IDS_LOGIN_DEFAULT_USER_AUTHOR_32">
         Magdalena Wasiczek
       </message>
+      <message translateable="false" name="IDS_LOGIN_DEFAULT_USER_AUTHOR_33">
+        Ivan Podogov
+      </message>
 
       <message translateable="false" name="IDS_LOGIN_DEFAULT_USER_WEBSITE">
       </message>
@@ -359,6 +362,8 @@
       </message>
       <message translateable="false" name="IDS_LOGIN_DEFAULT_USER_WEBSITE_32">
         http://www.magdawasiczek.pl
+      </message>
+      <message translateable="false" name="IDS_LOGIN_DEFAULT_USER_WEBSITE_33">
       </message>
 
       <message name="IDS_CHROMEOS_IME_INFOLIST_WINDOW_TITLE" desc="The title of the infolist window where the meanings and the usages of words are displayed.">
@@ -453,6 +458,12 @@
       <message name="IDS_NETWORK_CONNECTION_ERROR_MESSAGE_NO_NAME" desc="Message for network connection error where the network name is unavailable">
         Failed to connect to network: <ph name="details">$1<ex>Unrecognized error</ex></ph>
       </message>
+      <message name="IDS_NETWORK_VPN_CONNECTION_LOST_TITLE" desc="Title for network notification when VPN connection is lost">
+        VPN disconnected
+      </message>
+      <message name="IDS_NETWORK_VPN_CONNECTION_LOST_BODY" desc="Message for network notification when VPN connection is lost">
+        Connection to <ph name="name">$1<ex>Google VPN</ex></ph> has been lost
+      </message>
       <message name="IDS_NETWORK_OUT_OF_CREDITS_TITLE" desc="Title for network out of data error notification">
         Network Connection Error
       </message>
@@ -474,7 +485,9 @@
       <message name="IDS_NETWORK_ACTIVATION_NEEDS_CONNECTION" desc="Message when attempting to activate a mobile network that requires a connection">
         Activation of '<ph name="name">$1<ex>Generic Wireless</ex></ph>' requires a network connection.
       </message>
-
+      <message name="IDS_NETWORK_VPN_BUILT_IN_PROVIDER" desc="The name of the built-in VPN provider that supports OpenVPN and L2TP over IPsec.">
+        OpenVPN / L2TP
+      </message>
     </messages>
   </release>
 </grit>

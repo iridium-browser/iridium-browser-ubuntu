@@ -34,15 +34,26 @@
     return ~~(time / 60000) + ':' + ('0' + ~~(time / 1000 % 60)).slice(-2);
   }
 
-  Polymer('control-panel', {
+  /**
+   * @constructor
+   * @extends {PolymerElement}
+   */
+  var ControlPanelElement = function() {};
+
+  ControlPanelElement.prototype = {
     /**
      * Initializes an element. This method is called automatically when the
      * element is ready.
      */
     ready: function() {
       var onFocusoutBound = this.onVolumeControllerFocusout_.bind(this);
-      this.$.volumeSlider.addEventListener('focusout', onFocusoutBound);
-      this.$.volumeButton.addEventListener('focusout', onFocusoutBound);
+
+      this.volumeSlider = this.$.volumeSlider;
+      this.volumeButton = this.$.volumeButton;
+      this.volumeContainer = this.$.volumeContainer;
+
+      this.volumeSlider.addEventListener('focusout', onFocusoutBound);
+      this.volumeButton.addEventListener('focusout', onFocusoutBound);
     },
 
     /**
@@ -57,7 +68,7 @@
      * @param {AudioPlayerModel} newValue New Value.
      */
     modelChanged: function(oldValue, newValue) {
-      this.$.volumeSlider.model = newValue;
+      this.volumeSlider.model = newValue;
     },
 
     /**
@@ -104,16 +115,6 @@
     playing: false,
 
     /**
-     * Invoked when the 'duration' property is changed.
-     * @param {number} oldValue old value.
-     * @param {number} newValue new value.
-     */
-    durationChanged: function(oldValue, newValue) {
-      // Reset the current playback position.
-      this.time = 0;
-    },
-
-    /**
      * Invoked when the next button is clicked.
      */
     nextClick: function() {
@@ -136,7 +137,7 @@
 
     /**
      * Invoked the volume button is clicked.
-     * @type {Event} event The event.
+     * @param {!Event} event The event.
      */
     volumeButtonClick: function(event) {
       this.showVolumeController_(this.volumeSliderShown);
@@ -145,15 +146,15 @@
 
     /**
      * Invoked when the focus goes out of the volume elements.
-     * @param {FocusEvent} event The focusout event.
+     * @param {!FocusEvent} event The focusout event.
      * @private
      */
     onVolumeControllerFocusout_: function(event) {
       if (this.volumeSliderShown) {
         // If the focus goes out of the volume, hide the volume control.
         if (!event.relatedTarget ||
-            (event.relatedTarget !== this.$.volumeButton &&
-             event.relatedTarget !== this.$.volumeSlider)) {
+            (event.relatedTarget !== this.volumeButton &&
+             event.relatedTarget !== this.volumeSlider)) {
           this.showVolumeController_(false);
           this.volumeSliderShown = false;
         }
@@ -168,10 +169,12 @@
     showVolumeController_: function(show) {
       if (show) {
         matchBottomLine(this.$.volumeContainer, this.$.volumeButton);
-        this.$.volumeContainer.style.visibility = 'visible';
+        this.volumeContainer.style.visibility = 'visible';
       } else {
-        this.$.volumeContainer.style.visibility = 'hidden';
+        this.volumeContainer.style.visibility = 'hidden';
       }
     },
-  });
+  };
+
+  Polymer('control-panel', ControlPanelElement.prototype);
 })();  // Anonymous closure

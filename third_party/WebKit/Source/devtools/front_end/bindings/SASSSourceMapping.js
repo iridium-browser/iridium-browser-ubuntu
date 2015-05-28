@@ -40,7 +40,6 @@ WebInspector.SASSSourceMapping = function(cssModel, workspace, networkMapping, n
 {
     this.pollPeriodMs = 30 * 1000;
     this.pollIntervalMs = 200;
-
     this._cssModel = cssModel;
     this._workspace = workspace;
     this._networkProject = networkProject;
@@ -99,7 +98,7 @@ WebInspector.SASSSourceMapping.prototype = {
 
     /**
      * @param {string} headerName
-     * @param {!NetworkAgent.Headers} headers
+     * @param {!Object.<string, string>} headers
      * @return {?string}
      */
     _headerValue: function(headerName, headers)
@@ -116,7 +115,7 @@ WebInspector.SASSSourceMapping.prototype = {
     },
 
     /**
-     * @param {!NetworkAgent.Headers} headers
+     * @param {!Object.<string, string>} headers
      * @return {?Date}
      */
     _lastModified: function(headers)
@@ -131,7 +130,7 @@ WebInspector.SASSSourceMapping.prototype = {
     },
 
     /**
-     * @param {!NetworkAgent.Headers} headers
+     * @param {!Object.<string, string>} headers
      * @param {string} url
      * @return {?Date}
      */
@@ -159,24 +158,23 @@ WebInspector.SASSSourceMapping.prototype = {
         if (!WebInspector.settings.cssReloadEnabled.get())
             return;
 
-        var sassFile = this._networkMapping.uiSourceCodeForURL(sassURL);
+        var sassFile = this._networkMapping.uiSourceCodeForURL(sassURL, this._cssModel.target());
         console.assert(sassFile);
         if (wasLoadedFromFileSystem)
             sassFile.requestMetadata(metadataReceived.bind(this));
         else
-            NetworkAgent.loadResourceForFrontend(WebInspector.resourceTreeModel.mainFrame.id, sassURL, undefined, sassLoadedViaNetwork.bind(this));
+            WebInspector.NetworkManager.loadResourceForFrontend(sassURL, null, sassLoadedViaNetwork.bind(this));
 
         /**
-         * @param {?Protocol.Error} error
          * @param {number} statusCode
-         * @param {!NetworkAgent.Headers} headers
+         * @param {!Object.<string, string>} headers
          * @param {string} content
          * @this {WebInspector.SASSSourceMapping}
          */
-        function sassLoadedViaNetwork(error, statusCode, headers, content)
+        function sassLoadedViaNetwork(statusCode, headers, content)
         {
-            if (error || statusCode >= 400) {
-                console.error("Could not load content for " + sassURL + " : " + (error || ("HTTP status code: " + statusCode)));
+            if (statusCode >= 400) {
+                console.error("Could not load content for " + sassURL + " : " + "HTTP status code: " + statusCode);
                 return;
             }
             var lastModified = this._checkLastModified(headers, sassURL);
@@ -258,7 +256,7 @@ WebInspector.SASSSourceMapping.prototype = {
      */
     _reloadCSS: function(cssURL, sassURL, callback)
     {
-        var cssUISourceCode = this._networkMapping.uiSourceCodeForURL(cssURL);
+        var cssUISourceCode = this._networkMapping.uiSourceCodeForURL(cssURL, this._cssModel.target());
         if (!cssUISourceCode) {
             WebInspector.console.warn(WebInspector.UIString("%s resource missing. Please reload the page.", cssURL));
             callback(cssURL, sassURL, true);
@@ -285,19 +283,18 @@ WebInspector.SASSSourceMapping.prototype = {
             return;
         }
         var headers = { "if-modified-since": new Date(data.sassTimestamp.getTime() - 1000).toUTCString() };
-        NetworkAgent.loadResourceForFrontend(WebInspector.resourceTreeModel.mainFrame.id, cssURL, headers, contentLoaded.bind(this));
+        WebInspector.NetworkManager.loadResourceForFrontend(cssURL, headers, contentLoaded.bind(this));
 
         /**
-         * @param {?Protocol.Error} error
          * @param {number} statusCode
-         * @param {!NetworkAgent.Headers} headers
+         * @param {!Object.<string, string>} headers
          * @param {string} content
          * @this {WebInspector.SASSSourceMapping}
          */
-        function contentLoaded(error, statusCode, headers, content)
+        function contentLoaded(statusCode, headers, content)
         {
-            if (error || statusCode >= 400) {
-                console.error("Could not load content for " + cssURL + " : " + (error || ("HTTP status code: " + statusCode)));
+            if (statusCode >= 400) {
+                console.error("Could not load content for " + cssURL + " : " + "HTTP status code: " + statusCode);
                 callback(cssURL, sassURL, true);
                 return;
             }
@@ -410,7 +407,7 @@ WebInspector.SASSSourceMapping.prototype = {
      */
     addHeader: function(header)
     {
-        if (!header.sourceMapURL || !header.sourceURL || header.isInline || !WebInspector.settings.cssSourceMapsEnabled.get())
+        if (!header.sourceMapURL || !header.sourceURL || !WebInspector.settings.cssSourceMapsEnabled.get())
             return;
         var completeSourceMapURL = WebInspector.ParsedURL.completeURL(header.sourceURL, header.sourceMapURL);
         if (!completeSourceMapURL)
@@ -425,7 +422,7 @@ WebInspector.SASSSourceMapping.prototype = {
     removeHeader: function(header)
     {
         var sourceURL = header.sourceURL;
-        if (!sourceURL || !header.sourceMapURL || header.isInline || !this._completeSourceMapURLForCSSURL[sourceURL])
+        if (!sourceURL || !header.sourceMapURL || !this._completeSourceMapURLForCSSURL[sourceURL])
             return;
         delete this._sourceMapByStyleSheetURL[sourceURL];
         delete this._completeSourceMapURLForCSSURL[sourceURL];
@@ -544,7 +541,7 @@ WebInspector.SASSSourceMapping.prototype = {
         for (var i = 0; i < sources.length; ++i) {
             var url = sources[i];
             this._addCSSURLforSASSURL(rawURL, url);
-            if (!this._networkMapping.hasMappingForURL(url) && !this._networkMapping.uiSourceCodeForURL(url)) {
+            if (!this._networkMapping.hasMappingForURL(url) && !this._networkMapping.uiSourceCodeForURL(url, header.target())) {
                 var contentProvider = sourceMap.sourceContentProvider(url, WebInspector.resourceTypes.Stylesheet);
                 this._networkProject.addFileForURL(url, contentProvider);
             }
@@ -565,7 +562,7 @@ WebInspector.SASSSourceMapping.prototype = {
         entry = sourceMap.findEntry(rawLocation.lineNumber, rawLocation.columnNumber);
         if (!entry || entry.length === 2)
             return null;
-        var uiSourceCode = this._networkMapping.uiSourceCodeForURL(entry[2]);
+        var uiSourceCode = this._networkMapping.uiSourceCodeForURL(entry[2], rawLocation.target());
         if (!uiSourceCode)
             return null;
         return uiSourceCode.uiLocation(entry[3], entry[4]);

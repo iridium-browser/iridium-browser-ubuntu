@@ -28,9 +28,6 @@ void FakeGCMDriver::OnSignedIn() {
 void FakeGCMDriver::OnSignedOut() {
 }
 
-void FakeGCMDriver::Purge() {
-}
-
 void FakeGCMDriver::AddConnectionObserver(GCMConnectionObserver* observer) {
 }
 
@@ -63,7 +60,8 @@ void FakeGCMDriver::SetGCMRecording(const GetGCMStatisticsCallback& callback,
                                     bool recording) {
 }
 
-GCMClient::Result FakeGCMDriver::EnsureStarted() {
+GCMClient::Result FakeGCMDriver::EnsureStarted(
+    GCMClient::StartMode start_mode) {
   return GCMClient::SUCCESS;
 }
 

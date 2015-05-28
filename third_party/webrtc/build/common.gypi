@@ -41,6 +41,7 @@
       'webrtc_vp8_dir%': '<(webrtc_root)/modules/video_coding/codecs/vp8',
       'webrtc_vp9_dir%': '<(webrtc_root)/modules/video_coding/codecs/vp9',
       'include_opus%': 1,
+      'opus_dir%': '<(DEPTH)/third_party/opus',
     },
     'build_with_chromium%': '<(build_with_chromium)',
     'build_with_libjingle%': '<(build_with_libjingle)',
@@ -72,11 +73,6 @@
     # Remote bitrate estimator logging/plotting.
     'enable_bwe_test_logging%': 0,
 
-    # Adds video support to dependencies shared by voice and video engine.
-    # This should normally be enabled; the intended use is to disable only
-    # when building voice engine exclusively.
-    'enable_video%': 1,
-
     # Selects fixed-point code where possible.
     'prefer_fixed_point%': 0,
 
@@ -92,7 +88,10 @@
     'build_libjpeg%': 1,
     'build_libyuv%': 1,
     'build_libvpx%': 1,
+    'build_vp9%': 1,
     'build_ssl%': 1,
+    'build_openmax_dl%': 1,
+    'build_opus%': 1,
 
     # Disable by default
     'have_dbus_glib%': 0,
@@ -100,13 +99,15 @@
     # Enable to use the Mozilla internal settings.
     'build_with_mozilla%': 0,
 
+    # Make it possible to provide custom locations for some libraries.
+    'libvpx_dir%': '<(DEPTH)/third_party/libvpx',
     'libyuv_dir%': '<(DEPTH)/third_party/libyuv',
+    'opus_dir%': '<(opus_dir)',
 
-    # Define MIPS architecture variant, MIPS DSP variant and MIPS FPU
-    # This may be subject to change in accordance to Chromium's MIPS flags
-    'mips_dsp_rev%': 0,
-    'mips_fpu%' : 1,
-    'enable_android_opensl%': 1,
+    # Use Java based audio layer as default for Android.
+    # Change this setting to 1 to use Open SL audio instead.
+    # TODO(henrika): add support for Open SL ES.
+    'enable_android_opensl%': 0,
 
     # Link-Time Optimizations
     # Executes code generation at link-time instead of compile-time
@@ -158,11 +159,6 @@
     ], # conditions
   },
   'target_defaults': {
-    'include_dirs': [
-      # To include the top-level directory when building in Chrome, so we can
-      # use full paths (e.g. headers inside testing/ or third_party/).
-      '<(DEPTH)',
-    ],
     'conditions': [
       ['restrict_webrtc_logging==1', {
         'defines': ['WEBRTC_RESTRICT_LOGGING',],
@@ -184,8 +180,25 @@
       ['rtc_relative_path==1', {
         'defines': ['EXPAT_RELATIVE_PATH',],
       }],
-      ['enable_video==1', {
-        'defines': ['WEBRTC_MODULE_UTILITY_VIDEO',],
+      ['os_posix==1', {
+        'configurations': {
+          'Debug_Base': {
+            'defines': [
+              # Chromium's build/common.gypi defines _DEBUG for all posix
+              # _except_ for ios & mac.  The size of data types such as
+              # pthread_mutex_t varies between release and debug builds
+              # and is controlled via this flag.  Since we now share code
+              # between base/base.gyp and build/common.gypi (this file),
+              # both gyp(i) files, must consistently set this flag uniformly
+              # or else we'll run in to hard-to-figure-out problems where
+              # one compilation unit uses code from another but expects
+              # differently laid out types.
+              # For WebRTC, we want it there as well, because ASSERT and
+              # friends trigger off of it.
+              '_DEBUG',
+            ],
+          },
+        },
       }],
       ['build_with_chromium==1', {
         'defines': [
@@ -194,26 +207,23 @@
           'LOGGING_INSIDE_WEBRTC',
         ],
         'include_dirs': [
-          # overrides must be included first as that is the mechanism for
-          # selecting the override headers in Chromium.
+          # Include the top-level directory when building in Chrome, so we can
+          # use full paths (e.g. headers inside testing/ or third_party/).
+          '<(DEPTH)',
+          # The overrides must be included before the WebRTC root as that's the
+          # mechanism for selecting the override headers in Chromium.
           '../overrides',
-          # Allow includes to be prefixed with webrtc/ in case it is not an
-          # immediate subdirectory of <(DEPTH).
+          # The WebRTC root is needed to allow includes in the WebRTC code base
+          # to be prefixed with webrtc/.
           '../..',
         ],
       }, {
+         # Include the top-level dir so the WebRTC code can use full paths.
+        'include_dirs': [
+          '../..',
+        ],
         'conditions': [
           ['os_posix==1', {
-            'configurations': {
-              'Debug_Base': {
-                'defines': [
-                  # Chromium's build/common.gypi defines this for all posix
-                  # _except_ for ios & mac.  We want it there as well, e.g.
-                  # because ASSERT and friends trigger off of it.
-                  '_DEBUG',
-                ],
-              },
-            },
             'conditions': [
               # -Wextra is currently disabled in Chromium's common.gypi. Enable
               # for targets that can handle it. For Android/arm64 right now
@@ -240,6 +250,7 @@
           }],
           ['clang==1', {
             'cflags': [
+              '-Wimplicit-fallthrough',
               '-Wthread-safety',
             ],
           }],
@@ -279,50 +290,25 @@
           'MIPS32_LE',
         ],
         'conditions': [
-          ['mips_fpu==1', {
+          ['mips_float_abi=="hard"', {
             'defines': [
               'MIPS_FPU_LE',
-            ],
-            'cflags': [
-              '-mhard-float',
-            ],
-          }, {
-            'cflags': [
-              '-msoft-float',
             ],
           }],
           ['mips_arch_variant=="r2"', {
             'defines': [
               'MIPS32_R2_LE',
             ],
-            'cflags': [
-              '-mips32r2',
-            ],
-            'cflags_cc': [
-              '-mips32r2',
-            ],
           }],
           ['mips_dsp_rev==1', {
             'defines': [
               'MIPS_DSP_R1_LE',
-            ],
-            'cflags': [
-              '-mdsp',
-            ],
-            'cflags_cc': [
-              '-mdsp',
             ],
           }],
           ['mips_dsp_rev==2', {
             'defines': [
               'MIPS_DSP_R1_LE',
               'MIPS_DSP_R2_LE',
-            ],
-            'cflags': [
-              '-mdspr2',
-            ],
-            'cflags_cc': [
-              '-mdspr2',
             ],
           }],
         ],

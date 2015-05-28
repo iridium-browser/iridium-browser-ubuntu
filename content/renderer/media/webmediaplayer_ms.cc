@@ -10,6 +10,7 @@
 #include "base/callback.h"
 #include "base/message_loop/message_loop.h"
 #include "base/metrics/histogram.h"
+#include "cc/blink/context_provider_web_context.h"
 #include "cc/blink/web_layer_impl.h"
 #include "cc/layers/video_layer.h"
 #include "content/public/renderer/render_view.h"
@@ -18,6 +19,7 @@
 #include "content/renderer/media/video_frame_provider.h"
 #include "content/renderer/render_frame_impl.h"
 #include "content/renderer/render_thread_impl.h"
+#include "gpu/blink/webgraphicscontext3d_impl.h"
 #include "media/base/media_log.h"
 #include "media/base/video_frame.h"
 #include "media/base/video_rotation.h"
@@ -31,19 +33,21 @@
 #include "third_party/WebKit/public/web/WebFrame.h"
 #include "third_party/WebKit/public/web/WebView.h"
 #include "third_party/skia/include/core/SkBitmap.h"
-#include "webkit/common/gpu/context_provider_web_context.h"
 
 using blink::WebCanvas;
 using blink::WebMediaPlayer;
 using blink::WebRect;
 using blink::WebSize;
 
+namespace content {
+
 namespace {
 
 // This function copies a YV12 or NATIVE_TEXTURE to a new YV12
 // media::VideoFrame.
 scoped_refptr<media::VideoFrame> CopyFrameToYV12(
-    const scoped_refptr<media::VideoFrame>& frame) {
+    const scoped_refptr<media::VideoFrame>& frame,
+    media::SkCanvasVideoRenderer* video_renderer) {
   DCHECK(frame->format() == media::VideoFrame::YV12 ||
          frame->format() == media::VideoFrame::I420 ||
          frame->format() == media::VideoFrame::NATIVE_TEXTURE);
@@ -58,8 +62,19 @@ scoped_refptr<media::VideoFrame> CopyFrameToYV12(
     SkBitmap bitmap;
     bitmap.allocN32Pixels(frame->visible_rect().width(),
                           frame->visible_rect().height());
-    frame->ReadPixelsFromNativeTexture(bitmap);
+    SkCanvas canvas(bitmap);
 
+    cc::ContextProvider* provider =
+        RenderThreadImpl::current()->SharedMainThreadContextProvider().get();
+    if (provider) {
+      media::Context3D context_3d =
+          media::Context3D(provider->ContextGL(), provider->GrContext());
+      DCHECK(context_3d.gl);
+      video_renderer->Copy(frame.get(), &canvas, context_3d);
+    } else {
+      // GPU Process crashed.
+      bitmap.eraseColor(SK_ColorTRANSPARENT);
+    }
     media::CopyRGBToVideoFrame(
         reinterpret_cast<uint8*>(bitmap.getPixels()),
         bitmap.rowBytes(),
@@ -77,8 +92,6 @@ scoped_refptr<media::VideoFrame> CopyFrameToYV12(
 }
 
 }  // anonymous namespace
-
-namespace content {
 
 WebMediaPlayerMS::WebMediaPlayerMS(
     blink::WebFrame* frame,
@@ -151,7 +164,6 @@ void WebMediaPlayerMS::load(LoadType load_type,
   RenderFrame* frame = RenderFrame::FromWebFrame(frame_);
   audio_renderer_ = renderer_factory_->GetAudioRenderer(
     url,
-    frame->GetRenderView()->GetRoutingID(),
     frame->GetRoutingID());
 
   if (video_frame_provider_.get() || audio_renderer_.get()) {
@@ -219,7 +231,9 @@ void WebMediaPlayerMS::pause() {
   // The original frame must not be referenced when the player is paused since
   // there might be a finite number of available buffers. E.g, video that
   // originates from a video camera.
-  scoped_refptr<media::VideoFrame> new_frame = CopyFrameToYV12(current_frame_);
+  scoped_refptr<media::VideoFrame> new_frame =
+      CopyFrameToYV12(current_frame_, &video_renderer_);
+
   base::AutoLock auto_lock(current_frame_lock_);
   current_frame_ = new_frame;
 }
@@ -386,6 +400,51 @@ unsigned WebMediaPlayerMS::videoDecodedByteCount() const {
   DCHECK(thread_checker_.CalledOnValidThread());
   NOTIMPLEMENTED();
   return 0;
+}
+
+bool WebMediaPlayerMS::copyVideoTextureToPlatformTexture(
+    blink::WebGraphicsContext3D* web_graphics_context,
+    unsigned int texture,
+    unsigned int level,
+    unsigned int internal_format,
+    unsigned int type,
+    bool premultiply_alpha,
+    bool flip_y) {
+  return copyVideoTextureToPlatformTexture(web_graphics_context, texture,
+                                           internal_format, type,
+                                           premultiply_alpha, flip_y);
+}
+
+bool WebMediaPlayerMS::copyVideoTextureToPlatformTexture(
+    blink::WebGraphicsContext3D* web_graphics_context,
+    unsigned int texture,
+    unsigned int internal_format,
+    unsigned int type,
+    bool premultiply_alpha,
+    bool flip_y) {
+  TRACE_EVENT0("media", "WebMediaPlayerMS:copyVideoTextureToPlatformTexture");
+  DCHECK(thread_checker_.CalledOnValidThread());
+
+  scoped_refptr<media::VideoFrame> video_frame;
+  {
+    base::AutoLock auto_lock(current_frame_lock_);
+    video_frame = current_frame_;
+  }
+
+  if (!video_frame.get() ||
+      video_frame->format() != media::VideoFrame::NATIVE_TEXTURE) {
+    return false;
+  }
+
+  // TODO(dshwang): need more elegant way to convert WebGraphicsContext3D to
+  // GLES2Interface.
+  gpu::gles2::GLES2Interface* gl =
+      static_cast<gpu_blink::WebGraphicsContext3DImpl*>(web_graphics_context)
+          ->GetGLInterface();
+  media::SkCanvasVideoRenderer::CopyVideoFrameTextureToGLTexture(
+      gl, video_frame.get(), texture, internal_format, type, premultiply_alpha,
+      flip_y);
+  return true;
 }
 
 void WebMediaPlayerMS::SetVideoFrameProviderClient(

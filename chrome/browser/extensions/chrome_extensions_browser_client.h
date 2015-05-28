@@ -52,6 +52,10 @@ class ChromeExtensionsBrowserClient : public ExtensionsBrowserClient {
       content::BrowserContext* context) override;
   content::BrowserContext* GetOriginalContext(
       content::BrowserContext* context) override;
+#if defined(OS_CHROMEOS)
+  std::string GetUserIdHashFromContext(
+      content::BrowserContext* context) override;
+#endif
   bool IsGuestSession(content::BrowserContext* context) const override;
   bool IsExtensionIncognitoEnabled(
       const std::string& extension_id,
@@ -85,6 +89,8 @@ class ChromeExtensionsBrowserClient : public ExtensionsBrowserClient {
   ExtensionSystemProvider* GetExtensionSystemFactory() override;
   void RegisterExtensionFunctions(
       ExtensionFunctionRegistry* registry) const override;
+  void RegisterMojoServices(content::RenderFrameHost* render_frame_host,
+                            const Extension* extension) const override;
   scoped_ptr<extensions::RuntimeAPIDelegate> CreateRuntimeAPIDelegate(
       content::BrowserContext* context) const override;
   const ComponentExtensionResourceManager*

@@ -27,12 +27,13 @@
 [
     DoNotCheckConstants,
     GarbageCollected,
+    TypeChecking=Interface,
 ] interface Internals {
     DOMString address(Node node);
 
     GCObservation observeGC(any observed);
 
-    [RaisesException, TypeChecking=Interface] DOMString elementRenderTreeAsText(Element element);
+    [RaisesException, TypeChecking=Interface] DOMString elementLayoutTreeAsText(Element element);
     boolean isPreloaded(DOMString url);
     boolean isLoadingFromMemoryCache(DOMString url);
 
@@ -40,7 +41,7 @@
 
     [TypeChecking=Interface] CSSStyleDeclaration computedStyleIncludingVisitedInfo(Node node);
 
-    [TypeChecking=Interface] ShadowRoot createUserAgentShadowRoot(Element host);
+    [TypeChecking=Interface] ShadowRoot createClosedShadowRoot(Element host);
 
     [TypeChecking=Interface] ShadowRoot shadowRoot(Element host);
     [TypeChecking=Interface] ShadowRoot youngestShadowRoot(Element host);
@@ -165,6 +166,8 @@
     const unsigned short LAYER_TREE_INCLUDES_PAINTING_PHASES = 4;
     const unsigned short LAYER_TREE_INCLUDES_ROOT_LAYER = 8;
     const unsigned short LAYER_TREE_INCLUDES_CLIP_AND_SCROLL_PARENTS = 16;
+    const unsigned short LAYER_TREE_INCLUDES_SCROLL_BLOCKS_ON = 32;
+    const unsigned short LAYER_TREE_INCLUDES_PAINT_INVALIDATION_OBJECTS = 64;
     [RaisesException, TypeChecking=Interface] DOMString layerTreeAsText(Document document, optional unsigned short flags);
     [RaisesException, TypeChecking=Interface] DOMString elementLayerTreeAsText(Element element, optional unsigned short flags);
 
@@ -182,8 +185,6 @@
     DOMString dumpRefCountedInstanceCounts();
     sequence<DOMString> consoleMessageArgumentCounts(Document document);
     unsigned long[] setMemoryCacheCapacities(unsigned long minDeadBytes, unsigned long maxDeadBytes, unsigned long totalBytes);
-    [RaisesException] void setInspectorResourcesDataSizeLimits(long maximumResourcesContentSize, long maximumSingleResourceContentSize);
-    [RaisesException] DOMString inspectorHighlightJSON(Node node);
 
     DOMString counterValue(Element element);
     long pageNumber(Element element, optional float pageWidth, optional float pageHeight);
@@ -197,10 +198,10 @@
 
     [RaisesException, TypeChecking=Interface] void setIsCursorVisible(Document document, boolean isVisible);
 
-    void mediaPlayerRequestFullscreen(HTMLMediaElement mediaElement);
-    double effectiveMediaVolume(HTMLMediaElement mediaElement);
-    void mediaPlayerRemoteRouteAvailabilityChanged(HTMLMediaElement mediaElement, boolean available);
-    void mediaPlayerPlayingRemotelyChanged(HTMLMediaElement mediaElement, boolean remote);
+    [TypeChecking=Interface] void mediaPlayerRequestFullscreen(HTMLMediaElement mediaElement);
+    [TypeChecking=Interface] double effectiveMediaVolume(HTMLMediaElement mediaElement);
+    [TypeChecking=Interface] void mediaPlayerRemoteRouteAvailabilityChanged(HTMLMediaElement mediaElement, boolean available);
+    [TypeChecking=Interface] void mediaPlayerPlayingRemotelyChanged(HTMLMediaElement mediaElement, boolean remote);
 
     void registerURLSchemeAsBypassingContentSecurityPolicy(DOMString scheme);
     void registerURLSchemeAsBypassingContentSecurityPolicy(DOMString scheme, sequence<DOMString> policyAreas);
@@ -223,7 +224,7 @@
     // |node| should be Document, HTMLIFrameElement, or unspecified.
     // If |node| is an HTMLIFrameElement, it assumes node.contentDocument is
     // specified without security checks. Unspecified means this document.
-    [RaisesException] void updateLayoutIgnorePendingStylesheetsAndRunPostLayoutTasks(optional Node node);
+    [RaisesException] void updateLayoutIgnorePendingStylesheetsAndRunPostLayoutTasks(optional Node? node = null);
 
     [RaisesException, TypeChecking=Interface] void forceFullRepaint(Document document);
 
@@ -243,6 +244,7 @@
 
     [TypeChecking=Interface] DOMString getImageSourceURL(Element element);
 
+    [TypeChecking=Interface] DOMString selectMenuListText(HTMLSelectElement select);
     [TypeChecking=Interface] boolean isSelectPopupVisible(Node node);
     boolean selectPopupItemStyleIsRtl(Node select, long itemIndex);
     long selectPopupItemStyleFontHeight(Node select, long itemIndex);
@@ -272,6 +274,7 @@
     DOMString textSurroundingNode(Node node, long x, long y, unsigned long maxLength);
 
     void setFocused(boolean focused);
+    void setInitialFocus(boolean reverse);
 
     [TypeChecking=Interface] boolean ignoreLayoutWithPendingStylesheets(Document document);
 
@@ -283,7 +286,7 @@
     // This function is for testing HitRegions on Canvas2D.
     unsigned long countHitRegions(CanvasRenderingContext2D context);
 
-    [TypeChecking=Interface] ClientRect boundsInRootViewSpace(Element element);
+    [TypeChecking=Interface] ClientRect boundsInViewportSpace(Element element);
     DOMString serializeNavigationMarkup();
     DOMString[] getTransitionElementIds();
     ClientRectList getTransitionElementRects();
@@ -298,6 +301,11 @@
     UnionTypesTest unionTypesTest();
 
     void forceBlinkGCWithoutV8GC();
+
+    DOMString selectedHTMLForClipboard();
+    DOMString selectedTextForClipboard();
+
+    void setVisualViewportOffset(long x, long y);
 
     iterable<long>;
 };

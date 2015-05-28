@@ -13,6 +13,9 @@
   <message name="IDS_CHROMEBASE" desc="The localized name for Chromebase">
     Chromebase
   </message>
+  <message name="IDS_CHROMEBIT" desc="The localized name for Chromebit">
+    Chromebit  
+  </message>
   <!-- Idle logout dialog for retail mode -->
   <message name="IDS_IDLE_LOGOUT_TITLE" desc="Dialog title for the idle logout dialog. Used in retail mode only.">
     Are you still there?
@@ -178,6 +181,9 @@ Press any key to continue exploring.
     Enter
   </message>
 
+  <message name="IDS_FILE_BROWSER_STATUS_COLUMN_LABEL" desc="Status column label.  This column reflects the cloud import status of files.  The status is an icon depicting whether a file has been imported, and if so, where to - for example, a Drive icon if a file has been imported to Google Drive.  For unimported files, this column is blank. ">
+    Status
+  </message>
   <message name="IDS_FILE_BROWSER_TYPE_COLUMN_LABEL" desc="Type column label.">
     Type
   </message>
@@ -204,6 +210,9 @@ Press any key to continue exploring.
   </message>
   <message name="IDS_FILE_BROWSER_ERROR_LONG_NAME" desc="Error message displayed when user trys to enter too long name for a file or a folder.">
     This name is too long
+  </message>
+  <message name="IDS_FILE_BROWSER_EMPTY_FOLDER" desc="Label shown in an empty folder.">
+    Nothing to see here...
   </message>
   <message name="IDS_FILE_BROWSER_NEW_FOLDER_BUTTON_LABEL" desc="Label on the 'New folder' button.">
     New folder
@@ -240,6 +249,9 @@ Press any key to continue exploring.
   </message>
   <message name="IDS_FILE_BROWSER_CLOSE_VOLUME_BUTTON_LABEL" desc="Title of the action for closing either an archive volume or a volume provided by an extension.">
     Close
+  </message>
+  <message name="IDS_FILE_BROWSER_ADD_NEW_SERVICES_BUTTON_LABEL" desc="Title of the button in the left nav to add new services (file systems) to Files app.">
+    Add new services
   </message>
   <message name="IDS_FILE_BROWSER_ACTION_VIEW" desc="Title of the action to view (no edit) a file.">
     View
@@ -352,6 +364,9 @@ Press any key to continue exploring.
   <message name="IDS_FILE_BROWSER_GALLERY_SAVED" desc="In the Gallery, the message informing that editing saved successfully.">
     Saved
   </message>
+  <message name="IDS_FILE_BROWSER_GALLERY_SAVE_FAILED" desc="In the Gallery, the message informing that it failed to save editing image.">
+    Failed to save image.
+  </message>
   <message name="IDS_FILE_BROWSER_GALLERY_OVERWRITE_ORIGINAL" desc="In the Gallery, text on the button to overwrite original file along with the edited copy.">
     Overwrite original
   </message>
@@ -442,19 +457,89 @@ Press any key to continue exploring.
   <message name="IDS_FILE_BROWSER_SHARE_BUTTON_LABEL" desc="Menu item label, showing dialog to share the selected file.">
     Share
   </message>
-  <message name="IDS_FILE_BROWSER_CLOUD_IMPORT_BUTTON_LABEL" desc="Label for button that initiates media backup to the cloud.">
-    Import photos &amp; videos to Google Drive
+  <message name="IDS_FILE_BROWSER_TOGGLE_HIDDEN_FILES_COMMAND_LABEL" desc="Label for menu or button with checkmark that toggles visibility of hidden files.">
+    Show hidden files
   </message>
-  <message name="IDS_FILE_BROWSER_CLOUD_IMPORT_INSUFFICIENT_SPACE_BUTTON_LABEL" desc="Label for button that tells user there is not enough space to perform a cloud import.">
-    Insufficient space on your device!
+  <message name="IDS_FILE_BROWSER_TASKS_BUTTON_LABEL" desc="Label for button that selects a task to open the current file.">
+    Tasks
   </message>
-  <message name="IDS_FILE_BROWSER_CLOUD_IMPORT_SCANNING_BUTTON_LABEL" desc="Label for button showing that scanning is in progress...prior to being enabled when scanning is complete.">
-    Scanning your media...
+  <message name="IDS_FILE_BROWSER_CANCEL_SELECTION_BUTTON_LABEL" desc="Label for button that unselects all selected items.">
+    Cancel selection
+  </message>
+  <message name="IDS_FILE_BROWSER_CHANGE_TO_LISTVIEW_BUTTON_LABEL" desc="Label for button that changes the view mode to 'list view' mode.">
+    List view
+  </message>
+  <message name="IDS_FILE_BROWSER_CHANGE_TO_THUMBNAILVIEW_BUTTON_LABEL" desc="Label for button that changes the view mode to 'thumbnail view' mode.">
+    Thumbnail view
+  </message>
+  <message name="IDS_FILE_BROWSER_CLOUD_IMPORT_TITLE" desc="Title of the cloud import feature.">
+    Cloud backup
+  </message>
+  <message name="IDS_FILE_BROWSER_CLOUD_DESTINATION_FOLDER" desc="Title of the cloud import destination folder.">
+    Chrome OS Cloud backup
+  </message>
+  <message name="IDS_FILE_BROWSER_CLOUD_IMPORT_DESCRIPTION" desc="Short description of the cloud import feature.">
+    Back up your media device’s photos and videos to Google Drive.
+  </message>
+  <message name="IDS_FILE_BROWSER_CLOUD_IMPORT_START" desc="Tooltip of the toolbar button that starts backup.">
+    Backup your photos and videos
+  </message>
+  <message name="IDS_FILE_BROWSER_CLOUD_IMPORT_SHOW_DETAILS" desc="Tooltip for button that shows details panel.">
+    Show Cloud backup details
+  </message>
+  <message name="IDS_FILE_BROWSER_CLOUD_IMPORT_COMMAND" desc="Label of button on details panel that invokes cloud import feature.">
+    Back up
+  </message>
+  <message name="IDS_FILE_BROWSER_CLOUD_IMPORT_CANCEL_COMMAND" desc="Label of button on details panel that cancels an active import.">
+    Cancel
+  </message>
+  <message name="IDS_FILE_BROWSER_CLOUD_IMPORT_STATUS_SCANNING" desc="Cloud import scanning status message.">
+    Scanning your media device...
+    <ph name="LINE_BREAK1">&lt;br&gt;</ph>
+    <ph name="FILE_COUNT">$1<ex>5</ex></ph> new photos found
+  </message>
+  <message name="IDS_FILE_BROWSER_CLOUD_IMPORT_TOOLTIP_SCANNING" desc="Cloud import scanning tooltip.">
+    Scanning your media device...
+  </message>
+  <message name="IDS_FILE_BROWSER_CLOUD_IMPORT_STATUS_NO_MEDIA" desc="Cloud import no-new-media-found status message. Shown after backup is completed and when a search for new files to backup produces no result.">
+    All backed up to <ph name="BEGIN_LINK">&lt;span class='destination-link'&gt;</ph>Google Drive!<ph name="END_LINK">&lt;/span&gt;</ph>
+  </message>
+  <message name="IDS_FILE_BROWSER_CLOUD_IMPORT_TOOLTIP_NO_MEDIA" desc="Cloud import no-new-media-found tooltip. Shown after backup is completed and when a search for new files to backup produces no result.">
+    All backed up!
+  </message>
+  <message name="IDS_FILE_BROWSER_CLOUD_IMPORT_STATUS_INSUFFICIENT_SPACE" desc="Cloud import insufficient space status message.">
+    <ph name="FILE_COUNT">$1<ex>5</ex></ph> new photos found
+    <ph name="LINE_BREAK1">&lt;br&gt;</ph>
+    Not enough space on device.
+    <ph name="LINE_BREAK2">&lt;br&gt;</ph>
+    Try selecting a few photos to start.
+  </message>
+  <message name="IDS_FILE_BROWSER_CLOUD_IMPORT_TOOLTIP_INSUFFICIENT_SPACE" desc="Cloud import insufficient space tooltip.">
+    Not enough space on device
+  </message>
+  <message name="IDS_FILE_BROWSER_CLOUD_IMPORT_STATUS_READY" desc="Cloud import ready status message.">
+    <ph name="FILE_COUNT">$1<ex>5</ex></ph> new photos found
+    <ph name="LINE_BREAK1">&lt;br&gt;</ph>
+    Ready to backup to <ph name="BEGIN_LINK">&lt;span class='destination-link'&gt;</ph>Google Drive<ph name="END_LINK">&lt;/span&gt;</ph>
+  </message>
+  <message name="IDS_FILE_BROWSER_CLOUD_IMPORT_TOOLTIP_READY" desc="Cloud import ready tooltip.">
+    Ready to backup <ph name="FILE_COUNT">$1<ex>5</ex></ph> new photos
+  </message>
+  <message name="IDS_FILE_BROWSER_CLOUD_IMPORT_STATUS_IMPORTING" desc="Cloud import active-backup status. Message shown when importing is in progress">
+    Backing up <ph name="FILE_COUNT">$1<ex>5</ex></ph> photos to <ph name="BEGIN_LINK">&lt;span class='destination-link'&gt;</ph>Google Drive<ph name="END_LINK">&lt;/span&gt;</ph>
+  </message>
+  <message name="IDS_FILE_BROWSER_CLOUD_IMPORT_TOOLTIP_IMPORTING" desc="Cloud import active-backup tooltip.">
+    Backing up <ph name="FILE_COUNT">$1<ex>5</ex></ph> photos
+  </message>
+  <message name="IDS_FILE_BROWSER_CLOUD_IMPORT_STATUS_DONE" desc="Cloud import backup is complete status.">
+    <ph name="FILE_COUNT">$1<ex>5</ex></ph> photos backed up to <ph name="BEGIN_LINK">&lt;span class='destination-link'&gt;</ph>Google Drive<ph name="END_LINK">&lt;/span&gt;</ph>
+  </message>
+  <message name="IDS_FILE_BROWSER_CLOUD_IMPORT_TOOLTIP_DONE" desc="Cloud import backup is complete tooltip.">
+    <ph name="FILE_COUNT">$1<ex>5</ex></ph> photos backed up
   </message>
   <message name="IDS_FILE_BROWSER_CLOUD_IMPORT_ITEMS_REMAINING" desc="File Manager status message.">
-    Importing $1 files...
+    Importing <ph name="FILE_COUNT">$1<ex>5</ex></ph> files...
   </message>
-
   <message name="IDS_FILE_BROWSER_COPY_FILE_NAME" desc="File Manager status message.">
     Copying <ph name="FILE_NAME">$1<ex>movie.avi</ex></ph>...
   </message>
@@ -602,14 +687,14 @@ Press any key to continue exploring.
   <message name="IDS_FILE_BROWSER_SUGGEST_DIALOG_TITLE" desc="Title of the suggest app dialog, which shows the list of the apps which supports the selected file.">
     Select an app to open this file
   </message>
+  <message name="IDS_FILE_BROWSER_SUGGEST_DIALOG_FOR_PROVIDERS_TITLE" desc="Title of the suggest app dialog, which shows the list of the apps that can be added to the left nav of Files app.">
+    Available services
+  </message>
   <message name="IDS_FILE_BROWSER_SUGGEST_DIALOG_LINK_TO_WEBSTORE" desc="Text of the link to the app list on Chrome Webstore, which shows the more apps than in the suggest app dialog.">
     See more...
   </message>
   <message name="IDS_FILE_BROWSER_SUGGEST_DIALOG_INSTALLATION_FAILED" desc="Error message when the installation of the app from WebStore is failed.">
     Installation failed.
-  </message>
-  <message name="IDS_FILE_BROWSER_SUGGEST_DIALOG_MESSAGE_FOR_EXECUTABLE" desc="Information message in the suggest app dialog. It is shown when Files.app is suggesting an altanative application from Chrome WebStore becauase the user is trying to open an executable file which doesn't support on ChromeOS.">
-    It looks like you're trying to run a classic application. Please try one of these newer web-based apps as an alternative.
   </message>
 
   <message name="IDS_FILE_BROWSER_SELECT_FOLDER_TITLE" desc="Select folder title.">
@@ -1120,11 +1205,29 @@ Press any key to continue exploring.
   <message name="IDS_FLAGS_DISABLE_DISPLAY_COLOR_CALIBRATION_DESCRIPTION" desc="Description for the flag to disable the color calibration of the display.">
     Disable calibrating the color of the display even if the display supports the feature.
   </message>
-  <message name="IDS_FLAGS_USE_MEMORY_PRESSURE_NAME" desc="Name for the flag to enable memory pressure handling on ChromeOS.">
-    Enable memory pressure handling
+  <message name="IDS_FLAGS_DISABLE_MEMORY_PRESSURE_NAME" desc="Name for the flag to disable memory pressure handling on ChromeOS.">
+    Disable memory pressure handling
   </message>
-  <message name="IDS_FLAGS_USE_MEMORY_PRESSURE_DESCRIPTION" desc="Description for the flag to enable memory pressure handling on ChromeOS.">
-    Enables enhanced memory pressure handling on ChromeOS.
+  <message name="IDS_FLAGS_DISABLE_MEMORY_PRESSURE_DESCRIPTION" desc="Description for the flag to disable memory pressure handling on ChromeOS.">
+    Disable enhanced memory pressure handling on ChromeOS.
+  </message>
+  <message name="IDS_FLAGS_MEMORY_PRESSURE_THRESHOLD_NAME" desc="Name for the flag which specifies which memory pressure strategy should be used on ChromeOS.">
+    Memory discard strategy for advanced pressure handling
+  </message>
+  <message name="IDS_FLAGS_MEMORY_PRESSURE_THRESHOLD_DESCRIPTION" desc="Description for the flag which specifies which memory pressure strategy should be used on ChromeOS.">
+    Memory discarding strategy to use
+  </message>
+  <message name="IDS_FLAGS_CONSERVATIVE_THRESHOLDS" desc="The value of the Memory pressure for ChromeOS which requests conservative thresholds.">
+    Conservative memory pressure release strategy
+  </message>
+  <message name="IDS_FLAGS_AGGRESSIVE_CACHE_DISCARD_THRESHOLDS" desc="The value of the Memory pressure thresholds for ChromeOS which use an aggressive cache release strategy.">
+    Aggressive cache release strategy
+  </message>
+  <message name="IDS_FLAGS_AGGRESSIVE_TAB_DISCARD_THRESHOLDS" desc="The value of the Memory pressure thresholds for ChromeOS which uses an aggressive tab release strategy.">
+    Aggressive tab release strategy
+  </message>
+  <message name="IDS_FLAGS_AGGRESSIVE_THRESHOLDS" desc="The value of the Memory pressure thresholds for ChromeOS which use an aggressive release strategy.">
+    Aggressive tab and cache release strategy
   </message>
   <message name="IDS_FLAGS_WAKE_ON_PACKETS_NAME" desc="Name for the flag to enable wake on packets.">
     Wake On Packets
@@ -1739,6 +1842,9 @@ Press any key to continue exploring.
   <message name="IDS_OFFLINE_LOGIN_HTML" desc="Text which suggests enter as an existing user when valid network isn't presented.">
     If you've already registered on this device, you can <ph name="LINK2_START">$1<ex>&gt;a&lt;</ex></ph>sign in as an existing user<ph name="LINK2_END">$2<ex>&gt;/a&lt;</ex></ph>.
   </message>
+  <message name="IDS_RESTART_BUTTON" desc="Text shown on reboot button on login/locker screen">
+    Restart
+  </message>
   <message name="IDS_SHUTDOWN_BUTTON" desc="Text shown on shutdown button on login/locker screen">
     Shut down
   </message>
@@ -1784,6 +1890,9 @@ Press any key to continue exploring.
   <message name="IDS_OPTIONS_SETTINGS_SECTION_TITLE_PRIVATE_NETWORK" desc="Title for Virtual Private Network (VPN) group on the settings page">
     Private network
   </message>
+  <message name="IDS_OPTIONS_SETTINGS_SECTION_THIRD_PARTY_VPN_NAME_TEMPLATE" desc="Template for constructing the name of a VPN network that is handled by a third-party VPN provider from the provider name and the network name.">
+    <ph name="PROVIDER_NAME">$1<ex>OpenVPN</ex></ph>: <ph name="NETWORK_NAME">$2<ex>Work Network</ex></ph>
+  </message>
   <message name="IDS_OPTIONS_SETTINGS_SECTION_TITLE_ADD_CONNECTION" desc="Title for control to add a new network connection." >
     Add connection
   </message>
@@ -1793,6 +1902,9 @@ Press any key to continue exploring.
   <message name="IDS_OPTIONS_SETTINGS_SECTION_TITLE_REMEMBERED_NETWORK" desc="Title for section in settings/internet for list of remembered (favirote) networks">
     Remembered networks
 
+  </message>
+  <message name="IDS_OPTIONS_SETTINGS_ADD_VPN_TEMPLATE" desc="Template for constructing a menu item that will ask a given VPN provider to show its 'add network' dialog.">
+    Add <ph name="PROVIDER_NAME">$1<ex>OpenVPN</ex></ph>...
   </message>
   <!-- Network state strings -->
   <message name="IDS_CHROMEOS_NETWORK_STATE_NOT_CONNECTED" desc="Displayed state for a network when not connected.">
@@ -1900,9 +2012,6 @@ Press any key to continue exploring.
   </message>
   <message name="IDS_OPTIONS_SETTINGS_STORAGE_DESCRIPTION" desc="The 'Storage' button on the chrome://settings page.">
     Stored data...
-  </message>
-  <message name="IDS_OPTIONS_SETTINGS_TIME_SYNCED_EXPLANATION" desc="In the settings tab, the text indicating that the date and time are set automatically.">
-    Date and time are set automatically.
   </message>
   <message name="IDS_OPTIONS_SETTINGS_SET_TIME_BUTTON" desc="In the settings tab, the prompt on the button to open a dialog to set date and time.">
     Set date and time
@@ -2363,6 +2472,9 @@ Press any key to continue exploring.
   <message name="IDS_IMAGE_SCREEN_SYNCING_PREFERENCES" desc="The message displayed on the image screen while user preferences are syncing.">
     Syncing your preferences
   </message>
+  <message name="IDS_IMAGE_SCREEN_SYNCING_PREFERENCES_NEW_GAIA_FLOW" desc="The message displayed on the image screen of new Gaia flow while user preferences are syncing.">
+    Syncing your preferences...
+  </message>
   <message name="IDS_OPTIONS_SETTINGS_INTERNET_TAB_WIMAX" desc="In settings Internet options, the title for the WiMAX tab.">
     WiMAX
   </message>
@@ -2570,6 +2682,9 @@ Press any key to continue exploring.
   <message name="IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_OPEN_VPN" desc="In settings Internet options, a string specifying OpenVPN.">
     OpenVPN
   </message>
+  <message name="IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_THIRD_PARTY_VPN" desc="In settings Internet options, a string indicating that a VPN connection is provided by a third party.">
+    Third party
+  </message>
   <message name="IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_VPN_SERVICE_NAME" desc="In settings Internet options, a string specifying VPN service name.">
     Service name:
   </message>
@@ -2578,6 +2693,9 @@ Press any key to continue exploring.
   </message>
   <message name="IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_VPN_PROVIDER_TYPE" desc="In settings Internet options, a string specifying VPN provider type.">
     Provider type:
+  </message>
+  <message name="IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_VPN_PROVIDER_NAME" desc="In settings Internet options, a string specifying VPN provider name.">
+    Provider name:
   </message>
   <message name="IDS_OPTIONS_SETTINGS_INTERNET_OPTIONS_VPN_PSK_PASSPHRASE" desc="In settings Internet options, a string specifying VPN PSK passphrase.">
     Pre-shared key:
@@ -4097,6 +4215,75 @@ Battery full
   <message name="IDS_KEYBOARD_OVERLAY_INSTRUCTIONS_HIDE" desc="The instruction for hiding the keyboard overlay.">
     Type Ctrl+Alt+/ or Escape to hide
   </message>
+  <message name="IDS_KEYBOARD_OVERLAY_ESC_KEY_LABEL" desc="The text in the keyboard overlay to show the label of the 'esc' (Escape) key.">
+    esc
+  </message>
+  <message name="IDS_KEYBOARD_OVERLAY_BACK_KEY_LABEL" desc="The text in the keyboard overlay to show the label of the 'back' key that when pressed the browser goes back to the previous page in the tab's browsing history.">
+    back
+  </message>
+  <message name="IDS_KEYBOARD_OVERLAY_FORWARD_KEY_LABEL" desc="The text in the keyboard overlay to show the label of the 'forward' key that when pressed the browser goes forward to the next page in the tab's browsing history.">
+    forward
+  </message>
+  <message name="IDS_KEYBOARD_OVERLAY_RELOAD_KEY_LABEL" desc="The text in the keyboard overlay to show the label of the 'reload' key that when pressed the browser reloads the current page.">
+    reload
+  </message>
+  <message name="IDS_KEYBOARD_OVERLAY_FULL_SCREEN_KEY_LABEL" desc="The text in the keyboard overlay to show the label of the 'full screen' key that when pressed the active window will become full screen.">
+    full screen
+  </message>
+  <message name="IDS_KEYBOARD_OVERLAY_SWITCH_WIN_KEY_LABEL" desc="The text in the keyboard overlay to show the label of the 'switch window' key that when pressed an overview of all windows will be shown on screen.">
+    switch window
+  </message>
+  <message name="IDS_KEYBOARD_OVERLAY_BRIGHT_DOWN_KEY_LABEL" desc="The text in the keyboard overlay to show the label of the 'bright down' key that turns the screen's brightness down.">
+    bright down
+  </message>
+  <message name="IDS_KEYBOARD_OVERLAY_BRIGHT_UP_KEY_LABEL" desc="The text in the keyboard overlay to show the label of the 'bright up' key that turns the screen's brightness up.">
+    bright up
+  </message>
+  <message name="IDS_KEYBOARD_OVERLAY_MUTE_KEY_LABEL" desc="The text in the keyboard overlay to show the label of the 'mute' key that mutes the system's sound.">
+    mute
+  </message>
+  <message name="IDS_KEYBOARD_OVERLAY_VOL_DOWN_KEY_LABEL" desc="The text in the keyboard overlay to show the label of the 'volume down' key that turns the system's sound volume down.">
+    vol. down
+  </message>
+  <message name="IDS_KEYBOARD_OVERLAY_VOL_UP_KEY_LABEL" desc="The text in the keyboard overlay to show the label of the 'volume up' key that turns the system's sound volume up">
+    vol. up
+  </message>
+  <message name="IDS_KEYBOARD_OVERLAY_POWER_KEY_LABEL" desc="The text in the keyboard overlay to show the label of the 'power' key.">
+    power
+  </message>
+  <message name="IDS_KEYBOARD_OVERLAY_BACKSPACE_KEY_LABEL" desc="The text in the keyboard overlay to show the label of the 'backspace' key.">
+    backspace
+  </message>
+  <message name="IDS_KEYBOARD_OVERLAY_TAB_KEY_LABEL" desc="The text in the keyboard overlay to show the label of the 'tab' key.">
+    tab
+  </message>
+  <message name="IDS_KEYBOARD_OVERLAY_SEARCH_KEY_LABEL" desc="The text in the keyboard overlay to show the label of the 'search' key.">
+    search
+  </message>
+  <message name="IDS_KEYBOARD_OVERLAY_ENTER_KEY_LABEL" desc="The text in the keyboard overlay to show the label of the 'enter' key.">
+    enter
+  </message>
+  <message name="IDS_KEYBOARD_OVERLAY_SHIFT_KEY_LABEL" desc="The text in the keyboard overlay to show the label of the 'shift' key.">
+    shift
+  </message>
+  <message name="IDS_KEYBOARD_OVERLAY_CTRL_KEY_LABEL" desc="The text in the keyboard overlay to show the label of the 'ctrl' key.">
+    ctrl
+  </message>
+  <message name="IDS_KEYBOARD_OVERLAY_ALT_KEY_LABEL" desc="The text in the keyboard overlay to show the label of the 'alt' key.">
+    alt
+  </message>
+  <message name="IDS_KEYBOARD_OVERLAY_LEFT_KEY_LABEL" desc="The text in the keyboard overlay to show the label of the 'left' arrow key.">
+    left
+  </message>
+  <message name="IDS_KEYBOARD_OVERLAY_RIGHT_KEY_LABEL" desc="The text in the keyboard overlay to show the label of the 'right' arrow key.">
+    right
+  </message>
+  <message name="IDS_KEYBOARD_OVERLAY_UP_KEY_LABEL" desc="The text in the keyboard overlay to show the label of the 'up' arrow key.">
+    up
+  </message>
+  <message name="IDS_KEYBOARD_OVERLAY_DOWN_KEY_LABEL" desc="The text in the keyboard overlay to show the label of the 'down' arrow key.">
+    down
+  </message>
   <!-- BEGIN GENERATED KEYBOARD OVERLAY STRINGS -->
   <message name="IDS_KEYBOARD_OVERLAY_ACTIVATE_LAST_SHELF_ITEM" desc="The text in the keyboard overlay to explain the shortcut (Open the last shelf item).">
     Last shelf item
@@ -4452,6 +4639,9 @@ Battery full
   <message name="IDS_KEYBOARD_OVERLAY_TOGGLE_CAPS_LOCK" desc="The text in the keyboard overlay to explain the shortcut (enable or disable caps lock).">
     Caps Lock
   </message>
+  <message name="IDS_KEYBOARD_OVERLAY_DISABLE_CAPS_LOCK" desc="The text in the keyboard overlay to explain the shortcut (disable caps lock when it's enabled).">
+    Disable Caps Lock
+  </message>
   <message name="IDS_KEYBOARD_OVERLAY_TOGGLE_CHROMEVOX_SPOKEN_FEEDBACK" desc="The text in the keyboard overlay to explain the shortcut (enable or disable spoken feedback).">
     ChromeVox (spoken feedback)
   </message>
@@ -4802,6 +4992,9 @@ Battery full
   <message name="IDS_IME_NAME_KEYBOARD_ROMANIAN" desc="The input method name shows in system tray menu, this shows [Romanian keyboard].">
     Romanian keyboard
   </message>
+  <message name="IDS_IME_NAME_KEYBOARD_ROMANIAN_STANDARD" desc="The input method name shows in system tray menu, this shows [Romanian standard keyboard].">
+    Romanian standard keyboard
+  </message>
   <message name="IDS_IME_NAME_KEYBOARD_RUSSIAN" desc="The input method name shows in system tray menu, this shows [Russian keyboard].">
     Russian keyboard
   </message>
@@ -4894,7 +5087,7 @@ Battery full
     Zhuyin input method
   </message>
   <message name="IDS_IME_NAME_INPUTMETHOD_HANGUL" desc="The input method name shows in system tray menu, this is Korean Hangul input method.">
-    Hangul input method
+    Korean input method
   </message>
   <message name="IDS_IME_NAME_INPUTMETHOD_HANGUL_2_SET" desc="The input method name shows in system tray menu, this is Korean Hangul input method, 2 Set mode.">
     Hangul 2 Set
@@ -5067,8 +5260,11 @@ Battery full
     Transliteration (salam &#x2190; &#x0633;&#x0644;&#x0627;&#x0645;)
   </message>
 
-  <message name="IDS_LOGIN_ERROR_WHITELIST" desc="Couldn't sign in because user is not whitelisted.">
-    You are not authorized to use this device. For sign-in permission contact the device owner.
+  <message name="IDS_LOGIN_ERROR_WHITELIST" desc="Couldn't sign in because user is not whitelisted by the device owner.">
+    You are not authorized to use this device. Please contact the device owner for sign-in permission.
+  </message>
+  <message name="IDS_ENTERPRISE_LOGIN_ERROR_WHITELIST" desc="Couldn't sign in because user is not whitelisted by the administrator.">
+    You are not authorized to use this device. Please contact the administrator for sign-in permission.
   </message>
   <message name="IDS_LOGIN_ERROR_AUTHENTICATING_2ND_TIME" desc="Couldn't sign in because password is invalid for the 2nd time">
     Sorry, your password still could not be verified. Note: if you changed your password recently, your new password will be applied once you sign out, please use the old password here.
@@ -5317,7 +5513,7 @@ Battery full
     The Files app provides quick access to files that you've saved on Google Drive, external storage, or your Chrome OS device.
   </message>
 
-  <!-- HDCP verification UI -->
+  <!-- Platform verification UI -->
   <message name="IDS_PLATFORM_VERIFICATION_DIALOG_HEADLINE" desc="The label to describe what the dialog wants to confirm.">
     <ph name="DOMAIN">$1<ex>example.com</ex></ph> requires your device's identity to be verified, by Google, to determine eligibility for enhanced playback of protected media. <ph name="LEARN_MORE">$2<ex>Learn more</ex></ph>.
   </message>
@@ -5409,11 +5605,32 @@ All users must sign out to continue.
   <message name="IDS_FLAGS_NETWORK_PORTAL_NOTIFICATION_DESCRIPTION" desc="Description for the flag to enable/disable notifications about captive portals.">
     If enabled, notification is displayed when device is connected to a network behind captive portal.
   </message>
-  <message name="IDS_PORTAL_DETECTION_NOTIFICATION_TITLE" desc="Title for the system notification that current network is behind captive portal">
-    Action required to connect
+  <message name="IDS_PORTAL_DETECTION_NOTIFICATION_TITLE_WIRED" desc="Title for the system notification that current wired network is behind captive portal">
+    Connect to network
   </message>
-  <message name="IDS_PORTAL_DETECTION_NOTIFICATION_MESSAGE" desc="Body of the system notification that current network is behind captive portal">
-    To use <ph name="NETWORK_ID">$1<ex>Public Wifi</ex></ph> you need to visit the network's login page. Click to go to login page.
+  <message name="IDS_PORTAL_DETECTION_NOTIFICATION_TITLE_WIFI" desc="Title for the system notification that current Wi-Fi network is behind captive portal">
+    Connect to Wi-Fi network
+  </message>
+  <message name="IDS_PORTAL_DETECTION_NOTIFICATION_MESSAGE_WIRED" desc="Body of the system notification that current wired network is behind captive portal">
+    The network you are using (<ph name="NETWORK_ID">$1<ex>Public Network</ex></ph>) may require you to visit its login page.
+  </message>
+  <message name="IDS_PORTAL_DETECTION_NOTIFICATION_MESSAGE_WIFI" desc="Body of the system notification that current Wi-Fi network is behind captive portal">
+    The Wi-Fi network you are using (<ph name="NETWORK_ID">$1<ex>Public Network</ex></ph>) may require you to visit its login page.
+  </message>
+  <message name="IDS_PORTAL_DETECTION_NOTIFICATION_MESSAGE_ASK_WIFI" desc="Body of the system notification that asks a user whether to use an extension to authenticate to the network">
+    The Wi-Fi network you are using (<ph name="NETWORK_ID">$1<ex>Public Wifi</ex></ph>) may require authentication.
+  </message>
+  <message name="IDS_PORTAL_DETECTION_NOTIFICATION_MESSAGE_FAILED_WIFI" desc="Body of the system notification that authentication failed and current network is still behind captive portal">
+    Authentication failed. Click to visit the login page for the Wi-Fi network you are using (<ph name="NETWORK_ID">$1<ex>Public Wifi</ex></ph>).
+  </message>
+  <message name="IDS_PORTAL_DETECTION_NOTIFICATION_BUTTON_EXTENSION" desc="Button caption to connect using the authenticating extension">
+    Connect using <ph name="ExtensionName">$1<ex>WiFi Company Authenticator</ex></ph>
+  </message>
+  <message name="IDS_PORTAL_DETECTION_NOTIFICATION_BUTTON_EXTENSION_RETRY" desc="Button caption to connect using the authenticating extension">
+    Retry using <ph name="ExtensionName">$1<ex>WiFi Company Authenticator</ex></ph>
+  </message>
+  <message name="IDS_PORTAL_DETECTION_NOTIFICATION_BUTTON_PORTAL" desc="Button caption to open the captive portal login page.">
+    Visit captive portal login page
   </message>
 
   <!-- Locale Change Notification-->
@@ -5766,8 +5983,14 @@ All users must sign out to continue.
   <message name="IDS_NETWORK_UI_FORMAT_MANAGED" desc="Label in network property format dropdown for managed ONC properties">
     Managed ONC
   </message>
+  <message name="IDS_NETWORK_UI_FORMAT_STATE" desc="Label in network property format dropdown for ONC State properties">
+    ONC State
+  </message>
   <message name="IDS_NETWORK_UI_FORMAT_SHILL" desc="Label in network property format dropdown for Shill properties">
     Shill
+  </message>
+  <message name="IDS_NETWORK_UI_DEFAULT_NETWORK" desc="Text for the name and status of the default network">
+    Default Network: <ph name="NETWORK">$1<ex>Linksys</ex></ph> State: <ph name="STATE">$2<ex>Connected</ex></ph>
   </message>
   <message name="IDS_NETWORK_UI_VISIBLE_NETWORKS" desc="Label for list of visible networks">
     Visible Networks:
@@ -5778,51 +6001,6 @@ All users must sign out to continue.
 
   <message name="IDS_DEVICE_LOG_LINK_TEXT" desc="Message preceeding link to chrome://device-log">
     For network logs, see: <ph name="DEVICE_LOG_LINK">&lt;a href="chrome://device-log"&gt;chrome://device-log&lt;/a&gt;</ph>
-  </message>
-
-  <message name="IDS_DEVICE_LOG_TITLE" desc="Title of the chrome://device-log page">
-    Device Log
-  </message>
-  <message name="IDS_DEVICE_AUTO_REFRESH" desc="Instructions for how to auto-refresh the page">
-    Add a query param in URL to auto-refresh the page: chrome://device-log/?refresh=&lt;sec&gt;
-  </message>
-  <message name="IDS_DEVICE_LOG_REFRESH" desc="Button to refresh device log">
-    Refresh
-  </message>
-  <message name="IDS_DEVICE_LOG_LEVEL_SHOW" desc="'Show' label before logging level checkboxes">
-    Show:
-  </message>
-  <message name="IDS_DEVICE_LOG_LEVEL_ERROR" desc="Error logging level checkbox">
-    Error
-  </message>
-  <message name="IDS_DEVICE_LOG_LEVEL_USER" desc="User logging level checkbox">
-    User
-  </message>
-  <message name="IDS_DEVICE_LOG_LEVEL_EVENT" desc="Event logging level checkbox">
-    Event
-  </message>
-  <message name="IDS_DEVICE_LOG_LEVEL_DEBUG" desc="Debug logging level checkbox">
-    Debug
-  </message>
-  <message name="IDS_DEVICE_LOG_TYPE_LOGIN" desc="Checkbox to enable showing events of type LOGIN">
-    Login
-  </message>
-  <message name="IDS_DEVICE_LOG_TYPE_NETWORK" desc="Checkbox to enable showing events of type NETWORK">
-    Network
-  </message>
-  <message name="IDS_DEVICE_LOG_TYPE_POWER" desc="Checkbox to enable showing events of type POWER">
-    Power
-  </message>
-  <message name="IDS_DEVICE_LOG_FILEINFO" desc="File info checkbox in device event log">
-    File Info
-  </message>
-  <message name="IDS_DEVICE_LOG_TIME_DETAIL" desc="Detailed timestamps checkbox in device event log">
-    Detailed Timestamps
-  </message>
-  <message name="IDS_DEVICE_LOG_ENTRY" desc="Format string for lines in chrome://device-log.">
-    [<ph name="TIMESTAMP">$1<ex>Timestamp</ex></ph>]
-    <ph name="FILE_INFO">$2<ex>file:123</ex></ph>
-    <ph name="EVENT_NAME">$3<ex>Event Description</ex></ph>
   </message>
 
   <!-- About NFC Debug UI display strings. They aren't being internationalized bacause this page is meant for debugging only. -->
@@ -5966,6 +6144,18 @@ All users must sign out to continue.
   <message name="IDS_CONSUMER_MANAGEMENT_ENROLLMENT_FAILURE_NOTIFICATION_BODY" desc="The body of the desktop notification shown when consumer management enrollment fails">
     Enrollment in Google Device Manager was not successful.
   </message>
+  <message name="IDS_CONSUMER_MANAGEMENT_UNENROLLMENT_NOTIFICATION_TITLE" desc="The title of the desktop notification shown when consumer management unenrollment is completed">
+    Unenrolled
+  </message>
+  <message name="IDS_CONSUMER_MANAGEMENT_UNENROLLMENT_NOTIFICATION_BODY" desc="The body of the desktop notification shown when consumer management unenrollment is completed">
+    This device can no longer be managed remotely by the owner (you).
+  </message>
+  <message name="IDS_CONSUMER_MANAGEMENT_UNENROLLMENT_FAILURE_NOTIFICATION_TITLE" desc="The title of the desktop notification shown when consumer management unenrollment fails">
+    Failed to unenroll
+  </message>
+  <message name="IDS_CONSUMER_MANAGEMENT_UNENROLLMENT_FAILURE_NOTIFICATION_BODY" desc="The body of the desktop notification shown when consumer management unenrollment fails">
+    Unenrollment from remote management was not successful.
+  </message>
   <message name="IDS_CONSUMER_MANAGEMENT_NOTIFICATION_MODIFY_SETTINGS_BUTTON" desc="The label of the modify settings button on the desktop notification shown when consumer management enrollment or unenrollment is completed">
     Modify settings
   </message>
@@ -5989,4 +6179,54 @@ All users must sign out to continue.
   <message name="IDS_SET_TIME_TIME_LABEL" desc="Label for the time input element.">
     System time
   </message>
+
+  <message name="IDS_FLAGS_DISABLE_RESOLVE_TIMEZONE_BY_GEOLOCATION_NAME" desc="Title for the flag to disable automatic timezone update on user location change.">
+    Disable automatic timezone update by geolocation
+  </message>
+  <message name="IDS_FLAGS_DISABLE_RESOLVE_TIMEZONE_BY_GEOLOCATION_DESCRIPTION" desc="Description for the flag to disable user setting to automatically update timezone by user geolocation.">
+    If set, automatic timezone update by the current geolocation is turned off.
+  </message>
+  <message name="IDS_FLAGS_DISABLE_WEBVIEW_SIGNIN_FLOW_NAME" desc="Title for the flag to disable the new WebView-based sign-in flow.">
+    Disable WebView-based sign-in flow
+  </message>
+  <message name="IDS_FLAGS_DISABLE_WEBVIEW_SIGNIN_FLOW_DESCRIPTION" desc="Description for the flag to disable the new WebView-based sign-in flow.">
+    If set, sign-in will be performed using the old GAIA flow instead of the new WebView-based one.
+  </message>
+  <message name="IDS_OPTIONS_RESOLVE_TIMEZONE_BY_GEOLOCATION_DESCRIPTION" desc="Label for checkbox to allow automatic timezone update by user geolocation.">
+    Set time zone automatically using your location
+  </message>
+  <message name="IDS_FLAGS_ENABLE_FIREWALL_HOLE_PUNCHING_NAME" desc="Name of the option to enable punching holes in the Chrome OS firewall.">
+    Enable firewall hole punching.
+  </message>
+  <message name="IDS_FLAGS_ENABLE_FIREWALL_HOLE_PUNCHING_DESCRIPTION" desc="Description of the option to enable punching holes in the Chrome OS firewall.">
+    Enable punching holes in the Chrome OS firewall for Chrome Apps that open a TCP/IP server socket or UDP socket.
+  </message>
+  <message name="IDS_FILE_SYSTEM_REQUEST_FILE_SYSTEM_DIALOG_TITLE" desc="Title of a prompt dialog for granting permissions to a volume (eg. USB drive, SD card, MTP device) with the specified name.">
+    Permission requested
+  </message>
+  <message name="IDS_FILE_SYSTEM_REQUEST_FILE_SYSTEM_DIALOG_MESSAGE" desc="Message in a prompt dialog for granting read-only permissions to a volume (eg. USB drive, SD card, MTP device) with the specified name to the extension.">
+    <ph name="APP_NAME">$1<ex>Super Kiosk app</ex></ph> wants to copy files from <ph name="VOLUME_NAME">$2<ex>FooBar 4GB</ex></ph>.
+  </message>
+  <message name="IDS_FILE_SYSTEM_REQUEST_FILE_SYSTEM_DIALOG_WRITABLE_MESSAGE" desc="Message in a prompt dialog for granting full permissions (read, write, delete, create files and directories) to a volume (eg. USB drive, SD card, MTP device) with the specified name to the extension.">
+    <ph name="APP_NAME">$1<ex>Super Kiosk app</ex></ph> wants to access <ph name="VOLUME_NAME">$2<ex>FooBar 4GB</ex></ph>. It may modify or delete your files.
+  </message>
+  <message name="IDS_FILE_SYSTEM_REQUEST_FILE_SYSTEM_DIALOG_ALLOW_BUTTON" desc="Label on the button to grant permissions.">
+    Allow
+  </message>
+  <message name="IDS_FILE_SYSTEM_REQUEST_FILE_SYSTEM_DIALOG_DENY_BUTTON" desc="Label on the button to reject permissions.">
+    Deny
+  </message>
+  <message name="IDS_FLAG_ENABLE_MTP_WRITE_SUPPORT_NAME" desc="Name of the option to enable mtp write support.">
+    Enable MTP write support
+  </message>
+  <message name="IDS_FLAG_ENABLE_MTP_WRITE_SUPPORT_DESCRIPTION" desc="Description of the option to enable mtp write support.">
+    Enable MTP write support in file manager. Some operations (editing an image on MTP volume) are not supported yet.
+  </message>
+  <message name="IDS_FILE_SYSTEM_REQUEST_FILE_SYSTEM_NOTIFICATION_MESSAGE" desc="Message in a notification about granted read-only pemissions (read, write, delete, create files and directories) to a volume (eg. USB drive, SD card, MTP device) with the specified name to the extension.">
+    Read-only access to <ph name="VOLUME_NAME">$1<ex>FooBar 4GB</ex></ph> has been granted.
+  </message>
+  <message name="IDS_FILE_SYSTEM_REQUEST_FILE_SYSTEM_NOTIFICATION_WRITABLE_MESSAGE" desc="Message in a notification about granted full permissions (read, write, delete, create files and directories) to a volume (eg. USB drive, SD card, MTP device) with the specified name to the extension.">
+    Read and write access to <ph name="VOLUME_NAME">$1<ex>FooBar 4GB</ex></ph> has been granted.
+  </message>
+
 </grit-part>

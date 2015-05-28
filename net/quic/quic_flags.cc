@@ -13,9 +13,6 @@ bool FLAGS_quic_use_time_loss_detection = false;
 // CHLO.
 bool FLAGS_use_early_return_when_verifying_chlo = true;
 
-// If true, QUIC crypto reject message will include the reasons for rejection.
-bool FLAGS_send_quic_crypto_reject_reason = false;
-
 // If true, QUIC connections will support FEC protection of data while sending
 // packets, to reduce latency of data delivery to the application. The client
 // must also request FEC protection for the server to use FEC.
@@ -28,46 +25,30 @@ bool FLAGS_quic_use_bbr_congestion_control = false;
 // connection options.
 bool FLAGS_quic_allow_bbr = false;
 
-// If true, truncate QUIC connection IDs if the client requests it.
-bool FLAGS_allow_truncated_connection_ids_for_quic = true;
-
-// Do not flip this flag.  jokulik plans more testing and additional monitoring
-// before the flag can go the auto-flip process.
-//
-// If true, record the timestamp for the last sent new packet before the call to
-// WritePacket, rather than after in QUIC.
-bool FLAGS_quic_record_send_time_before_write = false;
-
-// If true, enables the QUIC bandwidth resumption experiment (triggered by
-// Chrome/Finch).
-bool FLAGS_quic_enable_bandwidth_resumption_experiment = true;
-
-// If true, QUIC congestion control will be paced.  If false, pacing may be
-// controlled by QUIC connection options in the config or by enabling BBR
-// congestion control.
-bool FLAGS_quic_enable_pacing = false;
-
-// If true, the silent close option will be honored.
-bool FLAGS_quic_allow_silent_close = true;
-
-// If true, use std::cbrt instead of custom cube root.
-bool FLAGS_quic_use_std_cbrt = true;
-
-// If true, the QUIC packet generator will not attempt to queue multiple ACK
-// frames.
-bool FLAGS_quic_disallow_multiple_pending_ack_frames = true;
-
 // If true, then the source address tokens generated for QUIC connects will
 // store multiple addresses.
 bool FLAGS_quic_use_multiple_address_in_source_tokens = false;
 
-// If true, an attempt to send an empty data string with no FIN will return
-// early, and not create a frame.
-bool FLAGS_quic_empty_data_no_fin_early_return = true;
+// Time period for which a given connection_id should live in the time-wait
+// state.
+int64 FLAGS_quic_time_wait_list_seconds = 5;
 
-// If true, if min RTT and/or SRTT have not yet been set then initial RTT is
-// used to initialize them in a call to QuicConnection::GetStats.
-bool FLAGS_quic_use_initial_rtt_for_stats = true;
+// Currently, this number is quite conservative.  The max QPS limit for an
+// individual server silo is currently set to 1000 qps, though the actual max
+// that we see in the wild is closer to 450 qps. Regardless, this means that the
+// longest time-wait list we should see is 5 seconds * 1000 qps = 5000.  If we
+// allow for an order of magnitude leeway, we have 50000.
+//
+// Maximum number of connections on the time-wait list. A negative value implies
+// no configured limit.
+int64 FLAGS_quic_time_wait_list_max_connections = 50000;
 
-// If true, uses the last sent packet for the RTO timer instead of the earliest.
-bool FLAGS_quic_rto_uses_last_sent = true;
+// Use small QUIC packet sizes by default.
+bool FLAGS_quic_small_default_packet_size = true;
+
+// Do not retransmit data for streams that have been reset.
+bool FLAGS_quic_do_not_retransmit_for_reset_streams = true;
+
+// If true, use the peer's receive buffer size to set the max CWND used by the
+// send algorithms.
+bool FLAGS_quic_limit_max_cwnd_to_receive_buffer = true;

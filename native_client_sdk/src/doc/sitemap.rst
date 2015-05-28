@@ -51,9 +51,12 @@ Contents:
    c-api-beta.rst
    c-api-dev.rst
    cpp-api.rst
+   c-api-beta.rst
    cpp-api-beta.rst
+   c-api-dev.rst
    cpp-api-dev.rst
    reference/index.rst
+   reference/ideas.rst
    reference/pnacl-bitcode-abi.rst
    reference/pnacl-bitcode-manual.rst
    reference/pnacl-c-cpp-language-support.rst

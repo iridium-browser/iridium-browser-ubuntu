@@ -38,11 +38,6 @@ extern int main(int argc, char** argv);
 
 namespace {
 
-// These two command line flags are supported for DumpRenderTree, which needs
-// three fifos rather than a combined one: one for stderr, stdin and stdout.
-const char kSeparateStderrFifo[] = "separate-stderr-fifo";
-const char kCreateStdinFifo[] = "create-stdin-fifo";
-
 // The test runner script writes the command line file in
 // "/data/local/tmp".
 static const char kCommandLineFilePath[] =
@@ -65,20 +60,6 @@ void SignalHandler(int sig, siginfo_t* info, void* reserved) {
   g_old_sa[sig].sa_sigaction(sig, info, reserved);
 }
 
-// TODO(nileshagrawal): now that we're using FIFO, test scripts can detect EOF.
-// Remove the signal handlers.
-void InstallHandlers() {
-  struct sigaction sa;
-  memset(&sa, 0, sizeof(sa));
-
-  sa.sa_sigaction = SignalHandler;
-  sa.sa_flags = SA_SIGINFO;
-
-  for (unsigned int i = 0; kExceptionSignals[i] != -1; ++i) {
-    sigaction(kExceptionSignals[i], &sa, &g_old_sa[kExceptionSignals[i]]);
-  }
-}
-
 // Writes printf() style string to Android's logger where |priority| is one of
 // the levels defined in <android/log.h>.
 void AndroidLog(int priority, const char* format, ...) {
@@ -88,42 +69,15 @@ void AndroidLog(int priority, const char* format, ...) {
   va_end(args);
 }
 
-// Ensures that the fifo at |path| is created by deleting whatever is at |path|
-// prior to (re)creating the fifo, otherwise logs the error and terminates the
-// program.
-void EnsureCreateFIFO(const base::FilePath& path) {
-  unlink(path.value().c_str());
-  if (base::android::CreateFIFO(path, 0666))
-    return;
-
-  AndroidLog(ANDROID_LOG_ERROR, "Failed to create fifo %s: %s\n",
-             path.value().c_str(), strerror(errno));
-  exit(EXIT_FAILURE);
-}
-
-// Ensures that |stream| is redirected to |path|, otherwise logs the error and
-// terminates the program.
-void EnsureRedirectStream(FILE* stream,
-                          const base::FilePath& path,
-                          const char* mode) {
-  if (base::android::RedirectStream(stream, path, mode))
-    return;
-
-  AndroidLog(ANDROID_LOG_ERROR, "Failed to redirect stream to file: %s: %s\n",
-             path.value().c_str(), strerror(errno));
-  exit(EXIT_FAILURE);
-}
-
 }  // namespace
 
 static void RunTests(JNIEnv* env,
                      jobject obj,
                      jstring jcommand_line_flags,
                      jstring jcommand_line_file_path,
-                     jstring jfiles_dir,
+                     jstring jstdout_file_path,
+                     jboolean jstdout_fifo,
                      jobject app_context) {
-  base::AtExitManager exit_manager;
-
   // Command line initialized basically, will be fully initialized later.
   static const char* const kInitialArgv[] = { "ChromeTestActivity" };
   base::CommandLine::Init(arraysize(kInitialArgv), kInitialArgv);
@@ -156,37 +110,25 @@ static void RunTests(JNIEnv* env,
   const base::CommandLine& command_line =
       *base::CommandLine::ForCurrentProcess();
 
-  base::FilePath files_dir(
-      base::android::ConvertJavaStringToUTF8(env, jfiles_dir));
+  base::FilePath stdout_file_path(
+      base::android::ConvertJavaStringToUTF8(env, jstdout_file_path));
 
   // A few options, such "--gtest_list_tests", will just use printf directly
   // Always redirect stdout to a known file.
-  base::FilePath fifo_path(files_dir.Append(base::FilePath("test.fifo")));
-  EnsureCreateFIFO(fifo_path);
-
-  base::FilePath stderr_fifo_path, stdin_fifo_path;
-
-  // DumpRenderTree needs a separate fifo for the stderr output. For all
-  // other tests, insert stderr content to the same fifo we use for stdout.
-  if (command_line.HasSwitch(kSeparateStderrFifo)) {
-    stderr_fifo_path = files_dir.Append(base::FilePath("stderr.fifo"));
-    EnsureCreateFIFO(stderr_fifo_path);
+  unlink(stdout_file_path.value().c_str());
+  if (jstdout_fifo) {
+    if (!base::android::CreateFIFO(stdout_file_path, 0666)) {
+      AndroidLog(ANDROID_LOG_ERROR, "Failed to create fifo %s: %s\n",
+                 stdout_file_path.value().c_str(), strerror(errno));
+      exit(EXIT_FAILURE);
+    }
   }
-
-  // DumpRenderTree uses stdin to receive input about which test to run.
-  if (command_line.HasSwitch(kCreateStdinFifo)) {
-    stdin_fifo_path = files_dir.Append(base::FilePath("stdin.fifo"));
-    EnsureCreateFIFO(stdin_fifo_path);
+  if (!base::android::RedirectStream(stdout, stdout_file_path, "w")) {
+    AndroidLog(ANDROID_LOG_ERROR, "Failed to redirect stream to file: %s: %s\n",
+               stdout_file_path.value().c_str(), strerror(errno));
+    exit(EXIT_FAILURE);
   }
-
-  // Only redirect the streams after all fifos have been created.
-  EnsureRedirectStream(stdout, fifo_path, "w");
-  if (!stdin_fifo_path.empty())
-    EnsureRedirectStream(stdin, stdin_fifo_path, "r");
-  if (!stderr_fifo_path.empty())
-    EnsureRedirectStream(stderr, stderr_fifo_path, "w");
-  else
-    dup2(STDOUT_FILENO, STDERR_FILENO);
+  dup2(STDOUT_FILENO, STDERR_FILENO);
 
   if (command_line.HasSwitch(switches::kWaitForDebugger)) {
     AndroidLog(ANDROID_LOG_VERBOSE,
@@ -199,16 +141,21 @@ static void RunTests(JNIEnv* env,
   main(argc, &argv[0]);
 }
 
-// This is called by the VM when the shared library is first loaded.
-JNI_EXPORT jint JNI_OnLoad(JavaVM* vm, void* reserved) {
-  // Install signal handlers to detect crashes.
-  InstallHandlers();
+bool RegisterNativeTestJNI(JNIEnv* env) {
+  return RegisterNativesImpl(env);
+}
 
-  base::android::InitVM(vm);
-  JNIEnv* env = base::android::AttachCurrentThread();
-  if (!RegisterNativesImpl(env)) {
-    return -1;
+
+// TODO(nileshagrawal): now that we're using FIFO, test scripts can detect EOF.
+// Remove the signal handlers.
+void InstallHandlers() {
+  struct sigaction sa;
+  memset(&sa, 0, sizeof(sa));
+
+  sa.sa_sigaction = SignalHandler;
+  sa.sa_flags = SA_SIGINFO;
+
+  for (unsigned int i = 0; kExceptionSignals[i] != -1; ++i) {
+    sigaction(kExceptionSignals[i], &sa, &g_old_sa[kExceptionSignals[i]]);
   }
-
-  return JNI_VERSION_1_4;
 }

@@ -16,7 +16,7 @@ SpdyMajorVersion NextProtoToSpdyMajorVersion(NextProto next_proto) {
     case kProtoSPDY31:
       return SPDY3;
     case kProtoSPDY4_14:
-    case kProtoSPDY4_15:
+    case kProtoSPDY4:
       return SPDY4;
     case kProtoUnknown:
     case kProtoHTTP11:
@@ -188,6 +188,10 @@ void BufferedSpdyFramer::OnStreamFrameData(SpdyStreamId stream_id,
                                            size_t len,
                                            bool fin) {
   visitor_->OnStreamFrameData(stream_id, data, len, fin);
+}
+
+void BufferedSpdyFramer::OnStreamPadding(SpdyStreamId stream_id, size_t len) {
+  visitor_->OnStreamPadding(stream_id, len);
 }
 
 void BufferedSpdyFramer::OnSettings(bool clear_persisted) {

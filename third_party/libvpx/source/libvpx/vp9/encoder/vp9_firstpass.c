@@ -38,6 +38,8 @@
 #define OUTPUT_FPF          0
 #define ARF_STATS_OUTPUT    0
 
+#define GROUP_ADAPTIVE_MAXQ 0
+
 #define BOOST_BREAKOUT      12.5
 #define BOOST_FACTOR        12.5
 #define ERR_DIVISOR         128.0
@@ -54,18 +56,23 @@
 #define NEW_MV_MODE_PENALTY 32
 #define SVC_FACTOR_PT_LOW   0.45
 #define DARK_THRESH         64
+#define DEFAULT_GRP_WEIGHT  1.0
+#define RC_FACTOR_MIN       0.75
+#define RC_FACTOR_MAX       1.75
+
+
+#define INTRA_WEIGHT_EXPERIMENT 0
+#if INTRA_WEIGHT_EXPERIMENT
+#define NCOUNT_INTRA_THRESH 8192
+#define NCOUNT_INTRA_FACTOR 3
+#define NCOUNT_FRAME_II_THRESH 5.0
+#endif
 
 #define DOUBLE_DIVIDE_CHECK(x) ((x) < 0 ? (x) - 0.000001 : (x) + 0.000001)
 
 #if ARF_STATS_OUTPUT
 unsigned int arf_count = 0;
 #endif
-
-static void swap_yv12(YV12_BUFFER_CONFIG *a, YV12_BUFFER_CONFIG *b) {
-  YV12_BUFFER_CONFIG temp = *a;
-  *a = *b;
-  *b = temp;
-}
 
 // Resets the first pass file to the given position using a relative seek from
 // the current position.
@@ -107,9 +114,9 @@ static void output_stats(FIRSTPASS_STATS *stats,
     FILE *fpfile;
     fpfile = fopen("firstpass.stt", "a");
 
-    fprintf(fpfile, "%12.0f %12.4f %12.0f %12.0f %12.0f %12.4f %12.4f"
-            "%12.4f %12.4f %12.4f %12.4f %12.4f %12.4f %12.4f"
-            "%12.0f %12.0f %12.4f %12.0f %12.0f %12.4f\n",
+    fprintf(fpfile, "%12.0lf %12.4lf %12.0lf %12.0lf %12.0lf %12.4lf %12.4lf"
+            "%12.4lf %12.4lf %12.4lf %12.4lf %12.4lf %12.4lf %12.4lf"
+            "%12.4lf %12.0lf %12.0lf %12.0lf %12.4lf\n",
             stats->frame,
             stats->weight,
             stats->intra_error,
@@ -460,12 +467,6 @@ void vp9_first_pass(VP9_COMP *cpi, const struct lookahead_entry *source) {
   int i;
 
   int recon_yoffset, recon_uvoffset;
-  YV12_BUFFER_CONFIG *const lst_yv12 = get_ref_frame_buffer(cpi, LAST_FRAME);
-  YV12_BUFFER_CONFIG *gld_yv12 = get_ref_frame_buffer(cpi, GOLDEN_FRAME);
-  YV12_BUFFER_CONFIG *const new_yv12 = get_frame_new_buffer(cm);
-  int recon_y_stride = lst_yv12->y_stride;
-  int recon_uv_stride = lst_yv12->uv_stride;
-  int uv_mb_height = 16 >> (lst_yv12->y_height > lst_yv12->uv_height);
   int64_t intra_error = 0;
   int64_t coded_error = 0;
   int64_t sr_coded_error = 0;
@@ -477,17 +478,28 @@ void vp9_first_pass(VP9_COMP *cpi, const struct lookahead_entry *source) {
   int intercount = 0;
   int second_ref_count = 0;
   const int intrapenalty = INTRA_MODE_PENALTY;
-  int neutral_count = 0;
+  double neutral_count;
   int new_mv_count = 0;
   int sum_in_vectors = 0;
   MV lastmv = {0, 0};
   TWO_PASS *twopass = &cpi->twopass;
   const MV zero_mv = {0, 0};
+  int recon_y_stride, recon_uv_stride, uv_mb_height;
+
+  YV12_BUFFER_CONFIG *const lst_yv12 = get_ref_frame_buffer(cpi, LAST_FRAME);
+  YV12_BUFFER_CONFIG *gld_yv12 = get_ref_frame_buffer(cpi, GOLDEN_FRAME);
+  YV12_BUFFER_CONFIG *const new_yv12 = get_frame_new_buffer(cm);
   const YV12_BUFFER_CONFIG *first_ref_buf = lst_yv12;
+
   LAYER_CONTEXT *const lc = is_two_pass_svc(cpi) ?
         &cpi->svc.layer_context[cpi->svc.spatial_layer_id] : NULL;
   double intra_factor;
   double brightness_factor;
+  BufferPool *const pool = cm->buffer_pool;
+
+  // First pass code requires valid last and new frame buffers.
+  assert(new_yv12 != NULL);
+  assert((lc != NULL) || frame_is_intra_only(cm) || (lst_yv12 != NULL));
 
 #if CONFIG_FP_MB_STATS
   if (cpi->use_fp_mb_stats) {
@@ -499,6 +511,7 @@ void vp9_first_pass(VP9_COMP *cpi, const struct lookahead_entry *source) {
 
   intra_factor = 0.0;
   brightness_factor = 0.0;
+  neutral_count = 0.0;
 
   set_first_pass_params(cpi);
   vp9_set_quantizer(cm, find_fp_qindex(cm->bit_depth));
@@ -532,19 +545,13 @@ void vp9_first_pass(VP9_COMP *cpi, const struct lookahead_entry *source) {
     }
 
     if (cpi->ref_frame_flags & VP9_GOLD_FLAG) {
-      const int ref_idx =
-          cm->ref_frame_map[get_ref_frame_idx(cpi, GOLDEN_FRAME)];
-      const int scaled_idx = cpi->scaled_ref_idx[GOLDEN_FRAME - 1];
-
-      gld_yv12 = (scaled_idx != ref_idx) ? &cm->frame_bufs[scaled_idx].buf :
-                 get_ref_frame_buffer(cpi, GOLDEN_FRAME);
+      gld_yv12 = vp9_get_scaled_ref_frame(cpi, GOLDEN_FRAME);
+      if (gld_yv12 == NULL) {
+        gld_yv12 = get_ref_frame_buffer(cpi, GOLDEN_FRAME);
+      }
     } else {
       gld_yv12 = NULL;
     }
-
-    recon_y_stride = new_yv12->y_stride;
-    recon_uv_stride = new_yv12->uv_stride;
-    uv_mb_height = 16 >> (new_yv12->y_height > new_yv12->uv_height);
 
     set_ref_ptrs(cm, xd,
                  (cpi->ref_frame_flags & VP9_LAST_FLAG) ? LAST_FRAME: NONE,
@@ -557,8 +564,11 @@ void vp9_first_pass(VP9_COMP *cpi, const struct lookahead_entry *source) {
   vp9_setup_block_planes(&x->e_mbd, cm->subsampling_x, cm->subsampling_y);
 
   vp9_setup_src_planes(x, cpi->Source, 0, 0);
-  vp9_setup_pre_planes(xd, 0, first_ref_buf, 0, 0, NULL);
   vp9_setup_dst_planes(xd->plane, new_yv12, 0, 0);
+
+  if (!frame_is_intra_only(cm)) {
+    vp9_setup_pre_planes(xd, 0, first_ref_buf, 0, 0, NULL);
+  }
 
   xd->mi = cm->mi;
   xd->mi[0].src_mi = &xd->mi[0];
@@ -578,6 +588,10 @@ void vp9_first_pass(VP9_COMP *cpi, const struct lookahead_entry *source) {
 
   // Tiling is ignored in the first pass.
   vp9_tile_init(&tile, cm, 0, 0);
+
+  recon_y_stride = new_yv12->y_stride;
+  recon_uv_stride = new_yv12->uv_stride;
+  uv_mb_height = 16 >> (new_yv12->y_height > new_yv12->uv_height);
 
   for (mb_row = 0; mb_row < cm->mb_rows; ++mb_row) {
     MV best_ref_mv = {0, 0};
@@ -813,12 +827,28 @@ void vp9_first_pass(VP9_COMP *cpi, const struct lookahead_entry *source) {
 #endif
 
         if (motion_error <= this_error) {
+          vp9_clear_system_state();
+
           // Keep a count of cases where the inter and intra were very close
           // and very low. This helps with scene cut detection for example in
           // cropped clips with black bars at the sides or top and bottom.
+#if INTRA_WEIGHT_EXPERIMENT
           if (((this_error - intrapenalty) * 9 <= motion_error * 10) &&
-              this_error < 2 * intrapenalty)
-            ++neutral_count;
+              (this_error < (2 * intrapenalty))) {
+            neutral_count += 1.0;
+          // Also track cases where the intra is not much worse than the inter
+          // and use this in limiting the GF/arf group length.
+          } else if ((this_error > NCOUNT_INTRA_THRESH) &&
+                     (this_error < (NCOUNT_INTRA_FACTOR * motion_error))) {
+            neutral_count += (double)motion_error /
+                             DOUBLE_DIVIDE_CHECK((double)this_error);
+          }
+#else
+          if (((this_error - intrapenalty) * 9 <= motion_error * 10) &&
+              (this_error < (2 * intrapenalty))) {
+            neutral_count += 1.0;
+          }
+#endif
 
           mv.row *= 8;
           mv.col *= 8;
@@ -1014,7 +1044,8 @@ void vp9_first_pass(VP9_COMP *cpi, const struct lookahead_entry *source) {
        ((twopass->this_frame_stats.intra_error /
          DOUBLE_DIVIDE_CHECK(twopass->this_frame_stats.coded_error)) > 2.0))) {
     if (gld_yv12 != NULL) {
-      vp8_yv12_copy_frame(lst_yv12, gld_yv12);
+      ref_cnt_fb(pool->frame_bufs, &cm->ref_frame_map[cpi->gld_fb_idx],
+                 cm->ref_frame_map[cpi->lst_fb_idx]);
     }
     twopass->sr_update_lag = 1;
   } else {
@@ -1026,14 +1057,17 @@ void vp9_first_pass(VP9_COMP *cpi, const struct lookahead_entry *source) {
   if (lc != NULL) {
     vp9_update_reference_frames(cpi);
   } else {
-    // Swap frame pointers so last frame refers to the frame we just compressed.
-    swap_yv12(lst_yv12, new_yv12);
+    // The frame we just compressed now becomes the last frame.
+    ref_cnt_fb(pool->frame_bufs, &cm->ref_frame_map[cpi->lst_fb_idx],
+               cm->new_fb_idx);
   }
 
   // Special case for the first frame. Copy into the GF buffer as a second
   // reference.
-  if (cm->current_video_frame == 0 && gld_yv12 != NULL && lc == NULL) {
-    vp8_yv12_copy_frame(lst_yv12, gld_yv12);
+  if (cm->current_video_frame == 0 && cpi->gld_fb_idx != INVALID_IDX &&
+      lc == NULL) {
+    ref_cnt_fb(pool->frame_bufs, &cm->ref_frame_map[cpi->gld_fb_idx],
+               cm->ref_frame_map[cpi->lst_fb_idx]);
   }
 
   // Use this to see what the first pass reconstruction looks like.
@@ -1082,8 +1116,9 @@ static double calc_correction_factor(double err_per_mb,
 #define EDIV_SIZE_FACTOR 800
 
 static int get_twopass_worst_quality(const VP9_COMP *cpi,
-                                     const FIRSTPASS_STATS *stats,
-                                     int section_target_bandwidth) {
+                                     const double section_err,
+                                     int section_target_bandwidth,
+                                     double group_weight_factor) {
   const RATE_CONTROL *const rc = &cpi->rc;
   const VP9EncoderConfig *const oxcf = &cpi->oxcf;
 
@@ -1092,7 +1127,6 @@ static int get_twopass_worst_quality(const VP9_COMP *cpi,
   } else {
     const int num_mbs = (cpi->oxcf.resize_mode != RESIZE_NONE)
                         ? cpi->initial_mbs : cpi->common.MBs;
-    const double section_err = stats->coded_error / stats->count;
     const double err_per_mb = section_err / num_mbs;
     const double speed_term = 1.0 + 0.04 * oxcf->speed;
     const double ediv_size_correction = num_mbs / EDIV_SIZE_FACTOR;
@@ -1101,8 +1135,10 @@ static int get_twopass_worst_quality(const VP9_COMP *cpi,
 
     int q;
     int is_svc_upper_layer = 0;
+
     if (is_two_pass_svc(cpi) && cpi->svc.spatial_layer_id > 0)
       is_svc_upper_layer = 1;
+
 
     // Try and pick a max Q that will be high enough to encode the
     // content at the given rate.
@@ -1113,9 +1149,10 @@ static int get_twopass_worst_quality(const VP9_COMP *cpi,
                                  is_svc_upper_layer ? SVC_FACTOR_PT_LOW :
                                  FACTOR_PT_LOW, FACTOR_PT_HIGH, q,
                                  cpi->common.bit_depth);
-      const int bits_per_mb = vp9_rc_bits_per_mb(INTER_FRAME, q,
-                                                 factor * speed_term,
-                                                 cpi->common.bit_depth);
+      const int bits_per_mb =
+        vp9_rc_bits_per_mb(INTER_FRAME, q,
+                           factor * speed_term * group_weight_factor,
+                           cpi->common.bit_depth);
       if (bits_per_mb <= target_norm_bits_per_mb)
         break;
     }
@@ -1127,7 +1164,38 @@ static int get_twopass_worst_quality(const VP9_COMP *cpi,
   }
 }
 
-extern void vp9_new_framerate(VP9_COMP *cpi, double framerate);
+static void setup_rf_level_maxq(VP9_COMP *cpi) {
+  int i;
+  RATE_CONTROL *const rc = &cpi->rc;
+  for (i = INTER_NORMAL; i < RATE_FACTOR_LEVELS; ++i) {
+    int qdelta = vp9_frame_type_qdelta(cpi, i, rc->worst_quality);
+    rc->rf_level_maxq[i] = MAX(rc->worst_quality + qdelta, rc->best_quality);
+  }
+}
+
+void vp9_init_subsampling(VP9_COMP *cpi) {
+  const VP9_COMMON *const cm = &cpi->common;
+  RATE_CONTROL *const rc = &cpi->rc;
+  const int w = cm->width;
+  const int h = cm->height;
+  int i;
+
+  for (i = 0; i < FRAME_SCALE_STEPS; ++i) {
+    // Note: Frames with odd-sized dimensions may result from this scaling.
+    rc->frame_width[i] = (w * 16) / frame_scale_factor[i];
+    rc->frame_height[i] = (h * 16) / frame_scale_factor[i];
+  }
+
+  setup_rf_level_maxq(cpi);
+}
+
+void calculate_coded_size(VP9_COMP *cpi,
+                          int *scaled_frame_width,
+                          int *scaled_frame_height) {
+  RATE_CONTROL *const rc = &cpi->rc;
+  *scaled_frame_width = rc->frame_width[rc->frame_size_selector];
+  *scaled_frame_height = rc->frame_height[rc->frame_size_selector];
+}
 
 void vp9_init_second_pass(VP9_COMP *cpi) {
   SVC *const svc = &cpi->svc;
@@ -1197,6 +1265,10 @@ void vp9_init_second_pass(VP9_COMP *cpi) {
   // Static sequence monitor variables.
   twopass->kf_zeromotion_pct = 100;
   twopass->last_kfgroup_zeromotion_pct = 100;
+
+  if (oxcf->resize_mode != RESIZE_NONE) {
+    vp9_init_subsampling(cpi);
+  }
 }
 
 #define SR_DIFF_PART 0.0015
@@ -1213,17 +1285,27 @@ static double get_sr_decay_rate(const VP9_COMP *cpi,
   double sr_diff =
       (frame->sr_coded_error - frame->coded_error) / num_mbs;
   double sr_decay = 1.0;
+  double modified_pct_inter;
+  double modified_pcnt_intra;
   const double motion_amplitude_factor =
     frame->pcnt_motion * ((frame->mvc_abs + frame->mvr_abs) / 2);
-  const double pcnt_intra = 100 * (1.0 - frame->pcnt_inter);
+
+  modified_pct_inter = frame->pcnt_inter;
+#if INTRA_WEIGHT_EXPERIMENT
+  if ((frame->intra_error / DOUBLE_DIVIDE_CHECK(frame->coded_error)) <
+      (double)NCOUNT_FRAME_II_THRESH)
+    modified_pct_inter = frame->pcnt_inter - frame->pcnt_neutral;
+#endif
+  modified_pcnt_intra = 100 * (1.0 - modified_pct_inter);
+
 
   if ((sr_diff > LOW_SR_DIFF_TRHESH)) {
     sr_diff = MIN(sr_diff, SR_DIFF_MAX);
     sr_decay = 1.0 - (SR_DIFF_PART * sr_diff) -
                (MOTION_AMP_PART * motion_amplitude_factor) -
-               (INTRA_PART * pcnt_intra);
+               (INTRA_PART * modified_pcnt_intra);
   }
-  return MAX(sr_decay, MIN(DEFAULT_DECAY_LIMIT, frame->pcnt_inter));
+  return MAX(sr_decay, MIN(DEFAULT_DECAY_LIMIT, modified_pct_inter));
 }
 
 // This function gives an estimate of how badly we believe the prediction
@@ -1689,8 +1771,9 @@ static void allocate_gf_group_bits(VP9_COMP *cpi, int64_t gf_group_bits,
 
 // Analyse and define a gf/arf group.
 static void define_gf_group(VP9_COMP *cpi, FIRSTPASS_STATS *this_frame) {
+  VP9_COMMON *const cm = &cpi->common;
   RATE_CONTROL *const rc = &cpi->rc;
-  const VP9EncoderConfig *const oxcf = &cpi->oxcf;
+  VP9EncoderConfig *const oxcf = &cpi->oxcf;
   TWO_PASS *const twopass = &cpi->twopass;
   FIRSTPASS_STATS next_frame;
   const FIRSTPASS_STATS *const start_pos = twopass->stats_in;
@@ -1699,6 +1782,9 @@ static void define_gf_group(VP9_COMP *cpi, FIRSTPASS_STATS *this_frame) {
   double boost_score = 0.0;
   double old_boost_score = 0.0;
   double gf_group_err = 0.0;
+#if GROUP_ADAPTIVE_MAXQ
+  double gf_group_raw_error = 0.0;
+#endif
   double gf_first_frame_err = 0.0;
   double mod_frame_err = 0.0;
 
@@ -1723,10 +1809,11 @@ static void define_gf_group(VP9_COMP *cpi, FIRSTPASS_STATS *this_frame) {
   int64_t gf_group_bits;
   double gf_group_error_left;
   int gf_arf_bits;
+  int is_key_frame = frame_is_intra_only(cm);
 
   // Reset the GF group data structures unless this is a key
   // frame in which case it will already have been done.
-  if (cpi->common.frame_type != KEY_FRAME) {
+  if (is_key_frame == 0) {
     vp9_zero(twopass->gf_group);
   }
 
@@ -1742,8 +1829,12 @@ static void define_gf_group(VP9_COMP *cpi, FIRSTPASS_STATS *this_frame) {
 
   // If this is a key frame or the overlay from a previous arf then
   // the error score / cost of this frame has already been accounted for.
-  if (cpi->common.frame_type == KEY_FRAME || rc->source_alt_ref_active)
+  if (is_key_frame || rc->source_alt_ref_active) {
     gf_group_err -= gf_first_frame_err;
+#if GROUP_ADAPTIVE_MAXQ
+    gf_group_raw_error -= this_frame->coded_error;
+#endif
+  }
 
   // Motion breakout threshold for loop below depends on image size.
   mv_ratio_accumulator_thresh =
@@ -1782,6 +1873,9 @@ static void define_gf_group(VP9_COMP *cpi, FIRSTPASS_STATS *this_frame) {
     // Accumulate error score of frames in this gf group.
     mod_frame_err = calculate_modified_err(twopass, oxcf, this_frame);
     gf_group_err += mod_frame_err;
+#if GROUP_ADAPTIVE_MAXQ
+    gf_group_raw_error += this_frame->coded_error;
+#endif
 
     if (EOF == input_stats(twopass, &next_frame))
       break;
@@ -1843,8 +1937,11 @@ static void define_gf_group(VP9_COMP *cpi, FIRSTPASS_STATS *this_frame) {
 
   twopass->gf_zeromotion_pct = (int)(zero_motion_accumulator * 1000.0);
 
+  // Was the group length constrained by the requirement for a new KF?
+  rc->constrained_gf_group = (i >= rc->frames_to_key) ? 1 : 0;
+
   // Set the interval until the next gf.
-  if (cpi->common.frame_type == KEY_FRAME || rc->source_alt_ref_active)
+  if (is_key_frame || rc->source_alt_ref_active)
     rc->baseline_gf_interval = i - 1;
   else
     rc->baseline_gf_interval = i;
@@ -1860,6 +1957,9 @@ static void define_gf_group(VP9_COMP *cpi, FIRSTPASS_STATS *this_frame) {
       if (EOF == input_stats(twopass, this_frame))
         break;
       gf_group_err += calculate_modified_err(twopass, oxcf, this_frame);
+#if GROUP_ADAPTIVE_MAXQ
+      gf_group_raw_error += this_frame->coded_error;
+#endif
     }
     rc->baseline_gf_interval = new_gf_interval;
   }
@@ -1890,6 +1990,34 @@ static void define_gf_group(VP9_COMP *cpi, FIRSTPASS_STATS *this_frame) {
   // Calculate the bits to be allocated to the gf/arf group as a whole
   gf_group_bits = calculate_total_gf_group_bits(cpi, gf_group_err);
 
+#if GROUP_ADAPTIVE_MAXQ
+  // Calculate an estimate of the maxq needed for the group.
+  // We are more agressive about correcting for sections
+  // where there could be significant overshoot than for easier
+  // sections where we do not wish to risk creating an overshoot
+  // of the allocated bit budget.
+  if ((cpi->oxcf.rc_mode != VPX_Q) && (rc->baseline_gf_interval > 1)) {
+    const int vbr_group_bits_per_frame =
+      (int)(gf_group_bits / rc->baseline_gf_interval);
+    const double group_av_err = gf_group_raw_error  / rc->baseline_gf_interval;
+    int tmp_q;
+    // rc factor is a weight factor that corrects for local rate control drift.
+    double rc_factor = 1.0;
+    if (rc->rate_error_estimate > 0) {
+      rc_factor = MAX(RC_FACTOR_MIN,
+                      (double)(100 - rc->rate_error_estimate) / 100.0);
+    } else {
+      rc_factor = MIN(RC_FACTOR_MAX,
+                      (double)(100 - rc->rate_error_estimate) / 100.0);
+    }
+    tmp_q =
+      get_twopass_worst_quality(cpi, group_av_err, vbr_group_bits_per_frame,
+                                twopass->kfgroup_inter_fraction * rc_factor);
+    twopass->active_worst_quality =
+      MAX(tmp_q, twopass->active_worst_quality >> 1);
+  }
+#endif
+
   // Calculate the extra bits to be used for boosted frame(s)
   gf_arf_bits = calculate_boost_bits(rc->baseline_gf_interval,
                                      rc->gfu_boost, gf_group_bits);
@@ -1905,7 +2033,7 @@ static void define_gf_group(VP9_COMP *cpi, FIRSTPASS_STATS *this_frame) {
   // also a key frame in which case it has already been accounted for.
   if (rc->source_alt_ref_pending) {
     gf_group_error_left = gf_group_err - mod_frame_err;
-  } else if (cpi->common.frame_type != KEY_FRAME) {
+  } else if (is_key_frame == 0) {
     gf_group_error_left = gf_group_err - gf_first_frame_err;
   } else {
     gf_group_error_left = gf_group_err;
@@ -1922,6 +2050,11 @@ static void define_gf_group(VP9_COMP *cpi, FIRSTPASS_STATS *this_frame) {
     twopass->section_intra_rating =
         calculate_section_intra_ratio(start_pos, twopass->stats_in_end,
                                       rc->baseline_gf_interval);
+  }
+
+  if (oxcf->resize_mode == RESIZE_DYNAMIC) {
+    // Default to starting GF groups at normal frame size.
+    cpi->rc.next_frame_size_selector = UNSCALED;
   }
 }
 
@@ -2113,7 +2246,7 @@ static void find_next_key_frame(VP9_COMP *cpi, FIRSTPASS_STATS *this_frame) {
     // Reset to the start of the group.
     reset_fpf_position(twopass, start_position);
 
-    kf_group_err = 0;
+    kf_group_err = 0.0;
 
     // Rescan to get the correct error data for the forced kf group.
     for (i = 0; i < rc->frames_to_key; ++i) {
@@ -2223,6 +2356,16 @@ static void find_next_key_frame(VP9_COMP *cpi, FIRSTPASS_STATS *this_frame) {
   kf_bits = calculate_boost_bits((rc->frames_to_key - 1),
                                   rc->kf_boost, twopass->kf_group_bits);
 
+  // Work out the fraction of the kf group bits reserved for the inter frames
+  // within the group after discounting the bits for the kf itself.
+  if (twopass->kf_group_bits) {
+    twopass->kfgroup_inter_fraction =
+      (double)(twopass->kf_group_bits - kf_bits) /
+      (double)twopass->kf_group_bits;
+  } else {
+    twopass->kfgroup_inter_fraction = 1.0;
+  }
+
   twopass->kf_group_bits -= kf_bits;
 
   // Save the bits to spend on the key frame.
@@ -2237,6 +2380,11 @@ static void find_next_key_frame(VP9_COMP *cpi, FIRSTPASS_STATS *this_frame) {
   // The count of bits left is adjusted elsewhere based on real coded frame
   // sizes.
   twopass->modified_error_left -= kf_group_err;
+
+  if (oxcf->resize_mode == RESIZE_DYNAMIC) {
+    // Default to normal-sized frame on keyframes.
+    cpi->rc.next_frame_size_selector = UNSCALED;
+  }
 }
 
 // Define the reference buffers that will be updated post encode.
@@ -2313,7 +2461,6 @@ void vp9_rc_get_second_pass_params(VP9_COMP *cpi) {
   GF_GROUP *const gf_group = &twopass->gf_group;
   int frames_left;
   FIRSTPASS_STATS this_frame;
-  FIRSTPASS_STATS this_frame_copy;
 
   int target_rate;
   LAYER_CONTEXT *const lc = is_two_pass_svc(cpi) ?
@@ -2371,9 +2518,14 @@ void vp9_rc_get_second_pass_params(VP9_COMP *cpi) {
     // Special case code for first frame.
     const int section_target_bandwidth = (int)(twopass->bits_left /
                                                frames_left);
-    const int tmp_q = get_twopass_worst_quality(cpi, &twopass->total_left_stats,
-                                                section_target_bandwidth);
+    const double section_error =
+      twopass->total_left_stats.coded_error / twopass->total_left_stats.count;
+    const int tmp_q =
+      get_twopass_worst_quality(cpi, section_error,
+                                section_target_bandwidth, DEFAULT_GRP_WEIGHT);
+
     twopass->active_worst_quality = tmp_q;
+    twopass->baseline_active_worst_quality = tmp_q;
     rc->ni_av_qi = tmp_q;
     rc->last_q[INTER_FRAME] = tmp_q;
     rc->avg_q = vp9_convert_qindex_to_q(tmp_q, cm->bit_depth);
@@ -2385,13 +2537,13 @@ void vp9_rc_get_second_pass_params(VP9_COMP *cpi) {
   if (EOF == input_stats(twopass, &this_frame))
     return;
 
-  // Local copy of the current frame's first pass stats.
-  this_frame_copy = this_frame;
-
   // Keyframe and section processing.
   if (rc->frames_to_key == 0 || (cpi->frame_flags & FRAMEFLAGS_KEY)) {
+    FIRSTPASS_STATS this_frame_copy;
+    this_frame_copy = this_frame;
     // Define next KF group and assign bits to it.
-    find_next_key_frame(cpi, &this_frame_copy);
+    find_next_key_frame(cpi, &this_frame);
+    this_frame = this_frame_copy;
   } else {
     cm->frame_type = INTER_FRAME;
   }
@@ -2420,7 +2572,7 @@ void vp9_rc_get_second_pass_params(VP9_COMP *cpi) {
 
   // Define a new GF/ARF group. (Should always enter here for key frames).
   if (rc->frames_till_gf_update_due == 0) {
-    define_gf_group(cpi, &this_frame_copy);
+    define_gf_group(cpi, &this_frame);
 
     rc->frames_till_gf_update_due = rc->baseline_gf_interval;
     if (lc != NULL)
@@ -2470,7 +2622,7 @@ void vp9_rc_get_second_pass_params(VP9_COMP *cpi) {
   subtract_stats(&twopass->total_left_stats, &this_frame);
 }
 
-#define MINQ_ADJ_LIMIT 32
+#define MINQ_ADJ_LIMIT 48
 void vp9_twopass_postencode_update(VP9_COMP *cpi) {
   TWO_PASS *const twopass = &cpi->twopass;
   RATE_CONTROL *const rc = &cpi->rc;
@@ -2503,13 +2655,14 @@ void vp9_twopass_postencode_update(VP9_COMP *cpi) {
   // Increment the gf group index ready for the next frame.
   ++twopass->gf_group.index;
 
-  // If the rate control is drifting consider adjustment ot min or maxq.
-  // Only make adjustments on gf/arf
-  if ((cpi->oxcf.rc_mode == VPX_VBR) &&
+  // If the rate control is drifting consider adjustment to min or maxq.
+  if ((cpi->oxcf.rc_mode != VPX_Q) &&
       (cpi->twopass.gf_zeromotion_pct < VLOW_MOTION_THRESHOLD) &&
       !cpi->rc.is_src_frame_alt_ref) {
     const int maxq_adj_limit =
       rc->worst_quality - twopass->active_worst_quality;
+    const int minq_adj_limit =
+      (cpi->oxcf.rc_mode == VPX_CQ) ? 0 : MINQ_ADJ_LIMIT;
 
     // Undershoot.
     if (rc->rate_error_estimate > cpi->oxcf.under_shoot_pct) {
@@ -2533,7 +2686,8 @@ void vp9_twopass_postencode_update(VP9_COMP *cpi) {
       else if (rc->rolling_target_bits > rc->rolling_actual_bits)
         --twopass->extend_maxq;
     }
-    twopass->extend_minq = clamp(twopass->extend_minq, 0, MINQ_ADJ_LIMIT);
+
+    twopass->extend_minq = clamp(twopass->extend_minq, 0, minq_adj_limit);
     twopass->extend_maxq = clamp(twopass->extend_maxq, 0, maxq_adj_limit);
   }
 }

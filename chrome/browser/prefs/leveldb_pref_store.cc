@@ -15,6 +15,7 @@
 #include "base/threading/thread_restrictions.h"
 #include "base/time/time.h"
 #include "base/values.h"
+#include "third_party/leveldatabase/env_chromium.h"
 #include "third_party/leveldatabase/src/include/leveldb/db.h"
 #include "third_party/leveldatabase/src/include/leveldb/write_batch.h"
 
@@ -106,6 +107,7 @@ void LevelDBPrefStore::OpenDB(const base::FilePath& path,
   DCHECK_EQ(0, reading_results->error);
   leveldb::Options options;
   options.create_if_missing = true;
+  options.reuse_logs = leveldb_env::kDefaultLogReuseOptionValue;
   leveldb::DB* db;
   while (1) {
     leveldb::Status status =
@@ -167,7 +169,7 @@ scoped_ptr<LevelDBPrefStore::ReadingResults> LevelDBPrefStore::DoReading(
   // TODO(dgrogan): Is it really necessary to check it->status() each iteration?
   for (it->SeekToFirst(); it->Valid() && it->status().ok(); it->Next()) {
     const std::string value_string = it->value().ToString();
-    JSONStringValueSerializer deserializer(value_string);
+    JSONStringValueDeserializer deserializer(value_string);
     std::string error_message;
     int error_code;
     base::Value* json_value =

@@ -19,6 +19,9 @@
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
+using bookmarks::BookmarkModel;
+using bookmarks::BookmarkNode;
+
 namespace extensions {
 
 namespace keys = bookmark_api_constants;

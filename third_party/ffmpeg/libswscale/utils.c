@@ -204,8 +204,6 @@ static const FormatEntry format_entries[AV_PIX_FMT_NB] = {
     [AV_PIX_FMT_GBRP14BE]    = { 1, 1 },
     [AV_PIX_FMT_GBRP16LE]    = { 1, 0 },
     [AV_PIX_FMT_GBRP16BE]    = { 1, 0 },
-    [AV_PIX_FMT_XYZ12BE]     = { 1, 1, 1 },
-    [AV_PIX_FMT_XYZ12LE]     = { 1, 1, 1 },
     [AV_PIX_FMT_GBRAP]       = { 1, 1 },
     [AV_PIX_FMT_GBRAP16LE]   = { 1, 0 },
     [AV_PIX_FMT_GBRAP16BE]   = { 1, 0 },
@@ -221,6 +219,8 @@ static const FormatEntry format_entries[AV_PIX_FMT_NB] = {
     [AV_PIX_FMT_BAYER_GBRG16BE] = { 1, 0 },
     [AV_PIX_FMT_BAYER_GRBG16LE] = { 1, 0 },
     [AV_PIX_FMT_BAYER_GRBG16BE] = { 1, 0 },
+    [AV_PIX_FMT_XYZ12BE]     = { 1, 1, 1 },
+    [AV_PIX_FMT_XYZ12LE]     = { 1, 1, 1 },
 };
 
 int sws_isSupportedInput(enum AVPixelFormat pix_fmt)
@@ -384,7 +384,7 @@ static av_cold int initFilter(int16_t **outFilter, int32_t **filterPos,
             int j;
             (*filterPos)[i] = xx;
             for (j = 0; j < filterSize; j++) {
-                int64_t d = (FFABS(((int64_t)xx << 17) - xDstInSrc)) << 13;
+                int64_t d = (FFABS(((int64_t)xx * (1 << 17)) - xDstInSrc)) << 13;
                 double floatd;
                 int64_t coeff;
 
@@ -611,14 +611,32 @@ static av_cold int initFilter(int16_t **outFilter, int32_t **filterPos,
         }
 
         if ((*filterPos)[i] + filterSize > srcW) {
-            int shift = (*filterPos)[i] + filterSize - srcW;
-            // move filter coefficients right to compensate for filterPos
-            for (j = filterSize - 2; j >= 0; j--) {
-                int right = FFMIN(j + shift, filterSize - 1);
-                filter[i * filterSize + right] += filter[i * filterSize + j];
-                filter[i * filterSize + j]      = 0;
+            int shift = (*filterPos)[i] + FFMIN(filterSize - srcW, 0);
+            int64_t acc = 0;
+
+            for (j = filterSize - 1; j >= 0; j--) {
+                if ((*filterPos)[i] + j >= srcW) {
+                    acc += filter[i * filterSize + j];
+                    filter[i * filterSize + j] = 0;
+                }
             }
-            (*filterPos)[i]= srcW - filterSize;
+            for (j = filterSize - 1; j >= 0; j--) {
+                if (j < shift) {
+                    filter[i * filterSize + j] = 0;
+                } else {
+                    filter[i * filterSize + j] = filter[i * filterSize + j - shift];
+                }
+            }
+
+            (*filterPos)[i]-= shift;
+            filter[i * filterSize + srcW - 1 - (*filterPos)[i]] += acc;
+        }
+        av_assert0((*filterPos)[i] >= 0);
+        av_assert0((*filterPos)[i] < srcW);
+        if ((*filterPos)[i] + filterSize > srcW) {
+            for (j = 0; j < filterSize; j++) {
+                av_assert0((*filterPos)[i] + j < srcW || !filter[i * filterSize + j]);
+            }
         }
     }
 
@@ -1166,7 +1184,7 @@ av_cold int sws_init_context(SwsContext *c, SwsFilter *srcFilter,
     c->chrDstW = FF_CEIL_RSHIFT(dstW, c->chrDstHSubSample);
     c->chrDstH = FF_CEIL_RSHIFT(dstH, c->chrDstVSubSample);
 
-    FF_ALLOC_OR_GOTO(c, c->formatConvBuffer, FFALIGN(srcW*2+78, 16) * 2, fail);
+    FF_ALLOCZ_OR_GOTO(c, c->formatConvBuffer, FFALIGN(srcW*2+78, 16) * 2, fail);
 
     c->srcBpc = 1 + desc_src->comp[0].depth_minus1;
     if (c->srcBpc < 8)
@@ -1590,8 +1608,13 @@ SwsFilter *sws_getDefaultFilter(float lumaGBlur, float chromaGBlur,
         filter->chrV = sws_getIdentityVec();
     }
 
+    if (!filter->lumH || !filter->lumV || !filter->chrH || !filter->chrV)
+        goto fail;
+
     if (chromaSharpen != 0.0) {
         SwsVector *id = sws_getIdentityVec();
+        if (!id)
+            goto fail;
         sws_scaleVec(filter->chrH, -chromaSharpen);
         sws_scaleVec(filter->chrV, -chromaSharpen);
         sws_addVec(filter->chrH, id);
@@ -1601,6 +1624,8 @@ SwsFilter *sws_getDefaultFilter(float lumaGBlur, float chromaGBlur,
 
     if (lumaSharpen != 0.0) {
         SwsVector *id = sws_getIdentityVec();
+        if (!id)
+            goto fail;
         sws_scaleVec(filter->lumH, -lumaSharpen);
         sws_scaleVec(filter->lumV, -lumaSharpen);
         sws_addVec(filter->lumH, id);
@@ -1625,6 +1650,14 @@ SwsFilter *sws_getDefaultFilter(float lumaGBlur, float chromaGBlur,
         sws_printVec2(filter->lumH, NULL, AV_LOG_DEBUG);
 
     return filter;
+
+fail:
+    sws_freeVec(filter->lumH);
+    sws_freeVec(filter->lumV);
+    sws_freeVec(filter->chrH);
+    sws_freeVec(filter->chrV);
+    av_freep(&filter);
+    return NULL;
 }
 
 SwsVector *sws_allocVec(int length)
@@ -1960,6 +1993,8 @@ struct SwsContext *sws_getCachedContext(struct SwsContext *context, int srcW,
 {
     static const double default_param[2] = { SWS_PARAM_DEFAULT,
                                              SWS_PARAM_DEFAULT };
+    int64_t src_h_chr_pos = -513, dst_h_chr_pos = -513,
+            src_v_chr_pos = -513, dst_v_chr_pos = -513;
 
     if (!param)
         param = default_param;
@@ -1974,6 +2009,11 @@ struct SwsContext *sws_getCachedContext(struct SwsContext *context, int srcW,
          context->flags     != flags     ||
          context->param[0]  != param[0]  ||
          context->param[1]  != param[1])) {
+
+        av_opt_get_int(context, "src_h_chr_pos", 0, &src_h_chr_pos);
+        av_opt_get_int(context, "src_v_chr_pos", 0, &src_v_chr_pos);
+        av_opt_get_int(context, "dst_h_chr_pos", 0, &dst_h_chr_pos);
+        av_opt_get_int(context, "dst_v_chr_pos", 0, &dst_v_chr_pos);
         sws_freeContext(context);
         context = NULL;
     }
@@ -1990,6 +2030,12 @@ struct SwsContext *sws_getCachedContext(struct SwsContext *context, int srcW,
         context->flags     = flags;
         context->param[0]  = param[0];
         context->param[1]  = param[1];
+
+        av_opt_set_int(context, "src_h_chr_pos", src_h_chr_pos, 0);
+        av_opt_set_int(context, "src_v_chr_pos", src_v_chr_pos, 0);
+        av_opt_set_int(context, "dst_h_chr_pos", dst_h_chr_pos, 0);
+        av_opt_set_int(context, "dst_v_chr_pos", dst_v_chr_pos, 0);
+
         if (sws_init_context(context, srcFilter, dstFilter) < 0) {
             sws_freeContext(context);
             return NULL;

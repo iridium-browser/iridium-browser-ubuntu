@@ -8,6 +8,8 @@
 
 #include "base/bind.h"
 #include "base/bind_helpers.h"
+#include "base/logging.h"
+#include "base/metrics/field_trial.h"
 #include "base/metrics/histogram.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/content_settings/cookie_settings.h"
@@ -17,8 +19,8 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/render_messages.h"
-#include "components/dns_prefetch/common/prefetch_common.h"
-#include "components/dns_prefetch/common/prefetch_messages.h"
+#include "components/network_hints/common/network_hints_common.h"
+#include "components/network_hints/common/network_hints_messages.h"
 #include "components/web_cache/browser/web_cache_manager.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_process_host.h"
@@ -44,7 +46,7 @@ namespace {
 
 const uint32 kFilteredMessageClasses[] = {
   ChromeMsgStart,
-  DnsPrefetchMsgStart,
+  NetworkHintsMsgStart,
 };
 
 }  // namespace
@@ -66,8 +68,8 @@ ChromeRenderMessageFilter::~ChromeRenderMessageFilter() {
 bool ChromeRenderMessageFilter::OnMessageReceived(const IPC::Message& message) {
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(ChromeRenderMessageFilter, message)
-    IPC_MESSAGE_HANDLER(DnsPrefetchMsg_RequestPrefetch, OnDnsPrefetch)
-    IPC_MESSAGE_HANDLER(ChromeViewHostMsg_Preconnect, OnPreconnect)
+    IPC_MESSAGE_HANDLER(NetworkHintsMsg_DNSPrefetch, OnDnsPrefetch)
+    IPC_MESSAGE_HANDLER(NetworkHintsMsg_Preconnect, OnPreconnect)
     IPC_MESSAGE_HANDLER(ChromeViewHostMsg_ResourceTypeStats,
                         OnResourceTypeStats)
     IPC_MESSAGE_HANDLER(ChromeViewHostMsg_UpdatedCacheStats,
@@ -85,6 +87,8 @@ bool ChromeRenderMessageFilter::OnMessageReceived(const IPC::Message& message) {
     IPC_MESSAGE_HANDLER(ChromeViewHostMsg_IsCrashReportingEnabled,
                         OnIsCrashReportingEnabled)
 #endif
+    IPC_MESSAGE_HANDLER(ChromeViewHostMsg_FieldTrialActivated,
+                        OnFieldTrialActivated)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
 
@@ -104,15 +108,22 @@ void ChromeRenderMessageFilter::OverrideThreadForMessage(
 }
 
 void ChromeRenderMessageFilter::OnDnsPrefetch(
-    const dns_prefetch::LookupRequest& request) {
+    const network_hints::LookupRequest& request) {
   if (predictor_)
     predictor_->DnsPrefetchList(request.hostname_list);
 }
 
-void ChromeRenderMessageFilter::OnPreconnect(const GURL& url) {
-  if (predictor_)
+void ChromeRenderMessageFilter::OnPreconnect(const GURL& url, int count) {
+  if (count < 1) {
+    LOG(WARNING) << "NetworkHintsMsg_Preconnect IPC with invalid count: "
+                 << count;
+    return;
+  }
+  if (predictor_ && url.is_valid() && url.has_host() && url.has_scheme() &&
+      url.SchemeIsHTTPOrHTTPS()) {
     predictor_->PreconnectUrl(
-        url, GURL(), chrome_browser_net::UrlInfo::MOUSE_OVER_MOTIVATED, 1);
+        url, GURL(), chrome_browser_net::UrlInfo::EARLY_LOAD_MOTIVATED, count);
+  }
 }
 
 void ChromeRenderMessageFilter::OnResourceTypeStats(
@@ -364,3 +375,11 @@ void ChromeRenderMessageFilter::OnIsCrashReportingEnabled(bool* enabled) {
   *enabled = ChromeMetricsServiceAccessor::IsCrashReportingEnabled();
 }
 #endif
+
+void ChromeRenderMessageFilter::OnFieldTrialActivated(
+    const std::string& trial_name) {
+  // Activate the trial in the browser process to match its state in the
+  // renderer. This is done by calling FindFullName which finalizes the group
+  // and activates the trial.
+  base::FieldTrialList::FindFullName(trial_name);
+}

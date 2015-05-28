@@ -44,7 +44,7 @@ namespace blink {
 struct CrossThreadResourceResponseData;
 
 class PLATFORM_EXPORT ResourceResponse {
-    WTF_MAKE_FAST_ALLOCATED;
+    WTF_MAKE_FAST_ALLOCATED(ResourceResponse);
 public:
     enum HTTPVersion { Unknown, HTTP_0_9, HTTP_1_0, HTTP_1_1 };
 
@@ -110,6 +110,7 @@ public:
     bool cacheControlContainsMustRevalidate();
     bool hasCacheValidatorFields() const;
     double cacheControlMaxAge();
+    double cacheControlStaleWhileRevalidate();
     double date() const;
     double age() const;
     double expires() const;
@@ -175,8 +176,8 @@ public:
     bool isMultipartPayload() const { return m_isMultipartPayload; }
     void setIsMultipartPayload(bool value) { m_isMultipartPayload = value; }
 
-    double responseTime() const { return m_responseTime; }
-    void setResponseTime(double responseTime) { m_responseTime = responseTime; }
+    int64 responseTime() const { return m_responseTime; }
+    void setResponseTime(int64 responseTime) { m_responseTime = responseTime; }
 
     const AtomicString& remoteIPAddress() const { return m_remoteIPAddress; }
     void setRemoteIPAddress(const AtomicString& value) { m_remoteIPAddress = value; }
@@ -280,7 +281,7 @@ private:
 
     // The time at which the response headers were received.  For cached
     // responses, this time could be "far" in the past.
-    double m_responseTime;
+    int64 m_responseTime;
 
     // Remote IP address of the socket which fetched this resource.
     AtomicString m_remoteIPAddress;
@@ -303,7 +304,7 @@ inline bool operator==(const ResourceResponse& a, const ResourceResponse& b) { r
 inline bool operator!=(const ResourceResponse& a, const ResourceResponse& b) { return !(a == b); }
 
 struct CrossThreadResourceResponseData {
-    WTF_MAKE_NONCOPYABLE(CrossThreadResourceResponseData); WTF_MAKE_FAST_ALLOCATED;
+    WTF_MAKE_NONCOPYABLE(CrossThreadResourceResponseData); WTF_MAKE_FAST_ALLOCATED(CrossThreadResourceResponseData);
 public:
     CrossThreadResourceResponseData() { }
     KURL m_url;
@@ -329,7 +330,7 @@ public:
     bool m_wasFallbackRequiredByServiceWorker;
     WebServiceWorkerResponseType m_serviceWorkerResponseType;
     KURL m_originalURLViaServiceWorker;
-    double m_responseTime;
+    int64 m_responseTime;
     String m_remoteIPAddress;
     unsigned short m_remotePort;
     String m_downloadedFilePath;

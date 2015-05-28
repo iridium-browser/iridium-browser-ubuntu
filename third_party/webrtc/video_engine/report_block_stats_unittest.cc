@@ -18,7 +18,7 @@ class ReportBlockStatsTest : public ::testing::Test {
  protected:
   ReportBlockStatsTest() : kSsrc1(0x12345), kSsrc2(0x23456) {}
 
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     // kSsrc1: block 1-3.
     block1_1_.cumulativeLost = 10;
     block1_1_.fractionLost = 123;
@@ -129,11 +129,11 @@ TEST_F(ReportBlockStatsTest, AggregateAndStore_TwoSsrcs) {
 TEST_F(ReportBlockStatsTest, StoreAndGetFractionLost) {
   const uint32_t kRemoteSsrc = 1;
   ReportBlockStats stats;
-  EXPECT_EQ(0, stats.FractionLostInPercent());
+  EXPECT_EQ(-1, stats.FractionLostInPercent());
 
-  // First block => 0%
+  // First block.
   stats.Store(RtcpReportBlockToRtcpStatistics(block1_1_), kRemoteSsrc, kSsrc1);
-  EXPECT_EQ(0, stats.FractionLostInPercent());
+  EXPECT_EQ(-1, stats.FractionLostInPercent());
   // fl: 100 * (15-10) / (24100-24000) = 5%
   stats.Store(RtcpReportBlockToRtcpStatistics(block1_2_), kRemoteSsrc, kSsrc1);
   EXPECT_EQ(5, stats.FractionLostInPercent());

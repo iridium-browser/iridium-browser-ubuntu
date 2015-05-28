@@ -15,6 +15,7 @@
 #include "chrome/browser/plugins/plugin_finder.h"
 #include "chrome/browser/plugins/plugin_metadata.h"
 #include "chrome/browser/plugins/plugin_prefs.h"
+#include "chrome/browser/plugins/plugins_field_trial.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser_otr_state.h"
 #include "chrome/common/pref_names.h"
@@ -36,7 +37,9 @@
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/guest_view/guest_view_base.h"
 #include "extensions/browser/guest_view/web_view/web_view_renderer_state.h"
+#include "extensions/common/constants.h"
 #include "extensions/common/extension.h"
+#include "extensions/common/manifest_constants.h"
 #include "extensions/common/manifest_handlers/webview_info.h"
 #endif
 
@@ -52,6 +55,19 @@ using content::PluginService;
 using content::WebPluginInfo;
 
 namespace {
+
+#if defined(OS_WIN) || defined(OS_MACOSX)
+// These are the mime-types of plugins which are known to have PPAPI versions.
+const char* kPepperPluginMimeTypes[] = {
+    "application/pdf",
+    "application/x-google-chrome-pdf",
+    "application/x-nacl",
+    "application/x-pnacl",
+    "application/vnd.chromium.remoting-viewer",
+    "application/x-shockwave-flash",
+    "application/futuresplash",
+};
+#endif
 
 // For certain sandboxed Pepper plugins, use the JavaScript Content Settings.
 bool ShouldUseJavaScriptSettingForPlugin(const WebPluginInfo& plugin) {
@@ -155,8 +171,14 @@ bool IsPluginLoadingAccessibleResourceInWebView(
   const extensions::Extension* extension =
       extension_registry->GetExtensionById(extension_id,
                              extensions::ExtensionRegistry::ENABLED);
-  if (!extensions::WebviewInfo::IsResourceWebviewAccessible(
-          extension, partition_id, resource.path())) {
+  if (!extension)
+    return false;
+  const extensions::WebviewInfo* webview_info =
+      static_cast<const extensions::WebviewInfo*>(extension->GetManifestData(
+          extensions::manifest_keys::kWebviewAccessibleResources));
+  if (!webview_info ||
+      !webview_info->IsResourceWebviewAccessible(extension, partition_id,
+                                                 resource.path())) {
     return false;
   }
 
@@ -351,17 +373,23 @@ void PluginInfoMessageFilter::Context::DecidePluginStatus(
   ContentSetting plugin_setting = CONTENT_SETTING_DEFAULT;
   bool uses_default_content_setting = true;
   bool is_managed = false;
-  // Check plug-in content settings. The primary URL is the top origin URL and
-  // the secondary URL is the plug-in URL.
+  // Check plugin content settings. The primary URL is the top origin URL and
+  // the secondary URL is the plugin URL.
   GetPluginContentSetting(plugin, params.top_origin_url, params.url,
                           plugin_metadata->identifier(), &plugin_setting,
                           &uses_default_content_setting, &is_managed);
+
+  bool legacy_ask_user = plugin_setting == CONTENT_SETTING_ASK;
+  plugin_setting = PluginsFieldTrial::EffectiveContentSetting(
+      CONTENT_SETTINGS_TYPE_PLUGINS, plugin_setting);
+
   DCHECK(plugin_setting != CONTENT_SETTING_DEFAULT);
+  DCHECK(plugin_setting != CONTENT_SETTING_ASK);
 
   PluginMetadata::SecurityStatus plugin_status =
       plugin_metadata->GetSecurityStatus(plugin);
 #if defined(ENABLE_PLUGIN_INSTALLATION)
-  // Check if the plug-in is outdated.
+  // Check if the plugin is outdated.
   if (plugin_status == PluginMetadata::SECURITY_STATUS_OUT_OF_DATE &&
       !allow_outdated_plugins_.GetValue()) {
     if (allow_outdated_plugins_.IsManaged()) {
@@ -373,17 +401,18 @@ void PluginInfoMessageFilter::Context::DecidePluginStatus(
     return;
   }
 #endif
-  // Check if the plug-in or its group is enabled by policy.
+  // Check if the plugin or its group is enabled by policy.
   PluginPrefs::PolicyStatus plugin_policy =
       plugin_prefs_->PolicyStatusForPlugin(plugin.name);
   PluginPrefs::PolicyStatus group_policy =
       plugin_prefs_->PolicyStatusForPlugin(plugin_metadata->name());
 
-  // Check if the plug-in requires authorization.
+  // Check if the plugin requires authorization.
   if (plugin_status ==
           PluginMetadata::SECURITY_STATUS_REQUIRES_AUTHORIZATION &&
       plugin.type != WebPluginInfo::PLUGIN_TYPE_PEPPER_IN_PROCESS &&
       plugin.type != WebPluginInfo::PLUGIN_TYPE_PEPPER_OUT_OF_PROCESS &&
+      plugin.type != WebPluginInfo::PLUGIN_TYPE_BROWSER_PLUGIN &&
       !always_authorize_plugins_.GetValue() &&
       plugin_setting != CONTENT_SETTING_BLOCK &&
       uses_default_content_setting &&
@@ -395,7 +424,7 @@ void PluginInfoMessageFilter::Context::DecidePluginStatus(
     return;
   }
 
-  // Check if the plug-in is crashing too much.
+  // Check if the plugin is crashing too much.
   if (PluginService::GetInstance()->IsPluginUnstable(plugin.path) &&
       !always_authorize_plugins_.GetValue() &&
       plugin_setting != CONTENT_SETTING_BLOCK &&
@@ -408,7 +437,8 @@ void PluginInfoMessageFilter::Context::DecidePluginStatus(
   // If an app has explicitly made internal resources available by listing them
   // in |accessible_resources| in the manifest, then allow them to be loaded by
   // plugins inside a guest-view.
-  if (!is_managed && plugin_setting == CONTENT_SETTING_BLOCK &&
+  if (params.url.SchemeIs(extensions::kExtensionScheme) && !is_managed &&
+      plugin_setting == CONTENT_SETTING_BLOCK &&
       IsPluginLoadingAccessibleResourceInWebView(
           extension_registry_, render_process_id_, params.url)) {
     plugin_setting = CONTENT_SETTING_ALLOW;
@@ -418,12 +448,12 @@ void PluginInfoMessageFilter::Context::DecidePluginStatus(
   if (plugin_setting == CONTENT_SETTING_DETECT_IMPORTANT_CONTENT) {
     status->value =
         ChromeViewHostMsg_GetPluginInfo_Status::kPlayImportantContent;
-  } else if (plugin_setting == CONTENT_SETTING_ASK) {
-    status->value = ChromeViewHostMsg_GetPluginInfo_Status::kClickToPlay;
   } else if (plugin_setting == CONTENT_SETTING_BLOCK) {
-    status->value =
-        is_managed ? ChromeViewHostMsg_GetPluginInfo_Status::kBlockedByPolicy
-                   : ChromeViewHostMsg_GetPluginInfo_Status::kBlocked;
+    // For managed users with the ASK policy, we allow manually running plugins
+    // via context menu. This is the closest to admin intent.
+    status->value = is_managed && !legacy_ask_user
+                  ? ChromeViewHostMsg_GetPluginInfo_Status::kBlockedByPolicy
+                  : ChromeViewHostMsg_GetPluginInfo_Status::kBlocked;
   }
 
   if (status->value == ChromeViewHostMsg_GetPluginInfo_Status::kAllowed) {
@@ -456,6 +486,19 @@ bool PluginInfoMessageFilter::Context::FindEnabledPlugin(
       url, mime_type, allow_wildcard, &matching_plugins, &mime_types);
   if (matching_plugins.empty()) {
     status->value = ChromeViewHostMsg_GetPluginInfo_Status::kNotFound;
+#if defined(OS_WIN) || defined(OS_MACOSX)
+    if (!PluginService::GetInstance()->NPAPIPluginsSupported()) {
+      // At this point it is not known for sure this is an NPAPI plugin as it
+      // could be a not-yet-installed Pepper plugin. To avoid notifying on
+      // these types, bail early based on a blacklist of pepper mime types.
+      for (auto pepper_mime_type : kPepperPluginMimeTypes)
+        if (pepper_mime_type == mime_type)
+          return false;
+
+      ChromePluginServiceFilter::GetInstance()->NPAPIPluginNotFound(
+          render_process_id_, render_frame_id, mime_type);
+    }
+#endif
     return false;
   }
 
@@ -473,10 +516,10 @@ bool PluginInfoMessageFilter::Context::FindEnabledPlugin(
     }
   }
 
-  // If we broke out of the loop, we have found an enabled plug-in.
+  // If we broke out of the loop, we have found an enabled plugin.
   bool enabled = i < matching_plugins.size();
   if (!enabled) {
-    // Otherwise, we only found disabled plug-ins, so we take the first one.
+    // Otherwise, we only found disabled plugins, so we take the first one.
     i = 0;
     status->value = ChromeViewHostMsg_GetPluginInfo_Status::kDisabled;
   }
@@ -549,7 +592,6 @@ void PluginInfoMessageFilter::Context::MaybeGrantAccess(
     const ChromeViewHostMsg_GetPluginInfo_Status& status,
     const base::FilePath& path) const {
   if (status.value == ChromeViewHostMsg_GetPluginInfo_Status::kAllowed ||
-      status.value == ChromeViewHostMsg_GetPluginInfo_Status::kClickToPlay ||
       status.value ==
           ChromeViewHostMsg_GetPluginInfo_Status::kPlayImportantContent) {
     ChromePluginServiceFilter::GetInstance()->AuthorizePlugin(

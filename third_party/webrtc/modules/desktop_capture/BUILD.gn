@@ -10,7 +10,7 @@ import("//build/config/ui.gni")
 import("../../build/webrtc.gni")
 
 use_desktop_capture_differ_sse2 =
-    (!is_ios && (cpu_arch == "x86" || cpu_arch == "x64"))
+    (!is_ios && (current_cpu == "x86" || current_cpu == "x64"))
 
 source_set("desktop_capture") {
   sources = [
@@ -127,8 +127,8 @@ source_set("desktop_capture") {
   }
 
   deps = [
+    "../../base:rtc_base_approved",
     "../../system_wrappers",
-    "../../base:webrtc_base",
   ]
 
   if (use_desktop_capture_differ_sse2) {

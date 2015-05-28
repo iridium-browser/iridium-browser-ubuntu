@@ -412,6 +412,7 @@ cr.define('print_preview', function() {
           this.onCancelButtonClick_.bind(this));
 
       this.tracker.add(window, 'keydown', this.onKeyDown_.bind(this));
+      this.previewArea_.setPluginKeyEventCallback(this.onKeyDown_.bind(this));
 
       this.tracker.add(
           this.destinationSettings_,
@@ -528,6 +529,7 @@ cr.define('print_preview', function() {
               PrintPreview.PrintAttemptResult_.READY_WAITING_FOR_PREVIEW) {
         if ((this.destinationStore_.selectedDestination.isLocal &&
              !this.destinationStore_.selectedDestination.isPrivet &&
+             !this.destinationStore_.selectedDestination.isExtension &&
              this.destinationStore_.selectedDestination.id !=
                  print_preview.Destination.GooglePromotedId.SAVE_AS_PDF) ||
              this.uiState_ == PrintPreview.UiState_.OPENING_PDF_PREVIEW) {
@@ -870,15 +872,12 @@ cr.define('print_preview', function() {
       // Escape key closes the dialog.
       if (e.keyCode == 27 && !e.shiftKey && !e.ctrlKey && !e.altKey &&
           !e.metaKey) {
-<if expr="toolkit_views">
-        // On the toolkit_views environment, ESC key is handled by C++-side
-        // instead of JS-side.
-        return;
-</if>
-<if expr="not toolkit_views">
-        this.close_();
-</if>
-        e.preventDefault();
+        // On non-mac with toolkit-views, ESC key is handled by C++-side instead
+        // of JS-side.
+        if (cr.isMac) {
+          this.close_();
+          e.preventDefault();
+        }
         return;
       }
 
@@ -993,6 +992,12 @@ cr.define('print_preview', function() {
           this.printTicketStore_.copies.isCapabilityAvailable()) {
         this.printTicketStore_.copies.updateValue(
             event.optionsFromDocument.copies);
+      }
+
+      if (event.optionsFromDocument.duplex >= 0 &&
+          this.printTicketStore_.duplex.isCapabilityAvailable()) {
+        this.printTicketStore_.duplex.updateValue(
+            event.optionsFromDocument.duplex);
       }
     },
 

@@ -21,19 +21,20 @@
 #include "base/threading/sequenced_worker_pool.h"
 #include "base/time/time.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
-#include "chrome/browser/safe_browsing/binary_feature_extractor.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/safe_browsing/download_feedback_service.h"
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
 #include "chrome/browser/safe_browsing/sandboxed_zip_analyzer.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_list.h"
+#include "chrome/common/safe_browsing/binary_feature_extractor.h"
 #include "chrome/common/safe_browsing/csd.pb.h"
 #include "chrome/common/safe_browsing/download_protection_util.h"
-#include "chrome/common/safe_browsing/zip_analyzer.h"
+#include "chrome/common/safe_browsing/zip_analyzer_results.h"
 #include "chrome/common/url_constants.h"
 #include "components/google/core/browser/google_util.h"
+#include "components/history/core/browser/history_service.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/download_item.h"
 #include "content/public/browser/page_navigator.h"
@@ -484,14 +485,14 @@ class DownloadProtectionService::CheckClientDownloadRequest
       *reason = REASON_INVALID_URL;
       return false;
     }
+    if (!download_protection_util::IsBinaryFile(target_path)) {
+      *reason = REASON_NOT_BINARY_FILE;
+      return false;
+    }
     if ((!final_url.IsStandard() && !final_url.SchemeIsBlob() &&
          !final_url.SchemeIs(url::kDataScheme)) ||
         final_url.SchemeIsFile()) {
       *reason = REASON_UNSUPPORTED_URL_SCHEME;
-      return false;
-    }
-    if (!download_protection_util::IsBinaryFile(target_path)) {
-      *reason = REASON_NOT_BINARY_FILE;
       return false;
     }
     *type = download_protection_util::GetDownloadType(target_path);
@@ -554,7 +555,14 @@ class DownloadProtectionService::CheckClientDownloadRequest
                         base::TimeTicks::Now() - start_time);
 
     start_time = base::TimeTicks::Now();
-    binary_feature_extractor_->ExtractImageHeaders(file_path, &image_headers_);
+    image_headers_.reset(new ClientDownloadRequest_ImageHeaders());
+    if (!binary_feature_extractor_->ExtractImageFeatures(
+            file_path,
+            BinaryFeatureExtractor::kDefaultOptions,
+            image_headers_.get(),
+            nullptr /* signed_data */)) {
+      image_headers_.reset();
+    }
     UMA_HISTOGRAM_TIMES("SBClientDownload.ExtractImageHeadersTime",
                         base::TimeTicks::Now() - start_time);
 
@@ -580,6 +588,7 @@ class DownloadProtectionService::CheckClientDownloadRequest
       return;
     if (results.success) {
       zipped_executable_ = results.has_executable;
+      archived_binary_.CopyFrom(results.archived_binary);
       DVLOG(1) << "Zip analysis finished for " << item_->GetFullPath().value()
                << ", has_executable=" << results.has_executable
                << " has_archive=" << results.has_archive;
@@ -676,8 +685,8 @@ class DownloadProtectionService::CheckClientDownloadRequest
     }
 
     Profile* profile = Profile::FromBrowserContext(item_->GetBrowserContext());
-    HistoryService* history =
-        HistoryServiceFactory::GetForProfile(profile, Profile::EXPLICIT_ACCESS);
+    history::HistoryService* history = HistoryServiceFactory::GetForProfile(
+        profile, ServiceAccessType::EXPLICIT_ACCESS);
     if (!history) {
       SendRequest();
       return;
@@ -760,12 +769,14 @@ class DownloadProtectionService::CheckClientDownloadRequest
         item_->GetTargetFilePath().BaseName().AsUTF8Unsafe());
     request.set_download_type(type_);
     request.mutable_signature()->CopyFrom(signature_info_);
-    request.mutable_image_headers()->CopyFrom(image_headers_);
+    if (image_headers_)
+      request.set_allocated_image_headers(image_headers_.release());
+    if (zipped_executable_)
+      request.mutable_archived_binary()->Swap(&archived_binary_);
     if (!request.SerializeToString(&client_download_request_data_)) {
       FinishRequest(UNKNOWN, REASON_INVALID_REQUEST_PROTO);
       return;
     }
-
     service_->client_download_request_callbacks_.Notify(item_, &request);
 
     DVLOG(2) << "Sending a request for URL: "
@@ -909,7 +920,9 @@ class DownloadProtectionService::CheckClientDownloadRequest
 
   bool zipped_executable_;
   ClientDownloadRequest_SignatureInfo signature_info_;
-  ClientDownloadRequest_ImageHeaders image_headers_;
+  scoped_ptr<ClientDownloadRequest_ImageHeaders> image_headers_;
+  google::protobuf::RepeatedPtrField<ClientDownloadRequest_ArchivedBinary>
+      archived_binary_;
   CheckDownloadCallback callback_;
   // Will be NULL if the request has been canceled.
   DownloadProtectionService* service_;

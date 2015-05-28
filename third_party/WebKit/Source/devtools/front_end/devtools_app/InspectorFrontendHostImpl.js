@@ -92,6 +92,18 @@ WebInspector.InspectorFrontendHostImpl.prototype = {
 
     /**
      * @override
+     * @param {string} url
+     * @param {string} headers
+     * @param {number} streamId
+     * @param {function(!InspectorFrontendHostAPI.LoadNetworkResourceResult)} callback
+     */
+    loadNetworkResource: function(url, headers, streamId, callback)
+    {
+        DevToolsAPI.sendMessageToEmbedder("loadNetworkResource", [url, headers, streamId], /** @type {function(?Object)} */ (callback));
+    },
+
+    /**
+     * @override
      * @param {string} origin
      * @param {string} script
      */
@@ -299,25 +311,6 @@ WebInspector.InspectorFrontendHostImpl.prototype = {
     isUnderTest: function()
     {
         return DevToolsHost.isUnderTest();
-    },
-
-    /**
-     * @override
-     * @param {string} browserId
-     * @param {string} url
-     */
-    openUrlOnRemoteDeviceAndInspect: function(browserId, url)
-    {
-        DevToolsAPI.sendMessageToEmbedder("openUrlOnRemoteDeviceAndInspect", [browserId, url], null);
-    },
-
-    /**
-     * @override
-     * @param {boolean} enabled
-     */
-    setDeviceCountUpdatesEnabled: function(enabled)
-    {
-        DevToolsAPI.sendMessageToEmbedder("setDeviceCountUpdatesEnabled", [enabled], null);
     },
 
     /**

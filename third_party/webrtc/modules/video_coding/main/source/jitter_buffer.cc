@@ -31,7 +31,7 @@
 namespace webrtc {
 
 // Use this rtt if no value has been reported.
-static const uint32_t kDefaultRtt = 200;
+static const int64_t kDefaultRtt = 200;
 
 typedef std::pair<uint32_t, VCMFrameBuffer*> FrameListPair;
 
@@ -214,7 +214,6 @@ void VCMJitterBuffer::Start() {
   time_first_packet_ms_ = 0;
 
   // Start in a non-signaled state.
-  frame_event_->Reset();
   waiting_for_completion_.frame_size = 0;
   waiting_for_completion_.timestamp = 0;
   waiting_for_completion_.latest_packet_time = -1;
@@ -258,7 +257,6 @@ void VCMJitterBuffer::Flush() {
   decodable_frames_.Reset(&free_frames_);
   incomplete_frames_.Reset(&free_frames_);
   last_decoded_state_.Reset();  // TODO(mikhal): sync reset.
-  frame_event_->Reset();
   num_consecutive_old_packets_ = 0;
   // Also reset the jitter and delay estimates
   jitter_estimate_.Reset();
@@ -409,10 +407,6 @@ bool VCMJitterBuffer::NextCompleteTimestamp(
         break;
       }
     }
-    // Inside |crit_sect_|.
-  } else {
-    // We already have a frame, reset the event.
-    frame_event_->Reset();
   }
   if (decodable_frames_.empty() ||
       decodable_frames_.Front()->GetState() != kStateComplete) {
@@ -674,6 +668,7 @@ VCMFrameBufferEnum VCMJitterBuffer::InsertPacket(const VCMPacket& packet,
           frame_event_->Set();
         }
       }
+      FALLTHROUGH();
     }
     // Note: There is no break here - continuing to kDecodableSession.
     case kDecodableSession: {
@@ -783,7 +778,7 @@ uint32_t VCMJitterBuffer::EstimatedJitterMs() {
   // low_rtt_nackThresholdMs_ == -1 means no FEC.
   double rtt_mult = 1.0f;
   if (low_rtt_nack_threshold_ms_ >= 0 &&
-      static_cast<int>(rtt_ms_) >= low_rtt_nack_threshold_ms_) {
+      rtt_ms_ >= low_rtt_nack_threshold_ms_) {
     // For RTTs above low_rtt_nack_threshold_ms_ we don't apply extra delay
     // when waiting for retransmissions.
     rtt_mult = 0.0f;
@@ -791,15 +786,15 @@ uint32_t VCMJitterBuffer::EstimatedJitterMs() {
   return jitter_estimate_.GetJitterEstimate(rtt_mult);
 }
 
-void VCMJitterBuffer::UpdateRtt(uint32_t rtt_ms) {
+void VCMJitterBuffer::UpdateRtt(int64_t rtt_ms) {
   CriticalSectionScoped cs(crit_sect_);
   rtt_ms_ = rtt_ms;
   jitter_estimate_.UpdateRtt(rtt_ms);
 }
 
 void VCMJitterBuffer::SetNackMode(VCMNackMode mode,
-                                  int low_rtt_nack_threshold_ms,
-                                  int high_rtt_nack_threshold_ms) {
+                                  int64_t low_rtt_nack_threshold_ms,
+                                  int64_t high_rtt_nack_threshold_ms) {
   CriticalSectionScoped cs(crit_sect_);
   nack_mode_ = mode;
   if (mode == kNoNack) {
@@ -955,7 +950,8 @@ bool VCMJitterBuffer::UpdateNackList(uint16_t sequence_number) {
     for (uint16_t i = latest_received_sequence_number_ + 1;
          IsNewerSequenceNumber(sequence_number, i); ++i) {
       missing_sequence_numbers_.insert(missing_sequence_numbers_.end(), i);
-      TRACE_EVENT_INSTANT1("webrtc", "AddNack", "seqnum", i);
+      TRACE_EVENT_INSTANT1(TRACE_DISABLED_BY_DEFAULT("webrtc_rtp"), "AddNack",
+                           "seqnum", i);
     }
     if (TooLargeNackList() && !HandleTooLargeNackList()) {
       LOG(LS_WARNING) << "Requesting key frame due to too large NACK list.";
@@ -968,7 +964,8 @@ bool VCMJitterBuffer::UpdateNackList(uint16_t sequence_number) {
     }
   } else {
     missing_sequence_numbers_.erase(sequence_number);
-    TRACE_EVENT_INSTANT1("webrtc", "RemoveNack", "seqnum", sequence_number);
+    TRACE_EVENT_INSTANT1(TRACE_DISABLED_BY_DEFAULT("webrtc_rtp"), "RemoveNack",
+                         "seqnum", sequence_number);
   }
   return true;
 }
@@ -1214,7 +1211,7 @@ bool VCMJitterBuffer::WaitForRetransmissions() {
   // Evaluate if the RTT is higher than |high_rtt_nack_threshold_ms_|, and in
   // that case we don't wait for retransmissions.
   if (high_rtt_nack_threshold_ms_ >= 0 &&
-      rtt_ms_ >= static_cast<unsigned int>(high_rtt_nack_threshold_ms_)) {
+      rtt_ms_ >= high_rtt_nack_threshold_ms_) {
     return false;
   }
   return true;

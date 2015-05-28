@@ -32,9 +32,9 @@
 #include "config.h"
 #include "core/paint/GraphicsContextAnnotator.h"
 
-#include "core/inspector/InspectorNodeIds.h"
-#include "core/rendering/PaintInfo.h"
-#include "core/rendering/RenderObject.h"
+#include "core/dom/DOMNodeIds.h"
+#include "core/layout/LayoutObject.h"
+#include "core/layout/PaintInfo.h"
 #include "platform/graphics/GraphicsContextAnnotation.h"
 #include "wtf/text/StringBuilder.h"
 
@@ -86,7 +86,7 @@ static const char* paintPhaseName(blink::PaintPhase phase)
 
 namespace blink {
 
-void GraphicsContextAnnotator::annotate(const PaintInfo& paintInfo, const RenderObject* object)
+void GraphicsContextAnnotator::annotate(const PaintInfo& paintInfo, const LayoutObject* object)
 {
     ASSERT(!m_context);
 
@@ -98,7 +98,7 @@ void GraphicsContextAnnotator::annotate(const PaintInfo& paintInfo, const Render
     Element* element = object->node() && object->node()->isElementNode() ? toElement(object->node()) : 0;
 
     if (mode & AnnotateRendererName)
-        annotations.append(std::make_pair(AnnotationKeyRendererName, object->renderName()));
+        annotations.append(std::make_pair(AnnotationKeyRendererName, object->decoratedName()));
 
     if (mode & AnnotatePaintPhase)
         annotations.append(std::make_pair(AnnotationKeyPaintPhase, paintPhaseName(paintInfo.phase)));
@@ -126,7 +126,7 @@ void GraphicsContextAnnotator::annotate(const PaintInfo& paintInfo, const Render
     if (mode & AnnotateInspectorId) {
         if (Node* ownerNode = object->generatingNode()) {
             annotations.append(std::make_pair(AnnotationKeyInspectorNodeId,
-                String::number(InspectorNodeIds::idForNode(ownerNode))));
+                String::number(DOMNodeIds::idForNode(ownerNode))));
         }
     }
 

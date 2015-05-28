@@ -38,6 +38,8 @@
 namespace blink {
 
 class RTCSessionDescriptionInit;
+class ScriptState;
+class ScriptValue;
 
 class RTCSessionDescription final : public GarbageCollectedFinalized<RTCSessionDescription>, public ScriptWrappable {
     DEFINE_WRAPPERTYPEINFO();
@@ -51,9 +53,11 @@ public:
     String sdp();
     void setSdp(const String&);
 
+    ScriptValue toJSONForBinding(ScriptState*);
+
     WebRTCSessionDescription webSessionDescription();
 
-    void trace(Visitor*) { }
+    DEFINE_INLINE_TRACE() { }
 
 private:
     explicit RTCSessionDescription(WebRTCSessionDescription);

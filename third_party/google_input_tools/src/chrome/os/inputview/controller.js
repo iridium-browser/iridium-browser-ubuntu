@@ -17,8 +17,8 @@ goog.require('goog.Disposable');
 goog.require('goog.Timer');
 goog.require('goog.array');
 goog.require('goog.async.Delay');
-goog.require('goog.dom');
 goog.require('goog.dom.classlist');
+goog.require('goog.events.Event');
 goog.require('goog.events.EventHandler');
 goog.require('goog.events.EventType');
 goog.require('goog.i18n.bidi');
@@ -29,6 +29,7 @@ goog.require('i18n.input.chrome.inputview.Adapter');
 goog.require('i18n.input.chrome.inputview.CandidatesInfo');
 goog.require('i18n.input.chrome.inputview.ConditionName');
 goog.require('i18n.input.chrome.inputview.Css');
+goog.require('i18n.input.chrome.inputview.FeatureName');
 goog.require('i18n.input.chrome.inputview.KeyboardContainer');
 goog.require('i18n.input.chrome.inputview.M17nModel');
 goog.require('i18n.input.chrome.inputview.Model');
@@ -36,10 +37,10 @@ goog.require('i18n.input.chrome.inputview.PerfTracker');
 goog.require('i18n.input.chrome.inputview.ReadyState');
 goog.require('i18n.input.chrome.inputview.Settings');
 goog.require('i18n.input.chrome.inputview.SizeSpec');
-goog.require('i18n.input.chrome.inputview.SoundController');
 goog.require('i18n.input.chrome.inputview.SpecNodeName');
 goog.require('i18n.input.chrome.inputview.StateType');
 goog.require('i18n.input.chrome.inputview.SwipeDirection');
+goog.require('i18n.input.chrome.inputview.elements.Element');
 goog.require('i18n.input.chrome.inputview.elements.ElementType');
 goog.require('i18n.input.chrome.inputview.elements.content.Candidate');
 goog.require('i18n.input.chrome.inputview.elements.content.CandidateView');
@@ -52,13 +53,13 @@ goog.require('i18n.input.chrome.inputview.util');
 goog.require('i18n.input.chrome.message.ContextType');
 goog.require('i18n.input.chrome.message.Name');
 goog.require('i18n.input.chrome.message.Type');
+goog.require('i18n.input.chrome.sounds.SoundController');
 goog.require('i18n.input.lang.InputToolCode');
 
 
 
 goog.scope(function() {
 var CandidateType = i18n.input.chrome.inputview.elements.content.Candidate.Type;
-var Candidate = i18n.input.chrome.inputview.elements.content.Candidate;
 var CandidateView = i18n.input.chrome.inputview.elements.content.CandidateView;
 var ConditionName = i18n.input.chrome.inputview.ConditionName;
 var ContextType = i18n.input.chrome.message.ContextType;
@@ -67,6 +68,7 @@ var ElementType = i18n.input.chrome.inputview.elements.ElementType;
 var EventType = i18n.input.chrome.inputview.events.EventType;
 var ExpandedCandidateView = i18n.input.chrome.inputview.elements.content.
     ExpandedCandidateView;
+var FeatureName = i18n.input.chrome.inputview.FeatureName;
 var InputToolCode = i18n.input.lang.InputToolCode;
 var KeyCodes = i18n.input.chrome.inputview.events.KeyCodes;
 var MenuView = i18n.input.chrome.inputview.elements.content.MenuView;
@@ -75,9 +77,7 @@ var PerfTracker = i18n.input.chrome.inputview.PerfTracker;
 var SizeSpec = i18n.input.chrome.inputview.SizeSpec;
 var SpecNodeName = i18n.input.chrome.inputview.SpecNodeName;
 var StateType = i18n.input.chrome.inputview.StateType;
-var content = i18n.input.chrome.inputview.elements.content;
-var SoundController = i18n.input.chrome.inputview.SoundController;
-var Sounds = i18n.input.chrome.inputview.Sounds;
+var SoundController = i18n.input.chrome.sounds.SoundController;
 var Type = i18n.input.chrome.message.Type;
 var util = i18n.input.chrome.inputview.util;
 
@@ -114,6 +114,23 @@ i18n.input.chrome.inputview.Controller = function(keyset, languageCode,
    * @private
    */
   this.layoutDataMap_ = {};
+
+  /**
+   * The element map.
+   *
+   * @private {!Object.<ElementType, !KeyCodes>}
+   */
+  this.elementTypeToKeyCode_ = goog.object.create(
+      ElementType.BOLD, KeyCodes.KEY_B,
+      ElementType.ITALICS, KeyCodes.KEY_I,
+      ElementType.UNDERLINE, KeyCodes.KEY_U,
+      ElementType.COPY, KeyCodes.KEY_C,
+      ElementType.PASTE, KeyCodes.KEY_V,
+      ElementType.CUT, KeyCodes.KEY_X,
+      ElementType.SELECT_ALL, KeyCodes.KEY_A,
+      ElementType.REDO, KeyCodes.KEY_Y,
+      ElementType.UNDO, KeyCodes.KEY_Z
+      );
 
   /**
    * The keyset data map.
@@ -162,13 +179,13 @@ i18n.input.chrome.inputview.Controller = function(keyset, languageCode,
   /** @private {!i18n.input.chrome.inputview.Adapter} */
   this.adapter_ = new i18n.input.chrome.inputview.Adapter(this.readyState_);
 
+  /** @private {!SoundController} */
+  this.soundController_ = new SoundController(false);
+
   /** @private {!i18n.input.chrome.inputview.KeyboardContainer} */
   this.container_ = new i18n.input.chrome.inputview.KeyboardContainer(
-      this.adapter_);
+      this.adapter_, this.soundController_);
   this.container_.render();
-
-  /** @private {!i18n.input.chrome.inputview.SoundController} */
-  this.soundController_ = new SoundController(false);
 
   /**
    * The context type and keyset mapping group by input method id.
@@ -359,6 +376,17 @@ Controller.CandidatesOperation = {
 
 
 /**
+ * A temporary list to track keysets have customized in material design.
+ *
+ * @private {!Array.<string>}
+ */
+Controller.MATERIAL_KEYSETS_ = [
+  'emoji',
+  'hwt'
+];
+
+
+/**
  * The active language code.
  *
  * @type {string}
@@ -379,7 +407,7 @@ Controller.prototype.passwordKeyset_ = '';
  * The soft key map, because key configuration is loaded before layout,
  * controller needs this varaible to save it and hook into keyboard view.
  *
- * @type {!Array.<!content.SoftKey>}
+ * @type {!Array.<!i18n.input.chrome.inputview.elements.content.SoftKey>}
  * @private
  */
 Controller.prototype.softKeyList_;
@@ -392,15 +420,6 @@ Controller.prototype.softKeyList_;
  * @private
  */
 Controller.prototype.mapping_;
-
-
-/**
- * The dead key.
- *
- * @type {string}
- * @private
- */
-Controller.prototype.deadKey_ = '';
 
 
 /**
@@ -438,29 +457,69 @@ Controller.prototype.registerEventHandler_ = function() {
             EventType.POINTER_OUT,
             EventType.SWIPE
           ], this.onPointerEvent_).
+      listen(this.pointerHandler_,
+          EventType.DRAG,
+          this.onDragEvent_).
       listen(window, goog.events.EventType.RESIZE, this.resize).
       listen(this.adapter_,
-          i18n.input.chrome.inputview.events.EventType.
-              SURROUNDING_TEXT_CHANGED,
-          this.onSurroundingTextChanged_).
+          EventType.SURROUNDING_TEXT_CHANGED, this.onSurroundingTextChanged_).
       listen(this.adapter_,
           i18n.input.chrome.DataSource.EventType.CANDIDATES_BACK,
           this.onCandidatesBack_).
-      listen(this.adapter_,
-          i18n.input.chrome.inputview.events.EventType.CONTEXT_FOCUS,
-          this.onContextFocus_).
-      listen(this.adapter_,
-          i18n.input.chrome.inputview.events.EventType.CONTEXT_BLUR,
-          this.onContextBlur_).
-      listen(this.adapter_,
-          i18n.input.chrome.inputview.events.EventType.VISIBILITY_CHANGE,
+      listen(this.adapter_, EventType.URL_CHANGED, this.onURLChanged_).
+      listen(this.adapter_, EventType.CONTEXT_FOCUS, this.onContextFocus_).
+      listen(this.adapter_, EventType.CONTEXT_BLUR, this.onContextBlur_).
+      listen(this.adapter_, EventType.VISIBILITY_CHANGE,
           this.onVisibilityChange_).
-      listen(this.adapter_,
-          i18n.input.chrome.inputview.events.EventType.SETTINGS_READY,
-          this.onSettingsReady_).
+      listen(this.adapter_, EventType.SETTINGS_READY, this.onSettingsReady_).
       listen(this.adapter_, Type.UPDATE_SETTINGS, this.onUpdateSettings_).
       listen(this.adapter_, Type.FRONT_TOGGLE_LANGUAGE_STATE,
-             this.onUpdateToggleLanguateState_);
+          this.onUpdateToggleLanguateState_).
+      listen(this.adapter_, Type.VOICE_STATE_CHANGE, this.onVoiceStateChange_).
+      listen(this.adapter_, EventType.REFRESH, this.onRefresh_);
+};
+
+
+/**
+ * Handler for voice module state change.
+ *
+ * @param {!i18n.input.chrome.message.Event} e .
+ * @private
+ */
+Controller.prototype.onVoiceStateChange_ = function(e) {
+  if (!e.msg[Name.VOICE_STATE]) {
+    this.container_.candidateView.switchToIcon(
+        CandidateView.IconType.VOICE, true);
+    this.container_.voiceView.stop();
+  }
+};
+
+
+/**
+ * Handles the refresh event from adapter.
+ *
+ * @private
+ */
+Controller.prototype.onRefresh_ = function() {
+  window.location.reload();
+};
+
+
+/**
+ * Sets the default keyset for context types.
+ *
+ * @param {string} newKeyset .
+ * @private
+ */
+Controller.prototype.setDefaultKeyset_ = function(newKeyset) {
+  var keysetMap = this.contextTypeToKeysetMap_[this.currentInputMethod_];
+  for (var context in keysetMap) {
+    if (context != ContextType.DEFAULT &&
+        keysetMap[context] == keysetMap[ContextType.DEFAULT]) {
+      keysetMap[context] = newKeyset;
+    }
+  }
+  keysetMap[ContextType.DEFAULT] = this.initialKeyset_ = newKeyset;
 };
 
 
@@ -482,8 +541,7 @@ Controller.prototype.onUpdateSettings_ = function(e) {
     settings.candidatesNavigation = e.msg['candidatesNavigation'];
   }
   if (goog.isDef(e.msg[Name.KEYSET])) {
-    this.contextTypeToKeysetMap_[this.currentInputMethod_][
-        ContextType.DEFAULT] = this.initialKeyset_ = e.msg[Name.KEYSET];
+    this.setDefaultKeyset_(e.msg[Name.KEYSET]);
   }
   if (goog.isDef(e.msg['enableLongPress'])) {
     settings.enableLongPress = e.msg['enableLongPress'];
@@ -497,7 +555,17 @@ Controller.prototype.onUpdateSettings_ = function(e) {
   }
   this.perfTracker_.tick(PerfTracker.TickName.BACKGROUND_SETTINGS_FETCHED);
   this.model_.stateManager.contextType = this.adapter_.contextType;
-  this.switchToKeyset(this.getActiveKeyset_());
+  this.maybeCreateViews_();
+};
+
+
+/**
+ * Callback for url changed.
+ *
+ * @private
+ */
+Controller.prototype.onURLChanged_ = function() {
+  this.container_.candidateView.setToolbarVisible(this.shouldShowToolBar_());
 };
 
 
@@ -513,22 +581,25 @@ Controller.prototype.onSettingsReady_ = function() {
 
   this.isSettingReady = true;
   var keysetMap = this.contextTypeToKeysetMap_[this.currentInputMethod_];
+  var newKeyset = '';
   if (this.adapter_.isA11yMode) {
-    keysetMap[ContextType.PASSWORD] = keysetMap[ContextType.DEFAULT] =
-        util.getConfigName(keysetMap[ContextType.DEFAULT]);
+    newKeyset = util.getConfigName(keysetMap[ContextType.DEFAULT]);
   } else {
-    var preferredKeyset = /** @type {string} */ (this.model_.settings.
+    newKeyset = /** @type {string} */ (this.model_.settings.
         getPreference(util.getConfigName(keysetMap[ContextType.DEFAULT])));
-    if (preferredKeyset) {
-      keysetMap[ContextType.PASSWORD] = keysetMap[ContextType.DEFAULT] =
-          preferredKeyset;
-    }
   }
-  if (!this.adapter_.isExperimental && keysetMap[ContextType.DEFAULT] ==
+  if (!this.adapter_.features.isEnabled(FeatureName.EXPERIMENTAL) &&
+      keysetMap[ContextType.DEFAULT] ==
       'zhuyin.compact.qwerty') {
-    keysetMap[ContextType.DEFAULT] = 'zhuyin';
+    newKeyset = 'zhuyin';
   }
-  this.initialKeyset_ = keysetMap[ContextType.DEFAULT];
+  if (newKeyset) {
+    this.setDefaultKeyset_(newKeyset);
+  }
+  this.container_.selectView.setVisible(
+      this.adapter_.features.isEnabled(FeatureName.GESTURE_SELECTION));
+  // Loads resources in case the default keyset is changed.
+  this.loadAllResources_();
   this.maybeCreateViews_();
 };
 
@@ -536,7 +607,7 @@ Controller.prototype.onSettingsReady_ = function() {
 /**
  * Gets the data for spatial module.
  *
- * @param {!content.SoftKey} key .
+ * @param {!i18n.input.chrome.inputview.elements.content.SoftKey} key .
  * @param {number} x The x-offset of the touch point.
  * @param {number} y The y-offset of the touch point.
  * @return {!Object} .
@@ -572,19 +643,21 @@ Controller.prototype.getSpatialData_ = function(key, x, y) {
 /**
  * Gets the key content.
  *
- * @param {!content.SoftKey} key .
+ * @param {!i18n.input.chrome.inputview.elements.content.SoftKey} key .
  * @return {string} .
  * @private
  */
 Controller.prototype.getKeyContent_ = function(key) {
   if (key.type == i18n.input.chrome.inputview.elements.ElementType.
       CHARACTER_KEY) {
-    key = /** @type {!content.CharacterKey} */ (key);
+    key = /** @type {!i18n.input.chrome.inputview.elements.content.
+        CharacterKey} */ (key);
     return key.getActiveCharacter();
   }
   if (key.type == i18n.input.chrome.inputview.elements.ElementType.
       COMPACT_KEY) {
-    key = /** @type {!content.FunctionalKey} */ (key);
+    key = /** @type {!i18n.input.chrome.inputview.elements.content.
+        FunctionalKey} */ (key);
     return key.text;
   }
   return '';
@@ -615,7 +688,8 @@ Controller.prototype.onPointerEvent_ = function(e) {
   // keyboard window bounds. For other cases, we expect a view associated with a
   // pointer up event.
   if (e.type == EventType.POINTER_UP && !e.view) {
-    if (this.container_.altDataView.isVisible()) {
+    if (this.container_.altDataView.isVisible() &&
+        e.identifier == this.container_.altDataView.identifier) {
       var altDataView = this.container_.altDataView;
       var ch = altDataView.getHighlightedCharacter();
       if (ch) {
@@ -635,14 +709,21 @@ Controller.prototype.onPointerEvent_ = function(e) {
 
   if (e.view) {
     this.handlePointerAction_(e.view, e);
-  } else if (e.type == EventType.POINTER_DOWN) {
-    var tabbableKeysets = [
-      Controller.HANDWRITING_VIEW_CODE_,
-      Controller.EMOJI_VIEW_CODE_];
-    if (goog.array.contains(tabbableKeysets, this.currentKeyset_)) {
-      this.resetAll_();
-      this.switchToKeyset(this.container_.currentKeysetView.fromKeyset);
-    }
+  }
+};
+
+
+/**
+ * Handles the drag events. Generally, this will forward the event details to
+ * the components that handle drawing, decoding, etc.
+ *
+ * @param {!i18n.input.chrome.inputview.events.DragEvent} e .
+ * @private
+ */
+Controller.prototype.onDragEvent_ = function(e) {
+  if (this.adapter_.isGestureTypingEnabled() && e.type == EventType.DRAG) {
+    this.container_.gestureCanvasView.addPoint(e);
+    return;
   }
 };
 
@@ -658,12 +739,20 @@ Controller.prototype.onPointerEvent_ = function(e) {
 Controller.prototype.handleSwipeAction_ = function(view, e) {
   var direction = e.direction;
   if (this.container_.altDataView.isVisible()) {
-    this.container_.altDataView.highlightItem(e.x, e.y);
+    this.container_.altDataView.highlightItem(e.x, e.y, e.identifier);
     return;
+  }
+  if (view.type == ElementType.BACKSPACE_KEY) {
+    if (this.container_.swipeView.isVisible() ||
+        this.container_.swipeView.isArmed()) {
+      this.stopBackspaceAutoRepeat_();
+      return;
+    }
   }
 
   if (view.type == ElementType.CHARACTER_KEY) {
-    view = /** @type {!content.CharacterKey} */ (view);
+    view = /** @type {!i18n.input.chrome.inputview.elements.content.
+        CharacterKey} */ (view);
     if (direction & i18n.input.chrome.inputview.SwipeDirection.UP ||
         direction & i18n.input.chrome.inputview.SwipeDirection.DOWN) {
       var ch = view.getCharacterByGesture(!!(direction &
@@ -675,7 +764,8 @@ Controller.prototype.handleSwipeAction_ = function(view, e) {
   }
 
   if (view.type == ElementType.COMPACT_KEY) {
-    view = /** @type {!content.CompactKey} */ (view);
+    view = /** @type {!i18n.input.chrome.inputview.elements.content.
+        CompactKey} */ (view);
     if ((direction & i18n.input.chrome.inputview.SwipeDirection.UP) &&
         view.hintText) {
       view.flickerredCharacter = view.hintText;
@@ -740,12 +830,46 @@ Controller.prototype.executeCommand_ = function(command, opt_arg) {
  * @private
  */
 Controller.prototype.handlePointerAction_ = function(view, e) {
-  if (e.type == i18n.input.chrome.inputview.events.EventType.SWIPE) {
-    e = /** @type {!i18n.input.chrome.inputview.events.SwipeEvent} */ (e);
+  if (this.adapter_.isGestureTypingEnabled() &&
+      e.type == EventType.POINTER_DOWN) {
+    this.container_.gestureCanvasView.startStroke(e);
+  }
+
+  if (this.adapter_.isGestureTypingEnabled() &&
+      e.type == EventType.POINTER_UP) {
+    this.container_.gestureCanvasView.endStroke(e);
+  }
+
+  // Do not trigger other actives when gesturing.
+  if (this.adapter_.isGestureTypingEnabled() &&
+      this.container_.gestureCanvasView.isGesturing) {
+    return;
+  }
+
+  // Listen for DOUBLE_CLICK as well to capture secondary taps on the spacebar.
+  if (e.type == EventType.POINTER_UP || e.type == EventType.DOUBLE_CLICK) {
+    this.recordStatsForClosing_(
+        'InputMethod.VirtualKeyboard.TapCount', 1, 4095, 4096);
+  }
+
+  if (e.type == EventType.SWIPE) {
+    e =  /** @type {!i18n.input.chrome.inputview.events.SwipeEvent} */ (e);
     this.handleSwipeAction_(view, e);
   }
   switch (view.type) {
+    case ElementType.KEYBOARD_CONTAINER_VIEW:
+      if (e.type == EventType.POINTER_DOWN) {
+        var tabbableKeysets = [
+          Controller.HANDWRITING_VIEW_CODE_,
+          Controller.EMOJI_VIEW_CODE_];
+        if (goog.array.contains(tabbableKeysets, this.currentKeyset_)) {
+          this.resetAll_();
+          this.switchToKeyset(this.container_.currentKeysetView.fromKeyset);
+        }
+      }
+      return;
     case ElementType.BACK_BUTTON:
+    case ElementType.BACK_TO_KEYBOARD:
       if (e.type == EventType.POINTER_OUT || e.type == EventType.POINTER_UP) {
         view.setHighlighted(false);
       } else if (e.type == EventType.POINTER_DOWN ||
@@ -775,7 +899,8 @@ Controller.prototype.handlePointerAction_ = function(view, e) {
       }
       return;
     case ElementType.CANDIDATE:
-      view = /** @type {!Candidate} */ (view);
+      view = /** @type {!i18n.input.chrome.inputview.elements.content.
+          Candidate} */ (view);
       if (e.type == EventType.POINTER_UP) {
         if (view.candidateType == CandidateType.CANDIDATE) {
           this.adapter_.selectCandidate(view.candidate);
@@ -794,11 +919,9 @@ Controller.prototype.handlePointerAction_ = function(view, e) {
       return;
 
     case ElementType.ALTDATA_VIEW:
-      view = /** @type {!content.AltDataView} */ (view);
-      if (e.type == EventType.POINTER_DOWN &&
-          e.target == view.getCoverElement()) {
-        view.hide();
-      } else if (e.type == EventType.POINTER_UP) {
+      view = /** @type {!i18n.input.chrome.inputview.elements.content.
+          AltDataView} */ (view);
+      if (e.type == EventType.POINTER_UP && e.identifier == view.identifier) {
         var ch = view.getHighlightedCharacter();
         if (ch) {
           this.adapter_.sendKeyDownAndUpEvent(ch, view.triggeredBy.id,
@@ -812,12 +935,13 @@ Controller.prototype.handlePointerAction_ = function(view, e) {
       return;
 
     case ElementType.MENU_ITEM:
-      view = /** @type {!content.MenuItem} */ (view);
-      if (e.type == EventType.CLICK) {
-        this.resetAll_();
+      view = /** @type {!i18n.input.chrome.inputview.elements.content.
+          MenuItem} */ (view);
+      if (e.type == EventType.POINTER_UP) {
         this.executeCommand_.apply(this, view.getCommand());
         this.container_.menuView.hide();
         this.soundController_.onKeyUp(view.type);
+        this.resetAll_();
       }
       view.setHighlighted(e.type == EventType.POINTER_DOWN ||
           e.type == EventType.POINTER_OVER);
@@ -825,16 +949,17 @@ Controller.prototype.handlePointerAction_ = function(view, e) {
       return;
 
     case ElementType.MENU_VIEW:
-      view = /** @type {!MenuView} */ (view);
+      view = /** @type {!i18n.input.chrome.inputview.elements.content.
+          MenuView} */ (view);
 
-      if (e.type == EventType.POINTER_DOWN &&
+      if (e.type == EventType.CLICK &&
           e.target == view.getCoverElement()) {
         view.hide();
       }
       return;
 
     case ElementType.EMOJI_KEY:
-      if (e.type == EventType.POINTER_UP) {
+      if (e.type == EventType.CLICK) {
         if (!this.container_.currentKeysetView.isDragging && view.text != '') {
           this.adapter_.commitText(view.text);
           this.soundController_.onKeyUp(view.type);
@@ -843,9 +968,63 @@ Controller.prototype.handlePointerAction_ = function(view, e) {
       return;
 
     case ElementType.HWT_PRIVACY_GOT_IT:
-      this.adapter_.sendHwtPrivacyConfirmMessage();
+      // Broadcasts the handwriting privacy confirmed message to let canvas
+      // view handle it.
+      this.adapter_.dispatchEvent(new goog.events.Event(
+          Type.HWT_PRIVACY_GOT_IT));
       return;
 
+    case ElementType.VOICE_PRIVACY_GOT_IT:
+      // Broadcasts the voice privacy confirmed message to let voice
+      // view handle it.
+      this.adapter_.dispatchEvent(new goog.events.Event(
+          Type.VOICE_PRIVACY_GOT_IT));
+      return;
+
+    case ElementType.VOICE_BTN:
+      if (e.type == EventType.POINTER_UP) {
+        this.container_.candidateView.switchToIcon(
+            CandidateView.IconType.VOICE, false);
+        this.container_.voiceView.start();
+      }
+      return;
+
+
+    case ElementType.VOICE_VIEW:
+      if (e.type == EventType.POINTER_UP) {
+        this.adapter_.sendVoiceViewStateChange(false);
+        this.container_.candidateView.switchToIcon(
+            CandidateView.IconType.VOICE, true);
+        this.container_.voiceView.stop();
+      }
+      return;
+    case ElementType.SWIPE_VIEW:
+      this.stopBackspaceAutoRepeat_();
+      if (e.type == EventType.POINTER_UP ||
+          e.type == EventType.POINTER_OUT) {
+        this.clearUnstickyState_();
+      }
+      return;
+    case ElementType.CUT:
+    case ElementType.COPY:
+    case ElementType.PASTE:
+    case ElementType.BOLD:
+    case ElementType.ITALICS:
+    case ElementType.UNDERLINE:
+    case ElementType.REDO:
+    case ElementType.UNDO:
+    case ElementType.SELECT_ALL:
+      view.setHighlighted(e.type == EventType.POINTER_DOWN ||
+          e.type == EventType.POINTER_OVER);
+      if (e.type == EventType.POINTER_UP) {
+        this.adapter_.sendKeyDownAndUpEvent(
+            '', this.elementTypeToKeyCode_[view.type], undefined, undefined, {
+              ctrl: true,
+              alt: false,
+              shift: false
+            });
+      }
+      return;
     case ElementType.SOFT_KEY_VIEW:
       // Delegates the events on the soft key view to its soft key.
       view = /** @type {!i18n.input.chrome.inputview.elements.layout.
@@ -858,7 +1037,8 @@ Controller.prototype.handlePointerAction_ = function(view, e) {
 
   if (view.type != ElementType.MODIFIER_KEY &&
       !this.container_.altDataView.isVisible() &&
-      !this.container_.menuView.isVisible()) {
+      !this.container_.menuView.isVisible() &&
+      !this.container_.swipeView.isVisible()) {
     // The highlight of the modifier key is depending on the state instead
     // of the key down or up.
     if (e.type == EventType.POINTER_OVER || e.type == EventType.POINTER_DOWN ||
@@ -870,8 +1050,9 @@ Controller.prototype.handlePointerAction_ = function(view, e) {
       view.setHighlighted(false);
     }
   }
-  this.handlePointerEventForSoftKey_(
-      /** @type {!content.SoftKey} */ (view), e);
+  view = /** @type {!i18n.input.chrome.inputview.elements.content.
+      SoftKey} */ (view);
+  this.handlePointerEventForSoftKey_(view, e);
   this.updateContextModifierState_();
 };
 
@@ -879,7 +1060,7 @@ Controller.prototype.handlePointerAction_ = function(view, e) {
 /**
  * Handles softkey of the pointer action.
  *
- * @param {!content.SoftKey} softKey .
+ * @param {!i18n.input.chrome.inputview.elements.content.SoftKey} softKey .
  * @param {!i18n.input.chrome.inputview.events.PointerEvent} e .
  * @private
  */
@@ -897,11 +1078,12 @@ Controller.prototype.handlePointerEventForSoftKey_ = function(softKey, e) {
       }
       break;
     case ElementType.CHARACTER_KEY:
-      key = /** @type {!content.CharacterKey} */ (softKey);
+      key = /** @type {!i18n.input.chrome.inputview.elements.content.
+          CharacterKey} */ (softKey);
       if (e.type == EventType.LONG_PRESS) {
         this.container_.altDataView.show(
             key, goog.i18n.bidi.isRtlLanguage(this.languageCode_),
-            this.adapter_.isExperimental);
+            e.identifier);
       } else if (e.type == EventType.POINTER_UP) {
         this.model_.stateManager.triggerChording();
         var ch = key.getActiveCharacter();
@@ -913,7 +1095,8 @@ Controller.prototype.handlePointerEventForSoftKey_ = function(softKey, e) {
       break;
 
     case ElementType.MODIFIER_KEY:
-      key = /** @type {!content.ModifierKey} */ (softKey);
+      key = /** @type {!i18n.input.chrome.inputview.elements.content.
+          ModifierKey} */(softKey);
       var isStateEnabled = this.model_.stateManager.hasState(key.toState);
       var isChording = this.model_.stateManager.isChording(key.toState);
       if (e.type == EventType.POINTER_DOWN) {
@@ -940,18 +1123,21 @@ Controller.prototype.handlePointerEventForSoftKey_ = function(softKey, e) {
       break;
 
     case ElementType.BACKSPACE_KEY:
-      key = /** @type {!content.FunctionalKey} */ (softKey);
+      key = /** @type {!i18n.input.chrome.inputview.elements.content.
+          FunctionalKey} */(softKey);
       if (e.type == EventType.POINTER_DOWN) {
         this.backspaceTick_();
       } else if (e.type == EventType.POINTER_UP || e.type == EventType.
           POINTER_OUT) {
-        this.stopBackspaceAutoRepeat_();
-        this.adapter_.sendKeyUpEvent('\u0008', KeyCodes.BACKSPACE);
+        if (!this.container_.swipeView.isVisible()) {
+          this.stopBackspaceAutoRepeat_();
+        }
       }
       break;
 
     case ElementType.TAB_KEY:
-      key = /** @type {!content.FunctionalKey} */ (softKey);
+      key = /** @type {!i18n.input.chrome.inputview.elements.content.
+          FunctionalKey} */ (softKey);
       if (e.type == EventType.POINTER_DOWN) {
         this.adapter_.sendKeyDownEvent('\u0009', KeyCodes.TAB);
       } else if (e.type == EventType.POINTER_UP) {
@@ -960,7 +1146,8 @@ Controller.prototype.handlePointerEventForSoftKey_ = function(softKey, e) {
       break;
 
     case ElementType.ENTER_KEY:
-      key = /** @type {!content.FunctionalKey} */ (softKey);
+      key = /** @type {!i18n.input.chrome.inputview.elements.content.
+          FunctionalKey} */ (softKey);
       if (e.type == EventType.POINTER_UP) {
         this.adapter_.sendKeyDownAndUpEvent('\u000D', KeyCodes.ENTER);
       }
@@ -999,16 +1186,19 @@ Controller.prototype.handlePointerEventForSoftKey_ = function(softKey, e) {
       break;
     case ElementType.EN_SWITCHER:
       if (e.type == EventType.POINTER_UP) {
-        key = /** @type {!content.EnSwitcherKey} */ (softKey);
+        key = /** @type {!i18n.input.chrome.inputview.elements.content.
+            EnSwitcherKey} */ (softKey);
         this.adapter_.toggleLanguageState(this.model_.stateManager.isEnMode);
         this.model_.stateManager.isEnMode = !this.model_.stateManager.isEnMode;
         key.update();
       }
       break;
     case ElementType.SPACE_KEY:
-      key = /** @type {!content.SpaceKey} */ (softKey);
+      key = /** @type {!i18n.input.chrome.inputview.elements.content.
+          SpaceKey} */ (softKey);
       var doubleSpacePeriod = this.model_.settings.doubleSpacePeriod &&
-          this.currentKeyset_ != Controller.HANDWRITING_VIEW_CODE_;
+          this.currentKeyset_ != Controller.HANDWRITING_VIEW_CODE_ &&
+          this.currentKeyset_ != Controller.EMOJI_VIEW_CODE_;
       if (e.type == EventType.POINTER_UP || (!doubleSpacePeriod && e.type ==
           EventType.DOUBLE_CLICK_END)) {
         this.adapter_.sendKeyDownAndUpEvent(key.getCharacter(),
@@ -1020,7 +1210,8 @@ Controller.prototype.handlePointerEventForSoftKey_ = function(softKey, e) {
       break;
 
     case ElementType.SWITCHER_KEY:
-      key = /** @type {!content.SwitcherKey} */ (softKey);
+      key = /** @type {!i18n.input.chrome.inputview.elements.content.
+          SwitcherKey} */ (softKey);
       if (e.type == EventType.POINTER_UP) {
         this.recordStatsForClosing_(
             'InputMethod.VirtualKeyboard.LayoutSwitch', 1, 25, 25);
@@ -1043,11 +1234,12 @@ Controller.prototype.handlePointerEventForSoftKey_ = function(softKey, e) {
       break;
 
     case ElementType.COMPACT_KEY:
-      key = /** @type {!content.CompactKey} */ (softKey);
+      key = /** @type {!i18n.input.chrome.inputview.elements.content.
+          CompactKey} */(softKey);
       if (e.type == EventType.LONG_PRESS) {
         this.container_.altDataView.show(
             key, goog.i18n.bidi.isRtlLanguage(this.languageCode_),
-            this.adapter_.isExperimental);
+            e.identifier);
       } else if (e.type == EventType.POINTER_UP) {
         this.model_.stateManager.triggerChording();
         var ch = key.getActiveCharacter();
@@ -1069,14 +1261,15 @@ Controller.prototype.handlePointerEventForSoftKey_ = function(softKey, e) {
       var defaultKeyset = this.getActiveKeyset_();
       if (e.type == EventType.POINTER_UP) {
         this.adapter_.hideKeyboard();
-      }
-      if (this.currentKeyset_ != defaultKeyset) {
-        this.switchToKeyset(defaultKeyset);
+        if (this.currentKeyset_ != defaultKeyset) {
+          this.switchToKeyset(defaultKeyset);
+        }
       }
       break;
 
     case ElementType.MENU_KEY:
-      key = /** @type {!content.MenuKey} */ (softKey);
+      key = /** @type {!i18n.input.chrome.inputview.elements.content.
+          MenuKey} */ (softKey);
       if (e.type == EventType.POINTER_DOWN) {
         var isCompact = this.currentKeyset_.indexOf('compact') != -1;
         // Gets the default full keyboard instead of default keyset because
@@ -1085,16 +1278,15 @@ Controller.prototype.handlePointerEventForSoftKey_ = function(softKey, e) {
         var defaultFullKeyset = this.initialKeyset_.split(/\./)[0];
         var enableCompact = !this.adapter_.isA11yMode && goog.array.contains(
             util.KEYSETS_HAVE_COMPACT, defaultFullKeyset);
-        if (defaultFullKeyset == 'zhuyin' && !this.adapter_.isExperimental ||
+        if (defaultFullKeyset == 'zhuyin' &&
+            !this.adapter_.features.isEnabled(FeatureName.EXPERIMENTAL) ||
             this.languageCode_ == 'ko') {
           // Hides 'switch to compact' for zhuyin when not in experimental env.
           enableCompact = false;
         }
-        var self = this;
         var hasHwt = !this.adapter_.isPasswordBox() &&
             !Controller.DISABLE_HWT && goog.object.contains(
-            InputToolCode, this.getHwtInputToolCode_()) &&
-            this.languageCode_ != 'ko';
+            InputToolCode, this.getHwtInputToolCode_());
         var hasEmoji = !this.adapter_.isPasswordBox();
         var enableSettings = this.shouldEnableSettings() &&
             !!window.inputview && !!inputview.openSettings;
@@ -1117,7 +1309,8 @@ Controller.prototype.handlePointerEventForSoftKey_ = function(softKey, e) {
       }
       break;
     case ElementType.IME_SWITCH:
-      key = /** @type {!content.FunctionalKey} */ (softKey);
+      key = /** @type {!i18n.input.chrome.inputview.elements.content.
+          FunctionalKey} */ (softKey);
       this.adapter_.sendKeyDownAndUpEvent('', key.id);
       break;
   }
@@ -1217,10 +1410,24 @@ Controller.prototype.resetAll_ = function() {
   this.model_.stateManager.reset();
   this.container_.update();
   this.updateContextModifierState_();
-  this.deadKey_ = '';
   this.resize();
   this.container_.expandedCandidateView.close();
   this.container_.menuView.hide();
+  this.container_.swipeView.reset();
+  this.container_.altDataView.hide();
+};
+
+
+/**
+ * Returns whether the toolbar should be shown.
+ *
+ * @return {boolean}
+ * @private
+ */
+Controller.prototype.shouldShowToolBar_ = function() {
+  return this.adapter_.features.isEnabled(FeatureName.OPTIMIZED_LAYOUTS) &&
+      this.adapter_.isGoogleDocument() &&
+      this.adapter_.contextType == ContextType.DEFAULT;
 };
 
 
@@ -1265,9 +1472,7 @@ Controller.prototype.onSurroundingTextChanged_ = function(e) {
  * @private
  */
 Controller.prototype.onContextBlur_ = function() {
-  this.clearCandidates_();
   this.container_.cleanStroke();
-  this.deadKey_ = '';
   this.container_.menuView.hide();
 };
 
@@ -1436,8 +1641,19 @@ Controller.prototype.clearCandidates_ = function() {
   if (this.container_.currentKeysetView) {
     this.container_.currentKeysetView.setVisible(true);
   }
-  this.container_.candidateView.switchToIcon(CandidateView.IconType.BACK,
-      Controller.HANDWRITING_VIEW_CODE_ == this.currentKeyset_);
+  if (!this.adapter_.isQPInputView &&
+      (this.currentKeyset_ == Controller.HANDWRITING_VIEW_CODE_ ||
+       this.currentKeyset_ == Controller.EMOJI_VIEW_CODE_)) {
+    this.container_.candidateView.switchToIcon(
+        CandidateView.IconType.BACK, true);
+  } else if (this.currentKeyset_ != Controller.HANDWRITING_VIEW_CODE_ &&
+      this.currentKeyset_ != Controller.EMOJI_VIEW_CODE_) {
+    this.container_.candidateView.switchToIcon(CandidateView.IconType.VOICE,
+        this.adapter_.isVoiceInputEnabled);
+  } else {
+    this.container_.candidateView.switchToIcon(CandidateView.IconType.VOICE,
+        false);
+  }
 };
 
 
@@ -1502,21 +1718,28 @@ Controller.prototype.maybeCreateViews_ = function() {
     return;
   }
 
-  var activeKeyset = this.getActiveKeyset_();
+  // Emoji is temp keyset which is delay loaded. So active keyset can be 'us'
+  // while current keyset is 'emoji'. To make sure delay load can work
+  // correctly, here need to create/switch to 'emoji' instead of 'us'.
+  var activeKeyset = (this.currentKeyset_ == Controller.EMOJI_VIEW_CODE_) ?
+      this.currentKeyset_ : this.getActiveKeyset_();
   var remappedActiveKeyset = this.getRemappedKeyset_(activeKeyset);
+  var created = false;
   if (this.keysetDataMap_[remappedActiveKeyset]) {
     this.createView_(remappedActiveKeyset);
     this.switchToKeyset(activeKeyset);
+    created = true;
   }
   // Async creating the non-active keysets to reduce the latency of showing the
   // active keyset.
-  goog.Timer.callOnce((function() {
-    for (var keyset in this.keysetDataMap_) {
-      if (keyset != remappedActiveKeyset) {
+  var keyLen = Object.keys(this.keysetDataMap_).length;
+  if (created && keyLen > 1 || !created && keyLen > 0) {
+    goog.Timer.callOnce((function() {
+      for (var keyset in this.keysetDataMap_) {
         this.createView_(keyset);
       }
-    }
-  }).bind(this));
+    }).bind(this));
+  }
 };
 
 
@@ -1531,7 +1754,6 @@ Controller.prototype.switchToKeyset = function(keyset) {
   }
 
   var contextType = this.adapter_.contextType;
-  var lastKeysetView = this.container_.currentKeysetView;
   var ret = this.container_.switchToKeyset(this.getRemappedKeyset_(keyset),
       this.title_, this.adapter_.isPasswordBox(), this.adapter_.isA11yMode,
       keyset, this.contextTypeToLastKeysetMap_[contextType] ||
@@ -1546,16 +1768,24 @@ Controller.prototype.switchToKeyset = function(keyset) {
           keyset;
     }
     this.updateLanguageState_(this.currentKeyset_, keyset);
+    this.currentKeyset_ = keyset;
     this.resize(Controller.DEV);
     this.statistics_.recordLayout(keyset, this.adapter_.isA11yMode);
-    this.currentKeyset_ = keyset;
     this.perfTracker_.tick(PerfTracker.TickName.KEYBOARD_SHOWN);
     this.perfTracker_.stop();
   } else {
     // Sets the current keyset for delay switching.
-    this.contextTypeToKeysetMap_[this.currentInputMethod_][contextType] =
-        this.currentKeyset_ = keyset;
-    this.loadResource_(keyset);
+    this.currentKeyset_ = keyset;
+    if (keyset != Controller.EMOJI_VIEW_CODE_) {  // Emoji is temp keyset.
+      this.contextTypeToKeysetMap_[this.currentInputMethod_][contextType] =
+          keyset;
+    }
+    if (this.adapter_.isQPInputView &&
+        goog.array.contains(Controller.MATERIAL_KEYSETS_, keyset)) {
+      this.loadResource_('m-' + keyset);
+    } else {
+      this.loadResource_(keyset);
+    }
   }
 };
 
@@ -1584,12 +1814,15 @@ Controller.prototype.onConfigLoaded_ = function(e) {
   }
 
   var layoutId = data[i18n.input.chrome.inputview.SpecNodeName.LAYOUT];
+  if (this.adapter_.isQPInputView) {
+    layoutId = 'm-' + layoutId;
+    data[i18n.input.chrome.inputview.SpecNodeName.LAYOUT] = layoutId;
+  }
   var layoutData = this.layoutDataMap_[layoutId];
   if (layoutData) {
     this.maybeCreateViews_();
   } else {
-    this.model_.loadLayout(data[i18n.input.chrome.inputview.SpecNodeName.
-        LAYOUT]);
+    this.model_.loadLayout(layoutId);
   }
 };
 
@@ -1603,10 +1836,17 @@ Controller.prototype.resize = function(opt_ignoreWindowResize) {
   var height;
   var widthPercent;
   var candidateViewHeight;
-  var isHorizontal = screen.width > screen.height;
+  var isLandScape = screen.width > screen.height;
+  if (isLandScape) {
+    goog.dom.classlist.addRemove(this.container_.getElement(),
+        Css.PORTRAIT, Css.LANDSCAPE);
+  } else {
+    goog.dom.classlist.addRemove(this.container_.getElement(),
+        Css.LANDSCAPE, Css.PORTRAIT);
+  }
   var isWideScreen = (Math.min(screen.width, screen.height) / Math.max(
       screen.width, screen.height)) < 0.6;
-  this.model_.stateManager.covariance.update(isWideScreen, isHorizontal,
+  this.model_.stateManager.covariance.update(isWideScreen, isLandScape,
       this.adapter_.isA11yMode);
   if (this.adapter_.isA11yMode) {
     height = SizeSpec.A11Y_HEIGHT;
@@ -1620,20 +1860,19 @@ Controller.prototype.resize = function(opt_ignoreWindowResize) {
     var spec = data && data[SpecNodeName.WIDTH_PERCENT] ||
         SizeSpec.NON_A11Y_WIDTH_PERCENT;
     height = SizeSpec.NON_A11Y_HEIGHT;
-    if (isHorizontal) {
+    if (isLandScape) {
       if (isWideScreen) {
-        widthPercent = spec.LANDSCAPE_WIDE_SCREEN;
+        widthPercent = spec['LANDSCAPE_WIDE_SCREEN'];
       } else {
-        widthPercent = spec.LANDSCAPE;
+        widthPercent = spec['LANDSCAPE'];
       }
     } else {
-      widthPercent = spec.PORTRAIT;
+      widthPercent = spec['PORTRAIT'];
     }
     candidateViewHeight = SizeSpec.NON_A11Y_CANDIDATE_VIEW_HEIGHT;
   }
 
-  var viewportSize = goog.dom.getViewportSize();
-  if (viewportSize.height != height && !opt_ignoreWindowResize) {
+  if (window.innerHeight != height && !opt_ignoreWindowResize) {
     if (this.lastResizeHeight_ != height) {
       this.lastResizeHeight_ = height;
       window.resizeTo(screen.width, height);
@@ -1641,8 +1880,9 @@ Controller.prototype.resize = function(opt_ignoreWindowResize) {
     return;
   }
 
-  this.container_.resize(screen.width, height, widthPercent,
+  this.container_.setContainerSize(screen.width, height, widthPercent,
       candidateViewHeight);
+  this.container_.candidateView.setToolbarVisible(this.shouldShowToolBar_());
   if (this.container_.currentKeysetView) {
     this.isKeyboardReady = true;
   }
@@ -1673,7 +1913,7 @@ Controller.prototype.loadAllResources_ = function() {
  */
 Controller.prototype.getRemappedKeyset_ = function(keyset) {
   if (goog.array.contains(util.KEYSETS_USE_US, keyset)) {
-    return 'us';
+    return 'us-ltr';
   }
   var match = keyset.match(/^(.*)-rtl$/);
   if (match && goog.array.contains(util.KEYSETS_USE_US, match[1])) {
@@ -1729,10 +1969,7 @@ Controller.prototype.initialize = function(keyset, languageCode, passwordLayout,
     }
     this.languageCode_ = languageCode;
     this.currentInputMethod_ = currentInputMethod;
-    var keySetMap = this.contextTypeToKeysetMap_[this.currentInputMethod_];
-    if (!keySetMap) {
-      keySetMap = this.contextTypeToKeysetMap_[this.currentInputMethod_] = {};
-    }
+    var keySetMap = this.contextTypeToKeysetMap_[this.currentInputMethod_] = {};
     keySetMap[ContextType.PASSWORD] = passwordLayout;
     keySetMap[ContextType.DEFAULT] = keyset;
 
@@ -1832,12 +2069,11 @@ Controller.prototype.updateLanguageState_ =
         toRawKeyset.indexOf('en.compact') < 0) { // Switches between non-en/en.
       toggle = true;
       toggleState = toRawKeyset.indexOf('en.compact') == -1;
-    } else if (goog.array.contains(util.KEYSETS_HAVE_EN_SWTICHER,
-                   toRawKeyset) &&
-               fromRawKeyset.indexOf(toRawKeyset) == 0 &&
-               fromRawKeyset.indexOf('.compact') > 0 ||
-               fromRawKeyset && toRawKeyset.indexOf(fromRawKeyset) == 0 &&
-               toRawKeyset.indexOf('.compact') > 0) {
+    } else if (fromRawKeyset.indexOf(toRawKeyset) == 0 &&
+        fromRawKeyset.indexOf('.compact') > 0 &&
+        goog.array.contains(util.KEYSETS_HAVE_EN_SWTICHER, toRawKeyset) ||
+        fromRawKeyset && toRawKeyset.indexOf(fromRawKeyset) == 0 &&
+        toRawKeyset.indexOf('.compact') > 0) {
       // Switch between full/compact layouts, reset the default button and
       // language.
       toggle = true;

@@ -35,7 +35,7 @@ scoped_ptr<net::URLRequest> BlobProtocolHandler::CreateBlobRequest(
     net::URLRequest::Delegate* request_delegate) {
   const GURL kBlobUrl("blob://see_user_data/");
   scoped_ptr<net::URLRequest> request = request_context->CreateRequest(
-      kBlobUrl, net::DEFAULT_PRIORITY, request_delegate, NULL);
+      kBlobUrl, net::DEFAULT_PRIORITY, request_delegate);
   SetRequestedBlobDataHandle(request.get(), blob_data_handle.Pass());
   return request.Pass();
 }
@@ -68,11 +68,11 @@ net::URLRequestJob* BlobProtocolHandler::MaybeCreateJob(
                                         file_loop_proxy_.get());
 }
 
-scoped_refptr<storage::BlobData> BlobProtocolHandler::LookupBlobData(
+scoped_ptr<BlobDataSnapshot> BlobProtocolHandler::LookupBlobData(
     net::URLRequest* request) const {
   BlobDataHandle* blob_data_handle = GetRequestedBlobDataHandle(request);
   if (blob_data_handle)
-    return blob_data_handle->data();
+    return blob_data_handle->CreateSnapshot().Pass();
   if (!context_.get())
     return NULL;
 
@@ -84,7 +84,12 @@ scoped_refptr<storage::BlobData> BlobProtocolHandler::LookupBlobData(
     return NULL;
   std::string uuid = request->url().spec().substr(kPrefix.length());
   scoped_ptr<BlobDataHandle> handle = context_->GetBlobDataFromUUID(uuid);
-  return handle.get() ? handle->data() : NULL;
+  scoped_ptr<BlobDataSnapshot> snapshot;
+  if (handle) {
+    snapshot = handle->CreateSnapshot().Pass();
+    SetRequestedBlobDataHandle(request, handle.Pass());
+  }
+  return snapshot.Pass();
 }
 
 }  // namespace storage

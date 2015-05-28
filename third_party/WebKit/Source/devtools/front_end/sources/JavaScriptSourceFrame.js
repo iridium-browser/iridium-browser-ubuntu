@@ -39,17 +39,19 @@ WebInspector.JavaScriptSourceFrame = function(scriptsPanel, uiSourceCode)
     this._scriptsPanel = scriptsPanel;
     this._breakpointManager = WebInspector.breakpointManager;
     this._uiSourceCode = uiSourceCode;
+    if (uiSourceCode.contentType() === WebInspector.resourceTypes.Script)
+        this._compiler = new WebInspector.JavaScriptCompiler(this);
 
     WebInspector.UISourceCodeFrame.call(this, uiSourceCode);
     if (uiSourceCode.project().type() === WebInspector.projectTypes.Debugger)
         this.element.classList.add("source-frame-debugger-script");
 
-    this._popoverHelper = new WebInspector.ObjectPopoverHelper(this.textEditor.element,
+    this._popoverHelper = new WebInspector.ObjectPopoverHelper(scriptsPanel.element,
         this._getPopoverAnchor.bind(this), this._resolveObjectForPopover.bind(this), this._onHidePopover.bind(this), true);
 
     this.textEditor.element.addEventListener("keydown", this._onKeyDown.bind(this), true);
 
-    this.textEditor.addEventListener(WebInspector.TextEditor.Events.GutterClick, this._handleGutterClick.bind(this), this);
+    this.textEditor.addEventListener(WebInspector.CodeMirrorTextEditor.Events.GutterClick, this._handleGutterClick.bind(this), this);
 
     this._breakpointManager.addEventListener(WebInspector.BreakpointManager.Events.BreakpointAdded, this._breakpointAdded, this);
     this._breakpointManager.addEventListener(WebInspector.BreakpointManager.Events.BreakpointRemoved, this._breakpointRemoved, this);
@@ -75,6 +77,8 @@ WebInspector.JavaScriptSourceFrame = function(scriptsPanel, uiSourceCode)
     WebInspector.settings.skipStackFramesPattern.addChangeListener(this._showBlackboxInfobarIfNeeded, this);
     WebInspector.settings.skipContentScripts.addChangeListener(this._showBlackboxInfobarIfNeeded, this);
     this._showBlackboxInfobarIfNeeded();
+    /** @type {!Map.<number, !Element>} */
+    this._valueWidgets = new Map();
 }
 
 WebInspector.JavaScriptSourceFrame.prototype = {
@@ -96,11 +100,11 @@ WebInspector.JavaScriptSourceFrame.prototype = {
 
         var fileURL = this._uiSourceCode.originURL();
         infobar.createDetailsRowMessage(WebInspector.UIString("The content of this file on the file system:\u00a0")).appendChild(
-            WebInspector.createExternalAnchor(fileURL, fileURL, "source-frame-infobar-details-url"));
+            WebInspector.linkifyURLAsNode(fileURL, fileURL, "source-frame-infobar-details-url", true));
 
         var scriptURL = WebInspector.networkMapping.networkURL(this._uiSourceCode);
         infobar.createDetailsRowMessage(WebInspector.UIString("does not match the loaded script:\u00a0")).appendChild(
-            WebInspector.createExternalAnchor(scriptURL, scriptURL, "source-frame-infobar-details-url"));
+            WebInspector.linkifyURLAsNode(scriptURL, scriptURL, "source-frame-infobar-details-url", true));
 
         infobar.createDetailsRowMessage();
         infobar.createDetailsRowMessage(WebInspector.UIString("Possible solutions are:"));
@@ -224,6 +228,8 @@ WebInspector.JavaScriptSourceFrame.prototype = {
     wasShown: function()
     {
         WebInspector.UISourceCodeFrame.prototype.wasShown.call(this);
+        if (this._executionLineNumber && this.loaded)
+            this._generateValuesInSource();
     },
 
     willHide: function()
@@ -243,6 +249,8 @@ WebInspector.JavaScriptSourceFrame.prototype = {
         this._scriptsPanel.setIgnoreExecutionLineEvents(true);
         WebInspector.UISourceCodeFrame.prototype.onTextChanged.call(this, oldRange, newRange);
         this._scriptsPanel.setIgnoreExecutionLineEvents(false);
+        if (this._compiler)
+            this._compiler.scheduleCompile();
     },
 
     populateLineGutterContextMenu: function(contextMenu, lineNumber)
@@ -251,7 +259,7 @@ WebInspector.JavaScriptSourceFrame.prototype = {
         var breakpoint = this._breakpointManager.findBreakpointOnLine(this._uiSourceCode, lineNumber);
         if (!breakpoint) {
             // This row doesn't have a breakpoint: We want to show Add Breakpoint and Add and Edit Breakpoint.
-            contextMenu.appendItem(WebInspector.UIString.capitalize("Add ^breakpoint"), this._setBreakpoint.bind(this, lineNumber, 0, "", true));
+            contextMenu.appendItem(WebInspector.UIString.capitalize("Add ^breakpoint"), this._createNewBreakpoint.bind(this, lineNumber, 0, "", true));
             contextMenu.appendItem(WebInspector.UIString.capitalize("Add ^conditional ^breakpoint…"), this._editBreakpointCondition.bind(this, lineNumber));
         } else {
             // This row has a breakpoint, we want to show edit and remove breakpoint, and either disable or enable.
@@ -489,6 +497,15 @@ WebInspector.JavaScriptSourceFrame.prototype = {
             breakpoints[i].remove();
     },
 
+    /**
+     * @param {string}  tokenType
+     * @return {boolean}
+     */
+    _isIdentifier: function(tokenType)
+    {
+        return tokenType.startsWith("js-variable") || tokenType.startsWith("js-property") || tokenType == "js-def";
+    },
+
     _getPopoverAnchor: function(element, event)
     {
         var target = WebInspector.context.flavor(WebInspector.Target);
@@ -518,13 +535,13 @@ WebInspector.JavaScriptSourceFrame.prototype = {
         }
 
         var token = this.textEditor.tokenAtTextPosition(textPosition.startLine, textPosition.startColumn);
-        if (!token)
+        if (!token || !token.type)
             return;
         var lineNumber = textPosition.startLine;
         var line = this.textEditor.line(lineNumber);
         var tokenContent = line.substring(token.startColumn, token.endColumn);
 
-        var isIdentifier = token.type.startsWith("js-variable") || token.type.startsWith("js-property") || token.type == "js-def";
+        var isIdentifier = this._isIdentifier(token.type);
         if (!isIdentifier && (token.type !== "js-keyword" || tokenContent !== "this"))
             return;
 
@@ -555,7 +572,7 @@ WebInspector.JavaScriptSourceFrame.prototype = {
         if (!anchorBox.forSelection) {
             while (startHighlight > 1 && line.charAt(startHighlight - 1) === '.') {
                 var token = this.textEditor.tokenAtTextPosition(lineNumber, startHighlight - 2);
-                if (!token) {
+                if (!token || !token.type) {
                     this._popoverHelper.hidePopover();
                     return;
                 }
@@ -657,7 +674,7 @@ WebInspector.JavaScriptSourceFrame.prototype = {
             if (breakpoint)
                 breakpoint.setCondition(newText);
             else
-                this._setBreakpoint(lineNumber, 0, newText, true);
+                this._createNewBreakpoint(lineNumber, 0, newText, true);
         }
 
         var config = new WebInspector.InplaceEditor.Config(finishEditing.bind(this, true), finishEditing.bind(this, false));
@@ -688,8 +705,174 @@ WebInspector.JavaScriptSourceFrame.prototype = {
     setExecutionLine: function(lineNumber)
     {
         this._executionLineNumber = lineNumber;
-        if (this.loaded)
-            this.textEditor.setExecutionLine(lineNumber);
+        if (!this.loaded)
+            return;
+
+        this.textEditor.setExecutionLine(lineNumber);
+        if (this.isShowing())
+            this._generateValuesInSource();
+    },
+
+    _generateValuesInSource: function()
+    {
+        if (!Runtime.experiments.isEnabled("inlineVariableValues") || !WebInspector.settings.inlineVariableValues.get())
+            return;
+        var executionContext = WebInspector.context.flavor(WebInspector.ExecutionContext);
+        if (!executionContext)
+            return;
+        var callFrame = executionContext.target().debuggerModel.selectedCallFrame();
+        if (!callFrame)
+            return;
+
+        var localScope = callFrame.localScope();
+        var functionLocation = callFrame.functionLocation();
+        if (localScope && functionLocation)
+            localScope.object().getAllProperties(false, this._prepareScopeVariables.bind(this, callFrame));
+
+        if (this._clearValueWidgetsTimer) {
+            clearTimeout(this._clearValueWidgetsTimer);
+            delete this._clearValueWidgetsTimer;
+        }
+    },
+
+    /**
+     * @param {!WebInspector.DebuggerModel.CallFrame} callFrame
+     * @param {?Array.<!WebInspector.RemoteObjectProperty>} properties
+     * @param {?Array.<!WebInspector.RemoteObjectProperty>} internalProperties
+     */
+    _prepareScopeVariables: function(callFrame, properties, internalProperties)
+    {
+        if (!properties || !properties.length || properties.length > 500) {
+            this._clearValueWidgets();
+            return;
+        }
+
+        var functionUILocation = WebInspector.debuggerWorkspaceBinding.rawLocationToUILocation(/**@type {!WebInspector.DebuggerModel.Location} */ (callFrame.functionLocation()));
+        var executionUILocation = WebInspector.debuggerWorkspaceBinding.rawLocationToUILocation(callFrame.location());
+        if (functionUILocation.uiSourceCode !== this._uiSourceCode || executionUILocation.uiSourceCode !== this._uiSourceCode) {
+            this._clearValueWidgets();
+            return;
+        }
+
+        var fromLine = functionUILocation.lineNumber;
+        var fromColumn = functionUILocation.columnNumber;
+        var toLine = executionUILocation.lineNumber;
+
+        // Make sure we have a chance to update all existing widgets.
+        if (this._valueWidgets) {
+            for (var line of this._valueWidgets.keys())
+                toLine = Math.max(toLine, line + 1);
+        }
+        if (fromLine >= toLine || toLine - fromLine > 500) {
+            this._clearValueWidgets();
+            return;
+        }
+
+        var valuesMap = new Map();
+        for (var property of properties)
+            valuesMap.set(property.name, property.value);
+
+        /** @type {!Map.<number, !Set<string>>} */
+        var namesPerLine = new Map();
+        var tokenizer = new WebInspector.CodeMirrorUtils.TokenizerFactory().createTokenizer("text/javascript");
+        tokenizer(this.textEditor.line(fromLine).substring(fromColumn), processToken.bind(this, fromLine));
+        for (var i = fromLine + 1; i < toLine; ++i)
+            tokenizer(this.textEditor.line(i), processToken.bind(this, i));
+
+        /**
+         * @param {number} lineNumber
+         * @param {string} tokenValue
+         * @param {?string} tokenType
+         * @param {number} column
+         * @param {number} newColumn
+         * @this {WebInspector.JavaScriptSourceFrame}
+         */
+        function processToken(lineNumber, tokenValue, tokenType, column, newColumn)
+        {
+            if (tokenType && this._isIdentifier(tokenType) && valuesMap.get(tokenValue)) {
+                var names = namesPerLine.get(lineNumber);
+                if (!names) {
+                    names = new Set();
+                    namesPerLine.set(lineNumber, names);
+                }
+                names.add(tokenValue);
+            }
+        }
+        this.textEditor.operation(this._renderDecorations.bind(this, valuesMap, namesPerLine, fromLine, toLine));
+    },
+
+    /**
+     * @param {!Map.<string,!WebInspector.RemoteObject>} valuesMap
+     * @param {!Map.<number, !Set<string>>} namesPerLine
+     * @param {number} fromLine
+     * @param {number} toLine
+     */
+    _renderDecorations: function(valuesMap, namesPerLine, fromLine, toLine)
+    {
+        var formatter = new WebInspector.RemoteObjectPreviewFormatter();
+        for (var i = fromLine; i < toLine; ++i) {
+            var names = namesPerLine.get(i);
+            var oldWidget = this._valueWidgets.get(i);
+            if (!names) {
+                if (oldWidget) {
+                    this._valueWidgets.delete(i);
+                    this.textEditor.removeDecoration(i, oldWidget);
+                }
+                continue;
+            }
+
+            var widget = createElementWithClass("div", "text-editor-value-decoration");
+            var base = this.textEditor.cursorPositionToCoordinates(i, 0);
+            var offset = this.textEditor.cursorPositionToCoordinates(i, this.textEditor.line(i).length);
+            var codeMirrorLinesLeftPadding = 4;
+            var left = offset.x - base.x + codeMirrorLinesLeftPadding;
+            widget.style.left = left + "px";
+            widget.__nameToToken = new Map();
+            widget.__lineNumber = i;
+
+            var renderedNameCount = 0;
+            for (var name of names) {
+                if (renderedNameCount > 10)
+                    break;
+                if (namesPerLine.get(i - 1) && namesPerLine.get(i - 1).has(name))
+                    continue;  // Only render name once in the given continuous block.
+                if (renderedNameCount)
+                    widget.createTextChild(", ");
+                var nameValuePair = widget.createChild("span");
+                widget.__nameToToken.set(name, nameValuePair);
+                nameValuePair.createTextChild(name + " = ");
+                var value = valuesMap.get(name);
+                var propertyCount = value.preview ? value.preview.properties.length : 0;
+                var entryCount = value.preview && value.preview.entries ? value.preview.entries.length : 0;
+                if (value.preview && propertyCount + entryCount < 10)
+                    formatter.appendObjectPreview(nameValuePair, value.preview, value);
+                else
+                    nameValuePair.appendChild(WebInspector.ObjectPropertiesSection.createValueElement(value, false));
+                ++renderedNameCount;
+            }
+
+            var widgetChanged = true;
+            if (oldWidget) {
+                widgetChanged = false;
+                for (var name of widget.__nameToToken.keys()) {
+                    var oldText = oldWidget.__nameToToken.get(name) ? oldWidget.__nameToToken.get(name).textContent : "";
+                    var newText = widget.__nameToToken.get(name) ? widget.__nameToToken.get(name).textContent : "";
+                    if (newText !== oldText) {
+                        widgetChanged = true;
+                        // value has changed, update it.
+                        WebInspector.runCSSAnimationOnce(/** @type {!Element} */ (widget.__nameToToken.get(name)), "source-frame-value-update-highlight");
+                    }
+                }
+                if (widgetChanged) {
+                    this._valueWidgets.delete(i);
+                    this.textEditor.removeDecoration(i, oldWidget);
+                }
+            }
+            if (widgetChanged) {
+                this._valueWidgets.set(i, widget);
+                this.textEditor.addDecoration(i, widget);
+            }
+        }
     },
 
     clearExecutionLine: function()
@@ -697,6 +880,15 @@ WebInspector.JavaScriptSourceFrame.prototype = {
         if (this.loaded && typeof this._executionLineNumber === "number")
             this.textEditor.clearExecutionLine();
         delete this._executionLineNumber;
+        this._clearValueWidgetsTimer = setTimeout(this._clearValueWidgets.bind(this), 1000);
+    },
+
+    _clearValueWidgets: function()
+    {
+        delete this._clearValueWidgetsTimer;
+        for (var line of this._valueWidgets.keys())
+            this.textEditor.removeDecoration(line, this._valueWidgets.get(line));
+        this._valueWidgets.clear();
     },
 
     /**
@@ -848,7 +1040,7 @@ WebInspector.JavaScriptSourceFrame.prototype = {
         if (this._muted)
             return;
 
-        var eventData = /** @type {!WebInspector.TextEditor.GutterClickEventData} */ (event.data);
+        var eventData = /** @type {!WebInspector.CodeMirrorTextEditor.GutterClickEventData} */ (event.data);
         var lineNumber = eventData.lineNumber;
         var eventObject = eventData.event;
 
@@ -872,7 +1064,19 @@ WebInspector.JavaScriptSourceFrame.prototype = {
             else
                 breakpoint.remove();
         } else
-            this._setBreakpoint(lineNumber, 0, "", true);
+            this._createNewBreakpoint(lineNumber, 0, "", true);
+    },
+
+    /**
+     * @param {number} lineNumber
+     * @param {number} columnNumber
+     * @param {string} condition
+     * @param {boolean} enabled
+     */
+    _createNewBreakpoint: function(lineNumber, columnNumber, condition, enabled)
+    {
+        this._setBreakpoint(lineNumber, columnNumber, condition, enabled);
+        WebInspector.userMetrics.ScriptsBreakpointSet.record();
     },
 
     toggleBreakpointOnCurrentLine: function()

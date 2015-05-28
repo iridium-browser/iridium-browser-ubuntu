@@ -199,9 +199,9 @@ bool GetAppLaunchContainer(
   extensions::LaunchContainer launch_container = extensions::GetLaunchContainer(
       extensions::ExtensionPrefs::Get(profile), extension);
 
-  if (!extensions::util::IsStreamlinedHostedAppsEnabled() &&
+  if (!extensions::util::IsNewBookmarkAppsEnabled() &&
       !extensions::HasPreferredLaunchContainer(
-           extensions::ExtensionPrefs::Get(profile), extension)) {
+          extensions::ExtensionPrefs::Get(profile), extension)) {
     launch_container = extensions::LAUNCH_CONTAINER_WINDOW;
   }
 
@@ -380,6 +380,18 @@ bool StartupBrowserCreatorImpl::Launch(Profile* profile,
       KeystoneInfoBar::PromotionInfoBar(profile);
     }
 #endif
+  }
+
+  // In kiosk mode, we want to always be fullscreen, so switch to that now.
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(switches::kKioskMode) ||
+      base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kStartFullscreen)) {
+    // It's possible for there to be no browser window, e.g. if someone
+    // specified a non-sensical combination of options
+    // ("--kiosk --no_startup_window"); do nothing in that case.
+    Browser* browser = BrowserList::GetInstance(desktop_type)->GetLastActive();
+    if (browser)
+      chrome::ToggleFullscreenMode(browser);
   }
 
 #if defined(OS_WIN)
@@ -800,12 +812,6 @@ Browser* StartupBrowserCreatorImpl::OpenTabsInBrowser(
   // to take care of that.
   if (!browser_creator_ || browser_creator_->show_main_browser_window())
     browser->window()->Show();
-
-  // In kiosk mode, we want to always be fullscreen, so switch to that now.
-  if (base::CommandLine::ForCurrentProcess()->HasSwitch(switches::kKioskMode) ||
-      base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kStartFullscreen))
-    chrome::ToggleFullscreenMode(browser);
 
   return browser;
 }

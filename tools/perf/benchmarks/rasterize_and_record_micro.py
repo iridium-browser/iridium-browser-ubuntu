@@ -2,9 +2,10 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+from telemetry import benchmark
+
 from measurements import rasterize_and_record_micro
 import page_sets
-from telemetry import benchmark
 
 
 class _RasterizeAndRecordMicro(benchmark.Benchmark):
@@ -30,10 +31,15 @@ class _RasterizeAndRecordMicro(benchmark.Benchmark):
                       action='store_true',
                       help='Whether to report additional detailed results.')
 
+  @classmethod
+  def Name(cls):
+    return 'rasterize_and_record_micro'
+
   def CreatePageTest(self, options):
     return rasterize_and_record_micro.RasterizeAndRecordMicro(
         options.start_wait_time, options.rasterize_repeat,
         options.record_repeat, options.timeout, options.report_detailed_results)
+
 
 # RasterizeAndRecord disabled on mac because of crbug.com/350684.
 # RasterizeAndRecord disabled on windows because of crbug.com/338057.
@@ -42,7 +48,31 @@ class RasterizeAndRecordMicroTop25(_RasterizeAndRecordMicro):
   """Measures rasterize and record performance on the top 25 web pages.
 
   http://www.chromium.org/developers/design-documents/rendering-benchmarks"""
-  page_set = page_sets.Top25SmoothPageSet
+  page_set = page_sets.Top25PageSet
+
+  @classmethod
+  def Name(cls):
+    return 'rasterize_and_record_micro.top_25_smooth'
+
+
+# RasterizeAndRecord disabled on mac because of crbug.com/350684.
+# RasterizeAndRecord disabled on windows because of crbug.com/338057.
+# Slimming paint version disabled on android because of crbug.com/472590.
+#@benchmark.Disabled('mac', 'win', 'android')
+#@benchmark.Disabled('reference')
+@benchmark.Disabled # Temporarily entirely disabled. crbug/457054
+class RasterizeAndRecordMicroTop25WithSlimmingPaint(_RasterizeAndRecordMicro):
+  """Measures rasterize and record performance with --enable-slimming-paint.
+
+  http://www.chromium.org/developers/design-documents/rendering-benchmarks"""
+  page_set = page_sets.Top25PageSet
+
+  def CustomizeBrowserOptions(self, options):
+    options.AppendExtraBrowserArgs(['--enable-slimming-paint'])
+
+  @classmethod
+  def Name(cls):
+    return 'rasterize_and_record_micro.top_25_slimming_paint_smooth'
 
 
 @benchmark.Disabled('mac', 'win')
@@ -50,7 +80,11 @@ class RasterizeAndRecordMicroKeyMobileSites(_RasterizeAndRecordMicro):
   """Measures rasterize and record performance on the key mobile sites.
 
   http://www.chromium.org/developers/design-documents/rendering-benchmarks"""
-  page_set = page_sets.KeyMobileSitesSmoothPageSet
+  page_set = page_sets.KeyMobileSitesPageSet
+
+  @classmethod
+  def Name(cls):
+    return 'rasterize_and_record_micro.key_mobile_sites_smooth'
 
 
 @benchmark.Disabled('mac', 'win')
@@ -58,7 +92,13 @@ class RasterizeAndRecordMicroKeySilkCases(_RasterizeAndRecordMicro):
   """Measures rasterize and record performance on the silk sites.
 
   http://www.chromium.org/developers/design-documents/rendering-benchmarks"""
-  page_set = page_sets.KeySilkCasesPageSet
+
+  @classmethod
+  def Name(cls):
+    return 'rasterize_and_record_micro.key_silk_cases'
+
+  def CreatePageSet(self, options):
+    return page_sets.KeySilkCasesPageSet(run_no_page_interactions=True)
 
 
 @benchmark.Enabled('android')
@@ -66,4 +106,10 @@ class RasterizeAndRecordMicroPolymer(_RasterizeAndRecordMicro):
   """Measures rasterize and record performance on the Polymer cases.
 
   http://www.chromium.org/developers/design-documents/rendering-benchmarks"""
-  page_set = page_sets.PolymerPageSet
+
+  @classmethod
+  def Name(cls):
+    return 'rasterize_and_record_micro.polymer'
+
+  def CreatePageSet(self, options):
+    return page_sets.PolymerPageSet(run_no_page_interactions=True)

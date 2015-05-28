@@ -6,11 +6,10 @@ import os
 import sys
 
 from telemetry.core import discover
-from telemetry.core import util
 from telemetry.core.platform import network_controller
 from telemetry.core.platform import platform_backend as platform_backend_module
-from telemetry.core.platform import profiling_controller
 from telemetry.core.platform import tracing_controller
+from telemetry.core import util
 
 
 _host_platform = None
@@ -44,7 +43,7 @@ def _IterAllPlatformBackendClasses():
       platform_backend_module.PlatformBackend).itervalues()
 
 
-def GetPlatformForDevice(device, logging=real_logging):
+def GetPlatformForDevice(device, finder_options, logging=real_logging):
   """ Returns a platform instance for the device.
     Args:
       device: a device.Device instance.
@@ -55,7 +54,8 @@ def GetPlatformForDevice(device, logging=real_logging):
     for platform_backend_class in _IterAllPlatformBackendClasses():
       if platform_backend_class.SupportsDevice(device):
         _remote_platforms[device.guid] = (
-            platform_backend_class.CreatePlatformForDevice(device))
+            platform_backend_class.CreatePlatformForDevice(device,
+                                                           finder_options))
         return _remote_platforms[device.guid]
     return None
   except Exception:
@@ -72,13 +72,12 @@ class Platform(object):
   """
   def __init__(self, platform_backend):
     self._platform_backend = platform_backend
+    self._platform_backend.InitPlatformBackend()
     self._platform_backend.SetPlatform(self)
     self._network_controller = network_controller.NetworkController(
         self._platform_backend.network_controller_backend)
     self._tracing_controller = tracing_controller.TracingController(
         self._platform_backend.tracing_controller_backend)
-    self._profiling_controller = profiling_controller.ProfilingController(
-        self._platform_backend.profiling_controller_backend)
 
   @property
   def is_host_platform(self):
@@ -92,10 +91,6 @@ class Platform(object):
   @property
   def tracing_controller(self):
     return self._tracing_controller
-
-  @property
-  def profiling_controller(self):
-    return self._profiling_controller
 
   def CanMonitorThermalThrottling(self):
     """Platforms may be able to detect thermal throttling.
@@ -132,6 +127,12 @@ class Platform(object):
 
     Examples: VISTA, WIN7, LION, MOUNTAINLION"""
     return self._platform_backend.GetOSVersionName()
+
+  def GetOSVersionNumber(self):
+    """Returns an integer description of the Platform OS major version.
+
+    Examples: On Mac, 13 for Mavericks, 14 for Yosemite."""
+    return self._platform_backend.GetOSVersionNumber()
 
   def CanFlushIndividualFilesFromSystemCache(self):
     """Returns true if the disk cache can be flushed for specific files."""

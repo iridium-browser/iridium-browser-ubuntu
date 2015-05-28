@@ -51,6 +51,7 @@ class CastMetricsServiceClient : public ::metrics::MetricsServiceClient {
 
   // metrics::MetricsServiceClient implementation:
   void SetMetricsClientId(const std::string& client_id) override;
+  void OnRecordingDisabled() override;
   bool IsOffTheRecordSessionActive() override;
   int32_t GetProduct() override;
   std::string GetApplicationLocale() override;
@@ -61,9 +62,8 @@ class CastMetricsServiceClient : public ::metrics::MetricsServiceClient {
   void StartGatheringMetrics(const base::Closure& done_callback) override;
   void CollectFinalMetrics(const base::Closure& done_callback) override;
   scoped_ptr< ::metrics::MetricsLogUploader> CreateUploader(
-      const std::string& server_url,
-      const std::string& mime_type,
       const base::Callback<void(int)>& on_upload_complete) override;
+  base::TimeDelta GetStandardUploadInterval() override;
 
   // Starts/stops the metrics service.
   void EnableMetricsService(bool enabled);

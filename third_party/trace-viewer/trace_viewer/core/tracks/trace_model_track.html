@@ -5,19 +5,58 @@ Use of this source code is governed by a BSD-style license that can be
 found in the LICENSE file.
 -->
 
-<link rel="stylesheet" href="/core/tracks/trace_model_track.css">
-
 <link rel="import" href="/core/tracks/highlighter.html">
 <link rel="import" href="/core/tracks/container_track.html">
 <link rel="import" href="/core/tracks/kernel_track.html">
+<link rel="import" href="/core/tracks/alert_track.html">
+<link rel="import" href="/core/tracks/memory_dump_track.html">
 <link rel="import" href="/core/tracks/process_track.html">
 <link rel="import" href="/core/draw_helpers.html">
 <link rel="import" href="/base/ui.html">
+
+<style>
+.model-track {
+  -webkit-box-flex: 1;
+}
+</style>
 
 <script>
 'use strict';
 
 tv.exportTo('tv.c.tracks', function() {
+
+  // TODO(nduca): Move this elsewhere and make it non-hacky.
+  function HackyMultiRowTrack(viewport, model) {
+    var mrt = new tv.c.tracks.MultiRowTrack(viewport);
+    mrt.heading = 'Interactions';
+    mrt.buildSubRows_ = function(slices) {
+      slices.sort(function(x, y) {
+        var r = x.title.localeCompare(y.title);
+        if (r)
+          return r;
+        return x.start - y.start;
+      });
+      return tv.c.tracks.AsyncSliceGroupTrack.prototype.buildSubRows_.call(
+          {}, slices, true);
+    };
+    mrt.addSubTrack_ = function(slices) {
+      var track = new tv.c.tracks.SliceTrack(this.viewport);
+      track.slices = slices;
+      this.appendChild(track);
+      return track;
+    };
+
+    mrt.setItemsToGroup(model.interaction_records, {
+      guid: tv.b.GUID.allocate(),
+      model: model,
+      getSettingsKey: function() {
+        return undefined;
+      }
+    });
+
+    return mrt;
+  }
+
   /**
    * Visualizes a Model by building ProcessTracks and
    * CpuTracks.
@@ -35,10 +74,23 @@ tv.exportTo('tv.c.tracks', function() {
       tv.c.tracks.ContainerTrack.prototype.decorate.call(this, viewport);
       this.classList.add('model-track');
 
-      this.highlighters_ = tv.c.tracks.Highlighter.getAllRegisteredTypeInfos().map(
+      var typeInfos = tv.c.tracks.Highlighter.getAllRegisteredTypeInfos();
+      this.highlighters_ = typeInfos.map(
         function(typeInfo) {
           return new typeInfo.constructor(viewport);
         });
+
+      this.upperMode_ = false;
+    },
+
+    // upperMode is true if the track is being used on the ruler.
+    get upperMode() {
+      return this.upperMode_;
+    },
+
+    set upperMode(upperMode) {
+      this.upperMode_ = upperMode;
+      this.updateContents_();
     },
 
     detach: function() {
@@ -63,6 +115,33 @@ tv.exportTo('tv.c.tracks', function() {
       if (!this.model_)
         return;
 
+      if (this.upperMode_)
+        this.updateContentsForUpperMode_();
+      else
+        this.updateContentsForLowerMode_();
+    },
+
+    updateContentsForUpperMode_: function() {
+    },
+
+    updateContentsForLowerMode_: function() {
+      if (this.model_.interaction_records.length) {
+        var mrt = new HackyMultiRowTrack(this.viewport_, this.model_);
+        this.appendChild(mrt);
+      }
+
+      if (this.model_.alerts.length) {
+        var at = new tv.c.tracks.AlertTrack(this.viewport_);
+        at.alerts = this.model_.alerts;
+        this.appendChild(at);
+      }
+
+      if (this.model_.globalMemoryDumps.length) {
+        var mdt = new tv.c.tracks.MemoryDumpTrack(this.viewport_);
+        mdt.memoryDumps = this.model_.globalMemoryDumps;
+        this.appendChild(mdt);
+      }
+
       this.appendKernelTrack_();
 
       // Get a sorted list of processes.
@@ -80,6 +159,7 @@ tv.exportTo('tv.c.tracks', function() {
         this.appendChild(track);
       }
       this.viewport_.rebuildEventToTrackMap();
+      this.viewport_.rebuildContainerToTrackMap();
 
       for (var i = 0; i < this.highlighters_.length; i++) {
         this.highlighters_[i].processModel(this.model_);
@@ -101,6 +181,12 @@ tv.exportTo('tv.c.tracks', function() {
       this.instantEvents.forEach(function(ev) {
         eventToTrackMap.addEvent(ev, this);
       }.bind(this));
+    },
+
+    addContainersToTrackMap: function(containerToTrackMap) {
+      var tracks = this.children;
+      for (var i = 0; i < tracks.length; ++i)
+        tracks[i].addContainersToTrackMap(containerToTrackMap);
     },
 
     appendKernelTrack_: function() {
@@ -195,18 +281,10 @@ tv.exportTo('tv.c.tracks', function() {
       var events =
           this.model_.flowIntervalTree.findIntersection(viewLWorld, viewRWorld);
 
-      var minWidth = 2 * pixWidth;
       var canvasBounds = ctx.canvas.getBoundingClientRect();
-
       for (var i = 0; i < events.length; ++i) {
         var startEvent = events[i][0];
         var endEvent = events[i][1];
-
-        // Skip lines that will be, essentially, vertical.
-        var distance = endEvent.start - startEvent.start;
-        if (distance <= minWidth)
-          continue;
-
         this.drawFlowArrowBetween_(
             ctx, startEvent, endEvent, canvasBounds, pixWidth);
       }

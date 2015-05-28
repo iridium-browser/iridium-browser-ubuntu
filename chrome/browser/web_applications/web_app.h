@@ -52,6 +52,7 @@ struct ShortcutInfo {
   gfx::ImageFamily favicon;
   base::FilePath profile_path;
   std::string profile_name;
+  std::string version_for_display;
 };
 
 // This specifies a folder in the system applications menu (e.g the Start Menu
@@ -135,7 +136,8 @@ void GetShortcutInfoForApp(const extensions::Extension* extension,
                            const ShortcutInfoCallback& callback);
 
 // Whether to create a shortcut for this type of extension.
-bool ShouldCreateShortcutFor(Profile* profile,
+bool ShouldCreateShortcutFor(web_app::ShortcutCreationReason reason,
+                             Profile* profile,
                              const extensions::Extension* extension);
 
 // Gets the user data directory for given web app. The path for the directory is

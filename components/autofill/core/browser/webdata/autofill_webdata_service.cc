@@ -17,7 +17,7 @@
 #include "components/autofill/core/browser/webdata/autofill_webdata_backend_impl.h"
 #include "components/autofill/core/browser/webdata/autofill_webdata_service_observer.h"
 #include "components/autofill/core/common/form_field_data.h"
-#include "components/webdata/common/web_data_service_backend.h"
+#include "components/webdata/common/web_database_backend.h"
 #include "components/webdata/common/web_database_service.h"
 
 using base::Bind;
@@ -129,11 +129,11 @@ WebDataServiceBase::Handle AutofillWebDataService::GetAutofillProfiles(
       consumer);
 }
 
-WebDataServiceBase::Handle AutofillWebDataService::GetAutofillServerProfiles(
+WebDataServiceBase::Handle AutofillWebDataService::GetServerProfiles(
     WebDataServiceConsumer* consumer) {
-  return wdbs_->ScheduleDBTaskWithResult(FROM_HERE,
-      Bind(&AutofillWebDataBackendImpl::GetAutofillServerProfiles,
-           autofill_backend_),
+  return wdbs_->ScheduleDBTaskWithResult(
+      FROM_HERE,
+      Bind(&AutofillWebDataBackendImpl::GetServerProfiles, autofill_backend_),
       consumer);
 }
 
@@ -196,6 +196,21 @@ void AutofillWebDataService::MaskServerCreditCard(const std::string& id) {
       FROM_HERE,
       Bind(&AutofillWebDataBackendImpl::MaskServerCreditCard,
            autofill_backend_, id));
+}
+
+void AutofillWebDataService::ClearAllServerData() {
+  wdbs_->ScheduleDBTask(
+      FROM_HERE,
+      Bind(&AutofillWebDataBackendImpl::ClearAllServerData,
+           autofill_backend_));
+}
+
+void AutofillWebDataService::UpdateUnmaskedCardUsageStats(
+    const CreditCard& credit_card) {
+  wdbs_->ScheduleDBTask(
+      FROM_HERE,
+      Bind(&AutofillWebDataBackendImpl::UpdateUnmaskedCardUsageStats,
+           autofill_backend_, credit_card));
 }
 
 void AutofillWebDataService::RemoveAutofillDataModifiedBetween(

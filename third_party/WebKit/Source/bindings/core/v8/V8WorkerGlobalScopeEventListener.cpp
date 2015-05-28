@@ -63,12 +63,12 @@ void V8WorkerGlobalScopeEventListener::handleEvent(ScriptState* scriptState, Eve
     ScriptState::Scope scope(scriptState);
 
     // Get the V8 wrapper for the event object.
-    v8::Handle<v8::Value> jsEvent = toV8(event, scriptState->context()->Global(), isolate());
+    v8::Local<v8::Value> jsEvent = toV8(event, scriptState->context()->Global(), isolate());
 
     invokeEventHandler(scriptState, event, v8::Local<v8::Value>::New(isolate(), jsEvent));
 }
 
-v8::Local<v8::Value> V8WorkerGlobalScopeEventListener::callListenerFunction(ScriptState* scriptState, v8::Handle<v8::Value> jsEvent, Event* event)
+v8::Local<v8::Value> V8WorkerGlobalScopeEventListener::callListenerFunction(ScriptState* scriptState, v8::Local<v8::Value> jsEvent, Event* event)
 {
     v8::Local<v8::Function> handlerFunction = getListenerFunction(scriptState);
     v8::Local<v8::Object> receiver = getReceiverObject(scriptState, event);
@@ -76,17 +76,9 @@ v8::Local<v8::Value> V8WorkerGlobalScopeEventListener::callListenerFunction(Scri
         return v8::Local<v8::Value>();
 
     TRACE_EVENT1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline"), "FunctionCall", "data", devToolsTraceEventData(isolate(), scriptState->executionContext(), handlerFunction));
-    // FIXME(361045): remove InspectorInstrumentation calls once DevTools Timeline migrates to tracing.
-    InspectorInstrumentationCookie cookie;
-    if (InspectorInstrumentation::hasFrontends()) {
-        int scriptId = 0;
-        String resourceName;
-        int lineNumber = 1;
-        GetDevToolsFunctionInfo(handlerFunction, isolate(), scriptId, resourceName, lineNumber);
-        cookie = InspectorInstrumentation::willCallFunction(scriptState->executionContext(), scriptId, resourceName, lineNumber);
-    }
+    InspectorInstrumentationCookie cookie = InspectorInstrumentation::willCallFunction(scriptState->executionContext(), DevToolsFunctionInfo(handlerFunction));
 
-    v8::Handle<v8::Value> parameters[1] = { jsEvent };
+    v8::Local<v8::Value> parameters[1] = { jsEvent };
     v8::Local<v8::Value> result = V8ScriptRunner::callFunction(handlerFunction, scriptState->executionContext(), receiver, WTF_ARRAY_LENGTH(parameters), parameters, isolate());
 
     InspectorInstrumentation::didCallFunction(cookie);
@@ -105,10 +97,10 @@ v8::Local<v8::Object> V8WorkerGlobalScopeEventListener::getReceiverObject(Script
         return listener;
 
     EventTarget* target = event->currentTarget();
-    v8::Handle<v8::Value> value = toV8(target, scriptState->context()->Global(), isolate());
+    v8::Local<v8::Value> value = toV8(target, scriptState->context()->Global(), isolate());
     if (value.IsEmpty())
         return v8::Local<v8::Object>();
-    return v8::Local<v8::Object>::New(isolate(), v8::Handle<v8::Object>::Cast(value));
+    return v8::Local<v8::Object>::New(isolate(), v8::Local<v8::Object>::Cast(value));
 }
 
 } // namespace blink

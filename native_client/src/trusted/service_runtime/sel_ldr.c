@@ -9,12 +9,12 @@
 /*
  * NaCl Simple/secure ELF loader (NaCl SEL).
  */
+#include "native_client/src/include/build_config.h"
 #include "native_client/src/include/portability.h"
 #include "native_client/src/include/portability_io.h"
 #include "native_client/src/include/portability_string.h"
 #include "native_client/src/include/nacl_macros.h"
 
-#include "native_client/src/public/desc_metadata_types.h"
 #include "native_client/src/public/nacl_app.h"
 #include "native_client/src/public/secure_service.h"
 
@@ -32,7 +32,6 @@
 #include "native_client/src/trusted/desc/nacl_desc_imc.h"
 #include "native_client/src/trusted/desc/nacl_desc_io.h"
 #include "native_client/src/trusted/desc/nrd_xfer.h"
-#include "native_client/src/trusted/desc_cacheability/desc_cacheability.h"
 #include "native_client/src/trusted/fault_injection/fault_injection.h"
 #include "native_client/src/trusted/fault_injection/test_injection.h"
 #include "native_client/src/trusted/interval_multiset/nacl_interval_range_tree_intern.h"
@@ -46,11 +45,9 @@
 #include "native_client/src/trusted/service_runtime/nacl_desc_effector_ldr.h"
 #include "native_client/src/trusted/service_runtime/nacl_globals.h"
 #include "native_client/src/trusted/service_runtime/nacl_resource.h"
-#include "native_client/src/trusted/service_runtime/nacl_reverse_quota_interface.h"
 #include "native_client/src/trusted/service_runtime/nacl_syscall_common.h"
 #include "native_client/src/trusted/service_runtime/nacl_syscall_handlers.h"
 #include "native_client/src/trusted/service_runtime/nacl_valgrind_hooks.h"
-#include "native_client/src/trusted/service_runtime/name_service/name_service.h"
 #include "native_client/src/trusted/service_runtime/sel_addrspace.h"
 #include "native_client/src/trusted/service_runtime/sel_ldr.h"
 #include "native_client/src/trusted/service_runtime/sel_memory.h"
@@ -59,7 +56,6 @@
 #include "native_client/src/trusted/simple_service/nacl_simple_service.h"
 #include "native_client/src/trusted/threading/nacl_thread_interface.h"
 #include "native_client/src/trusted/validator/rich_file_info.h"
-#include "native_client/src/trusted/validator/validation_cache.h"
 
 static int IsEnvironmentVariableSet(char const *env_name) {
   return NULL != getenv(env_name);
@@ -181,8 +177,6 @@ int NaClAppWithSyscallTableCtor(struct NaClApp               *nap,
   nap->secure_service = NULL;
   nap->main_exe_prevalidated = 0;
 
-  nap->kernel_service = NULL;
-  nap->resource_phase = NACL_RESOURCE_PHASE_START;
   if (!NaClResourceNaClAppInit(&nap->resources, nap)) {
     goto cleanup_dynamic_load_mutex;
   }
@@ -201,25 +195,10 @@ int NaClAppWithSyscallTableCtor(struct NaClApp               *nap,
 
   nap->syscall_table = table;
 
-  nap->runtime_host_interface = NULL;
   nap->desc_quota_interface = NULL;
 
   nap->module_initialization_state = NACL_MODULE_UNINITIALIZED;
   nap->module_load_status = LOAD_OK;
-
-  nap->name_service = (struct NaClNameService *) malloc(
-      sizeof *nap->name_service);
-  if (NULL == nap->name_service) {
-    goto cleanup_cv;
-  }
-  if (!NaClNameServiceCtor(nap->name_service,
-                           NaClAddrSpSquattingThreadIfFactoryFunction,
-                           (void *) nap)) {
-    free(nap->name_service);
-    goto cleanup_cv;
-  }
-  nap->name_service_conn_cap = NaClDescRef(nap->name_service->
-                                           base.base.bound_and_cap[1]);
 
   nap->ignore_validator_result = 0;
   nap->skip_validator = 0;
@@ -242,7 +221,7 @@ int NaClAppWithSyscallTableCtor(struct NaClApp               *nap,
   nap->pnacl_mode = 0;
 
   if (!NaClMutexCtor(&nap->threads_mu)) {
-    goto cleanup_name_service;
+    goto cleanup_cv;
   }
   nap->num_threads = 0;
   if (!NaClFastMutexCtor(&nap->desc_mu)) {
@@ -294,23 +273,24 @@ int NaClAppWithSyscallTableCtor(struct NaClApp               *nap,
   nap->sc_nprocessors_onln = sysconf(_SC_NPROCESSORS_ONLN);
 #endif
 
+#if !NACL_LINUX
   if (!NaClMutexCtor(&nap->futex_wait_list_mu)) {
     goto cleanup_exception_mu;
   }
   nap->futex_wait_list_head.next = &nap->futex_wait_list_head;
   nap->futex_wait_list_head.prev = &nap->futex_wait_list_head;
+#endif
 
   return 1;
 
+#if !NACL_LINUX
  cleanup_exception_mu:
   NaClMutexDtor(&nap->exception_mu);
+#endif
  cleanup_desc_mu:
   NaClFastMutexDtor(&nap->desc_mu);
  cleanup_threads_mu:
   NaClMutexDtor(&nap->threads_mu);
- cleanup_name_service:
-  NaClDescUnref(nap->name_service_conn_cap);
-  NaClRefCountUnref((struct NaClRefCount *) nap->name_service);
  cleanup_cv:
   NaClCondVarDtor(&nap->cv);
  cleanup_mu:
@@ -714,25 +694,29 @@ static struct {
 };
 
 /*
- * File redirection is impossible if an outer sandbox is in place.
- * For the command-line embedding, we sometimes have an outer sandbox:
- * on OSX, it is enabled after loading the file is loaded.  On the
- * other hand, device redirection (DEBUG_ONLY:dev://postmessage) is
- * impossible until the reverse channel setup has occurred.
+ * Process I/O redirection/inheritance from the environment.
  *
- * Because of this, we run NaClProcessRedirControl twice: once to
- * process default inheritance, file redirection early on, and once
- * after the reverse channel is in place to handle the device
- * redirection.  We try to hide knowledge about which redirection
- * control values can be handled in which phases by allowing the
- * NaClResourceOpen to fail, and only in the last phase do we check
- * that the redirection succeeded in *some* phase.
+ * File redirection is impossible if an outer sandbox is in place.  For the
+ * command-line embedding, we sometimes have an outer sandbox: on OSX, it is
+ * enabled after loading the file is loaded. We handle this situation by
+ * allowing the NaClAppInitialDescriptorHookup to fail in which case in falls
+ * back to default inheritance. This means dup'ing descriptors 0-2 and making
+ * them available to the NaCl App.
+ *
+ * When standard input is inherited, this could result in a NaCl module
+ * competing for input from the terminal; for graphical / browser plugin
+ * environments, this never is allowed to happen, and having this is useful for
+ * debugging, and for potential standalone text-mode applications of NaCl.
+ *
+ * TODO(bsy): consider whether default inheritance should occur only
+ * in debug mode.
  */
-static void NaClProcessRedirControl(struct NaClApp *nap) {
-
+void NaClAppInitialDescriptorHookup(struct NaClApp *nap) {
   size_t          ix;
   char const      *env;
   struct NaClDesc *ndp;
+
+  NaClLog(4, "Processing I/O redirection/inheritance from environment\n");
 
   for (ix = 0; ix < NACL_ARRAY_SIZE(g_nacl_redir_control); ++ix) {
     ndp = NULL;
@@ -749,7 +733,7 @@ static void NaClProcessRedirControl(struct NaClApp *nap) {
     if (NULL != ndp) {
       NaClLog(4, "Setting descriptor %d\n", (int) ix);
       NaClAppSetDesc(nap, (int) ix, ndp);
-    } else if (NACL_RESOURCE_PHASE_START == nap->resource_phase) {
+    } else {
       /*
        * Environment not set or redirect failed -- handle default inheritance.
        */
@@ -757,26 +741,7 @@ static void NaClProcessRedirControl(struct NaClApp *nap) {
                             g_nacl_redir_control[ix].nacl_flags, (int) ix);
     }
   }
-}
 
-/*
- * Process default descriptor inheritance.  This means dup'ing
- * descriptors 0-2 and making them available to the NaCl App.
- *
- * When standard input is inherited, this could result in a NaCl
- * module competing for input from the terminal; for graphical /
- * browser plugin environments, this never is allowed to happen, and
- * having this is useful for debugging, and for potential standalone
- * text-mode applications of NaCl.
- *
- * TODO(bsy): consider whether default inheritance should occur only
- * in debug mode.
- */
-void NaClAppInitialDescriptorHookup(struct NaClApp  *nap) {
-
-  NaClLog(4, "Processing I/O redirection/inheritance from environment\n");
-  nap->resource_phase = NACL_RESOURCE_PHASE_START;
-  NaClProcessRedirControl(nap);
   NaClLog(4, "... done.\n");
 }
 
@@ -1048,12 +1013,6 @@ void NaClAppLoadModule(struct NaClApp   *nap,
 
   NaClXMutexLock(&nap->mu);
 
-  /*
-   * TODO(teravest): Remove this when file tokens are no longer used in |nexe|.
-   */
-  NaClReplaceDescIfValidationCacheAssertsMappable(&nexe,
-                                                  nap->validation_cache);
-
   /* Transfer ownership from nexe to nap->main_nexe_desc. */
   CHECK(nap->main_nexe_desc == NULL);
   nap->main_nexe_desc = nexe;
@@ -1089,41 +1048,6 @@ void NaClAppLoadModule(struct NaClApp   *nap,
 
   /* Give debuggers a well known point at which xlate_base is known.  */
   NaClGdbHook(nap);
-}
-
-int NaClAppRuntimeHostSetup(struct NaClApp                  *nap,
-                            struct NaClRuntimeHostInterface *host_itf) {
-  NaClErrorCode status = LOAD_OK;
-
-  NaClLog(4,
-          ("Entered NaClAppRuntimeHostSetup, nap 0x%"NACL_PRIxPTR","
-           " host_itf 0x%"NACL_PRIxPTR"\n"),
-          (uintptr_t) nap, (uintptr_t) host_itf);
-
-  NaClXMutexLock(&nap->mu);
-  if (nap->module_initialization_state > NACL_MODULE_STARTING) {
-    NaClLog(LOG_ERROR, "NaClAppRuntimeHostSetup: too late\n");
-    status = LOAD_INTERNAL;
-    goto cleanup_status_mu;
-  }
-
-  nap->runtime_host_interface = (struct NaClRuntimeHostInterface *)
-      NaClRefCountRef((struct NaClRefCount *) host_itf);
-
-  /*
-   * Hook up runtime host enabled resources, e.g.,
-   * DEBUG_ONLY:dev://postmessage.  NB: Resources specified by
-   * file:path should have been taken care of earlier, in
-   * NaClAppInitialDescriptorHookup.
-   */
-  nap->resource_phase = NACL_RESOURCE_PHASE_RUNTIME_HOST;
-  NaClLog(4, "Processing dev I/O redirection/inheritance from environment\n");
-  NaClProcessRedirControl(nap);
-  NaClLog(4, "... done.\n");
-
- cleanup_status_mu:
-  NaClXMutexUnlock(&nap->mu);
-  return (int) status;
 }
 
 int NaClAppDescQuotaSetup(struct NaClApp                 *nap,

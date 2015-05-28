@@ -4,13 +4,13 @@
 
 #include "mojo/services/network/network_service_impl.h"
 
-#include "mojo/public/cpp/application/application_connection.h"
 #include "mojo/services/network/cookie_store_impl.h"
 #include "mojo/services/network/net_adapters.h"
 #include "mojo/services/network/tcp_bound_socket_impl.h"
 #include "mojo/services/network/udp_socket_impl.h"
 #include "mojo/services/network/url_loader_impl.h"
 #include "mojo/services/network/web_socket_impl.h"
+#include "third_party/mojo/src/mojo/public/cpp/application/application_connection.h"
 
 namespace mojo {
 
@@ -25,7 +25,10 @@ NetworkServiceImpl::~NetworkServiceImpl() {
 
 void NetworkServiceImpl::CreateURLLoader(InterfaceRequest<URLLoader> loader) {
   // TODO(darin): Plumb origin_. Use for CORS.
-  BindToRequest(new URLLoaderImpl(context_), &loader);
+  // The loader will delete itself when the pipe is closed, unless a request is
+  // in progress. In which case, the loader will delete itself when the request
+  // is finished.
+  new URLLoaderImpl(context_, loader.Pass());
 }
 
 void NetworkServiceImpl::GetCookieStore(InterfaceRequest<CookieStore> store) {
@@ -63,8 +66,9 @@ void NetworkServiceImpl::CreateTCPConnectedSocket(
   callback.Run(MakeNetworkError(net::ERR_NOT_IMPLEMENTED), NetAddressPtr());
 }
 
-void NetworkServiceImpl::CreateUDPSocket(InterfaceRequest<UDPSocket> socket) {
-  BindToRequest(new UDPSocketImpl(), &socket);
+void NetworkServiceImpl::CreateUDPSocket(InterfaceRequest<UDPSocket> request) {
+  // The lifetime of this UDPSocketImpl is bound to that of the underlying pipe.
+  new UDPSocketImpl(request.Pass());
 }
 
 }  // namespace mojo

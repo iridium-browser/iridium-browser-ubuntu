@@ -13,7 +13,9 @@
 #include "content/public/browser/notification_registrar.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
+#include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
+#include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_ui.h"
 #include "media/audio/audio_parameters.h"
 #include "media/base/media_log_event.h"
@@ -42,6 +44,7 @@ std::string EffectsToString(int effects) {
     { media::AudioParameters::ECHO_CANCELLER, "ECHO_CANCELLER" },
     { media::AudioParameters::DUCKING, "DUCKING" },
     { media::AudioParameters::KEYBOARD_MIC, "KEYBOARD_MIC" },
+    { media::AudioParameters::HOTWORD, "HOTWORD" },
   };
 
   std::string ret;
@@ -61,6 +64,22 @@ std::string EffectsToString(int effects) {
   }
 
   return ret;
+}
+
+std::string FormatToString(media::AudioParameters::Format format) {
+  switch (format) {
+    case media::AudioParameters::AUDIO_PCM_LINEAR:
+      return "pcm_linear";
+    case media::AudioParameters::AUDIO_PCM_LOW_LATENCY:
+      return "pcm_low_latency";
+    case media::AudioParameters::AUDIO_FAKE:
+      return "fake";
+    case media::AudioParameters::AUDIO_LAST_FORMAT:
+      break;
+  }
+
+  NOTREACHED();
+  return "unknown";
 }
 
 const char kAudioLogStatusKey[] = "status";
@@ -86,12 +105,22 @@ class AudioLogImpl : public media::AudioLog {
   void OnError(int component_id) override;
   void OnSetVolume(int component_id, double volume) override;
 
+  // Called by MediaInternals to update the WebContents title for a stream.
+  void SendWebContentsTitle(int component_id,
+                            int render_process_id,
+                            int render_frame_id);
+
  private:
   void SendSingleStringUpdate(int component_id,
                               const std::string& key,
                               const std::string& value);
   void StoreComponentMetadata(int component_id, base::DictionaryValue* dict);
   std::string FormatCacheKey(int component_id);
+
+  static void SendWebContentsTitleHelper(const std::string& cache_key,
+                                         scoped_ptr<base::DictionaryValue> dict,
+                                         int render_process_id,
+                                         int render_frame_id);
 
   const int owner_id_;
   const media::AudioLogFactory::AudioComponent component_;
@@ -117,6 +146,7 @@ void AudioLogImpl::OnCreated(int component_id,
 
   dict.SetString(kAudioLogStatusKey, "created");
   dict.SetString("device_id", device_id);
+  dict.SetString("device_type", FormatToString(params.format()));
   dict.SetInteger("frames_per_buffer", params.frames_per_buffer());
   dict.SetInteger("sample_rate", params.sample_rate());
   dict.SetInteger("channels", params.channels());
@@ -124,8 +154,9 @@ void AudioLogImpl::OnCreated(int component_id,
                  ChannelLayoutToString(params.channel_layout()));
   dict.SetString("effects", EffectsToString(params.effects()));
 
-  media_internals_->SendUpdateAndCacheAudioStreamKey(
-      FormatCacheKey(component_id), kAudioLogUpdateFunction, &dict);
+  media_internals_->SendAudioLogUpdate(MediaInternals::CREATE,
+                                       FormatCacheKey(component_id),
+                                       kAudioLogUpdateFunction, &dict);
 }
 
 void AudioLogImpl::OnStarted(int component_id) {
@@ -140,8 +171,9 @@ void AudioLogImpl::OnClosed(int component_id) {
   base::DictionaryValue dict;
   StoreComponentMetadata(component_id, &dict);
   dict.SetString(kAudioLogStatusKey, "closed");
-  media_internals_->SendUpdateAndPurgeAudioStreamCache(
-      FormatCacheKey(component_id), kAudioLogUpdateFunction, &dict);
+  media_internals_->SendAudioLogUpdate(MediaInternals::UPDATE_AND_DELETE,
+                                       FormatCacheKey(component_id),
+                                       kAudioLogUpdateFunction, &dict);
 }
 
 void AudioLogImpl::OnError(int component_id) {
@@ -152,12 +184,51 @@ void AudioLogImpl::OnSetVolume(int component_id, double volume) {
   base::DictionaryValue dict;
   StoreComponentMetadata(component_id, &dict);
   dict.SetDouble("volume", volume);
-  media_internals_->SendUpdateAndCacheAudioStreamKey(
-      FormatCacheKey(component_id), kAudioLogUpdateFunction, &dict);
+  media_internals_->SendAudioLogUpdate(MediaInternals::UPDATE_IF_EXISTS,
+                                       FormatCacheKey(component_id),
+                                       kAudioLogUpdateFunction, &dict);
+}
+
+void AudioLogImpl::SendWebContentsTitle(int component_id,
+                                        int render_process_id,
+                                        int render_frame_id) {
+  scoped_ptr<base::DictionaryValue> dict(new base::DictionaryValue());
+  StoreComponentMetadata(component_id, dict.get());
+  SendWebContentsTitleHelper(FormatCacheKey(component_id), dict.Pass(),
+                             render_process_id, render_frame_id);
 }
 
 std::string AudioLogImpl::FormatCacheKey(int component_id) {
   return base::StringPrintf("%d:%d:%d", owner_id_, component_, component_id);
+}
+
+// static
+void AudioLogImpl::SendWebContentsTitleHelper(
+    const std::string& cache_key,
+    scoped_ptr<base::DictionaryValue> dict,
+    int render_process_id,
+    int render_frame_id) {
+  // Page title information can only be retrieved from the UI thread.
+  if (!BrowserThread::CurrentlyOn(BrowserThread::UI)) {
+    BrowserThread::PostTask(
+        BrowserThread::UI, FROM_HERE,
+        base::Bind(&SendWebContentsTitleHelper, cache_key, base::Passed(&dict),
+                   render_process_id, render_frame_id));
+    return;
+  }
+
+  const WebContents* web_contents = WebContents::FromRenderFrameHost(
+      RenderFrameHost::FromID(render_process_id, render_frame_id));
+  if (!web_contents)
+    return;
+
+  // Note: by this point the given audio log entry could have been destroyed, so
+  // we use UPDATE_IF_EXISTS to discard such instances.
+  dict->SetInteger("render_process_id", render_process_id);
+  dict->SetString("web_contents_title", web_contents->GetTitle());
+  MediaInternals::GetInstance()->SendAudioLogUpdate(
+      MediaInternals::UPDATE_IF_EXISTS, cache_key, kAudioLogUpdateFunction,
+      dict.get());
 }
 
 void AudioLogImpl::SendSingleStringUpdate(int component_id,
@@ -166,8 +237,9 @@ void AudioLogImpl::SendSingleStringUpdate(int component_id,
   base::DictionaryValue dict;
   StoreComponentMetadata(component_id, &dict);
   dict.SetString(key, value);
-  media_internals_->SendUpdateAndCacheAudioStreamKey(
-      FormatCacheKey(component_id), kAudioLogUpdateFunction, &dict);
+  media_internals_->SendAudioLogUpdate(MediaInternals::UPDATE_IF_EXISTS,
+                                       FormatCacheKey(component_id),
+                                       kAudioLogUpdateFunction, &dict);
 }
 
 void AudioLogImpl::StoreComponentMetadata(int component_id,
@@ -200,6 +272,7 @@ class MediaInternals::MediaInternalsUMAHandler : public NotificationObserver {
     bool has_audio;
     bool has_video;
     bool video_dds;
+    bool video_decoder_changed;
     std::string audio_codec_name;
     std::string video_codec_name;
     std::string video_decoder;
@@ -207,7 +280,8 @@ class MediaInternals::MediaInternalsUMAHandler : public NotificationObserver {
         : last_pipeline_status(media::PIPELINE_OK),
           has_audio(false),
           has_video(false),
-          video_dds(false) {}
+          video_dds(false),
+          video_decoder_changed(false) {}
   };
 
   // Helper function to report PipelineStatus associated with a player to UMA.
@@ -239,7 +313,7 @@ void MediaInternals::MediaInternalsUMAHandler::Observe(
     int type,
     const NotificationSource& source,
     const NotificationDetails& details) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK_EQ(type, NOTIFICATION_RENDERER_PROCESS_TERMINATED);
   RenderProcessHost* process = Source<RenderProcessHost>(source).ptr();
 
@@ -257,13 +331,9 @@ void MediaInternals::MediaInternalsUMAHandler::Observe(
 void MediaInternals::MediaInternalsUMAHandler::SavePlayerState(
     const media::MediaLogEvent& event,
     int render_process_id) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
   PlayerInfoMap& player_info = renderer_info_[render_process_id];
   switch (event.type) {
-    case media::MediaLogEvent::WEBMEDIAPLAYER_CREATED: {
-      // Nothing to do here
-      break;
-    }
     case media::MediaLogEvent::PIPELINE_ERROR: {
       int status;
       event.params.GetInteger("pipeline_error", &status);
@@ -289,8 +359,13 @@ void MediaInternals::MediaInternalsUMAHandler::SavePlayerState(
                                &player_info[event.id].video_codec_name);
       }
       if (event.params.HasKey("video_decoder")) {
+        std::string previous_video_decoder(player_info[event.id].video_decoder);
         event.params.GetString("video_decoder",
                                &player_info[event.id].video_decoder);
+        if (!previous_video_decoder.empty() &&
+            previous_video_decoder != player_info[event.id].video_decoder) {
+          player_info[event.id].video_decoder_changed = true;
+        }
       }
       if (event.params.HasKey("video_dds")) {
         event.params.GetBoolean("video_dds", &player_info[event.id].video_dds);
@@ -304,7 +379,7 @@ void MediaInternals::MediaInternalsUMAHandler::SavePlayerState(
 
 std::string MediaInternals::MediaInternalsUMAHandler::GetUMANameForAVStream(
     const PipelineInfo& player_info) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
   static const char kPipelineUmaPrefix[] = "Media.PipelineStatus.AudioVideo.";
   std::string uma_name = kPipelineUmaPrefix;
   if (player_info.video_codec_name == "vp8") {
@@ -336,7 +411,7 @@ std::string MediaInternals::MediaInternalsUMAHandler::GetUMANameForAVStream(
 
 void MediaInternals::MediaInternalsUMAHandler::ReportUMAForPipelineStatus(
     const PipelineInfo& player_info) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
   if (player_info.has_video && player_info.has_audio) {
     base::LinearHistogram::FactoryGet(
         GetUMANameForAVStream(player_info), 1, media::PIPELINE_STATUS_MAX,
@@ -356,11 +431,17 @@ void MediaInternals::MediaInternalsUMAHandler::ReportUMAForPipelineStatus(
                               player_info.last_pipeline_status,
                               media::PIPELINE_STATUS_MAX + 1);
   }
+  // Report whether video decoder fallback happened, but only if a video decoder
+  // was reported.
+  if (!player_info.video_decoder.empty()) {
+    UMA_HISTOGRAM_BOOLEAN("Media.VideoDecoderFallback",
+                          player_info.video_decoder_changed);
+  }
 }
 
 void MediaInternals::MediaInternalsUMAHandler::LogAndClearPlayersInRenderer(
     int render_process_id) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
   auto players_it = renderer_info_.find(render_process_id);
   if (players_it == renderer_info_.end())
     return;
@@ -383,7 +464,7 @@ MediaInternals::~MediaInternals() {}
 
 void MediaInternals::OnMediaEvents(
     int render_process_id, const std::vector<media::MediaLogEvent>& events) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
   // Notify observers that |event| has occurred.
   for (auto event = events.begin(); event != events.end(); ++event) {
     base::DictionaryValue dict;
@@ -414,12 +495,12 @@ void MediaInternals::OnMediaEvents(
 }
 
 void MediaInternals::AddUpdateCallback(const UpdateCallback& callback) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
   update_callbacks_.push_back(callback);
 }
 
 void MediaInternals::RemoveUpdateCallback(const UpdateCallback& callback) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
   for (size_t i = 0; i < update_callbacks_.size(); ++i) {
     if (update_callbacks_[i].Equals(callback)) {
       update_callbacks_.erase(update_callbacks_.begin() + i);
@@ -440,14 +521,14 @@ void MediaInternals::SendAudioStreamData() {
 }
 
 void MediaInternals::SendVideoCaptureDeviceCapabilities() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
   SendUpdate(SerializeUpdate("media.onReceiveVideoCaptureCapabilities",
                              &video_capture_capabilities_cached_data_));
 }
 
 void MediaInternals::UpdateVideoCaptureDeviceCapabilities(
     const media::VideoCaptureDeviceInfos& video_capture_device_infos) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
   video_capture_capabilities_cached_data_.Clear();
 
   for (const auto& video_capture_device_info : video_capture_device_infos) {
@@ -460,10 +541,10 @@ void MediaInternals::UpdateVideoCaptureDeviceCapabilities(
     device_dict->SetString(
         "name", video_capture_device_info.name.GetNameAndModel());
     device_dict->Set("formats", format_list);
-#if defined(OS_WIN) || defined(OS_MACOSX)
+#if defined(OS_WIN) || defined(OS_MACOSX) || defined(OS_LINUX) || \
+    defined(OS_ANDROID)
     device_dict->SetString(
-        "captureApi",
-        video_capture_device_info.name.GetCaptureApiTypeString());
+        "captureApi", video_capture_device_info.name.GetCaptureApiTypeString());
 #endif
     video_capture_capabilities_cached_data_.Append(device_dict);
   }
@@ -477,6 +558,15 @@ scoped_ptr<media::AudioLog> MediaInternals::CreateAudioLog(
   base::AutoLock auto_lock(lock_);
   return scoped_ptr<media::AudioLog>(new AudioLogImpl(
       owner_ids_[component]++, component, this));
+}
+
+void MediaInternals::SetWebContentsTitleForAudioLogEntry(
+    int component_id,
+    int render_process_id,
+    int render_frame_id,
+    media::AudioLog* audio_log) {
+  static_cast<AudioLogImpl*>(audio_log)
+      ->SendWebContentsTitle(component_id, render_process_id, render_frame_id);
 }
 
 void MediaInternals::SendUpdate(const base::string16& update) {
@@ -493,32 +583,30 @@ void MediaInternals::SendUpdate(const base::string16& update) {
     update_callbacks_[i].Run(update);
 }
 
-void MediaInternals::SendUpdateAndCacheAudioStreamKey(
-    const std::string& cache_key,
-    const std::string& function,
-    const base::DictionaryValue* value) {
-  SendUpdate(SerializeUpdate(function, value));
-
-  base::AutoLock auto_lock(lock_);
-  if (!audio_streams_cached_data_.HasKey(cache_key)) {
-    audio_streams_cached_data_.Set(cache_key, value->DeepCopy());
-    return;
+void MediaInternals::SendAudioLogUpdate(AudioLogUpdateType type,
+                                        const std::string& cache_key,
+                                        const std::string& function,
+                                        const base::DictionaryValue* value) {
+  {
+    base::AutoLock auto_lock(lock_);
+    const bool has_entry = audio_streams_cached_data_.HasKey(cache_key);
+    if ((type == UPDATE_IF_EXISTS || type == UPDATE_AND_DELETE) && !has_entry) {
+      return;
+    } else if (!has_entry) {
+      DCHECK_EQ(type, CREATE);
+      audio_streams_cached_data_.Set(cache_key, value->DeepCopy());
+    } else if (type == UPDATE_AND_DELETE) {
+      scoped_ptr<base::Value> out_value;
+      CHECK(audio_streams_cached_data_.Remove(cache_key, &out_value));
+    } else {
+      base::DictionaryValue* existing_dict = NULL;
+      CHECK(
+          audio_streams_cached_data_.GetDictionary(cache_key, &existing_dict));
+      existing_dict->MergeDictionary(value);
+    }
   }
 
-  base::DictionaryValue* existing_dict = NULL;
-  CHECK(audio_streams_cached_data_.GetDictionary(cache_key, &existing_dict));
-  existing_dict->MergeDictionary(value);
-}
-
-void MediaInternals::SendUpdateAndPurgeAudioStreamCache(
-    const std::string& cache_key,
-    const std::string& function,
-    const base::DictionaryValue* value) {
   SendUpdate(SerializeUpdate(function, value));
-
-  base::AutoLock auto_lock(lock_);
-  scoped_ptr<base::Value> out_value;
-  CHECK(audio_streams_cached_data_.Remove(cache_key, &out_value));
 }
 
 }  // namespace content

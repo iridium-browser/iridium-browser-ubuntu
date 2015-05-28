@@ -32,14 +32,19 @@
 #include "bindings/core/v8/ScheduledAction.h"
 #include "bindings/core/v8/ScriptSourceCode.h"
 #include "bindings/core/v8/ScriptValue.h"
+#include "bindings/core/v8/V8CacheOptions.h"
 #include "core/dom/ActiveDOMObject.h"
 #include "core/dom/AddConsoleMessageTask.h"
 #include "core/dom/ContextLifecycleNotifier.h"
+#include "core/dom/CrossThreadTask.h"
 #include "core/dom/DOMURL.h"
 #include "core/dom/ExceptionCode.h"
 #include "core/dom/MessagePort.h"
 #include "core/events/ErrorEvent.h"
 #include "core/events/Event.h"
+#include "core/fetch/MemoryCache.h"
+#include "core/frame/DOMTimer.h"
+#include "core/frame/DOMTimerCoordinator.h"
 #include "core/inspector/ConsoleMessage.h"
 #include "core/inspector/ConsoleMessageStorage.h"
 #include "core/inspector/InspectorConsoleInstrumentation.h"
@@ -50,6 +55,7 @@
 #include "core/workers/WorkerNavigator.h"
 #include "core/workers/WorkerClients.h"
 #include "core/workers/WorkerConsole.h"
+#include "core/workers/WorkerLoaderProxy.h"
 #include "core/workers/WorkerLocation.h"
 #include "core/workers/WorkerNavigator.h"
 #include "core/workers/WorkerReportingProxy.h"
@@ -82,14 +88,15 @@ public:
 WorkerGlobalScope::WorkerGlobalScope(const KURL& url, const String& userAgent, WorkerThread* thread, double timeOrigin, const SecurityOrigin* starterOrigin, PassOwnPtrWillBeRawPtr<WorkerClients> workerClients)
     : m_url(url)
     , m_userAgent(userAgent)
-    , m_script(adoptPtr(new WorkerScriptController(*this)))
+    , m_v8CacheOptions(V8CacheOptionsDefault)
+    , m_script(adoptPtr(new WorkerScriptController(*this, thread->isolate())))
     , m_thread(thread)
     , m_workerInspectorController(adoptRefWillBeNoop(new WorkerInspectorController(this)))
     , m_closing(false)
     , m_eventQueue(WorkerEventQueue::create(this))
     , m_workerClients(workerClients)
     , m_timeOrigin(timeOrigin)
-    , m_messageStorage(ConsoleMessageStorage::createForWorker(this))
+    , m_messageStorage(ConsoleMessageStorage::create())
     , m_workerExceptionUniqueIdentifier(0)
 {
     setSecurityOrigin(SecurityOrigin::create(url));
@@ -102,6 +109,7 @@ WorkerGlobalScope::WorkerGlobalScope(const KURL& url, const String& userAgent, W
 
 WorkerGlobalScope::~WorkerGlobalScope()
 {
+    ASSERT(!m_script);
 }
 
 void WorkerGlobalScope::applyContentSecurityPolicyFromString(const String& policy, ContentSecurityPolicyHeaderType contentSecurityPolicyType)
@@ -153,6 +161,11 @@ double WorkerGlobalScope::timerAlignmentInterval() const
     return DOMTimer::visiblePageAlignmentInterval();
 }
 
+DOMTimerCoordinator* WorkerGlobalScope::timers()
+{
+    return &m_timers;
+}
+
 WorkerLocation* WorkerGlobalScope::location() const
 {
     if (!m_location)
@@ -169,7 +182,7 @@ void WorkerGlobalScope::close()
     // After m_closing is set, all the tasks in the queue continue to be fetched but only
     // tasks with isCleanupTask()==true will be executed.
     m_closing = true;
-    postTask(CloseWorkerGlobalScopeTask::create());
+    postTask(FROM_HERE, CloseWorkerGlobalScopeTask::create());
 }
 
 WorkerConsole* WorkerGlobalScope::console()
@@ -186,9 +199,9 @@ WorkerNavigator* WorkerGlobalScope::navigator() const
     return m_navigator.get();
 }
 
-void WorkerGlobalScope::postTask(PassOwnPtr<ExecutionContextTask> task)
+void WorkerGlobalScope::postTask(const WebTraceLocation& location, PassOwnPtr<ExecutionContextTask> task)
 {
-    thread()->postTask(task);
+    thread()->postTask(location, task);
 }
 
 // FIXME: Called twice, from WorkerThreadShutdownFinishTask and WorkerGlobalScope::dispose.
@@ -255,9 +268,12 @@ void WorkerGlobalScope::importScripts(const Vector<String>& urls, ExceptionState
         }
 
         InspectorInstrumentation::scriptImported(&executionContext, scriptLoader->identifier(), scriptLoader->script());
+        scriptLoaded(scriptLoader->script().length(), scriptLoader->cachedMetadata() ? scriptLoader->cachedMetadata()->size() : 0);
 
         RefPtrWillBeRawPtr<ErrorEvent> errorEvent = nullptr;
-        m_script->evaluate(ScriptSourceCode(scriptLoader->script(), scriptLoader->responseURL()), &errorEvent);
+        OwnPtr<Vector<char>> cachedMetaData(scriptLoader->releaseCachedMetadata());
+        OwnPtr<CachedMetadataHandler> handler(createWorkerScriptCachedMetadataHandler(completeURL, cachedMetaData.get()));
+        m_script->evaluate(ScriptSourceCode(scriptLoader->script(), scriptLoader->responseURL()), &errorEvent, handler.get(), m_v8CacheOptions);
         if (errorEvent) {
             m_script->rethrowExceptionFromImportedScript(errorEvent.release(), exceptionState);
             return;
@@ -289,7 +305,7 @@ void WorkerGlobalScope::addConsoleMessage(PassRefPtrWillBeRawPtr<ConsoleMessage>
 {
     RefPtrWillBeRawPtr<ConsoleMessage> consoleMessage = prpConsoleMessage;
     if (!isContextThread()) {
-        postTask(AddConsoleMessageTask::create(consoleMessage->source(), consoleMessage->level(), consoleMessage->message()));
+        postTask(FROM_HERE, AddConsoleMessageTask::create(consoleMessage->source(), consoleMessage->level(), consoleMessage->message()));
         return;
     }
     thread()->workerReportingProxy().reportConsoleMessage(consoleMessage);
@@ -299,7 +315,7 @@ void WorkerGlobalScope::addConsoleMessage(PassRefPtrWillBeRawPtr<ConsoleMessage>
 void WorkerGlobalScope::addMessageToWorkerConsole(PassRefPtrWillBeRawPtr<ConsoleMessage> consoleMessage)
 {
     ASSERT(isContextThread());
-    m_messageStorage->reportMessage(consoleMessage);
+    m_messageStorage->reportMessage(this, consoleMessage);
 }
 
 bool WorkerGlobalScope::isContextThread() const
@@ -312,11 +328,6 @@ bool WorkerGlobalScope::isJSExecutionForbidden() const
     return m_script->isExecutionForbidden();
 }
 
-bool WorkerGlobalScope::idleNotification()
-{
-    return script()->idleNotification();
-}
-
 WorkerEventQueue* WorkerGlobalScope::eventQueue() const
 {
     return m_eventQueue.get();
@@ -327,9 +338,18 @@ void WorkerGlobalScope::countFeature(UseCounter::Feature) const
     // FIXME: How should we count features for shared/service workers?
 }
 
-void WorkerGlobalScope::countDeprecation(UseCounter::Feature) const
+void WorkerGlobalScope::countDeprecation(UseCounter::Feature feature) const
 {
     // FIXME: How should we count features for shared/service workers?
+
+    ASSERT(isSharedWorkerGlobalScope() || isServiceWorkerGlobalScope());
+    // For each deprecated feature, send console message at most once
+    // per worker lifecycle.
+    if (m_deprecationWarningBits.recordMeasurement(feature)) {
+        ASSERT(!UseCounter::deprecationMessage(feature).isEmpty());
+        ASSERT(executionContext());
+        executionContext()->addConsoleMessage(ConsoleMessage::create(DeprecationMessageSource, WarningMessageLevel, UseCounter::deprecationMessage(feature)));
+    }
 }
 
 ConsoleMessageStorage* WorkerGlobalScope::messageStorage()
@@ -344,7 +364,17 @@ void WorkerGlobalScope::exceptionHandled(int exceptionId, bool isHandled)
         addConsoleMessage(consoleMessage.release());
 }
 
-void WorkerGlobalScope::trace(Visitor* visitor)
+void WorkerGlobalScope::removeURLFromMemoryCache(const KURL& url)
+{
+    m_thread->workerLoaderProxy()->postTaskToLoader(createCrossThreadTask(&WorkerGlobalScope::removeURLFromMemoryCacheInternal, url));
+}
+
+void WorkerGlobalScope::removeURLFromMemoryCacheInternal(ExecutionContext*, const KURL& url)
+{
+    memoryCache()->removeURLFromCache(url);
+}
+
+DEFINE_TRACE(WorkerGlobalScope)
 {
 #if ENABLE(OILPAN)
     visitor->trace(m_console);
@@ -353,6 +383,7 @@ void WorkerGlobalScope::trace(Visitor* visitor)
     visitor->trace(m_workerInspectorController);
     visitor->trace(m_eventQueue);
     visitor->trace(m_workerClients);
+    visitor->trace(m_timers);
     visitor->trace(m_messageStorage);
     visitor->trace(m_pendingMessages);
     HeapSupplementable<WorkerGlobalScope>::trace(visitor);

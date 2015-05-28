@@ -38,6 +38,7 @@ PassRefPtrWillBeRawPtr<WebGLVertexArrayObjectOES> WebGLVertexArrayObjectOES::cre
 
 WebGLVertexArrayObjectOES::WebGLVertexArrayObjectOES(WebGLRenderingContextBase* ctx, VaoType type)
     : WebGLContextObject(ctx)
+    , m_object(0)
     , m_type(type)
     , m_hasEverBeenBound(false)
 #if ENABLE(OILPAN)
@@ -51,7 +52,7 @@ WebGLVertexArrayObjectOES::WebGLVertexArrayObjectOES(WebGLRenderingContextBase* 
     case VaoTypeDefault:
         break;
     default:
-        setObject(context()->webContext()->createVertexArrayOES());
+        m_object = context()->webContext()->createVertexArrayOES();
         break;
     }
 }
@@ -85,13 +86,14 @@ void WebGLVertexArrayObjectOES::dispatchDetached(blink::WebGraphicsContext3D* co
     }
 }
 
-void WebGLVertexArrayObjectOES::deleteObjectImpl(blink::WebGraphicsContext3D* context3d, Platform3DObject object)
+void WebGLVertexArrayObjectOES::deleteObjectImpl(blink::WebGraphicsContext3D* context3d)
 {
     switch (m_type) {
     case VaoTypeDefault:
         break;
     default:
-        context3d->deleteVertexArrayOES(object);
+        context3d->deleteVertexArrayOES(m_object);
+        m_object = 0;
         break;
     }
 
@@ -161,12 +163,12 @@ void WebGLVertexArrayObjectOES::setVertexAttribDivisor(GLuint index, GLuint divi
     state.divisor = divisor;
 }
 
-void WebGLVertexArrayObjectOES::VertexAttribState::trace(Visitor* visitor)
+DEFINE_TRACE(WebGLVertexArrayObjectOES::VertexAttribState)
 {
     visitor->trace(bufferBinding);
 }
 
-void WebGLVertexArrayObjectOES::trace(Visitor* visitor)
+DEFINE_TRACE(WebGLVertexArrayObjectOES)
 {
     visitor->trace(m_boundElementArrayBuffer);
     visitor->trace(m_vertexAttribState);

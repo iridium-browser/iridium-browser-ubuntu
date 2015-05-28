@@ -32,11 +32,17 @@ class SpdyUtils {
   static SpdyHeaderBlock RequestHeadersToSpdyHeaders(
       const BalsaHeaders& request_headers);
 
+  static SpdyHeaderBlock RequestHeadersToSpdy4Headers(
+      const BalsaHeaders& request_headers);
+
   static SpdyHeaderBlock ResponseHeadersToSpdyHeaders(
       const BalsaHeaders& response_headers);
 
   static std::string SerializeUncompressedHeaders(
       const SpdyHeaderBlock& headers);
+
+  static void SpdyHeadersToResponseHeaders(const SpdyHeaderBlock& block,
+                                           BalsaHeaders* headers);
 
  private:
   DISALLOW_COPY_AND_ASSIGN(SpdyUtils);

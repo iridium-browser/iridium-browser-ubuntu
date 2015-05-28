@@ -17,7 +17,6 @@
 #include "base/memory/ref_counted.h"
 #include "base/message_loop/message_loop.h"
 #include "base/path_service.h"
-#include "base/prefs/pref_service.h"
 #include "base/run_loop.h"
 #include "base/values.h"
 #include "chrome/browser/chrome_notification_types.h"
@@ -29,7 +28,6 @@
 #include "chrome/browser/services/gcm/gcm_profile_service.h"
 #include "chrome/browser/services/gcm/gcm_profile_service_factory.h"
 #include "chrome/common/chrome_paths.h"
-#include "chrome/common/pref_names.h"
 #include "chrome/test/base/testing_profile.h"
 #include "components/gcm_driver/fake_gcm_app_handler.h"
 #include "components/gcm_driver/fake_gcm_client.h"
@@ -150,6 +148,7 @@ class FakeExtensionGCMAppHandler : public ExtensionGCMAppHandler {
 
   void OnUnregisterCompleted(const std::string& app_id,
                              gcm::GCMClient::Result result) override {
+    ExtensionGCMAppHandler::OnUnregisterCompleted(app_id, result);
     unregistration_result_ = result;
     waiter_->SignalCompleted();
   }
@@ -182,7 +181,6 @@ class ExtensionGCMAppHandlerTest : public testing::Test {
     return new gcm::GCMProfileService(
         Profile::FromBrowserContext(context),
         scoped_ptr<gcm::GCMClientFactory>(new gcm::FakeGCMClientFactory(
-            gcm::FakeGCMClient::NO_DELAY_START,
             content::BrowserThread::GetMessageLoopProxyForThread(
                 content::BrowserThread::UI),
             content::BrowserThread::GetMessageLoopProxyForThread(
@@ -233,9 +231,6 @@ class ExtensionGCMAppHandlerTest : public testing::Test {
     extension_service_->set_extensions_enabled(true);
     extension_service_->set_show_extensions_prompts(false);
     extension_service_->set_install_updates_when_idle_for_test(false);
-
-    // Enable GCM such that tests could be run on all channels.
-    profile()->GetPrefs()->SetBoolean(prefs::kGCMChannelEnabled, true);
 
     // Create GCMProfileService that talks with fake GCMClient.
     gcm::GCMProfileServiceFactory::GetInstance()->SetTestingFactoryAndUse(
@@ -307,7 +302,7 @@ class ExtensionGCMAppHandlerTest : public testing::Test {
         extensions::NOTIFICATION_CRX_INSTALLER_DONE,
         base::Bind(&IsCrxInstallerDone, &installer));
     extension_service_->UpdateExtension(
-        extension->id(), path, true, &installer);
+        extensions::CRXFileInfo(extension->id(), path), true, &installer);
 
     if (installer)
       observer.Wait();
@@ -408,7 +403,7 @@ TEST_F(ExtensionGCMAppHandlerTest, AddAndRemoveAppHandler) {
 
   // App handler is removed when extension is uninstalled.
   UninstallExtension(extension.get());
-  waiter()->PumpUILoop();
+  waiter()->WaitUntilCompleted();
   EXPECT_FALSE(HasAppHandlers(extension->id()));
 }
 
@@ -423,19 +418,11 @@ TEST_F(ExtensionGCMAppHandlerTest, UnregisterOnExtensionUninstall) {
   waiter()->WaitUntilCompleted();
   EXPECT_EQ(gcm::GCMClient::SUCCESS, registration_result());
 
-  // Add another app handler in order to prevent the GCM service from being
-  // stopped when the extension is uninstalled. This is needed because otherwise
-  // we are not able to receive the unregistration result.
-  GetGCMDriver()->AddAppHandler("Foo", gcm_app_handler());
-
   // Unregistration should be triggered when the extension is uninstalled.
   UninstallExtension(extension.get());
   waiter()->WaitUntilCompleted();
   EXPECT_EQ(gcm::GCMClient::SUCCESS,
             gcm_app_handler()->unregistration_result());
-
-  // Clean up.
-  GetGCMDriver()->RemoveAppHandler("Foo");
 }
 
 TEST_F(ExtensionGCMAppHandlerTest, UpdateExtensionWithGcmPermissionKept) {

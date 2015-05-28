@@ -52,40 +52,37 @@ class WebLayer;
 class FloatRect;
 class GraphicsContext;
 
-enum OpacityMode {
-    NonOpaque,
-    Opaque,
-};
-
 class PLATFORM_EXPORT ImageBufferSurface {
-    WTF_MAKE_NONCOPYABLE(ImageBufferSurface); WTF_MAKE_FAST_ALLOCATED;
+    WTF_MAKE_NONCOPYABLE(ImageBufferSurface); WTF_MAKE_FAST_ALLOCATED(ImageBufferSurface);
 public:
     virtual ~ImageBufferSurface();
 
     virtual SkCanvas* canvas() const = 0;
     virtual const SkBitmap& bitmap();
     virtual void willAccessPixels() { }
+    virtual void didDraw(const FloatRect& rect) { }
     virtual bool isValid() const = 0;
     virtual bool restore() { return false; };
     virtual WebLayer* layer() const { return 0; };
     virtual bool isAccelerated() const { return false; }
     virtual bool isRecording() const { return false; }
-    virtual bool needsClipTracking() const { return false; }
     virtual Platform3DObject getBackingTexture() const { return 0; }
     virtual void didModifyBackingTexture() { }
     virtual bool cachedBitmapEnabled() const { return false; }
+    virtual bool isExpensiveToPaint() { return false; }
     virtual const SkBitmap& cachedBitmap() const;
     virtual void invalidateCachedBitmap() { }
     virtual void updateCachedBitmapIfNeeded() { }
-    virtual void setFilterLevel(SkPaint::FilterLevel) { }
+    virtual void setFilterQuality(SkFilterQuality) { }
     virtual void setIsHidden(bool) { }
     virtual void setImageBuffer(ImageBuffer*) { }
     virtual PassRefPtr<SkPicture> getPicture();
-    virtual void didClearCanvas() { }
     virtual void finalizeFrame(const FloatRect &dirtyRect) { }
     virtual void willDrawVideo() { }
+    virtual void willOverwriteCanvas() { }
     virtual PassRefPtr<SkImage> newImageSnapshot() const;
-    virtual void draw(GraphicsContext*, const FloatRect& destRect, const FloatRect& srcRect, CompositeOperator, WebBlendMode, bool needsCopy);
+    virtual void draw(GraphicsContext*, const FloatRect& destRect, const FloatRect& srcRect, SkXfermode::Mode, bool needsCopy);
+    virtual void setHasExpensiveOp() { }
 
     OpacityMode opacityMode() const { return m_opacityMode; }
     const IntSize& size() const { return m_size; }

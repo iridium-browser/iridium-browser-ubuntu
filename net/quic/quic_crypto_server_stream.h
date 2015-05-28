@@ -34,9 +34,7 @@ class NET_EXPORT_PRIVATE ServerHelloNotifier : public
       : server_stream_(stream) {}
 
   // QuicAckNotifier::DelegateInterface implementation
-  void OnAckNotification(int num_original_packets,
-                         int num_original_bytes,
-                         int num_retransmitted_packets,
+  void OnAckNotification(int num_retransmitted_packets,
                          int num_retransmitted_bytes,
                          QuicTime::Delta delta_largest_observed) override;
 
@@ -50,7 +48,8 @@ class NET_EXPORT_PRIVATE ServerHelloNotifier : public
 
 class NET_EXPORT_PRIVATE QuicCryptoServerStream : public QuicCryptoStream {
  public:
-  QuicCryptoServerStream(const QuicCryptoServerConfig& crypto_config,
+  // |crypto_config| must outlive the stream.
+  QuicCryptoServerStream(const QuicCryptoServerConfig* crypto_config,
                          QuicSession* session);
   ~QuicCryptoServerStream() override;
 
@@ -123,7 +122,7 @@ class NET_EXPORT_PRIVATE QuicCryptoServerStream : public QuicCryptoStream {
       const ValidateClientHelloResultCallback::Result& result);
 
   // crypto_config_ contains crypto parameters for the handshake.
-  const QuicCryptoServerConfig& crypto_config_;
+  const QuicCryptoServerConfig* crypto_config_;
 
   // Pointer to the active callback that will receive the result of
   // the client hello validation request and forward it to

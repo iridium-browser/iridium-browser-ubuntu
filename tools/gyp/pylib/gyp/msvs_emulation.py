@@ -407,6 +407,13 @@ class MsvsSettings(object):
     else:
       return None
 
+  def GetNoImportLibrary(self, config):
+    """If NoImportLibrary: true, ninja will not expect the output to include
+    an import library."""
+    config = self._TargetConfig(config)
+    noimplib = self._Setting(('NoImportLibrary',), config)
+    return noimplib == 'true'
+
   def GetAsmflags(self, config):
     """Returns the flags that need to be added to ml invocations."""
     config = self._TargetConfig(config)
@@ -456,7 +463,8 @@ class MsvsSettings(object):
     cl('EnablePREfast', map={'true': '/analyze'})
     cl('AdditionalOptions', prefix='')
     cl('EnableEnhancedInstructionSet',
-       map={'1': 'SSE', '2': 'SSE2', '3': 'AVX', '4': 'IA32'}, prefix='/arch:')
+        map={'1': 'SSE', '2': 'SSE2', '3': 'AVX', '4': 'IA32', '5': 'AVX2'},
+        prefix='/arch:')
     cflags.extend(['/FI' + f for f in self._Setting(
         ('VCCLCompilerTool', 'ForcedIncludeFiles'), config, default=[])])
     if self.vs_version.short_name in ('2013', '2013e', '2015'):
@@ -606,9 +614,16 @@ class MsvsSettings(object):
     ld('Profile', map={'true': '/PROFILE'})
     ld('LargeAddressAware',
         map={'1': ':NO', '2': ''}, prefix='/LARGEADDRESSAWARE')
-    ld('ImageHasSafeExceptionHandlers', map={'true': '/SAFESEH'})
     # TODO(scottmg): This should sort of be somewhere else (not really a flag).
     ld('AdditionalDependencies', prefix='')
+
+    if self.GetArch(config) == 'x86':
+      safeseh_default = 'true'
+    else:
+      safeseh_default = None
+    ld('ImageHasSafeExceptionHandlers',
+        map={'false': ':NO', 'true': ''}, prefix='/SAFESEH',
+        default=safeseh_default)
 
     # If the base address is not specifically controlled, DYNAMICBASE should
     # be on by default.

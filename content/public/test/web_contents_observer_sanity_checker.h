@@ -39,6 +39,7 @@ class WebContentsObserverSanityChecker : public WebContentsObserver,
       RenderFrameHost* render_frame_host) override;
   void RenderFrameHostChanged(RenderFrameHost* old_host,
                               RenderFrameHost* new_host) override;
+  void FrameDeleted(RenderFrameHost* render_frame_host) override;
   void DidStartProvisionalLoadForFrame(RenderFrameHost* render_frame_host,
                                        const GURL& validated_url,
                                        bool is_error_page,
@@ -74,7 +75,6 @@ class WebContentsObserverSanityChecker : public WebContentsObserver,
                            const Referrer& referrer,
                            WindowOpenDisposition disposition,
                            ui::PageTransition transition) override;
-  void FrameDetached(RenderFrameHost* render_frame_host) override;
   bool OnMessageReceived(const IPC::Message& message,
                          RenderFrameHost* render_frame_host) override;
   void WebContentsDestroyed() override;
@@ -84,11 +84,13 @@ class WebContentsObserverSanityChecker : public WebContentsObserver,
   ~WebContentsObserverSanityChecker() override;
 
   std::string Format(RenderFrameHost* render_frame_host);
-  void AssertFrameExists(RenderFrameHost* render_frame_host);
+  void AssertRenderFrameExists(RenderFrameHost* render_frame_host);
   void AssertMainFrameExists();
 
+  std::set<std::pair<int, int>> current_hosts_;
   std::set<std::pair<int, int>> live_routes_;
   std::set<std::pair<int, int>> deleted_routes_;
+
   bool web_contents_destroyed_;
 
   DISALLOW_COPY_AND_ASSIGN(WebContentsObserverSanityChecker);

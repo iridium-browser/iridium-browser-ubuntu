@@ -62,7 +62,7 @@ inline SVGFETurbulenceElement::SVGFETurbulenceElement(Document& document)
     addToPropertyMap(m_numOctaves);
 }
 
-void SVGFETurbulenceElement::trace(Visitor* visitor)
+DEFINE_TRACE(SVGFETurbulenceElement)
 {
     visitor->trace(m_baseFrequency);
     visitor->trace(m_seed);
@@ -85,11 +85,6 @@ bool SVGFETurbulenceElement::isSupportedAttribute(const QualifiedName& attrName)
         supportedAttributes.add(SVGNames::typeAttr);
     }
     return supportedAttributes.contains<SVGAttributeHashTranslator>(attrName);
-}
-
-void SVGFETurbulenceElement::parseAttribute(const QualifiedName& name, const AtomicString& value)
-{
-    parseAttributeNew(name, value);
 }
 
 bool SVGFETurbulenceElement::setFilterEffectAttribute(FilterEffect* effect, const QualifiedName& attrName)

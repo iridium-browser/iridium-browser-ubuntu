@@ -11,12 +11,12 @@
 #include "base/callback.h"
 #include "base/compiler_specific.h"
 #include "ui/base/ime/chromeos/input_method_delegate.h"
-#include "ui/base/ui_base_export.h"
+#include "ui/base/ime/ui_base_ime_export.h"
 
 namespace chromeos {
 namespace input_method {
 
-class UI_BASE_EXPORT FakeInputMethodDelegate : public InputMethodDelegate {
+class UI_BASE_IME_EXPORT FakeInputMethodDelegate : public InputMethodDelegate {
  public:
   typedef base::Callback<base::string16 (const std::string& language_code)>
       LanguageNameLocalizationCallback;
@@ -24,14 +24,13 @@ class UI_BASE_EXPORT FakeInputMethodDelegate : public InputMethodDelegate {
       GetLocalizedStringCallback;
 
   FakeInputMethodDelegate();
-  virtual ~FakeInputMethodDelegate();
+  ~FakeInputMethodDelegate() override;
 
   // InputMethodDelegate implementation:
-  virtual std::string GetHardwareKeyboardLayouts() const override;
-  virtual base::string16 GetLocalizedString(int resource_id) const override;
-  virtual void SetHardwareKeyboardLayoutForTesting(
-      const std::string& layout) override;
-  virtual base::string16 GetDisplayLanguageName(
+  std::string GetHardwareKeyboardLayouts() const override;
+  base::string16 GetLocalizedString(int resource_id) const override;
+  void SetHardwareKeyboardLayoutForTesting(const std::string& layout) override;
+  base::string16 GetDisplayLanguageName(
       const std::string& language_code) const override;
 
   void set_hardware_keyboard_layout(const std::string& value) {

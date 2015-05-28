@@ -11,7 +11,6 @@
 #include "cc/resources/one_copy_tile_task_worker_pool.h"
 #include "cc/resources/pixel_buffer_tile_task_worker_pool.h"
 #include "cc/resources/resource_pool.h"
-#include "cc/resources/software_rasterizer.h"
 #include "cc/resources/tile_task_worker_pool.h"
 #include "cc/resources/zero_copy_tile_task_worker_pool.h"
 #include "cc/test/fake_output_surface.h"
@@ -125,27 +124,6 @@ void LayerTreeHostPixelResourceTest::InitializeFromTestCase(
   NOTREACHED();
 }
 
-scoped_ptr<Rasterizer> LayerTreeHostPixelResourceTest::CreateRasterizer(
-    LayerTreeHostImpl* host_impl) {
-  bool use_distance_field_text = false;
-  ContextProvider* context_provider =
-      host_impl->output_surface()->context_provider();
-  ResourceProvider* resource_provider = host_impl->resource_provider();
-  switch (resource_pool_option_) {
-    case BITMAP_TILE_TASK_WORKER_POOL:
-    case ZERO_COPY_TILE_TASK_WORKER_POOL:
-    case ONE_COPY_TILE_TASK_WORKER_POOL:
-    case PIXEL_BUFFER_TILE_TASK_WORKER_POOL:
-      return SoftwareRasterizer::Create();
-    case GPU_TILE_TASK_WORKER_POOL:
-      EXPECT_TRUE(context_provider);
-      return GpuRasterizer::Create(context_provider, resource_provider,
-                                   use_distance_field_text, false);
-  }
-  NOTREACHED();
-  return nullptr;
-}
-
 void LayerTreeHostPixelResourceTest::CreateResourceAndTileTaskWorkerPool(
     LayerTreeHostImpl* host_impl,
     scoped_ptr<TileTaskWorkerPool>* tile_task_worker_pool,
@@ -168,36 +146,31 @@ void LayerTreeHostPixelResourceTest::CreateResourceAndTileTaskWorkerPool(
       EXPECT_EQ(PIXEL_TEST_SOFTWARE, test_type_);
       *resource_pool =
           ResourcePool::Create(resource_provider,
-                               draw_texture_target_,
-                               resource_provider->best_texture_format());
+                               draw_texture_target_);
 
       *tile_task_worker_pool = BitmapTileTaskWorkerPool::Create(
-          task_runner, TileTaskWorkerPool::GetTaskGraphRunner(),
-          resource_provider);
+          task_runner, task_graph_runner(), resource_provider);
       break;
     case GPU_TILE_TASK_WORKER_POOL:
       EXPECT_TRUE(context_provider);
       EXPECT_EQ(PIXEL_TEST_GL, test_type_);
       *resource_pool =
           ResourcePool::Create(resource_provider,
-                               draw_texture_target_,
-                               resource_provider->best_texture_format());
+                               draw_texture_target_);
 
       *tile_task_worker_pool = GpuTileTaskWorkerPool::Create(
-          task_runner, TileTaskWorkerPool::GetTaskGraphRunner());
+          task_runner, task_graph_runner(), context_provider, resource_provider,
+          false, 0);
       break;
     case ZERO_COPY_TILE_TASK_WORKER_POOL:
       EXPECT_TRUE(context_provider);
       EXPECT_EQ(PIXEL_TEST_GL, test_type_);
       EXPECT_TRUE(host_impl->GetRendererCapabilities().using_image);
       *resource_pool =
-          ResourcePool::Create(resource_provider,
-                               draw_texture_target_,
-                               resource_provider->best_texture_format());
+          ResourcePool::Create(resource_provider, draw_texture_target_);
 
       *tile_task_worker_pool = ZeroCopyTileTaskWorkerPool::Create(
-          task_runner, TileTaskWorkerPool::GetTaskGraphRunner(),
-          resource_provider);
+          task_runner, task_graph_runner(), resource_provider);
       break;
     case ONE_COPY_TILE_TASK_WORKER_POOL:
       EXPECT_TRUE(context_provider);
@@ -205,29 +178,23 @@ void LayerTreeHostPixelResourceTest::CreateResourceAndTileTaskWorkerPool(
       EXPECT_TRUE(host_impl->GetRendererCapabilities().using_image);
       // We need to create a staging resource pool when using copy rasterizer.
       *staging_resource_pool =
-          ResourcePool::Create(resource_provider,
-                               staging_texture_target_,
-                               resource_provider->best_texture_format());
+          ResourcePool::Create(resource_provider, staging_texture_target_);
       *resource_pool =
-          ResourcePool::Create(resource_provider,
-                               draw_texture_target_,
-                               resource_provider->best_texture_format());
+          ResourcePool::Create(resource_provider, draw_texture_target_);
 
       *tile_task_worker_pool = OneCopyTileTaskWorkerPool::Create(
-          task_runner, TileTaskWorkerPool::GetTaskGraphRunner(),
-          context_provider, resource_provider, staging_resource_pool->get());
+          task_runner, task_graph_runner(), context_provider, resource_provider,
+          staging_resource_pool->get());
       break;
     case PIXEL_BUFFER_TILE_TASK_WORKER_POOL:
       EXPECT_TRUE(context_provider);
       EXPECT_EQ(PIXEL_TEST_GL, test_type_);
       *resource_pool = ResourcePool::Create(
-          resource_provider,
-          draw_texture_target_,
-          resource_provider->memory_efficient_texture_format());
+          resource_provider, draw_texture_target_);
 
       *tile_task_worker_pool = PixelBufferTileTaskWorkerPool::Create(
-          task_runner, TileTaskWorkerPool::GetTaskGraphRunner(),
-          context_provider, resource_provider, max_transfer_buffer_usage_bytes);
+          task_runner, task_graph_runner(), context_provider, resource_provider,
+          max_transfer_buffer_usage_bytes);
       break;
   }
 }

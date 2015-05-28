@@ -4,6 +4,7 @@
 
 #include "media/cdm/json_web_key.h"
 
+#include "base/base64.h"
 #include "base/logging.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -44,7 +45,9 @@ class JSONWebKeyTest : public testing::Test {
                               MediaKeys::SessionType session_type,
                               const std::string& expected_result) {
     std::vector<uint8> result;
-    CreateLicenseRequest(key_id, key_id_length, session_type, &result);
+    KeyIdList key_ids;
+    key_ids.push_back(std::vector<uint8>(key_id, key_id + key_id_length));
+    CreateLicenseRequest(key_ids, session_type, &result);
     std::string s(result.begin(), result.end());
     EXPECT_EQ(expected_result, s);
   }
@@ -57,11 +60,16 @@ class JSONWebKeyTest : public testing::Test {
     std::vector<uint8> key;
     EXPECT_EQ(expected_result,
               ExtractFirstKeyIdFromLicenseRequest(license_vector, &key));
-    if (expected_result) {
-      std::vector<uint8> key_result(expected_key,
-                                    expected_key + expected_key_length);
-      EXPECT_EQ(key_result, key);
-    }
+    if (expected_result)
+      VerifyKeyId(key, expected_key, expected_key_length);
+  }
+
+  void VerifyKeyId(std::vector<uint8> key,
+                   const uint8* expected_key,
+                   int expected_key_length) {
+    std::vector<uint8> key_result(expected_key,
+                                  expected_key + expected_key_length);
+    EXPECT_EQ(key_result, key);
   }
 };
 
@@ -125,7 +133,7 @@ TEST_F(JSONWebKeyTest, ExtractValidJWKKeys) {
       "      \"kty\": \"oct\","
       "      \"alg\": \"A128KW\","
       "      \"kid\": \"JCUmJygpKissLS4vMA\","
-      "      \"k\":\"MTIzNDU2Nzg5Ojs8PT4/QA\""
+      "      \"k\":\"MTIzNDU2Nzg5Ojs8PT4_QA\""
       "    }"
       "  ]"
       "}";
@@ -152,7 +160,7 @@ TEST_F(JSONWebKeyTest, ExtractValidJWKKeys) {
       "      \"kty\": \"oct\","
       "      \"alg\": \"A128KW\","
       "      \"kid\": \"JCUmJygpKissLS4vMA\","
-      "      \"k\":\"MTIzNDU2Nzg5Ojs8PT4/QA\""
+      "      \"k\":\"MTIzNDU2Nzg5Ojs8PT4_QA\""
       "    }"
       "  ]"
       "}";
@@ -469,6 +477,129 @@ TEST_F(JSONWebKeyTest, ExtractLicense) {
 
   // Correct tag, but invalid base64 encoding.
   ExtractKeyFromLicenseAndExpect("{\"kids\":[\"!@#$%^&*()\"]}", false, NULL, 0);
+}
+
+TEST_F(JSONWebKeyTest, Base64UrlEncoding) {
+  const uint8 data1[] = { 0xfb, 0xfd, 0xfb, 0xfd, 0xfb, 0xfd, 0xfb };
+
+  // Verify that |data1| contains invalid base64url characters '+' and '/'
+  // and is padded with = when converted to base64.
+  std::string encoded_text;
+  base::Base64Encode(
+      std::string(reinterpret_cast<const char*>(&data1[0]), arraysize(data1)),
+      &encoded_text);
+  EXPECT_EQ(encoded_text, "+/37/fv9+w==");
+  EXPECT_NE(encoded_text.find('+'), std::string::npos);
+  EXPECT_NE(encoded_text.find('/'), std::string::npos);
+  EXPECT_NE(encoded_text.find('='), std::string::npos);
+
+  // base64url characters '-' and '_' not in base64 encoding.
+  EXPECT_EQ(encoded_text.find('-'), std::string::npos);
+  EXPECT_EQ(encoded_text.find('_'), std::string::npos);
+
+  CreateLicenseAndExpect(data1, arraysize(data1), MediaKeys::TEMPORARY_SESSION,
+                         "{\"kids\":[\"-_37_fv9-w\"],\"type\":\"temporary\"}");
+
+  ExtractKeyFromLicenseAndExpect(
+      "{\"kids\":[\"-_37_fv9-w\"],\"type\":\"temporary\"}", true, data1,
+      arraysize(data1));
+}
+
+TEST_F(JSONWebKeyTest, MultipleKeys) {
+  const uint8 data1[] = { 0x01, 0x02 };
+  const uint8 data2[] = { 0x01, 0x02, 0x03, 0x04 };
+  const uint8 data3[] = { 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+                          0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10 };
+
+  std::vector<uint8> result;
+  KeyIdList key_ids;
+  key_ids.push_back(std::vector<uint8>(data1, data1 + arraysize(data1)));
+  key_ids.push_back(std::vector<uint8>(data2, data2 + arraysize(data2)));
+  key_ids.push_back(std::vector<uint8>(data3, data3 + arraysize(data3)));
+  CreateLicenseRequest(key_ids, MediaKeys::TEMPORARY_SESSION, &result);
+  std::string s(result.begin(), result.end());
+  EXPECT_EQ(
+      "{\"kids\":[\"AQI\",\"AQIDBA\",\"AQIDBAUGBwgJCgsMDQ4PEA\"],\"type\":"
+      "\"temporary\"}",
+      s);
+}
+
+TEST_F(JSONWebKeyTest, ExtractKeyIds) {
+  const uint8 data1[] = { 0x01, 0x02 };
+  const uint8 data2[] = { 0x01, 0x02, 0x03, 0x04 };
+  const uint8 data3[] = { 0x01, 0x02, 0x03, 0x04, 0x05, 0x06, 0x07, 0x08,
+                          0x09, 0x0a, 0x0b, 0x0c, 0x0d, 0x0e, 0x0f, 0x10 };
+
+  KeyIdList key_ids;
+  std::string error_message;
+
+  EXPECT_TRUE(ExtractKeyIdsFromKeyIdsInitData("{\"kids\":[\"AQI\"]}", &key_ids,
+                                              &error_message));
+  EXPECT_EQ(1u, key_ids.size());
+  EXPECT_EQ(0u, error_message.length());
+  VerifyKeyId(key_ids[0], data1, arraysize(data1));
+
+  EXPECT_TRUE(ExtractKeyIdsFromKeyIdsInitData(
+      "{\"kids\":[\"AQI\",\"AQIDBA\",\"AQIDBAUGBwgJCgsMDQ4PEA\"]}", &key_ids,
+      &error_message));
+  EXPECT_EQ(3u, key_ids.size());
+  EXPECT_EQ(0u, error_message.length());
+  VerifyKeyId(key_ids[0], data1, arraysize(data1));
+  VerifyKeyId(key_ids[1], data2, arraysize(data2));
+  VerifyKeyId(key_ids[2], data3, arraysize(data3));
+
+  // Expect failure when non-ascii.
+  EXPECT_FALSE(ExtractKeyIdsFromKeyIdsInitData(
+      "This is not ASCII due to \xff\xfe\x0a in it.", &key_ids,
+      &error_message));
+  EXPECT_EQ(3u, key_ids.size());  // |key_ids| should be unchanged.
+  EXPECT_EQ(error_message,
+            "Non ASCII: This is not ASCII due to \\u00FF\\u00FE\\n in it.");
+
+  // Expect failure when not JSON or not a dictionary.
+  EXPECT_FALSE(ExtractKeyIdsFromKeyIdsInitData("This is invalid.", &key_ids,
+                                               &error_message));
+  EXPECT_EQ(3u, key_ids.size());  // |key_ids| should be unchanged.
+  EXPECT_EQ(error_message, "Not valid JSON: This is invalid.");
+  EXPECT_FALSE(ExtractKeyIdsFromKeyIdsInitData("6", &key_ids, &error_message));
+  EXPECT_EQ(3u, key_ids.size());  // |key_ids| should be unchanged.
+  EXPECT_EQ(error_message, "Not valid JSON: 6");
+  EXPECT_FALSE(ExtractKeyIdsFromKeyIdsInitData(
+      "This is a very long string that is longer than 64 characters and is "
+      "invalid.",
+      &key_ids, &error_message));
+  EXPECT_EQ(3u, key_ids.size());  // |key_ids| should be unchanged.
+  EXPECT_EQ(error_message,
+            "Not valid JSON: This is a very long string that is longer than 64 "
+            "characters ...");
+
+  // Expect failure when "kids" not specified.
+  EXPECT_FALSE(ExtractKeyIdsFromKeyIdsInitData("{\"keys\":[\"AQI\"]}", &key_ids,
+                                               &error_message));
+  EXPECT_EQ(3u, key_ids.size());  // |key_ids| should be unchanged.
+  EXPECT_EQ(error_message, "Missing 'kids' parameter or not a list");
+
+  // Expect failure when invalid key_ids specified.
+  EXPECT_FALSE(ExtractKeyIdsFromKeyIdsInitData("{\"kids\":[1]}", &key_ids,
+                                               &error_message));
+  EXPECT_EQ(3u, key_ids.size());  // |key_ids| should be unchanged.
+  EXPECT_EQ(error_message, "'kids'[0] is not string.");
+  EXPECT_FALSE(ExtractKeyIdsFromKeyIdsInitData("{\"kids\": {\"id\":\"AQI\" }}",
+                                               &key_ids, &error_message));
+  EXPECT_EQ(3u, key_ids.size());  // |key_ids| should be unchanged.
+  EXPECT_EQ(error_message, "Missing 'kids' parameter or not a list");
+
+  // Expect failure when non-base64 key_ids specified.
+  EXPECT_FALSE(ExtractKeyIdsFromKeyIdsInitData("{\"kids\":[\"AQI+\"]}",
+                                               &key_ids, &error_message));
+  EXPECT_EQ(3u, key_ids.size());  // |key_ids| should be unchanged.
+  EXPECT_EQ(error_message,
+            "'kids'[0] is not valid base64url encoded. Value: AQI+");
+  EXPECT_FALSE(ExtractKeyIdsFromKeyIdsInitData("{\"kids\":[\"AQI\",\"AQI/\"]}",
+                                               &key_ids, &error_message));
+  EXPECT_EQ(3u, key_ids.size());  // |key_ids| should be unchanged.
+  EXPECT_EQ(error_message,
+            "'kids'[1] is not valid base64url encoded. Value: AQI/");
 }
 
 }  // namespace media

@@ -8,6 +8,7 @@
 #include "base/compiler_specific.h"
 #include "base/logging.h"
 #include "base/message_loop/message_loop.h"
+#include "base/metrics/histogram_macros.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
 #include "base/values.h"
@@ -272,9 +273,9 @@ void SpdyStream::IncreaseSendWindowSize(int32 delta_window_size) {
   send_window_size_ += delta_window_size;
 
   net_log_.AddEvent(
-      NetLog::TYPE_SPDY_STREAM_UPDATE_SEND_WINDOW,
-      base::Bind(&NetLogSpdyStreamWindowUpdateCallback,
-                 stream_id_, delta_window_size, send_window_size_));
+      NetLog::TYPE_HTTP2_STREAM_UPDATE_SEND_WINDOW,
+      base::Bind(&NetLogSpdyStreamWindowUpdateCallback, stream_id_,
+                 delta_window_size, send_window_size_));
 
   PossiblyResumeIfSendStalled();
 }
@@ -297,9 +298,9 @@ void SpdyStream::DecreaseSendWindowSize(int32 delta_window_size) {
   send_window_size_ -= delta_window_size;
 
   net_log_.AddEvent(
-      NetLog::TYPE_SPDY_STREAM_UPDATE_SEND_WINDOW,
-      base::Bind(&NetLogSpdyStreamWindowUpdateCallback,
-                 stream_id_, -delta_window_size, send_window_size_));
+      NetLog::TYPE_HTTP2_STREAM_UPDATE_SEND_WINDOW,
+      base::Bind(&NetLogSpdyStreamWindowUpdateCallback, stream_id_,
+                 -delta_window_size, send_window_size_));
 }
 
 void SpdyStream::OnReadBufferConsumed(
@@ -327,9 +328,9 @@ void SpdyStream::IncreaseRecvWindowSize(int32 delta_window_size) {
 
   recv_window_size_ += delta_window_size;
   net_log_.AddEvent(
-      NetLog::TYPE_SPDY_STREAM_UPDATE_RECV_WINDOW,
-      base::Bind(&NetLogSpdyStreamWindowUpdateCallback,
-                 stream_id_, delta_window_size, recv_window_size_));
+      NetLog::TYPE_HTTP2_STREAM_UPDATE_RECV_WINDOW,
+      base::Bind(&NetLogSpdyStreamWindowUpdateCallback, stream_id_,
+                 delta_window_size, recv_window_size_));
 
   unacked_recv_window_bytes_ += delta_window_size;
   if (unacked_recv_window_bytes_ >
@@ -359,9 +360,9 @@ void SpdyStream::DecreaseRecvWindowSize(int32 delta_window_size) {
 
   recv_window_size_ -= delta_window_size;
   net_log_.AddEvent(
-      NetLog::TYPE_SPDY_STREAM_UPDATE_RECV_WINDOW,
-      base::Bind(&NetLogSpdyStreamWindowUpdateCallback,
-                 stream_id_, -delta_window_size, recv_window_size_));
+      NetLog::TYPE_HTTP2_STREAM_UPDATE_RECV_WINDOW,
+      base::Bind(&NetLogSpdyStreamWindowUpdateCallback, stream_id_,
+                 -delta_window_size, recv_window_size_));
 }
 
 int SpdyStream::GetPeerAddress(IPEndPoint* address) const {
@@ -427,8 +428,6 @@ int SpdyStream::OnInitialResponseHeadersReceived(
       break;
   }
 
-  metrics_.StartStream();
-
   DCHECK_NE(io_state_, STATE_IDLE);
 
   response_time_ = response_time;
@@ -477,7 +476,6 @@ void SpdyStream::OnDataReceived(scoped_ptr<SpdyBuffer> buffer) {
       pending_recv_data_.push_back(buffer.release());
     } else {
       pending_recv_data_.push_back(NULL);
-      metrics_.StopStream();
       // Note: we leave the stream open in the session until the stream
       //       is claimed.
     }
@@ -496,7 +494,6 @@ void SpdyStream::OnDataReceived(scoped_ptr<SpdyBuffer> buffer) {
   CHECK(!IsClosed());
 
   if (!buffer) {
-    metrics_.StopStream();
     if (io_state_ == STATE_OPEN) {
       io_state_ = STATE_HALF_CLOSED_REMOTE;
     } else if (io_state_ == STATE_HALF_CLOSED_LOCAL) {
@@ -518,12 +515,22 @@ void SpdyStream::OnDataReceived(scoped_ptr<SpdyBuffer> buffer) {
   }
 
   // Track our bandwidth.
-  metrics_.RecordBytes(length);
   recv_bytes_ += length;
   recv_last_byte_time_ = base::TimeTicks::Now();
 
   // May close |this|.
   delegate_->OnDataReceived(buffer.Pass());
+}
+
+void SpdyStream::OnPaddingConsumed(size_t len) {
+  if (session_->flow_control_state() >= SpdySession::FLOW_CONTROL_STREAM) {
+    // Decrease window size because padding bytes are received.
+    // Increase window size because padding bytes are consumed (by discarding).
+    // Net result: |session_unacked_recv_window_bytes_| increases by |len|,
+    // |session_recv_window_size_| does not change.
+    DecreaseRecvWindowSize(static_cast<int32>(len));
+    IncreaseRecvWindowSize(static_cast<int32>(len));
+  }
 }
 
 void SpdyStream::OnFrameWriteComplete(SpdyFrameType frame_type,
@@ -610,9 +617,9 @@ SpdyMajorVersion SpdyStream::GetProtocolVersion() const {
 }
 
 void SpdyStream::LogStreamError(int status, const std::string& description) {
-  net_log_.AddEvent(NetLog::TYPE_SPDY_STREAM_ERROR,
-                    base::Bind(&NetLogSpdyStreamErrorCallback,
-                               stream_id_, status, &description));
+  net_log_.AddEvent(NetLog::TYPE_HTTP2_STREAM_ERROR,
+                    base::Bind(&NetLogSpdyStreamErrorCallback, stream_id_,
+                               status, &description));
 }
 
 void SpdyStream::OnClose(int status) {
@@ -704,9 +711,8 @@ void SpdyStream::PossiblyResumeIfSendStalled() {
   }
   if (send_stalled_by_flow_control_ && !session_->IsSendStalled() &&
       send_window_size_ > 0) {
-    net_log_.AddEvent(
-        NetLog::TYPE_SPDY_STREAM_FLOW_CONTROL_UNSTALLED,
-        NetLog::IntegerCallback("stream_id", stream_id_));
+    net_log_.AddEvent(NetLog::TYPE_HTTP2_STREAM_FLOW_CONTROL_UNSTALLED,
+                      NetLog::IntegerCallback("stream_id", stream_id_));
     send_stalled_by_flow_control_ = false;
     QueueNextDataFrame();
   }

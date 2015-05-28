@@ -54,7 +54,7 @@ public:
 
     virtual void onSuccess(WebVector<WebServiceWorkerResponse>* webResponses) override
     {
-        HeapVector<Member<Response> > responses;
+        HeapVector<Member<Response>> responses;
         for (size_t i = 0; i < webResponses->size(); ++i)
             responses.append(Response::create(m_resolver->scriptState()->executionContext(), (*webResponses)[i]));
         m_resolver->resolve(responses);
@@ -122,7 +122,7 @@ public:
 
     virtual void onSuccess(WebVector<WebServiceWorkerRequest>* webRequests) override
     {
-        HeapVector<Member<Request> > requests;
+        HeapVector<Member<Request>> requests;
         for (size_t i = 0; i < webRequests->size(); ++i)
             requests.append(Request::create(m_resolver->scriptState()->executionContext(), (*webRequests)[i]));
         m_resolver->resolve(requests);
@@ -174,11 +174,11 @@ public:
         cleanup();
     }
 
-    void trace(Visitor* visitor) override
+    DEFINE_INLINE_VIRTUAL_TRACE()
     {
-        BlobHandleCreatorClient::trace(visitor);
         visitor->trace(m_resolver);
         visitor->trace(m_cache);
+        BlobHandleCreatorClient::trace(visitor);
     }
 
 private:
@@ -282,7 +282,6 @@ WebServiceWorkerCache::QueryParams Cache::toWebQueryParams(const CacheQueryOptio
     webQueryParams.ignoreSearch = options.ignoreSearch();
     webQueryParams.ignoreMethod = options.ignoreMethod();
     webQueryParams.ignoreVary = options.ignoreVary();
-    webQueryParams.prefixMatch = options.prefixMatch();
     webQueryParams.cacheName = options.cacheName();
     return webQueryParams;
 }
@@ -363,20 +362,20 @@ ScriptPromise Cache::putImpl(ScriptState* scriptState, Request* request, Respons
         return ScriptPromise::reject(scriptState, V8ThrowException::createTypeError(scriptState->isolate(), "Request body is already used"));
     if (response->hasBody() && response->bodyUsed())
         return ScriptPromise::reject(scriptState, V8ThrowException::createTypeError(scriptState->isolate(), "Response body is already used"));
-    if (response->internalBuffer() && response->streamAccessed())
-        return ScriptPromise::reject(scriptState, V8ThrowException::createTypeError(scriptState->isolate(), "Storing the Response which .body is accessed is not supported."));
 
     if (request->hasBody())
-        request->setBodyUsed();
+        request->lockBody(Body::PassBody);
     if (response->hasBody())
-        response->setBodyUsed();
+        response->lockBody(Body::PassBody);
 
     RefPtrWillBeRawPtr<ScriptPromiseResolver> resolver = ScriptPromiseResolver::create(scriptState);
     const ScriptPromise promise = resolver->promise();
-    if (response->internalBuffer()) {
+    if (BodyStreamBuffer* buffer = response->internalBuffer()) {
+        if (buffer == response->buffer() && response->isBodyConsumed())
+            buffer = response->createDrainingStream();
         // If the response body type is stream, read the all data and create the
         // blob handle and dispatch the put batch asynchronously.
-        response->internalBuffer()->readAllAndCreateBlobHandle(response->internalContentTypeForBuffer(), new AsyncPutBatch(resolver, this, request, response));
+        buffer->readAllAndCreateBlobHandle(response->internalMIMEType(), new AsyncPutBatch(resolver, this, request, response));
         return promise;
     }
     WebVector<WebServiceWorkerCache::BatchOperation> batchOperations(size_t(1));

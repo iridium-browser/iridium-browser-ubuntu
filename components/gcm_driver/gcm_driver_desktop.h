@@ -62,7 +62,6 @@ class GCMDriverDesktop : public GCMDriver {
   void Shutdown() override;
   void OnSignedIn() override;
   void OnSignedOut() override;
-  void Purge() override;
   void AddAppHandler(const std::string& app_id,
                      GCMAppHandler* handler) override;
   void RemoveAppHandler(const std::string& app_id) override;
@@ -93,7 +92,7 @@ class GCMDriverDesktop : public GCMDriver {
 
  protected:
   // GCMDriver implementation:
-  GCMClient::Result EnsureStarted() override;
+  GCMClient::Result EnsureStarted(GCMClient::StartMode start_mode) override;
   void RegisterImpl(const std::string& app_id,
                     const std::vector<std::string>& sender_ids) override;
   void UnregisterImpl(const std::string& app_id) override;
@@ -135,14 +134,12 @@ class GCMDriverDesktop : public GCMDriver {
   scoped_ptr<GCMChannelStatusSyncer> gcm_channel_status_syncer_;
 
   // Flag to indicate whether the user is signed in to a GAIA account.
-  // TODO(jianli): To be removed when sign-in enforcement is dropped.
   bool signed_in_;
 
   // Flag to indicate if GCM is started.
   bool gcm_started_;
 
   // Flag to indicate if GCM is enabled.
-  // TODO(jianli): Removed when we switch completely to support all users.
   bool gcm_enabled_;
 
   // Flag to indicate the last known state of the GCM client. Because this

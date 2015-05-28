@@ -7,8 +7,8 @@
 #include <algorithm>
 #include <vector>
 
-#include "base/debug/trace_event.h"
 #include "base/metrics/histogram.h"
+#include "base/trace_event/trace_event.h"
 #include "cc/base/util.h"
 #include "cc/resources/resource.h"
 #include "gpu/GLES2/gl2extchromium.h"
@@ -146,14 +146,7 @@ void TextureUploader::Upload(const uint8* image,
   if (is_full_upload)
     BeginQuery();
 
-  if (format == ETC1) {
-    // ETC1 does not support subimage uploads.
-    DCHECK(is_full_upload);
-    UploadWithTexImageETC1(image, size);
-  } else {
-    UploadWithMapTexSubImage(
-        image, image_rect, source_rect, dest_offset, format);
-  }
+  UploadWithMapTexSubImage(image, image_rect, source_rect, dest_offset, format);
 
   if (is_full_upload)
     EndQuery();
@@ -289,22 +282,6 @@ void TextureUploader::UploadWithMapTexSubImage(const uint8* image,
   }
 
   gl_->UnmapTexSubImage2DCHROMIUM(pixel_dest);
-}
-
-void TextureUploader::UploadWithTexImageETC1(const uint8* image,
-                                             const gfx::Size& size) {
-  TRACE_EVENT0("cc", "TextureUploader::UploadWithTexImageETC1");
-  DCHECK_EQ(0, size.width() % 4);
-  DCHECK_EQ(0, size.height() % 4);
-
-  gl_->CompressedTexImage2D(GL_TEXTURE_2D,
-                            0,
-                            GLInternalFormat(ETC1),
-                            size.width(),
-                            size.height(),
-                            0,
-                            Resource::MemorySizeBytes(size, ETC1),
-                            image);
 }
 
 void TextureUploader::ProcessQueries() {

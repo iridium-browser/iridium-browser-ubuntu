@@ -159,7 +159,7 @@ private:
 typedef Vector<BlobDataItem> BlobDataItemList;
 
 class PLATFORM_EXPORT BlobData {
-    WTF_MAKE_FAST_ALLOCATED;
+    WTF_MAKE_FAST_ALLOCATED(BlobData);
 public:
     static PassOwnPtr<BlobData> create();
 
@@ -170,7 +170,6 @@ public:
     void setContentType(const String&);
 
     const BlobDataItemList& items() const { return m_items; }
-    void swapItems(BlobDataItemList&);
 
     void appendBytes(const void*, size_t length);
     void appendData(PassRefPtr<RawData>, long long offset, long long length);

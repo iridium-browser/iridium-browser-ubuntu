@@ -11,6 +11,7 @@
 #include "sync/api/attachments/attachment.h"
 #include "sync/api/attachments/attachment_id.h"
 #include "sync/api/attachments/attachment_store.h"
+#include "sync/api/attachments/attachment_store_backend.h"
 #include "sync/base/sync_export.h"
 
 namespace attachment_store_pb {
@@ -29,7 +30,7 @@ namespace syncer {
 
 // On-disk implementation of AttachmentStore. Stores attachments in leveldb
 // database in |path| directory.
-class SYNC_EXPORT OnDiskAttachmentStore : public AttachmentStoreBase,
+class SYNC_EXPORT OnDiskAttachmentStore : public AttachmentStoreBackend,
                                           public base::NonThreadSafe {
  public:
   // Constructs attachment store.
@@ -38,15 +39,24 @@ class SYNC_EXPORT OnDiskAttachmentStore : public AttachmentStoreBase,
       const base::FilePath& path);
   ~OnDiskAttachmentStore() override;
 
-  // AttachmentStoreBase implementation.
-  void Init(const InitCallback& callback) override;
-  void Read(const AttachmentIdList& ids, const ReadCallback& callback) override;
-  void Write(const AttachmentList& attachments,
-             const WriteCallback& callback) override;
-  void Drop(const AttachmentIdList& ids, const DropCallback& callback) override;
-  void ReadMetadata(const AttachmentIdList& ids,
-                    const ReadMetadataCallback& callback) override;
-  void ReadAllMetadata(const ReadMetadataCallback& callback) override;
+  // AttachmentStoreBackend implementation.
+  void Init(const AttachmentStore::InitCallback& callback) override;
+  void Read(const AttachmentIdList& ids,
+            const AttachmentStore::ReadCallback& callback) override;
+  void Write(AttachmentStore::Component component,
+             const AttachmentList& attachments,
+             const AttachmentStore::WriteCallback& callback) override;
+  void SetReference(AttachmentStore::Component component,
+                    const AttachmentIdList& ids) override;
+  void DropReference(AttachmentStore::Component component,
+                     const AttachmentIdList& ids,
+                     const AttachmentStore::DropCallback& callback) override;
+  void ReadMetadata(
+      const AttachmentIdList& ids,
+      const AttachmentStore::ReadMetadataCallback& callback) override;
+  void ReadAllMetadata(
+      AttachmentStore::Component component,
+      const AttachmentStore::ReadMetadataCallback& callback) override;
 
  private:
   friend class OnDiskAttachmentStoreSpecificTest;
@@ -54,17 +64,23 @@ class SYNC_EXPORT OnDiskAttachmentStore : public AttachmentStoreBase,
   // Opens leveldb database at |path|, creating it if needed. In the future
   // upgrade code will be invoked from OpenOrCreate as well. If open fails
   // result is UNSPECIFIED_ERROR.
-  Result OpenOrCreate(const base::FilePath& path);
+  AttachmentStore::Result OpenOrCreate(const base::FilePath& path);
   // Reads single attachment from store. Returns nullptr in case of errors.
   scoped_ptr<Attachment> ReadSingleAttachment(
       const AttachmentId& attachment_id);
   // Writes single attachment to store. Returns false in case of errors.
-  bool WriteSingleAttachment(const Attachment& attachment);
-  // Reads single store_pb::RecordMetadata from levelDB into the provided
-  // buffer. Returns false in case of an error.
+  bool WriteSingleAttachment(const Attachment& attachment,
+                             AttachmentStore::Component component);
+  // Reads single attachment_store_pb::RecordMetadata from levelDB into the
+  // provided buffer. Returns false in case of an error.
   bool ReadSingleRecordMetadata(
       const AttachmentId& attachment_id,
       attachment_store_pb::RecordMetadata* record_metadata);
+  // Writes single attachment_store_pb::RecordMetadata to levelDB. Returns false
+  // in case of an error.
+  bool WriteSingleRecordMetadata(
+      const AttachmentId& attachment_id,
+      const attachment_store_pb::RecordMetadata& record_metadata);
 
   static std::string MakeDataKeyFromAttachmentId(
       const AttachmentId& attachment_id);
@@ -74,9 +90,10 @@ class SYNC_EXPORT OnDiskAttachmentStore : public AttachmentStoreBase,
       const AttachmentId& attachment_id,
       const attachment_store_pb::RecordMetadata& record_metadata);
 
-  scoped_refptr<base::SequencedTaskRunner> callback_task_runner_;
   const base::FilePath path_;
   scoped_ptr<leveldb::DB> db_;
+
+  DISALLOW_COPY_AND_ASSIGN(OnDiskAttachmentStore);
 };
 
 }  // namespace syncer

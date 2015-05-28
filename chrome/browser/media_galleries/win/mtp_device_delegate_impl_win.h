@@ -90,9 +90,14 @@ class MTPDeviceDelegateImplWin : public MTPDeviceAsyncDelegate {
   virtual ~MTPDeviceDelegateImplWin();
 
   // MTPDeviceAsyncDelegate:
-  virtual void GetFileInfo(
-      const base::FilePath& file_path,
-      const GetFileInfoSuccessCallback& success_callback,
+  virtual void GetFileInfo(const base::FilePath& file_path,
+                           const GetFileInfoSuccessCallback& success_callback,
+                           const ErrorCallback& error_callback) override;
+  virtual void CreateDirectory(
+      const base::FilePath& directory_path,
+      const bool exclusive,
+      const bool recursive,
+      const CreateDirectorySuccessCallback& success_callback,
       const ErrorCallback& error_callback) override;
   virtual void ReadDirectory(
       const base::FilePath& root,
@@ -110,6 +115,31 @@ class MTPDeviceDelegateImplWin : public MTPDeviceAsyncDelegate {
                          int buf_len,
                          const ReadBytesSuccessCallback& success_callback,
                          const ErrorCallback& error_callback) override;
+  bool IsReadOnly() const override;
+  void CopyFileLocal(
+      const base::FilePath& source_file_path,
+      const base::FilePath& device_file_path,
+      const CreateTemporaryFileCallback& create_temporary_file_callback,
+      const CopyFileProgressCallback& progress_callback,
+      const CopyFileLocalSuccessCallback& success_callback,
+      const ErrorCallback& error_callback) override;
+  void MoveFileLocal(
+      const base::FilePath& source_file_path,
+      const base::FilePath& device_file_path,
+      const CreateTemporaryFileCallback& create_temporary_file_callback,
+      const MoveFileLocalSuccessCallback& success_callback,
+      const ErrorCallback& error_callback) override;
+  void CopyFileFromLocal(
+      const base::FilePath& source_file_path,
+      const base::FilePath& device_file_path,
+      const CopyFileFromLocalSuccessCallback& success_callback,
+      const ErrorCallback& error_callback) override;
+  void DeleteFile(const base::FilePath& file_path,
+                  const DeleteFileSuccessCallback& success_callback,
+                  const ErrorCallback& error_callback) override;
+  void DeleteDirectory(const base::FilePath& file_path,
+                       const DeleteDirectorySuccessCallback& success_callback,
+                       const ErrorCallback& error_callback) override;
   virtual void CancelPendingTasksAndDeleteDelegate() override;
 
   // Ensures the device is initialized for communication by doing a

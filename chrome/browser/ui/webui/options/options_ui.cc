@@ -20,6 +20,7 @@
 #include "base/values.h"
 #include "chrome/browser/browser_about_handler.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/extensions/tab_helper.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/webui/metrics_handler.h"
 #include "chrome/browser/ui/webui/options/autofill_options_handler.h"
@@ -44,9 +45,6 @@
 #include "chrome/browser/ui/webui/options/reset_profile_settings_handler.h"
 #include "chrome/browser/ui/webui/options/search_engine_manager_handler.h"
 #include "chrome/browser/ui/webui/options/startup_pages_handler.h"
-#include "chrome/browser/ui/webui/options/supervised_user_create_confirm_handler.h"
-#include "chrome/browser/ui/webui/options/supervised_user_import_handler.h"
-#include "chrome/browser/ui/webui/options/supervised_user_learn_more_handler.h"
 #include "chrome/browser/ui/webui/options/sync_setup_handler.h"
 #include "chrome/browser/ui/webui/options/website_settings_handler.h"
 #include "chrome/browser/ui/webui/theme_source.h"
@@ -88,18 +86,15 @@
 #include "chrome/browser/ui/webui/options/chromeos/core_chromeos_options_handler.h"
 #include "chrome/browser/ui/webui/options/chromeos/cros_language_options_handler.h"
 #include "chrome/browser/ui/webui/options/chromeos/date_time_options_handler.h"
+#include "chrome/browser/ui/webui/options/chromeos/display_options_handler.h"
+#include "chrome/browser/ui/webui/options/chromeos/display_overscan_handler.h"
 #include "chrome/browser/ui/webui/options/chromeos/internet_options_handler.h"
 #include "chrome/browser/ui/webui/options/chromeos/keyboard_handler.h"
 #include "chrome/browser/ui/webui/options/chromeos/pointer_handler.h"
+#include "chrome/browser/ui/webui/options/chromeos/power_handler.h"
 #include "chrome/browser/ui/webui/options/chromeos/proxy_handler.h"
 #include "chrome/browser/ui/webui/options/chromeos/stats_options_handler.h"
 #include "chrome/browser/ui/webui/options/chromeos/user_image_source.h"
-#endif
-
-#if defined(OS_CHROMEOS) && !defined(USE_ATHENA)
-#include "chrome/browser/ui/webui/options/chromeos/display_options_handler.h"
-#include "chrome/browser/ui/webui/options/chromeos/display_overscan_handler.h"
-#include "chrome/browser/ui/webui/options/chromeos/power_handler.h"
 #endif
 
 #if defined(USE_NSS)
@@ -167,7 +162,8 @@ void OptionsUIHTMLSource::StartDataRequest(
     int render_frame_id,
     const content::URLDataSource::GotDataCallback& callback) {
   scoped_refptr<base::RefCountedMemory> response_bytes;
-  webui::SetFontAndTextDirection(localized_strings_.get());
+  const std::string& app_locale = g_browser_process->GetApplicationLocale();
+  webui::SetLoadTimeDataDefaults(app_locale, localized_strings_.get());
 
   if (path == kLocalizedStringsFile) {
     // Return dynamically-generated strings from memory.
@@ -312,8 +308,7 @@ OptionsUI::OptionsUI(content::WebUI* web_ui)
   AddOptionsPageUIHandler(localized_strings,
                           new SupervisedUserLearnMoreHandler());
 #endif
-  AddOptionsPageUIHandler(localized_strings, new SyncSetupHandler(
-      g_browser_process->profile_manager()));
+  AddOptionsPageUIHandler(localized_strings, new SyncSetupHandler());
   AddOptionsPageUIHandler(localized_strings, new WebsiteSettingsHandler());
 #if defined(OS_CHROMEOS)
   AddOptionsPageUIHandler(localized_strings,
@@ -322,14 +317,12 @@ OptionsUI::OptionsUI(content::WebUI* web_ui)
                           new chromeos::options::BluetoothOptionsHandler());
   AddOptionsPageUIHandler(localized_strings,
                           new chromeos::options::DateTimeOptionsHandler());
-#if !defined(USE_ATHENA)
   AddOptionsPageUIHandler(localized_strings,
                           new chromeos::options::DisplayOptionsHandler());
   AddOptionsPageUIHandler(localized_strings,
                           new chromeos::options::DisplayOverscanHandler());
   AddOptionsPageUIHandler(localized_strings,
                           new chromeos::options::PowerHandler());
-#endif
   AddOptionsPageUIHandler(localized_strings,
                           new chromeos::options::InternetOptionsHandler());
   AddOptionsPageUIHandler(localized_strings,
@@ -361,6 +354,9 @@ OptionsUI::OptionsUI(content::WebUI* web_ui)
   AddOptionsPageUIHandler(localized_strings, new HandlerOptionsHandler());
 
   web_ui->AddMessageHandler(new MetricsHandler());
+
+  // Enable extension API calls in the WebUI.
+  extensions::TabHelper::CreateForWebContents(web_ui->GetWebContents());
 
   // |localized_strings| ownership is taken over by this constructor.
   OptionsUIHTMLSource* html_source =

@@ -43,20 +43,20 @@ public:
     static PassRefPtrWillBeRawPtr<SpeechRecognitionEvent> create(const AtomicString&, const SpeechRecognitionEventInit&);
     virtual ~SpeechRecognitionEvent();
 
-    static PassRefPtrWillBeRawPtr<SpeechRecognitionEvent> createResult(unsigned long resultIndex, const HeapVector<Member<SpeechRecognitionResult> >& results);
+    static PassRefPtrWillBeRawPtr<SpeechRecognitionEvent> createResult(unsigned long resultIndex, const HeapVector<Member<SpeechRecognitionResult>>& results);
     static PassRefPtrWillBeRawPtr<SpeechRecognitionEvent> createNoMatch(SpeechRecognitionResult*);
 
     unsigned long resultIndex() const { return m_resultIndex; }
-    SpeechRecognitionResultList* results() const { return m_results.get(); }
+    SpeechRecognitionResultList* results() const { return m_results; }
 
-    // These two methods are here to satisfy the specification which requires these attrubutes to exist.
-    Document* interpretation() { return 0; }
-    Document* emma() { return 0; }
+    // These two methods are here to satisfy the specification which requires these attributes to exist.
+    Document* interpretation() { return nullptr; }
+    Document* emma() { return nullptr; }
 
     // Event
     virtual const AtomicString& interfaceName() const override;
 
-    virtual void trace(Visitor*) override;
+    DECLARE_VIRTUAL_TRACE();
 
 private:
     SpeechRecognitionEvent();

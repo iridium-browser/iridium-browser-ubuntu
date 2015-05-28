@@ -16,7 +16,7 @@ FetchHeaderList* FetchHeaderList::create()
     return new FetchHeaderList();
 }
 
-FetchHeaderList* FetchHeaderList::createCopy()
+FetchHeaderList* FetchHeaderList::clone()
 {
     FetchHeaderList* list = create();
     for (size_t i = 0; i < m_headerList.size(); ++i)
@@ -63,6 +63,19 @@ void FetchHeaderList::set(const String& name, const String& value)
         }
     }
     m_headerList.append(adoptPtr(new Header(lowercasedName, value)));
+}
+
+String FetchHeaderList::extractMIMEType() const
+{
+    // To extract a MIME type from a header list (headers), run these steps:
+    // 1. Let MIMEType be the result of parsing `Content-Type` in headers.
+    String mimeType;
+    if (!get("Content-Type", mimeType)) {
+        // 2. If MIMEType is null or failure, return the empty byte sequence.
+        return String();
+    }
+    // 3. Return MIMEType, byte lowercased.
+    return mimeType.lower();
 }
 
 size_t FetchHeaderList::size() const

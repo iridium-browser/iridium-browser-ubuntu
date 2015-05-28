@@ -203,21 +203,14 @@ def NinjaBuild(targets, out_dir):
 def GypNinjaBuild(arch, gyp_py_script, gyp_file, targets, out_dir):
   gyp_env = dict(os.environ)
   gyp_env['GYP_GENERATORS'] = 'ninja'
-  gyp_defines = []
+  gyp_defines = ['nacl_allow_thin_archives=0']
   if options.mac_sdk:
     gyp_defines.append('mac_sdk=%s' % options.mac_sdk)
   if arch:
     gyp_defines.append('target_arch=%s' % arch)
     if arch == 'arm':
-      if PLATFORM == 'linux':
-        gyp_env['CC'] = 'arm-linux-gnueabihf-gcc'
-        gyp_env['CXX'] = 'arm-linux-gnueabihf-g++'
-        gyp_env['AR'] = 'arm-linux-gnueabihf-ar'
-        gyp_env['AS'] = 'arm-linux-gnueabihf-as'
-        gyp_env['CC_host'] = 'cc'
-        gyp_env['CXX_host'] = 'c++'
-      gyp_defines += ['armv7=1', 'arm_thumb=0', 'arm_neon=1',
-                      'arm_float_abi=hard', 'nacl_enable_arm_gcc=1']
+      gyp_env['GYP_CROSSCOMPILE'] = '1'
+      gyp_defines += ['arm_float_abi=hard']
       if options.no_arm_trusted:
         gyp_defines.append('disable_cross_trusted=1')
   if PLATFORM == 'mac':
@@ -243,6 +236,8 @@ def GetToolsFiles():
     files.append(['nacl_helper_bootstrap', 'nacl_helper_bootstrap_x86_32'])
     files.append(['nonsfi_loader_newlib_x32_nonsfi.nexe',
                   'nonsfi_loader_x86_32'])
+    files.append(['nonsfi_loader_newlib_arm_nonsfi.nexe',
+                  'nonsfi_loader_arm'])
 
   # Add .exe extensions to all windows tools
   for pair in files:
@@ -358,8 +353,17 @@ def GetGypToolchainLib(root, tcname, xarch):
 
 def MakeGypArchives():
   join = os.path.join
-  gyp_nacl = join(NACL_DIR, 'build', 'gyp_nacl')
   gyp_chromium = join(SRC_DIR, 'build', 'gyp_chromium')
+  # TODO(binji): gyp_nacl doesn't build properly on Windows anymore; it only
+  # can use VS2010, not VS2013 which is now required by the Chromium repo. NaCl
+  # needs to be updated to perform the same logic as Chromium in detecting VS,
+  # which can now exist in the depot_tools directory.
+  # See https://code.google.com/p/nativeclient/issues/detail?id=4022
+  #
+  # For now, let's use gyp_chromium to build these components.
+  # gyp_nacl = join(NACL_DIR, 'build', 'gyp_nacl')
+  gyp_nacl = gyp_chromium
+
   nacl_core_sdk_gyp = join(NACL_DIR, 'build', 'nacl_core_sdk.gyp')
   all_gyp = join(NACL_DIR, 'build', 'all.gyp')
   breakpad_gyp = join(SRC_DIR, 'breakpad', 'breakpad.gyp')

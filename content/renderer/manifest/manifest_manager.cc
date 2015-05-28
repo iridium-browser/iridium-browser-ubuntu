@@ -101,6 +101,16 @@ void ManifestManager::DidChangeManifest() {
   manifest_dirty_ = true;
 }
 
+void ManifestManager::DidCommitProvisionalLoad(
+    bool is_new_navigation,
+    bool is_same_page_navigation) {
+  if (is_same_page_navigation)
+    return;
+
+  may_have_manifest_ = false;
+  manifest_dirty_ = true;
+}
+
 void ManifestManager::FetchManifest() {
   GURL url(render_frame()->GetWebFrame()->document().manifestURL());
 

@@ -159,6 +159,7 @@ class WebContentsViewAura
   gfx::Size GetMaximumSize() const override;
   void OnBoundsChanged(const gfx::Rect& old_bounds,
                        const gfx::Rect& new_bounds) override;
+  ui::TextInputClient* GetFocusedTextInputClient() override;
   gfx::NativeCursor GetCursor(const gfx::Point& point) override;
   int GetNonClientComponent(const gfx::Point& point) const override;
   bool ShouldDescendIntoChildForEventHandling(
@@ -166,7 +167,7 @@ class WebContentsViewAura
       const gfx::Point& location) override;
   bool CanFocus() override;
   void OnCaptureLost() override;
-  void OnPaint(gfx::Canvas* canvas) override;
+  void OnPaint(const ui::PaintContext& context) override;
   void OnDeviceScaleFactorChanged(float device_scale_factor) override;
   void OnWindowDestroying(aura::Window* window) override;
   void OnWindowDestroyed(aura::Window* window) override;

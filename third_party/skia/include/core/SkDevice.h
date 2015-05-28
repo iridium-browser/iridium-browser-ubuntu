@@ -16,6 +16,7 @@
 
 class SkClipStack;
 class SkDraw;
+class SkDrawFilter;
 struct SkIRect;
 class SkMatrix;
 class SkMetaData;
@@ -124,10 +125,9 @@ public:
     };
 
 protected:
-    enum Usage {
-       kGeneral_Usage,
-       kSaveLayer_Usage,  // <! internal use only
-       kImageFilter_Usage // <! internal use only
+    enum TileUsage {
+        kPossible_TileUsage,    //!< the created device may be drawn tiled
+        kNever_TileUsage,       //!< the created device will never be drawn tiled
     };
 
     struct TextFlags {
@@ -218,9 +218,6 @@ protected:
     virtual void drawPosText(const SkDraw&, const void* text, size_t len,
                              const SkScalar pos[], int scalarsPerPos,
                              const SkPoint& offset, const SkPaint& paint) = 0;
-    virtual void drawTextOnPath(const SkDraw&, const void* text, size_t len,
-                                const SkPath& path, const SkMatrix* matrix,
-                                const SkPaint& paint) = 0;
     virtual void drawVertices(const SkDraw&, SkCanvas::VertexMode, int vertexCount,
                               const SkPoint verts[], const SkPoint texs[],
                               const SkColor colors[], SkXfermode* xmode,
@@ -228,16 +225,18 @@ protected:
                               const SkPaint& paint) = 0;
     // default implementation unrolls the blob runs.
     virtual void drawTextBlob(const SkDraw&, const SkTextBlob*, SkScalar x, SkScalar y,
-                              const SkPaint& paint);
+                              const SkPaint& paint, SkDrawFilter* drawFilter);
     // default implementation calls drawVertices
     virtual void drawPatch(const SkDraw&, const SkPoint cubics[12], const SkColor colors[4],
                            const SkPoint texCoords[4], SkXfermode* xmode, const SkPaint& paint);
     /** The SkDevice passed will be an SkDevice which was returned by a call to
-        onCreateCompatibleDevice on this device with kSaveLayer_Usage.
+        onCreateDevice on this device with kNeverTile_TileExpectation.
      */
     virtual void drawDevice(const SkDraw&, SkBaseDevice*, int x, int y,
                             const SkPaint&) = 0;
 
+    virtual void drawTextOnPath(const SkDraw&, const void* text, size_t len, const SkPath&,
+                                const SkMatrix*, const SkPaint&);
     bool readPixels(const SkImageInfo&, void* dst, size_t rowBytes, int x, int y);
 
     ///////////////////////////////////////////////////////////////////////////
@@ -253,14 +252,6 @@ protected:
     */
     virtual void lockPixels() {}
     virtual void unlockPixels() {}
-
-    /**
-     *  Returns true if the device allows processing of this imagefilter. If
-     *  false is returned, then the filter is ignored. This may happen for
-     *  some subclasses that do not support pixel manipulations after drawing
-     *  has occurred (e.g. printing). The default implementation returns true.
-     */
-    virtual bool allowImageFilter(const SkImageFilter*) { return true; }
 
     /**
      *  Override and return true for filters that the device can handle
@@ -336,21 +327,25 @@ protected:
                                           const SkPaint*);
 
     struct CreateInfo {
-        static SkPixelGeometry AdjustGeometry(const SkImageInfo&, Usage, SkPixelGeometry geo);
+        static SkPixelGeometry AdjustGeometry(const SkImageInfo&, TileUsage, SkPixelGeometry);
 
-        // The construct may change the pixel geometry based on usage as needed.
-        CreateInfo(const SkImageInfo& info, Usage usage, SkPixelGeometry geo)
+        // The constructor may change the pixel geometry based on other parameters.
+        CreateInfo(const SkImageInfo& info, TileUsage tileUsage, SkPixelGeometry geo)
             : fInfo(info)
-            , fUsage(usage)
-            , fPixelGeometry(AdjustGeometry(info, usage, geo))
+            , fTileUsage(tileUsage)
+            , fPixelGeometry(AdjustGeometry(info, tileUsage, geo))
         {}
 
-        const SkImageInfo     fInfo;
-        const Usage           fUsage;
-        const SkPixelGeometry fPixelGeometry;
+        const SkImageInfo       fInfo;
+        const TileUsage         fTileUsage;
+        const SkPixelGeometry   fPixelGeometry;
     };
 
-    virtual SkBaseDevice* onCreateCompatibleDevice(const CreateInfo&) {
+    /**
+     *  Create a new device based on CreateInfo. If the paint is not null, then it represents a
+     *  preview of how the new device will be composed with its creator device (this).
+     */
+    virtual SkBaseDevice* onCreateDevice(const CreateInfo&, const SkPaint*) {
         return NULL;
     }
 

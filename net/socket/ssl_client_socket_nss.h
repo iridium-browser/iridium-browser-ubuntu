@@ -20,11 +20,11 @@
 #include "net/base/completion_callback.h"
 #include "net/base/host_port_pair.h"
 #include "net/base/net_export.h"
-#include "net/base/net_log.h"
 #include "net/base/nss_memio.h"
 #include "net/cert/cert_verify_result.h"
 #include "net/cert/ct_verify_result.h"
 #include "net/cert/x509_certificate.h"
+#include "net/log/net_log.h"
 #include "net/socket/ssl_client_socket.h"
 #include "net/ssl/channel_id_service.h"
 #include "net/ssl/ssl_config_service.h"
@@ -68,9 +68,6 @@ class SSLClientSocketNSS : public SSLClientSocket {
   ~SSLClientSocketNSS() override;
 
   // SSLClientSocket implementation.
-  std::string GetSessionCacheKey() const override;
-  bool InSessionCache() const override;
-  void SetHandshakeCompletionCallback(const base::Closure& callback) override;
   void GetSSLCertRequestInfo(SSLCertRequestInfo* cert_request_info) override;
   NextProtoStatus GetNextProto(std::string* proto) override;
 

@@ -138,7 +138,7 @@ WebInspector.ConcatenatedScriptsContentProvider.prototype = {
 
         /**
          * @param {!WebInspector.Script} script
-         * @param {!Array.<!PageAgent.SearchMatch>} searchMatches
+         * @param {!Array.<!DebuggerAgent.SearchMatch>} searchMatches
          */
         function searchCallback(script, searchMatches)
         {
@@ -225,19 +225,18 @@ WebInspector.CompilerSourceMappingContentProvider.prototype = {
      */
     requestContent: function(callback)
     {
-        NetworkAgent.loadResourceForFrontend(WebInspector.resourceTreeModel.mainFrame.id, this._sourceURL, undefined, contentLoaded.bind(this));
+        WebInspector.NetworkManager.loadResourceForFrontend(this._sourceURL, {}, contentLoaded.bind(this));
 
         /**
-         * @param {?Protocol.Error} error
          * @param {number} statusCode
-         * @param {!NetworkAgent.Headers} headers
+         * @param {!Object.<string, string>} headers
          * @param {string} content
          * @this {WebInspector.CompilerSourceMappingContentProvider}
          */
-        function contentLoaded(error, statusCode, headers, content)
+        function contentLoaded(statusCode, headers, content)
         {
-            if (error || statusCode >= 400) {
-                console.error("Could not load content for " + this._sourceURL + " : " + (error || ("HTTP status code: " + statusCode)));
+            if (statusCode >= 400) {
+                console.error("Could not load content for " + this._sourceURL + " : " + "HTTP status code: " + statusCode);
                 callback(null);
                 return;
             }

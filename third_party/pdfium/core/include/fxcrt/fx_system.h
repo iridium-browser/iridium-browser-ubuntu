@@ -139,11 +139,13 @@ typedef FX_UINT64				FX_QWORD;
 #define FX_PI	3.1415926535897932384626433832795f
 #if _FXM_PLATFORM_ == _FXM_PLATFORM_WINDOWS_
 #define FXSYS_snprintf	_snprintf
+#define FXSYS_vsnprintf	_vsnprintf
 #else
 #define FXSYS_snprintf	snprintf
+#define FXSYS_vsnprintf	vsnprintf
 #endif
-#define FXSYS_sprintf	sprintf
-#define FXSYS_vsprintf	vsprintf
+#define FXSYS_sprintf	DO_NOT_USE_SPRINTF_DIE_DIE_DIE
+#define FXSYS_vsprintf	DO_NOT_USE_VSPRINTF_DIE_DIE_DIE
 #define FXSYS_strchr	strchr
 #define FXSYS_strlen	strlen
 #define FXSYS_strncmp	strncmp
@@ -275,11 +277,6 @@ int			FXSYS_round(FX_FLOAT f);
 #define		FXSYS_sqrt2(a, b) (FX_FLOAT)FXSYS_sqrt((a)*(a) + (b)*(b))
 #ifdef __cplusplus
 };
-
-#include "../../../third_party/numerics/safe_math.h"
-typedef base::CheckedNumeric<FX_DWORD> FX_SAFE_DWORD;
-typedef base::CheckedNumeric<FX_INT32> FX_SAFE_INT32;
-typedef base::CheckedNumeric<size_t>   FX_SAFE_SIZE_T;
 
 #if defined(__clang__) || _MSC_VER >= 1700
 #define FX_FINAL final

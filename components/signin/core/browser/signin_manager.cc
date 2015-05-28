@@ -13,6 +13,7 @@
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
+#include "components/signin/core/browser/gaia_cookie_manager_service.h"
 #include "components/signin/core/browser/profile_oauth2_token_service.h"
 #include "components/signin/core/browser/signin_account_id_helper.h"
 #include "components/signin/core/browser/signin_client.h"
@@ -23,66 +24,25 @@
 #include "google_apis/gaia/gaia_auth_util.h"
 #include "google_apis/gaia/gaia_constants.h"
 #include "google_apis/gaia/gaia_urls.h"
-#include "net/base/escape.h"
+#include "google_apis/gaia/google_service_auth_error.h"
 #include "third_party/icu/source/i18n/unicode/regex.h"
 
 using namespace signin_internals_util;
 
-namespace {
-
-const char kChromiumSyncService[] = "service=chromiumsync";
-
-}  // namespace
-
-// Under the covers, we use a dummy chrome-extension ID to serve the purposes
-// outlined in the .h file comment for this string.
-const char SigninManager::kChromeSigninEffectiveSite[] =
-    "chrome-extension://acfccoigjajmmgbhpfbjnpckhjjegnih";
-
-// static
-bool SigninManager::IsWebBasedSigninFlowURL(const GURL& url) {
-  GURL effective(kChromeSigninEffectiveSite);
-  if (url.SchemeIs(effective.scheme().c_str()) &&
-      url.host() == effective.host()) {
-    return true;
-  }
-
-  GURL service_login(GaiaUrls::GetInstance()->service_login_url());
-  if (url.GetOrigin() != service_login.GetOrigin())
-    return false;
-
-  // Any login UI URLs with signin=chromiumsync should be considered a web
-  // URL (relies on GAIA keeping the "service=chromiumsync" query string
-  // fragment present even when embedding inside a "continue" parameter).
-  return net::UnescapeURLComponent(url.query(),
-                                   net::UnescapeRule::URL_SPECIAL_CHARS)
-             .find(kChromiumSyncService) != std::string::npos;
-}
-
 SigninManager::SigninManager(SigninClient* client,
                              ProfileOAuth2TokenService* token_service,
-                             AccountTrackerService* account_tracker_service)
+                             AccountTrackerService* account_tracker_service,
+                             GaiaCookieManagerService* cookie_manager_service)
     : SigninManagerBase(client),
       prohibit_signout_(false),
       type_(SIGNIN_TYPE_NONE),
       client_(client),
       token_service_(token_service),
       account_tracker_service_(account_tracker_service),
+      cookie_manager_service_(cookie_manager_service),
       signin_manager_signed_in_(false),
       user_info_fetched_by_account_tracker_(false),
       weak_pointer_factory_(this) {}
-
-void SigninManager::AddMergeSessionObserver(
-    MergeSessionHelper::Observer* observer) {
-  if (merge_session_helper_)
-    merge_session_helper_->AddObserver(observer);
-}
-
-void SigninManager::RemoveMergeSessionObserver(
-    MergeSessionHelper::Observer* observer) {
-  if (merge_session_helper_)
-    merge_session_helper_->RemoveObserver(observer);
-}
 
 SigninManager::~SigninManager() {}
 
@@ -96,7 +56,7 @@ std::string SigninManager::SigninTypeToString(SigninManager::SigninType type) {
     case SIGNIN_TYPE_NONE:
       return "No Signin";
     case SIGNIN_TYPE_WITH_REFRESH_TOKEN:
-      return "Signin with refresh token";
+      return "With refresh token";
   }
 
   NOTREACHED();
@@ -128,7 +88,7 @@ bool SigninManager::PrepareForSignin(SigninType type,
   password_.assign(password);
   signin_manager_signed_in_ = false;
   user_info_fetched_by_account_tracker_ = false;
-  NotifyDiagnosticsObservers(SIGNIN_TYPE, SigninTypeToString(type));
+  NotifyDiagnosticsObservers(SIGNIN_STARTED, SigninTypeToString(type));
   return true;
 }
 
@@ -146,8 +106,6 @@ void SigninManager::StartSignInWithRefreshToken(
   // Store our callback and token.
   temp_refresh_token_ = refresh_token;
   possibly_invalid_username_ = username;
-
-  NotifyDiagnosticsObservers(GET_USER_INFO_STATUS, "Successful");
 
   if (!callback.is_null() && !temp_refresh_token_.empty()) {
     callback.Run(temp_refresh_token_);
@@ -220,9 +178,6 @@ void SigninManager::SignOut(
   client_->GetPrefs()->ClearPref(prefs::kSignedInTime);
   client_->OnSignedOut();
 
-  // Erase (now) stale information from AboutSigninInternals.
-  NotifyDiagnosticsObservers(USERNAME, "");
-
   // Determine the duration the user was logged in and log that to UMA.
   if (!signin_time.is_null()) {
     base::TimeDelta signed_in_duration = base::Time::Now() - signin_time;
@@ -275,9 +230,6 @@ void SigninManager::Initialize(PrefService* local_state) {
 
 void SigninManager::Shutdown() {
   account_tracker_service_->RemoveObserver(this);
-  if (merge_session_helper_)
-    merge_session_helper_->CancelAll();
-
   local_state_pref_registrar_.RemoveAll();
   account_id_helper_.reset();
   SigninManagerBase::Shutdown();
@@ -356,24 +308,29 @@ void SigninManager::DisableOneClickSignIn(PrefService* prefs) {
   prefs->SetBoolean(prefs::kReverseAutologinEnabled, false);
 }
 
+void SigninManager::MergeSigninCredentialIntoCookieJar() {
+  if (!client_->ShouldMergeSigninCredentialsIntoCookieJar())
+    return;
+
+  if (!IsAuthenticated())
+    return;
+
+  cookie_manager_service_->AddAccountToCookie(GetAuthenticatedAccountId());
+}
+
 void SigninManager::CompletePendingSignin() {
+  NotifyDiagnosticsObservers(SIGNIN_COMPLETED, "Successful");
+
   DCHECK(!possibly_invalid_username_.empty());
   OnSignedIn(possibly_invalid_username_);
 
-  if (client_->ShouldMergeSigninCredentialsIntoCookieJar()) {
-    merge_session_helper_.reset(new MergeSessionHelper(
-        token_service_, GaiaConstants::kChromeSource,
-        client_->GetURLRequestContext(), NULL));
-  }
-
   DCHECK(!temp_refresh_token_.empty());
   DCHECK(IsAuthenticated());
-  std::string account_id = GetAuthenticatedAccountId();
-  token_service_->UpdateCredentials(account_id, temp_refresh_token_);
+  token_service_->UpdateCredentials(GetAuthenticatedAccountId(),
+                                    temp_refresh_token_);
   temp_refresh_token_.clear();
 
-  if (client_->ShouldMergeSigninCredentialsIntoCookieJar())
-    merge_session_helper_->LogIn(account_id);
+  MergeSigninCredentialIntoCookieJar();
 }
 
 void SigninManager::OnExternalSigninCompleted(const std::string& username) {

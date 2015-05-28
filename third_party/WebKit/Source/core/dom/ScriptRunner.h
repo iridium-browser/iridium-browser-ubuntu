@@ -27,12 +27,12 @@
 #define ScriptRunner_h
 
 #include "core/fetch/ResourcePtr.h"
-#include "platform/Timer.h"
 #include "platform/heap/Handle.h"
+#include "platform/scheduler/CancellableTaskFactory.h"
+#include "wtf/Deque.h"
 #include "wtf/HashMap.h"
 #include "wtf/Noncopyable.h"
 #include "wtf/PassOwnPtr.h"
-#include "wtf/Vector.h"
 
 namespace blink {
 
@@ -40,7 +40,7 @@ class Document;
 class ScriptLoader;
 
 class ScriptRunner final : public NoBaseWillBeGarbageCollectedFinalized<ScriptRunner> {
-    WTF_MAKE_NONCOPYABLE(ScriptRunner); WTF_MAKE_FAST_ALLOCATED_WILL_BE_REMOVED;
+    WTF_MAKE_NONCOPYABLE(ScriptRunner); WTF_MAKE_FAST_ALLOCATED_WILL_BE_REMOVED(ScriptRunner);
 public:
     static PassOwnPtrWillBeRawPtr<ScriptRunner> create(Document* document)
     {
@@ -58,23 +58,27 @@ public:
 
     static void movePendingAsyncScript(Document&, Document&, ScriptLoader*);
 
-    void trace(Visitor*);
+    DECLARE_TRACE();
 
 private:
     explicit ScriptRunner(Document*);
 
-    void timerFired(Timer<ScriptRunner>*);
+    void executeScripts();
 
     void addPendingAsyncScript(ScriptLoader*);
 
     void movePendingAsyncScript(ScriptRunner*, ScriptLoader*);
 
+    bool yieldForHighPriorityWork();
+
+    void postTaskIfOneIsNotAlreadyInFlight();
+
     RawPtrWillBeMember<Document> m_document;
-    WillBeHeapVector<RawPtrWillBeMember<ScriptLoader> > m_scriptsToExecuteInOrder;
+    WillBeHeapDeque<RawPtrWillBeMember<ScriptLoader>> m_scriptsToExecuteInOrder;
     // http://www.whatwg.org/specs/web-apps/current-work/#set-of-scripts-that-will-execute-as-soon-as-possible
-    WillBeHeapVector<RawPtrWillBeMember<ScriptLoader> > m_scriptsToExecuteSoon;
-    WillBeHeapHashSet<RawPtrWillBeMember<ScriptLoader> > m_pendingAsyncScripts;
-    Timer<ScriptRunner> m_timer;
+    WillBeHeapDeque<RawPtrWillBeMember<ScriptLoader>> m_scriptsToExecuteSoon;
+    WillBeHeapHashSet<RawPtrWillBeMember<ScriptLoader>> m_pendingAsyncScripts;
+    CancellableTaskFactory m_executeScriptsTaskFactory;
 };
 
 }

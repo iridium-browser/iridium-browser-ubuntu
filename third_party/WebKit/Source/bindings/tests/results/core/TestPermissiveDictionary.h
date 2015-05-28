@@ -8,11 +8,12 @@
 #define TestPermissiveDictionary_h
 
 #include "bindings/core/v8/Nullable.h"
+#include "core/CoreExport.h"
 #include "platform/heap/Handle.h"
 
 namespace blink {
 
-class TestPermissiveDictionary {
+class CORE_EXPORT TestPermissiveDictionary {
     ALLOW_ONLY_INLINE_ALLOCATION();
 public:
     TestPermissiveDictionary();
@@ -21,7 +22,7 @@ public:
     bool booleanMember() const { return m_booleanMember.get(); }
     void setBooleanMember(bool value) { m_booleanMember = value; }
 
-    virtual void trace(Visitor*);
+    DECLARE_VIRTUAL_TRACE();
 
 private:
     Nullable<bool> m_booleanMember;

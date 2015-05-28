@@ -40,7 +40,6 @@
 #include "core/dom/Document.h"
 #include "core/events/EventListener.h"
 #include "core/frame/LocalFrame.h"
-#include "core/inspector/InspectorController.h"
 #include "core/inspector/InspectorState.h"
 #include "core/page/Page.h"
 #include "modules/IndexedDBNames.h"
@@ -119,7 +118,7 @@ public:
         }
 
         RefPtrWillBeRawPtr<DOMStringList> databaseNamesList = requestResult->domStringList();
-        RefPtr<TypeBuilder::Array<String> > databaseNames = TypeBuilder::Array<String>::create();
+        RefPtr<TypeBuilder::Array<String>> databaseNames = TypeBuilder::Array<String>::create();
         for (size_t i = 0; i < databaseNamesList->length(); ++i)
             databaseNames->addItem(databaseNamesList->item(i));
         m_requestCallback->sendSuccess(databaseNames.release());
@@ -243,7 +242,7 @@ static PassRefPtr<KeyPath> keyPathFromIDBKeyPath(const IDBKeyPath& idbKeyPath)
         break;
     case IDBKeyPath::ArrayType: {
         keyPath = KeyPath::create().setType(KeyPath::Type::Array);
-        RefPtr<TypeBuilder::Array<String> > array = TypeBuilder::Array<String>::create();
+        RefPtr<TypeBuilder::Array<String>> array = TypeBuilder::Array<String>::create();
         const Vector<String>& stringArray = idbKeyPath.array();
         for (size_t i = 0; i < stringArray.size(); ++i)
             array->addItem(stringArray[i]);
@@ -273,15 +272,15 @@ public:
 
         const IDBDatabaseMetadata databaseMetadata = idbDatabase->metadata();
 
-        RefPtr<TypeBuilder::Array<TypeBuilder::IndexedDB::ObjectStore> > objectStores = TypeBuilder::Array<TypeBuilder::IndexedDB::ObjectStore>::create();
+        RefPtr<TypeBuilder::Array<TypeBuilder::IndexedDB::ObjectStore>> objectStores = TypeBuilder::Array<TypeBuilder::IndexedDB::ObjectStore>::create();
 
-        for (IDBDatabaseMetadata::ObjectStoreMap::const_iterator it = databaseMetadata.objectStores.begin(); it != databaseMetadata.objectStores.end(); ++it) {
-            const IDBObjectStoreMetadata& objectStoreMetadata = it->value;
+        for (const auto& storeMapEntry : databaseMetadata.objectStores) {
+            const IDBObjectStoreMetadata& objectStoreMetadata = storeMapEntry.value;
 
-            RefPtr<TypeBuilder::Array<TypeBuilder::IndexedDB::ObjectStoreIndex> > indexes = TypeBuilder::Array<TypeBuilder::IndexedDB::ObjectStoreIndex>::create();
+            RefPtr<TypeBuilder::Array<TypeBuilder::IndexedDB::ObjectStoreIndex>> indexes = TypeBuilder::Array<TypeBuilder::IndexedDB::ObjectStoreIndex>::create();
 
-            for (IDBObjectStoreMetadata::IndexMap::const_iterator it = objectStoreMetadata.indexes.begin(); it != objectStoreMetadata.indexes.end(); ++it) {
-                const IDBIndexMetadata& indexMetadata = it->value;
+            for (const auto& metadataMapEntry : objectStoreMetadata.indexes) {
+                const IDBIndexMetadata& indexMetadata = metadataMapEntry.value;
 
                 RefPtr<ObjectStoreIndex> objectStoreIndex = ObjectStoreIndex::create()
                     .setName(indexMetadata.name)
@@ -323,27 +322,27 @@ static IDBKey* idbKeyFromInspectorObject(JSONObject* key)
     if (!key->getString("type", &type))
         return 0;
 
-    DEFINE_STATIC_LOCAL(String, number, ("number"));
-    DEFINE_STATIC_LOCAL(String, string, ("string"));
-    DEFINE_STATIC_LOCAL(String, date, ("date"));
-    DEFINE_STATIC_LOCAL(String, array, ("array"));
+    DEFINE_STATIC_LOCAL(String, s_number, ("number"));
+    DEFINE_STATIC_LOCAL(String, s_string, ("string"));
+    DEFINE_STATIC_LOCAL(String, s_date, ("date"));
+    DEFINE_STATIC_LOCAL(String, s_array, ("array"));
 
-    if (type == number) {
+    if (type == s_number) {
         double number;
         if (!key->getNumber("number", &number))
             return 0;
         idbKey = IDBKey::createNumber(number);
-    } else if (type == string) {
+    } else if (type == s_string) {
         String string;
         if (!key->getString("string", &string))
             return 0;
         idbKey = IDBKey::createString(string);
-    } else if (type == date) {
+    } else if (type == s_date) {
         double date;
         if (!key->getNumber("date", &date))
             return 0;
         idbKey = IDBKey::createDate(date);
-    } else if (type == array) {
+    } else if (type == s_array) {
         IDBKey::KeyArray keyArray;
         RefPtr<JSONArray> array = key->getArray("array");
         for (size_t i = 0; i < array->length(); ++i) {
@@ -450,9 +449,12 @@ public:
         // FIXME: There are no tests for this error showing when a recursive
         // object is inspected.
         const String errorMessage("\"Inspection error. Maximum depth reached?\"");
-        RefPtr<JSONValue> keyJsonValue = idbCursor->key(m_scriptState.get()).toJSONValue(m_scriptState.get());
-        RefPtr<JSONValue> primaryKeyJsonValue = idbCursor->primaryKey(m_scriptState.get()).toJSONValue(m_scriptState.get());
-        RefPtr<JSONValue> valueJsonValue = idbCursor->value(m_scriptState.get()).toJSONValue(m_scriptState.get());
+        ScriptState* scriptState = m_scriptState.get();
+        v8::Isolate* isolate = scriptState->isolate();
+        ScriptState::Scope scope(scriptState);
+        RefPtr<JSONValue> keyJsonValue = ScriptValue::to<JSONValuePtr>(isolate, idbCursor->key(scriptState), exceptionState);
+        RefPtr<JSONValue> primaryKeyJsonValue = ScriptValue::to<JSONValuePtr>(isolate, idbCursor->primaryKey(scriptState), exceptionState);
+        RefPtr<JSONValue> valueJsonValue = ScriptValue::to<JSONValuePtr>(isolate, idbCursor->value(scriptState), exceptionState);
         String key = keyJsonValue ? keyJsonValue->toJSONString() : errorMessage;
         String value = valueJsonValue ? valueJsonValue->toJSONString() : errorMessage;
         String primaryKey = primaryKeyJsonValue ? primaryKeyJsonValue->toJSONString() : errorMessage;
@@ -486,7 +488,7 @@ private:
     RefPtrWillBePersistent<RequestDataCallback> m_requestCallback;
     int m_skipCount;
     unsigned m_pageSize;
-    RefPtr<Array<DataEntry> > m_result;
+    RefPtr<Array<DataEntry>> m_result;
 };
 
 class DataLoader final : public ExecutableWithDatabase {
@@ -564,25 +566,20 @@ LocalFrame* findFrameWithSecurityOrigin(Page* page, const String& securityOrigin
 
 } // namespace
 
-void InspectorIndexedDBAgent::provideTo(Page* page)
+// static
+PassOwnPtrWillBeRawPtr<InspectorIndexedDBAgent> InspectorIndexedDBAgent::create(Page* page)
 {
-    OwnPtrWillBeRawPtr<InspectorIndexedDBAgent> agent(adoptPtrWillBeNoop(new InspectorIndexedDBAgent(page)));
-    page->inspectorController().registerModuleAgent(agent.release());
+    return adoptPtrWillBeNoop(new InspectorIndexedDBAgent(page));
 }
 
 InspectorIndexedDBAgent::InspectorIndexedDBAgent(Page* page)
-    : InspectorBaseAgent<InspectorIndexedDBAgent>("IndexedDB")
+    : InspectorBaseAgent<InspectorIndexedDBAgent, InspectorFrontend::IndexedDB>("IndexedDB")
     , m_page(page)
 {
 }
 
 InspectorIndexedDBAgent::~InspectorIndexedDBAgent()
 {
-}
-
-void InspectorIndexedDBAgent::clearFrontend()
-{
-    disable(0);
 }
 
 void InspectorIndexedDBAgent::restore()
@@ -786,7 +783,7 @@ void InspectorIndexedDBAgent::clearObjectStore(ErrorString* errorString, const S
     clearObjectStore->start(idbFactory, document->securityOrigin(), databaseName);
 }
 
-void InspectorIndexedDBAgent::trace(Visitor* visitor)
+DEFINE_TRACE(InspectorIndexedDBAgent)
 {
     visitor->trace(m_page);
     InspectorBaseAgent::trace(visitor);

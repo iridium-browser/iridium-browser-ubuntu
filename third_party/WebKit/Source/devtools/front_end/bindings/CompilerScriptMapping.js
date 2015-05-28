@@ -88,7 +88,7 @@ WebInspector.CompilerScriptMapping.prototype = {
         if (!entry || entry.length === 2)
             return null;
         var url = /** @type {string} */ (entry[2]);
-        var uiSourceCode = this._networkMapping.uiSourceCodeForURL(url);
+        var uiSourceCode = this._networkMapping.uiSourceCodeForURL(url, this._target);
         if (!uiSourceCode)
             return null;
         return uiSourceCode.uiLocation(/** @type {number} */ (entry[3]), /** @type {number} */ (entry[4]));
@@ -160,60 +160,61 @@ WebInspector.CompilerScriptMapping.prototype = {
         this._stubUISourceCodes.set(script.scriptId, stubUISourceCode);
 
         this._debuggerWorkspaceBinding.pushSourceMapping(script, this);
-        this._loadSourceMapForScript(script, sourceMapLoaded.bind(this));
+        this._loadSourceMapForScript(script, this._sourceMapLoaded.bind(this, script, uiSourceCodePath));
+    },
 
-        /**
-         * @param {?WebInspector.SourceMap} sourceMap
-         * @this {WebInspector.CompilerScriptMapping}
-         */
-        function sourceMapLoaded(sourceMap)
-        {
-            this._stubUISourceCodes.delete(script.scriptId);
-            this._stubProjectDelegate.removeFile(uiSourceCodePath);
+    /**
+     * @param {!WebInspector.Script} script
+     * @param {string} uiSourceCodePath
+     * @param {?WebInspector.SourceMap} sourceMap
+     */
+    _sourceMapLoaded: function(script, uiSourceCodePath, sourceMap)
+    {
+        this._stubUISourceCodes.delete(script.scriptId);
+        this._stubProjectDelegate.removeFile(uiSourceCodePath);
 
-            if (!sourceMap) {
-                this._debuggerWorkspaceBinding.updateLocations(script);
-                return;
-            }
-
-            if (this._scriptForSourceMap.get(sourceMap)) {
-                this._sourceMapForScriptId[script.scriptId] = sourceMap;
-                this._debuggerWorkspaceBinding.updateLocations(script);
-                return;
-            }
-
-            this._sourceMapForScriptId[script.scriptId] = sourceMap;
-            this._scriptForSourceMap.set(sourceMap, script);
-
-            var sourceURLs = sourceMap.sources();
-            var missingSources = [];
-            for (var i = 0; i < sourceURLs.length; ++i) {
-                var sourceURL = sourceURLs[i];
-                if (this._sourceMapForURL.get(sourceURL))
-                    continue;
-                this._sourceMapForURL.set(sourceURL, sourceMap);
-                if (!this._networkMapping.hasMappingForURL(sourceURL) && !this._networkMapping.uiSourceCodeForURL(sourceURL)) {
-                    var contentProvider = sourceMap.sourceContentProvider(sourceURL, WebInspector.resourceTypes.Script);
-                    this._networkProject.addFileForURL(sourceURL, contentProvider, script.isContentScript());
-                }
-                var uiSourceCode = this._networkMapping.uiSourceCodeForURL(sourceURL);
-                if (uiSourceCode) {
-                    this._bindUISourceCode(uiSourceCode);
-                } else {
-                    if (missingSources.length < 3)
-                        missingSources.push(sourceURL);
-                    else if (missingSources.peekLast() !== "\u2026")
-                        missingSources.push("\u2026");
-                }
-            }
-            if (missingSources.length) {
-                WebInspector.console.warn(
-                    WebInspector.UIString("Source map %s points to the files missing from the workspace: [%s]",
-                                          sourceMap.url(), missingSources.join(", ")));
-            }
-
+        if (!sourceMap) {
             this._debuggerWorkspaceBinding.updateLocations(script);
+            return;
         }
+
+        if (this._scriptForSourceMap.get(sourceMap)) {
+            this._sourceMapForScriptId[script.scriptId] = sourceMap;
+            this._debuggerWorkspaceBinding.updateLocations(script);
+            return;
+        }
+
+        this._sourceMapForScriptId[script.scriptId] = sourceMap;
+        this._scriptForSourceMap.set(sourceMap, script);
+
+        var sourceURLs = sourceMap.sources();
+        var missingSources = [];
+        for (var i = 0; i < sourceURLs.length; ++i) {
+            var sourceURL = sourceURLs[i];
+            if (this._sourceMapForURL.get(sourceURL))
+                continue;
+            this._sourceMapForURL.set(sourceURL, sourceMap);
+            if (!this._networkMapping.hasMappingForURL(sourceURL) && !this._networkMapping.uiSourceCodeForURL(sourceURL, script.target())) {
+                var contentProvider = sourceMap.sourceContentProvider(sourceURL, WebInspector.resourceTypes.Script);
+                this._networkProject.addFileForURL(sourceURL, contentProvider, script.isContentScript());
+            }
+            var uiSourceCode = this._networkMapping.uiSourceCodeForURL(sourceURL, this._target);
+            if (uiSourceCode) {
+                this._bindUISourceCode(uiSourceCode);
+            } else {
+                if (missingSources.length < 3)
+                    missingSources.push(sourceURL);
+                else if (missingSources.peekLast() !== "\u2026")
+                    missingSources.push("\u2026");
+            }
+        }
+        if (missingSources.length) {
+            WebInspector.console.warn(
+                WebInspector.UIString("Source map %s points to the files missing from the workspace: [%s]",
+                                      sourceMap.url(), missingSources.join(", ")));
+        }
+
+        this._debuggerWorkspaceBinding.updateLocations(script);
     },
 
     /**
@@ -278,7 +279,7 @@ WebInspector.CompilerScriptMapping.prototype = {
     {
         // script.sourceURL can be a random string, but is generally an absolute path -> complete it to inspected page url for
         // relative links.
-        var scriptURL = WebInspector.ParsedURL.completeURL(script.target().resourceTreeModel.inspectedPageURL(), script.sourceURL);
+        var scriptURL = WebInspector.ParsedURL.completeURL(this._target.resourceTreeModel.inspectedPageURL(), script.sourceURL);
         if (!scriptURL) {
             callback(null);
             return;
@@ -336,7 +337,7 @@ WebInspector.CompilerScriptMapping.prototype = {
          */
         function unbindUISourceCodeForURL(sourceURL)
         {
-            var uiSourceCode = this._networkMapping.uiSourceCodeForURL(sourceURL);
+            var uiSourceCode = this._networkMapping.uiSourceCodeForURL(sourceURL, this._target);
             if (!uiSourceCode)
                 return;
             this._unbindUISourceCode(uiSourceCode);

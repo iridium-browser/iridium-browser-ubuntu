@@ -21,26 +21,6 @@
 
 namespace webrtc {
 
-struct SsrcStats {
-  SsrcStats()
-      : sent_width(0),
-        sent_height(0),
-        total_bitrate_bps(0),
-        retransmit_bitrate_bps(0),
-        avg_delay_ms(0),
-        max_delay_ms(0) {}
-  FrameCounts frame_counts;
-  int sent_width;
-  int sent_height;
-  // TODO(holmer): Move bitrate_bps out to the webrtc::Call layer.
-  int total_bitrate_bps;
-  int retransmit_bitrate_bps;
-  int avg_delay_ms;
-  int max_delay_ms;
-  StreamDataCounters rtp_stats;
-  RtcpStatistics rtcp_stats;
-};
-
 // Settings for NACK, see RFC 4585 for details.
 struct NackConfig {
   NackConfig() : rtp_history_ms(0) {}
@@ -71,19 +51,14 @@ struct RtpExtension {
 
   static const char* kTOffset;
   static const char* kAbsSendTime;
+  static const char* kVideoRotation;
   std::string name;
   int id;
 };
 
 struct VideoStream {
-  VideoStream()
-      : width(0),
-        height(0),
-        max_framerate(-1),
-        min_bitrate_bps(-1),
-        target_bitrate_bps(-1),
-        max_bitrate_bps(-1),
-        max_qp(-1) {}
+  VideoStream();
+  ~VideoStream();
   std::string ToString() const;
 
   size_t width;
@@ -115,11 +90,8 @@ struct VideoEncoderConfig {
     kScreenshare,
   };
 
-  VideoEncoderConfig()
-      : content_type(kRealtimeVideo),
-        encoder_specific_settings(NULL),
-        min_transmit_bitrate_bps(0) {}
-
+  VideoEncoderConfig();
+  ~VideoEncoderConfig();
   std::string ToString() const;
 
   std::vector<VideoStream> streams;

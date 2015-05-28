@@ -33,7 +33,7 @@ base::LazyInstance<RoutingIDFrameProxyMap> g_routing_id_frame_proxy_map =
 // static
 RenderFrameProxyHost* RenderFrameProxyHost::FromID(int process_id,
                                                    int routing_id) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   RoutingIDFrameProxyMap* frames = g_routing_id_frame_proxy_map.Pointer();
   RoutingIDFrameProxyMap::iterator it = frames->find(
       RenderFrameProxyHostID(process_id, routing_id));
@@ -44,7 +44,9 @@ RenderFrameProxyHost::RenderFrameProxyHost(SiteInstance* site_instance,
                                            FrameTreeNode* frame_tree_node)
     : routing_id_(site_instance->GetProcess()->GetNextRoutingID()),
       site_instance_(site_instance),
-      frame_tree_node_(frame_tree_node) {
+      process_(site_instance->GetProcess()),
+      frame_tree_node_(frame_tree_node),
+      render_frame_proxy_created_(false) {
   GetProcess()->AddRoute(routing_id_, this);
   CHECK(g_routing_id_frame_proxy_map.Get().insert(
       std::make_pair(
@@ -121,11 +123,12 @@ bool RenderFrameProxyHost::OnMessageReceived(const IPC::Message& msg) {
 }
 
 bool RenderFrameProxyHost::InitRenderFrameProxy() {
+  DCHECK(!render_frame_proxy_created_);
   // The process may (if we're sharing a process with another host that already
   // initialized it) or may not (we have our own process or the old process
   // crashed) have been initialized. Calling Init multiple times will be
   // ignored, so this is safe.
-  if (!site_instance_->GetProcess()->Init())
+  if (!GetProcess()->Init())
     return false;
 
   DCHECK(GetProcess()->HasConnection());
@@ -146,6 +149,7 @@ bool RenderFrameProxyHost::InitRenderFrameProxy() {
                                   frame_tree_node_
                                       ->current_replication_state()));
 
+  render_frame_proxy_created_ = true;
   return true;
 }
 

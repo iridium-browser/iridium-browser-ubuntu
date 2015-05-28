@@ -6,22 +6,24 @@
 
 #include "base/bind.h"
 #include "base/callback_helpers.h"
-#include "base/debug/trace_event.h"
 #include "base/logging.h"
 #include "base/memory/linked_ptr.h"
 #include "base/message_loop/message_loop.h"
+#include "base/metrics/histogram.h"
 #include "base/stl_util.h"
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_offset_string_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
-#include "cc/base/latency_info_swap_promise.h"
+#include "base/trace_event/trace_event.h"
 #include "cc/blink/web_layer_impl.h"
 #include "cc/layers/texture_layer.h"
+#include "cc/output/latency_info_swap_promise.h"
 #include "cc/trees/layer_tree_host.h"
 #include "content/common/content_constants_internal.h"
 #include "content/common/frame_messages.h"
 #include "content/common/input/web_input_event_traits.h"
+#include "content/common/view_messages.h"
 #include "content/public/common/content_constants.h"
 #include "content/public/common/page_zoom.h"
 #include "content/public/renderer/content_renderer_client.h"
@@ -38,10 +40,10 @@
 #include "content/renderer/pepper/pepper_file_ref_renderer_host.h"
 #include "content/renderer/pepper/pepper_graphics_2d_host.h"
 #include "content/renderer/pepper/pepper_in_process_router.h"
-#include "content/renderer/pepper/pepper_plugin_instance_impl.h"
-#include "content/renderer/pepper/pepper_plugin_instance_throttler.h"
+#include "content/renderer/pepper/pepper_plugin_instance_metrics.h"
 #include "content/renderer/pepper/pepper_try_catch.h"
 #include "content/renderer/pepper/pepper_url_loader_host.h"
+#include "content/renderer/pepper/plugin_instance_throttler_impl.h"
 #include "content/renderer/pepper/plugin_module.h"
 #include "content/renderer/pepper/plugin_object.h"
 #include "content/renderer/pepper/ppapi_preferences_builder.h"
@@ -80,7 +82,6 @@
 #include "ppapi/proxy/uma_private_resource.h"
 #include "ppapi/proxy/url_loader_resource.h"
 #include "ppapi/shared_impl/ppapi_permissions.h"
-#include "ppapi/shared_impl/ppapi_preferences.h"
 #include "ppapi/shared_impl/ppb_gamepad_shared.h"
 #include "ppapi/shared_impl/ppb_input_event_shared.h"
 #include "ppapi/shared_impl/ppb_url_util_shared.h"
@@ -127,12 +128,6 @@
 
 #if defined(OS_CHROMEOS)
 #include "ui/events/keycodes/keyboard_codes_posix.h"
-#endif
-
-#if defined(OS_WIN)
-#include "base/metrics/histogram.h"
-#include "base/win/windows_version.h"
-#include "skia/ext/platform_canvas.h"
 #endif
 
 using base::StringPrintf;
@@ -182,25 +177,27 @@ namespace content {
 
 namespace {
 
+#define STATIC_ASSERT_PP_MATCHING_ENUM(a, b)                \
+  static_assert(static_cast<int>(a) == static_cast<int>(b), \
+                "mismatching enums: " #a)
+
 // Check PP_TextInput_Type and ui::TextInputType are kept in sync.
-COMPILE_ASSERT(int(ui::TEXT_INPUT_TYPE_NONE) == int(PP_TEXTINPUT_TYPE_NONE),
-               mismatching_enums);
-COMPILE_ASSERT(int(ui::TEXT_INPUT_TYPE_TEXT) == int(PP_TEXTINPUT_TYPE_TEXT),
-               mismatching_enums);
-COMPILE_ASSERT(int(ui::TEXT_INPUT_TYPE_PASSWORD) ==
-                   int(PP_TEXTINPUT_TYPE_PASSWORD),
-               mismatching_enums);
-COMPILE_ASSERT(int(ui::TEXT_INPUT_TYPE_SEARCH) == int(PP_TEXTINPUT_TYPE_SEARCH),
-               mismatching_enums);
-COMPILE_ASSERT(int(ui::TEXT_INPUT_TYPE_EMAIL) == int(PP_TEXTINPUT_TYPE_EMAIL),
-               mismatching_enums);
-COMPILE_ASSERT(int(ui::TEXT_INPUT_TYPE_NUMBER) == int(PP_TEXTINPUT_TYPE_NUMBER),
-               mismatching_enums);
-COMPILE_ASSERT(int(ui::TEXT_INPUT_TYPE_TELEPHONE) ==
-                   int(PP_TEXTINPUT_TYPE_TELEPHONE),
-               mismatching_enums);
-COMPILE_ASSERT(int(ui::TEXT_INPUT_TYPE_URL) == int(PP_TEXTINPUT_TYPE_URL),
-               mismatching_enums);
+STATIC_ASSERT_PP_MATCHING_ENUM(ui::TEXT_INPUT_TYPE_NONE,
+                               PP_TEXTINPUT_TYPE_NONE);
+STATIC_ASSERT_PP_MATCHING_ENUM(ui::TEXT_INPUT_TYPE_TEXT,
+                               PP_TEXTINPUT_TYPE_TEXT);
+STATIC_ASSERT_PP_MATCHING_ENUM(ui::TEXT_INPUT_TYPE_PASSWORD,
+                               PP_TEXTINPUT_TYPE_PASSWORD);
+STATIC_ASSERT_PP_MATCHING_ENUM(ui::TEXT_INPUT_TYPE_SEARCH,
+                               PP_TEXTINPUT_TYPE_SEARCH);
+STATIC_ASSERT_PP_MATCHING_ENUM(ui::TEXT_INPUT_TYPE_EMAIL,
+                               PP_TEXTINPUT_TYPE_EMAIL);
+STATIC_ASSERT_PP_MATCHING_ENUM(ui::TEXT_INPUT_TYPE_NUMBER,
+                               PP_TEXTINPUT_TYPE_NUMBER);
+STATIC_ASSERT_PP_MATCHING_ENUM(ui::TEXT_INPUT_TYPE_TELEPHONE,
+                               PP_TEXTINPUT_TYPE_TELEPHONE);
+STATIC_ASSERT_PP_MATCHING_ENUM(ui::TEXT_INPUT_TYPE_URL,
+                               PP_TEXTINPUT_TYPE_URL);
 
 // The default text input type is to regard the plugin always accept text input.
 // This is for allowing users to use input methods even on completely-IME-
@@ -209,90 +206,86 @@ COMPILE_ASSERT(int(ui::TEXT_INPUT_TYPE_URL) == int(PP_TEXTINPUT_TYPE_URL),
 // that they don't accept texts.
 const ui::TextInputType kPluginDefaultTextInputType = ui::TEXT_INPUT_TYPE_TEXT;
 
-#define COMPILE_ASSERT_MATCHING_ENUM(webkit_name, np_name)       \
-  COMPILE_ASSERT(static_cast<int>(WebCursorInfo::webkit_name) == \
-                     static_cast<int>(np_name),                  \
-                 mismatching_enums)
-
-#define COMPILE_ASSERT_PRINT_SCALING_MATCHING_ENUM(webkit_name, pp_name)     \
-  COMPILE_ASSERT(static_cast<int>(webkit_name) == static_cast<int>(pp_name), \
-                 mismatching_enums)
-
 // <embed>/<object> attributes.
 const char kWidth[] = "width";
 const char kHeight[] = "height";
 const char kBorder[] = "border";  // According to w3c, deprecated.
 const char kStyle[] = "style";
 
-COMPILE_ASSERT_MATCHING_ENUM(TypePointer, PP_MOUSECURSOR_TYPE_POINTER);
-COMPILE_ASSERT_MATCHING_ENUM(TypeCross, PP_MOUSECURSOR_TYPE_CROSS);
-COMPILE_ASSERT_MATCHING_ENUM(TypeHand, PP_MOUSECURSOR_TYPE_HAND);
-COMPILE_ASSERT_MATCHING_ENUM(TypeIBeam, PP_MOUSECURSOR_TYPE_IBEAM);
-COMPILE_ASSERT_MATCHING_ENUM(TypeWait, PP_MOUSECURSOR_TYPE_WAIT);
-COMPILE_ASSERT_MATCHING_ENUM(TypeHelp, PP_MOUSECURSOR_TYPE_HELP);
-COMPILE_ASSERT_MATCHING_ENUM(TypeEastResize, PP_MOUSECURSOR_TYPE_EASTRESIZE);
-COMPILE_ASSERT_MATCHING_ENUM(TypeNorthResize, PP_MOUSECURSOR_TYPE_NORTHRESIZE);
-COMPILE_ASSERT_MATCHING_ENUM(TypeNorthEastResize,
-                             PP_MOUSECURSOR_TYPE_NORTHEASTRESIZE);
-COMPILE_ASSERT_MATCHING_ENUM(TypeNorthWestResize,
-                             PP_MOUSECURSOR_TYPE_NORTHWESTRESIZE);
-COMPILE_ASSERT_MATCHING_ENUM(TypeSouthResize, PP_MOUSECURSOR_TYPE_SOUTHRESIZE);
-COMPILE_ASSERT_MATCHING_ENUM(TypeSouthEastResize,
-                             PP_MOUSECURSOR_TYPE_SOUTHEASTRESIZE);
-COMPILE_ASSERT_MATCHING_ENUM(TypeSouthWestResize,
-                             PP_MOUSECURSOR_TYPE_SOUTHWESTRESIZE);
-COMPILE_ASSERT_MATCHING_ENUM(TypeWestResize, PP_MOUSECURSOR_TYPE_WESTRESIZE);
-COMPILE_ASSERT_MATCHING_ENUM(TypeNorthSouthResize,
-                             PP_MOUSECURSOR_TYPE_NORTHSOUTHRESIZE);
-COMPILE_ASSERT_MATCHING_ENUM(TypeEastWestResize,
-                             PP_MOUSECURSOR_TYPE_EASTWESTRESIZE);
-COMPILE_ASSERT_MATCHING_ENUM(TypeNorthEastSouthWestResize,
-                             PP_MOUSECURSOR_TYPE_NORTHEASTSOUTHWESTRESIZE);
-COMPILE_ASSERT_MATCHING_ENUM(TypeNorthWestSouthEastResize,
-                             PP_MOUSECURSOR_TYPE_NORTHWESTSOUTHEASTRESIZE);
-COMPILE_ASSERT_MATCHING_ENUM(TypeColumnResize,
-                             PP_MOUSECURSOR_TYPE_COLUMNRESIZE);
-COMPILE_ASSERT_MATCHING_ENUM(TypeRowResize, PP_MOUSECURSOR_TYPE_ROWRESIZE);
-COMPILE_ASSERT_MATCHING_ENUM(TypeMiddlePanning,
-                             PP_MOUSECURSOR_TYPE_MIDDLEPANNING);
-COMPILE_ASSERT_MATCHING_ENUM(TypeEastPanning, PP_MOUSECURSOR_TYPE_EASTPANNING);
-COMPILE_ASSERT_MATCHING_ENUM(TypeNorthPanning,
-                             PP_MOUSECURSOR_TYPE_NORTHPANNING);
-COMPILE_ASSERT_MATCHING_ENUM(TypeNorthEastPanning,
-                             PP_MOUSECURSOR_TYPE_NORTHEASTPANNING);
-COMPILE_ASSERT_MATCHING_ENUM(TypeNorthWestPanning,
-                             PP_MOUSECURSOR_TYPE_NORTHWESTPANNING);
-COMPILE_ASSERT_MATCHING_ENUM(TypeSouthPanning,
-                             PP_MOUSECURSOR_TYPE_SOUTHPANNING);
-COMPILE_ASSERT_MATCHING_ENUM(TypeSouthEastPanning,
-                             PP_MOUSECURSOR_TYPE_SOUTHEASTPANNING);
-COMPILE_ASSERT_MATCHING_ENUM(TypeSouthWestPanning,
-                             PP_MOUSECURSOR_TYPE_SOUTHWESTPANNING);
-COMPILE_ASSERT_MATCHING_ENUM(TypeWestPanning, PP_MOUSECURSOR_TYPE_WESTPANNING);
-COMPILE_ASSERT_MATCHING_ENUM(TypeMove, PP_MOUSECURSOR_TYPE_MOVE);
-COMPILE_ASSERT_MATCHING_ENUM(TypeVerticalText,
-                             PP_MOUSECURSOR_TYPE_VERTICALTEXT);
-COMPILE_ASSERT_MATCHING_ENUM(TypeCell, PP_MOUSECURSOR_TYPE_CELL);
-COMPILE_ASSERT_MATCHING_ENUM(TypeContextMenu, PP_MOUSECURSOR_TYPE_CONTEXTMENU);
-COMPILE_ASSERT_MATCHING_ENUM(TypeAlias, PP_MOUSECURSOR_TYPE_ALIAS);
-COMPILE_ASSERT_MATCHING_ENUM(TypeProgress, PP_MOUSECURSOR_TYPE_PROGRESS);
-COMPILE_ASSERT_MATCHING_ENUM(TypeNoDrop, PP_MOUSECURSOR_TYPE_NODROP);
-COMPILE_ASSERT_MATCHING_ENUM(TypeCopy, PP_MOUSECURSOR_TYPE_COPY);
-COMPILE_ASSERT_MATCHING_ENUM(TypeNone, PP_MOUSECURSOR_TYPE_NONE);
-COMPILE_ASSERT_MATCHING_ENUM(TypeNotAllowed, PP_MOUSECURSOR_TYPE_NOTALLOWED);
-COMPILE_ASSERT_MATCHING_ENUM(TypeZoomIn, PP_MOUSECURSOR_TYPE_ZOOMIN);
-COMPILE_ASSERT_MATCHING_ENUM(TypeZoomOut, PP_MOUSECURSOR_TYPE_ZOOMOUT);
-COMPILE_ASSERT_MATCHING_ENUM(TypeGrab, PP_MOUSECURSOR_TYPE_GRAB);
-COMPILE_ASSERT_MATCHING_ENUM(TypeGrabbing, PP_MOUSECURSOR_TYPE_GRABBING);
+#define STATIC_ASSERT_MATCHING_ENUM(webkit_name, np_name)       \
+  static_assert(static_cast<int>(WebCursorInfo::webkit_name) == \
+                static_cast<int>(np_name),                      \
+                "mismatching enums: " #webkit_name)
+
+STATIC_ASSERT_MATCHING_ENUM(TypePointer, PP_MOUSECURSOR_TYPE_POINTER);
+STATIC_ASSERT_MATCHING_ENUM(TypeCross, PP_MOUSECURSOR_TYPE_CROSS);
+STATIC_ASSERT_MATCHING_ENUM(TypeHand, PP_MOUSECURSOR_TYPE_HAND);
+STATIC_ASSERT_MATCHING_ENUM(TypeIBeam, PP_MOUSECURSOR_TYPE_IBEAM);
+STATIC_ASSERT_MATCHING_ENUM(TypeWait, PP_MOUSECURSOR_TYPE_WAIT);
+STATIC_ASSERT_MATCHING_ENUM(TypeHelp, PP_MOUSECURSOR_TYPE_HELP);
+STATIC_ASSERT_MATCHING_ENUM(TypeEastResize, PP_MOUSECURSOR_TYPE_EASTRESIZE);
+STATIC_ASSERT_MATCHING_ENUM(TypeNorthResize, PP_MOUSECURSOR_TYPE_NORTHRESIZE);
+STATIC_ASSERT_MATCHING_ENUM(TypeNorthEastResize,
+                            PP_MOUSECURSOR_TYPE_NORTHEASTRESIZE);
+STATIC_ASSERT_MATCHING_ENUM(TypeNorthWestResize,
+                            PP_MOUSECURSOR_TYPE_NORTHWESTRESIZE);
+STATIC_ASSERT_MATCHING_ENUM(TypeSouthResize, PP_MOUSECURSOR_TYPE_SOUTHRESIZE);
+STATIC_ASSERT_MATCHING_ENUM(TypeSouthEastResize,
+                            PP_MOUSECURSOR_TYPE_SOUTHEASTRESIZE);
+STATIC_ASSERT_MATCHING_ENUM(TypeSouthWestResize,
+                            PP_MOUSECURSOR_TYPE_SOUTHWESTRESIZE);
+STATIC_ASSERT_MATCHING_ENUM(TypeWestResize, PP_MOUSECURSOR_TYPE_WESTRESIZE);
+STATIC_ASSERT_MATCHING_ENUM(TypeNorthSouthResize,
+                            PP_MOUSECURSOR_TYPE_NORTHSOUTHRESIZE);
+STATIC_ASSERT_MATCHING_ENUM(TypeEastWestResize,
+                            PP_MOUSECURSOR_TYPE_EASTWESTRESIZE);
+STATIC_ASSERT_MATCHING_ENUM(TypeNorthEastSouthWestResize,
+                            PP_MOUSECURSOR_TYPE_NORTHEASTSOUTHWESTRESIZE);
+STATIC_ASSERT_MATCHING_ENUM(TypeNorthWestSouthEastResize,
+                            PP_MOUSECURSOR_TYPE_NORTHWESTSOUTHEASTRESIZE);
+STATIC_ASSERT_MATCHING_ENUM(TypeColumnResize,
+                            PP_MOUSECURSOR_TYPE_COLUMNRESIZE);
+STATIC_ASSERT_MATCHING_ENUM(TypeRowResize, PP_MOUSECURSOR_TYPE_ROWRESIZE);
+STATIC_ASSERT_MATCHING_ENUM(TypeMiddlePanning,
+                            PP_MOUSECURSOR_TYPE_MIDDLEPANNING);
+STATIC_ASSERT_MATCHING_ENUM(TypeEastPanning, PP_MOUSECURSOR_TYPE_EASTPANNING);
+STATIC_ASSERT_MATCHING_ENUM(TypeNorthPanning,
+                            PP_MOUSECURSOR_TYPE_NORTHPANNING);
+STATIC_ASSERT_MATCHING_ENUM(TypeNorthEastPanning,
+                            PP_MOUSECURSOR_TYPE_NORTHEASTPANNING);
+STATIC_ASSERT_MATCHING_ENUM(TypeNorthWestPanning,
+                            PP_MOUSECURSOR_TYPE_NORTHWESTPANNING);
+STATIC_ASSERT_MATCHING_ENUM(TypeSouthPanning,
+                            PP_MOUSECURSOR_TYPE_SOUTHPANNING);
+STATIC_ASSERT_MATCHING_ENUM(TypeSouthEastPanning,
+                            PP_MOUSECURSOR_TYPE_SOUTHEASTPANNING);
+STATIC_ASSERT_MATCHING_ENUM(TypeSouthWestPanning,
+                            PP_MOUSECURSOR_TYPE_SOUTHWESTPANNING);
+STATIC_ASSERT_MATCHING_ENUM(TypeWestPanning, PP_MOUSECURSOR_TYPE_WESTPANNING);
+STATIC_ASSERT_MATCHING_ENUM(TypeMove, PP_MOUSECURSOR_TYPE_MOVE);
+STATIC_ASSERT_MATCHING_ENUM(TypeVerticalText,
+                            PP_MOUSECURSOR_TYPE_VERTICALTEXT);
+STATIC_ASSERT_MATCHING_ENUM(TypeCell, PP_MOUSECURSOR_TYPE_CELL);
+STATIC_ASSERT_MATCHING_ENUM(TypeContextMenu, PP_MOUSECURSOR_TYPE_CONTEXTMENU);
+STATIC_ASSERT_MATCHING_ENUM(TypeAlias, PP_MOUSECURSOR_TYPE_ALIAS);
+STATIC_ASSERT_MATCHING_ENUM(TypeProgress, PP_MOUSECURSOR_TYPE_PROGRESS);
+STATIC_ASSERT_MATCHING_ENUM(TypeNoDrop, PP_MOUSECURSOR_TYPE_NODROP);
+STATIC_ASSERT_MATCHING_ENUM(TypeCopy, PP_MOUSECURSOR_TYPE_COPY);
+STATIC_ASSERT_MATCHING_ENUM(TypeNone, PP_MOUSECURSOR_TYPE_NONE);
+STATIC_ASSERT_MATCHING_ENUM(TypeNotAllowed, PP_MOUSECURSOR_TYPE_NOTALLOWED);
+STATIC_ASSERT_MATCHING_ENUM(TypeZoomIn, PP_MOUSECURSOR_TYPE_ZOOMIN);
+STATIC_ASSERT_MATCHING_ENUM(TypeZoomOut, PP_MOUSECURSOR_TYPE_ZOOMOUT);
+STATIC_ASSERT_MATCHING_ENUM(TypeGrab, PP_MOUSECURSOR_TYPE_GRAB);
+STATIC_ASSERT_MATCHING_ENUM(TypeGrabbing, PP_MOUSECURSOR_TYPE_GRABBING);
 // Do not assert WebCursorInfo::TypeCustom == PP_CURSORTYPE_CUSTOM;
 // PP_CURSORTYPE_CUSTOM is pinned to allow new cursor types.
 
-COMPILE_ASSERT_PRINT_SCALING_MATCHING_ENUM(blink::WebPrintScalingOptionNone,
+STATIC_ASSERT_PP_MATCHING_ENUM(blink::WebPrintScalingOptionNone,
                                            PP_PRINTSCALINGOPTION_NONE);
-COMPILE_ASSERT_PRINT_SCALING_MATCHING_ENUM(
+STATIC_ASSERT_PP_MATCHING_ENUM(
     blink::WebPrintScalingOptionFitToPrintableArea,
     PP_PRINTSCALINGOPTION_FIT_TO_PRINTABLE_AREA);
-COMPILE_ASSERT_PRINT_SCALING_MATCHING_ENUM(
+STATIC_ASSERT_PP_MATCHING_ENUM(
     blink::WebPrintScalingOptionSourceSize,
     PP_PRINTSCALINGOPTION_SOURCE_SIZE);
 
@@ -352,7 +345,7 @@ bool IsReservedSystemInputEvent(const blink::WebInputEvent& event) {
 
 class PluginInstanceLockTarget : public MouseLockDispatcher::LockTarget {
  public:
-  PluginInstanceLockTarget(PepperPluginInstanceImpl* plugin)
+  explicit PluginInstanceLockTarget(PepperPluginInstanceImpl* plugin)
       : plugin_(plugin) {}
 
   void OnLockMouseACK(bool succeeded) override {
@@ -487,7 +480,10 @@ PepperPluginInstanceImpl::PepperPluginInstanceImpl(
       layer_bound_to_fullscreen_(false),
       layer_is_hardware_(false),
       plugin_url_(plugin_url),
+      document_url_(container ? GURL(container->element().document().url())
+                              : GURL()),
       is_flash_plugin_(module->name() == kFlashPluginName),
+      has_been_clicked_(false),
       javascript_used_(false),
       full_frame_(false),
       sent_initial_did_change_view_(false),
@@ -530,6 +526,7 @@ PepperPluginInstanceImpl::PepperPluginInstanceImpl(
       is_deleted_(false),
       last_input_number_(0),
       is_tracking_latency_(false),
+      initialized_(false),
       view_change_weak_ptr_factory_(this),
       weak_factory_(this) {
   pp_instance_ = HostGlobals::Get()->AddInstance(this);
@@ -570,7 +567,7 @@ PepperPluginInstanceImpl::PepperPluginInstanceImpl(
       browser_connection->DidCreateInProcessInstance(
           pp_instance(),
           render_frame_->GetRoutingID(),
-          container_->element().document().url(),
+          document_url_,
           GetPluginURL());
     }
   }
@@ -624,6 +621,9 @@ PepperPluginInstanceImpl::~PepperPluginInstanceImpl() {
   // This should be last since some of the above "instance deleted" calls will
   // want to look up in the global map to get info off of our object.
   HostGlobals::Get()->InstanceDeleted(pp_instance_);
+
+  if (throttler_)
+    throttler_->RemoveObserver(this);
 }
 
 // NOTE: Any of these methods that calls into the plugin needs to take into
@@ -679,10 +679,17 @@ void PepperPluginInstanceImpl::Delete() {
   // If this is a NaCl plugin instance, shut down the NaCl plugin by calling
   // its DidDestroy. Don't call DidDestroy on the untrusted plugin instance,
   // since there is little that it can do at this point.
-  if (original_instance_interface_)
+  if (original_instance_interface_) {
+    base::TimeTicks start = base::TimeTicks::Now();
     original_instance_interface_->DidDestroy(pp_instance());
-  else
+    UMA_HISTOGRAM_CUSTOM_TIMES("NaCl.Perf.ShutdownTime.Total",
+                               base::TimeTicks::Now() - start,
+                               base::TimeDelta::FromMilliseconds(1),
+                               base::TimeDelta::FromSeconds(20),
+                               100);
+  } else {
     instance_interface_->DidDestroy(pp_instance());
+  }
   // Ensure we don't attempt to call functions on the destroyed instance.
   original_instance_interface_.reset();
   instance_interface_.reset();
@@ -800,51 +807,20 @@ void PepperPluginInstanceImpl::InstanceCrashed() {
   UnSetAndDeleteLockTargetAdapter();
 }
 
-static void SetGPUHistogram(const ppapi::Preferences& prefs,
-                            const std::vector<std::string>& arg_names,
-                            const std::vector<std::string>& arg_values) {
-// Calculate a histogram to let us determine how likely people are to try to
-// run Stage3D content on machines that have it blacklisted.
-#if defined(OS_WIN)
-  bool needs_gpu = false;
-  bool is_xp = base::win::GetVersion() <= base::win::VERSION_XP;
-
-  for (size_t i = 0; i < arg_names.size(); i++) {
-    if (arg_names[i] == "wmode") {
-      // In theory content other than Flash could have a "wmode" argument,
-      // but that's pretty unlikely.
-      if (arg_values[i] == "direct" || arg_values[i] == "gpu")
-        needs_gpu = true;
-      break;
-    }
-  }
-  // 0 : No 3D content and GPU is blacklisted
-  // 1 : No 3D content and GPU is not blacklisted
-  // 2 : 3D content but GPU is blacklisted
-  // 3 : 3D content and GPU is not blacklisted
-  // 4 : No 3D content and GPU is blacklisted on XP
-  // 5 : No 3D content and GPU is not blacklisted on XP
-  // 6 : 3D content but GPU is blacklisted on XP
-  // 7 : 3D content and GPU is not blacklisted on XP
-  UMA_HISTOGRAM_ENUMERATION(
-      "Flash.UsesGPU", is_xp * 4 + needs_gpu * 2 + prefs.is_webgl_supported, 8);
-#endif
-}
-
 bool PepperPluginInstanceImpl::Initialize(
     const std::vector<std::string>& arg_names,
     const std::vector<std::string>& arg_values,
     bool full_frame,
-    RenderFrame::PluginPowerSaverMode power_saver_mode) {
+    scoped_ptr<PluginInstanceThrottlerImpl> throttler) {
+  DCHECK(!throttler_);
+
   if (!render_frame_)
     return false;
 
-  blink::WebRect bounds = container()->element().boundsInViewportSpace();
-
-  throttler_.reset(new PepperPluginInstanceThrottler(
-      render_frame(), bounds, is_flash_plugin_, plugin_url_, power_saver_mode,
-      base::Bind(&PepperPluginInstanceImpl::SendDidChangeView,
-                 weak_factory_.GetWeakPtr())));
+  if (throttler) {
+    throttler_ = throttler.Pass();
+    throttler_->AddObserver(this);
+  }
 
   message_channel_ = MessageChannel::Create(this, &message_channel_object_);
 
@@ -862,8 +838,15 @@ bool PepperPluginInstanceImpl::Initialize(
   argv_ = arg_values;
   scoped_ptr<const char * []> argn_array(StringVectorToArgArray(argn_));
   scoped_ptr<const char * []> argv_array(StringVectorToArgArray(argv_));
+  auto weak_this = weak_factory_.GetWeakPtr();
   bool success = PP_ToBool(instance_interface_->DidCreate(
       pp_instance(), argn_.size(), argn_array.get(), argv_array.get()));
+  if (!weak_this) {
+    // The plugin may do synchronous scripting during "DidCreate", so |this|
+    // may be deleted. In that case, return failure and don't touch any
+    // member variables.
+    return false;
+  }
   // If this is a plugin that hosts external plugins, we should delay messages
   // so that the child plugin that's created later will receive all the
   // messages. (E.g., NaCl trusted plugin starting a child NaCl app.)
@@ -874,6 +857,7 @@ bool PepperPluginInstanceImpl::Initialize(
     if (message_channel_)
       message_channel_->Start();
   }
+  initialized_ = success;
   return success;
 }
 
@@ -1101,7 +1085,15 @@ bool PepperPluginInstanceImpl::HandleInputEvent(
     WebCursorInfo* cursor_info) {
   TRACE_EVENT0("ppapi", "PepperPluginInstanceImpl::HandleInputEvent");
 
-  if (throttler_->ConsumeInputEvent(event))
+  if (!has_been_clicked_ && is_flash_plugin_ &&
+      event.type == blink::WebInputEvent::MouseDown &&
+      (event.modifiers & blink::WebInputEvent::LeftButtonDown)) {
+    has_been_clicked_ = true;
+    blink::WebRect bounds = container()->element().boundsInViewportSpace();
+    RecordFlashClickSizeMetric(bounds.width, bounds.height);
+  }
+
+  if (throttler_ && throttler_->ConsumeInputEvent(event))
     return true;
 
   if (!render_frame_)
@@ -1239,8 +1231,9 @@ PP_Var PepperPluginInstanceImpl::GetInstanceObject(v8::Isolate* isolate) {
 }
 
 void PepperPluginInstanceImpl::ViewChanged(
-    const gfx::Rect& position,
+    const gfx::Rect& window,
     const gfx::Rect& clip,
+    const gfx::Rect& unobscured,
     const std::vector<gfx::Rect>& cut_outs_rects) {
   // WebKit can give weird (x,y) positions for empty clip rects (since the
   // position technically doesn't matter). But we want to make these
@@ -1250,9 +1243,11 @@ void PepperPluginInstanceImpl::ViewChanged(
   if (!clip.IsEmpty())
     new_clip = clip;
 
+  unobscured_rect_ = unobscured;
+
   cut_outs_rects_ = cut_outs_rects;
 
-  view_data_.rect = PP_FromGfxRect(position);
+  view_data_.rect = PP_FromGfxRect(window);
   view_data_.clip_rect = PP_FromGfxRect(clip);
   view_data_.device_scale = container_->deviceScaleFactor();
   view_data_.css_scale =
@@ -1294,7 +1289,12 @@ void PepperPluginInstanceImpl::ViewChanged(
 
   UpdateFlashFullscreenState(fullscreen_container_ != NULL);
 
-  SendDidChangeView();
+  // During plugin initialization, there are often re-layouts. Avoid sending
+  // intermediate sizes the plugin and throttler.
+  if (sent_initial_did_change_view_)
+    SendDidChangeView();
+  else
+    ScheduleAsyncDidChangeView();
 }
 
 void PepperPluginInstanceImpl::SetWebKitFocus(bool has_focus) {
@@ -1365,16 +1365,6 @@ int32_t PepperPluginInstanceImpl::RegisterMessageHandler(
     PP_Instance instance,
     void* user_data,
     const PPP_MessageHandler_0_2* handler,
-    PP_Resource message_loop) {
-  // Not supported in-process.
-  NOTIMPLEMENTED();
-  return PP_ERROR_FAILED;
-}
-
-int32_t PepperPluginInstanceImpl::RegisterMessageHandler_1_1_Deprecated(
-    PP_Instance instance,
-    void* user_data,
-    const PPP_MessageHandler_0_1_Deprecated* handler,
     PP_Resource message_loop) {
   // Not supported in-process.
   NOTIMPLEMENTED();
@@ -1640,15 +1630,34 @@ void PepperPluginInstanceImpl::SendAsyncDidChangeView() {
 }
 
 void PepperPluginInstanceImpl::SendDidChangeView() {
+  // An asynchronous view update is scheduled. Skip sending this update.
+  if (view_change_weak_ptr_factory_.HasWeakPtrs())
+    return;
+
   // Don't send DidChangeView to crashed plugins.
   if (module()->is_crashed())
     return;
+
+  // During the first view update, initialize the throttler.
+  if (!sent_initial_did_change_view_) {
+    if (is_flash_plugin_ && RenderThread::Get()) {
+      RenderThread::Get()->RecordAction(
+          base::UserMetricsAction("Flash.PluginInstanceCreated"));
+      RecordFlashSizeMetric(unobscured_rect_.width(),
+                            unobscured_rect_.height());
+    }
+
+    if (throttler_) {
+      throttler_->Initialize(render_frame_, plugin_url_.GetOrigin(),
+                             module()->name(), unobscured_rect_.size());
+    }
+  }
 
   ppapi::ViewData view_data = view_data_;
 
   // When plugin content is throttled, fake the page being offscreen. We cannot
   // send empty view data here, as some plugins rely on accurate view data.
-  if (throttler_ && throttler_->is_throttled()) {
+  if (throttler_ && throttler_->IsThrottled()) {
     view_data.is_page_visible = false;
     view_data.clip_rect.point.x = 0;
     view_data.clip_rect.point.y = 0;
@@ -1656,9 +1665,7 @@ void PepperPluginInstanceImpl::SendDidChangeView() {
     view_data.clip_rect.size.height = 0;
   }
 
-  if (view_change_weak_ptr_factory_.HasWeakPtrs() ||
-      (sent_initial_did_change_view_ &&
-       last_sent_view_data_.Equals(view_data)))
+  if (sent_initial_did_change_view_ && last_sent_view_data_.Equals(view_data))
     return;  // Nothing to update.
 
   sent_initial_did_change_view_ = true;
@@ -1830,13 +1837,31 @@ bool PepperPluginInstanceImpl::GetPrintPresetOptionsFromDocument(
   }
 
   preset_options->isScalingDisabled = PP_ToBool(options.is_scaling_disabled);
+  switch (options.duplex) {
+    case PP_PRIVATEDUPLEXMODE_SIMPLEX:
+      preset_options->duplexMode = blink::WebSimplex;
+      break;
+    case PP_PRIVATEDUPLEXMODE_SHORT_EDGE:
+      preset_options->duplexMode = blink::WebShortEdge;
+      break;
+    case PP_PRIVATEDUPLEXMODE_LONG_EDGE:
+      preset_options->duplexMode = blink::WebLongEdge;
+      break;
+    default:
+      preset_options->duplexMode = blink::WebUnknownDuplexMode;
+      break;
+  }
   preset_options->copies = options.copies;
+  preset_options->isPageSizeUniform = PP_ToBool(options.is_page_size_uniform);
+  preset_options->uniformPageSize =
+      blink::WebSize(options.uniform_page_size.width,
+                     options.uniform_page_size.height);
 
   return true;
 }
 
 bool PepperPluginInstanceImpl::CanRotateView() {
-  if (!LoadPdfInterface())
+  if (!LoadPdfInterface() || module()->is_crashed())
     return false;
 
   return true;
@@ -1978,6 +2003,8 @@ bool PepperPluginInstanceImpl::PrintPDFOutput(PP_Resource print_output,
 void PepperPluginInstanceImpl::UpdateLayer(bool device_changed) {
   if (!container_)
     return;
+  if (throttler_ && throttler_->IsHiddenForPlaceholder())
+    return;
 
   gpu::Mailbox mailbox;
   uint32 sync_point = 0;
@@ -2059,6 +2086,22 @@ bool PepperPluginInstanceImpl::PrepareTextureMailbox(
 }
 
 void PepperPluginInstanceImpl::OnDestruct() { render_frame_ = NULL; }
+
+void PepperPluginInstanceImpl::OnThrottleStateChange() {
+  SendDidChangeView();
+
+  bool is_throttled = throttler_->IsThrottled();
+  render_frame()->Send(new ViewHostMsg_PluginInstanceThrottleStateChange(
+      module_->GetPluginChildId(), pp_instance_, is_throttled));
+}
+
+void PepperPluginInstanceImpl::OnHiddenForPlaceholder(bool hidden) {
+  if (hidden) {
+    container_->setWebLayer(nullptr);
+  } else {
+    UpdateLayer(true /* device_changed */);
+  }
+}
 
 void PepperPluginInstanceImpl::AddLatencyInfo(
     const std::vector<ui::LatencyInfo>& latency_info) {
@@ -2411,9 +2454,9 @@ void PepperPluginInstanceImpl::PromiseResolved(PP_Instance instance,
 void PepperPluginInstanceImpl::PromiseResolvedWithSession(
     PP_Instance instance,
     uint32 promise_id,
-    PP_Var web_session_id_var) {
+    PP_Var session_id_var) {
   content_decryptor_delegate_->OnPromiseResolvedWithSession(promise_id,
-                                                            web_session_id_var);
+                                                            session_id_var);
 }
 
 void PepperPluginInstanceImpl::PromiseRejected(
@@ -2427,45 +2470,45 @@ void PepperPluginInstanceImpl::PromiseRejected(
 }
 
 void PepperPluginInstanceImpl::SessionMessage(PP_Instance instance,
-                                              PP_Var web_session_id_var,
+                                              PP_Var session_id_var,
                                               PP_CdmMessageType message_type,
                                               PP_Var message_var,
                                               PP_Var legacy_destination_url) {
   content_decryptor_delegate_->OnSessionMessage(
-      web_session_id_var, message_type, message_var, legacy_destination_url);
+      session_id_var, message_type, message_var, legacy_destination_url);
 }
 
 void PepperPluginInstanceImpl::SessionKeysChange(
     PP_Instance instance,
-    PP_Var web_session_id_var,
+    PP_Var session_id_var,
     PP_Bool has_additional_usable_key,
     uint32_t key_count,
     const struct PP_KeyInformation key_information[]) {
-  content_decryptor_delegate_->OnSessionKeysChange(web_session_id_var,
-                                                   has_additional_usable_key,
-                                                   key_count, key_information);
+  content_decryptor_delegate_->OnSessionKeysChange(
+      session_id_var, has_additional_usable_key, key_count, key_information);
 }
 
 void PepperPluginInstanceImpl::SessionExpirationChange(
     PP_Instance instance,
-    PP_Var web_session_id_var,
+    PP_Var session_id_var,
     PP_Time new_expiry_time) {
-  content_decryptor_delegate_->OnSessionExpirationChange(web_session_id_var,
+  content_decryptor_delegate_->OnSessionExpirationChange(session_id_var,
                                                          new_expiry_time);
 }
 
 void PepperPluginInstanceImpl::SessionClosed(PP_Instance instance,
-                                             PP_Var web_session_id_var) {
-  content_decryptor_delegate_->OnSessionClosed(web_session_id_var);
+                                             PP_Var session_id_var) {
+  content_decryptor_delegate_->OnSessionClosed(session_id_var);
 }
 
-void PepperPluginInstanceImpl::SessionError(PP_Instance instance,
-                                            PP_Var web_session_id_var,
-                                            PP_CdmExceptionCode exception_code,
-                                            uint32 system_code,
-                                            PP_Var error_description_var) {
-  content_decryptor_delegate_->OnSessionError(
-      web_session_id_var, exception_code, system_code, error_description_var);
+void PepperPluginInstanceImpl::LegacySessionError(
+    PP_Instance instance,
+    PP_Var session_id_var,
+    PP_CdmExceptionCode exception_code,
+    uint32 system_code,
+    PP_Var error_description_var) {
+  content_decryptor_delegate_->OnLegacySessionError(
+      session_id_var, exception_code, system_code, error_description_var);
 }
 
 void PepperPluginInstanceImpl::DeliverBlock(
@@ -2558,7 +2601,6 @@ void PepperPluginInstanceImpl::SetTickmarks(PP_Instance instance,
                                             tickmarks[i].point.y,
                                             tickmarks[i].size.width,
                                             tickmarks[i].size.height);
-    ;
   }
   blink::WebFrame* frame = render_frame_->GetWebFrame();
   frame->setTickmarks(tickmarks_converted);
@@ -2587,7 +2629,6 @@ ppapi::Resource* PepperPluginInstanceImpl::GetSingletonResource(
   switch (id) {
     case ppapi::BROKER_SINGLETON_ID:
     case ppapi::BROWSER_FONT_SINGLETON_ID:
-    case ppapi::FILE_MAPPING_SINGLETON_ID:
     case ppapi::FLASH_CLIPBOARD_SINGLETON_ID:
     case ppapi::FLASH_FILE_SINGLETON_ID:
     case ppapi::FLASH_FULLSCREEN_SINGLETON_ID:
@@ -3120,7 +3161,8 @@ int32_t PepperPluginInstanceImpl::Navigate(
     return PP_ERROR_FAILED;
   }
   web_request.setFirstPartyForCookies(document.firstPartyForCookies());
-  web_request.setHasUserGesture(from_user_action);
+  if (IsProcessingUserGesture())
+    web_request.setHasUserGesture(true);
 
   GURL gurl(web_request.url());
   if (gurl.SchemeIs(url::kJavaScriptScheme)) {
@@ -3133,7 +3175,8 @@ int32_t PepperPluginInstanceImpl::Navigate(
 
     // TODO(viettrungluu): NPAPI sends the result back to the plugin -- do we
     // need that?
-    WebString result = container_->executeScriptURL(gurl, from_user_action);
+    blink::WebScopedUserGesture user_gesture(CurrentUserGestureToken());
+    WebString result = container_->executeScriptURL(gurl, false);
     return result.isNull() ? PP_ERROR_FAILED : PP_OK;
   }
 
@@ -3142,6 +3185,7 @@ int32_t PepperPluginInstanceImpl::Navigate(
     return PP_ERROR_BADARGUMENT;
 
   WebString target_str = WebString::fromUTF8(target);
+  blink::WebScopedUserGesture user_gesture(CurrentUserGestureToken());
   container_->loadFrameRequest(web_request, target_str, false, NULL);
   return PP_OK;
 }
@@ -3294,7 +3338,7 @@ void PepperPluginInstanceImpl::DidDataFromWebURLResponse(
 }
 
 void PepperPluginInstanceImpl::RecordFlashJavaScriptUse() {
-  if (!javascript_used_ && is_flash_plugin_) {
+  if (initialized_ && !javascript_used_ && is_flash_plugin_) {
     javascript_used_ = true;
     RenderThread::Get()->RecordAction(
         base::UserMetricsAction("Flash.JavaScriptUsed"));

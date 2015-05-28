@@ -6,12 +6,13 @@
 
 #include <algorithm>
 
+#include "base/auto_reset.h"
 #include "base/command_line.h"
-#include "base/debug/trace_event.h"
 #include "base/json/json_writer.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/trace_event/trace_event.h"
 #include "cc/base/scoped_ptr_algorithm.h"
 #include "cc/layers/content_layer.h"
 #include "cc/layers/delegated_renderer_layer.h"
@@ -28,6 +29,7 @@
 #include "ui/compositor/compositor_switches.h"
 #include "ui/compositor/dip_util.h"
 #include "ui/compositor/layer_animator.h"
+#include "ui/compositor/paint_context.h"
 #include "ui/gfx/animation/animation.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/display.h"
@@ -540,6 +542,9 @@ void Layer::SetTextureMailbox(
     new_layer->SetFlipped(true);
     SwitchToLayer(new_layer);
     texture_layer_ = new_layer;
+    // Reset the frame_size_in_dip_ so that SetTextureSize() will not early out,
+    // the frame_size_in_dip_ was for a previous (different) |texture_layer_|.
+    frame_size_in_dip_ = gfx::Size();
   }
   if (mailbox_release_callback_)
     mailbox_release_callback_->Run(0, false);
@@ -617,8 +622,11 @@ void Layer::SetShowSolidColorContent() {
   RecomputeDrawsContentAndUVRect();
 }
 
-void Layer::UpdateNinePatchLayerBitmap(const SkBitmap& bitmap) {
+void Layer::UpdateNinePatchLayerImage(const gfx::ImageSkia& image) {
   DCHECK(type_ == LAYER_NINE_PATCH && nine_patch_layer_.get());
+  nine_patch_layer_image_ = image;
+  SkBitmap bitmap = nine_patch_layer_image_.GetRepresentation(
+      device_scale_factor_).sk_bitmap();
   SkBitmap bitmap_copy;
   if (bitmap.isImmutable()) {
     bitmap_copy = bitmap;
@@ -630,9 +638,11 @@ void Layer::UpdateNinePatchLayerBitmap(const SkBitmap& bitmap) {
   nine_patch_layer_->SetBitmap(bitmap_copy);
 }
 
-void Layer::UpdateNinePatchLayerAperture(const gfx::Rect& aperture) {
+void Layer::UpdateNinePatchLayerAperture(const gfx::Rect& aperture_in_dip) {
   DCHECK(type_ == LAYER_NINE_PATCH && nine_patch_layer_.get());
-  nine_patch_layer_->SetAperture(aperture);
+  nine_patch_layer_aperture_ = aperture_in_dip;
+  gfx::Rect aperture_in_pixel = ConvertRectToPixel(this, aperture_in_dip);
+  nine_patch_layer_->SetAperture(aperture_in_pixel);
 }
 
 void Layer::UpdateNinePatchLayerBorder(const gfx::Rect& border) {
@@ -641,6 +651,14 @@ void Layer::UpdateNinePatchLayerBorder(const gfx::Rect& border) {
 }
 
 void Layer::SetColor(SkColor color) { GetAnimator()->SetColor(color); }
+
+SkColor Layer::GetTargetColor() {
+  return GetAnimator()->GetTargetColor();
+}
+
+SkColor Layer::background_color() const {
+  return cc_layer_->background_color();
+}
 
 bool Layer::SchedulePaint(const gfx::Rect& invalid_rect) {
   if ((type_ == LAYER_SOLID_COLOR && !texture_layer_.get()) ||
@@ -706,6 +724,10 @@ void Layer::OnDeviceScaleFactorChanged(float device_scale_factor) {
   device_scale_factor_ = device_scale_factor;
   RecomputeDrawsContentAndUVRect();
   RecomputePosition();
+  if (nine_patch_layer_) {
+    UpdateNinePatchLayerImage(nine_patch_layer_image_);
+    UpdateNinePatchLayerAperture(nine_patch_layer_aperture_);
+  }
   SchedulePaint(gfx::Rect(bounds_.size()));
   if (delegate_)
     delegate_->OnDeviceScaleFactorChanged(device_scale_factor);
@@ -726,19 +748,20 @@ void Layer::RequestCopyOfOutput(scoped_ptr<cc::CopyOutputRequest> request) {
   cc_layer_->RequestCopyOfOutput(request.Pass());
 }
 
-void Layer::PaintContents(SkCanvas* sk_canvas,
-                          const gfx::Rect& clip,
-                          ContentLayerClient::GraphicsContextStatus gc_status) {
-  TRACE_EVENT0("ui", "Layer::PaintContents");
+void Layer::PaintContents(
+    SkCanvas* sk_canvas,
+    const gfx::Rect& clip,
+    ContentLayerClient::PaintingControlSetting painting_control) {
+  TRACE_EVENT1("ui", "Layer::PaintContents", "name", name_);
   scoped_ptr<gfx::Canvas> canvas(gfx::Canvas::CreateCanvasWithoutScaling(
       sk_canvas, device_scale_factor_));
   if (delegate_)
-    delegate_->OnPaintLayer(canvas.get());
+    delegate_->OnPaintLayer(PaintContext(canvas.get(), clip));
 }
 
 scoped_refptr<cc::DisplayItemList> Layer::PaintContentsToDisplayList(
     const gfx::Rect& clip,
-    ContentLayerClient::GraphicsContextStatus gc_status) {
+    ContentLayerClient::PaintingControlSetting painting_control) {
   NOTIMPLEMENTED();
   return cc::DisplayItemList::Create();
 }
@@ -764,7 +787,7 @@ void Layer::SetForceRenderSurface(bool force) {
   cc_layer_->SetForceRenderSurface(force_render_surface_);
 }
 
-class LayerDebugInfo : public base::debug::ConvertableToTraceFormat {
+class LayerDebugInfo : public base::trace_event::ConvertableToTraceFormat {
  public:
   explicit LayerDebugInfo(std::string name) : name_(name) { }
   void AppendAsTraceFormat(std::string* out) const override {
@@ -778,7 +801,8 @@ class LayerDebugInfo : public base::debug::ConvertableToTraceFormat {
   std::string name_;
 };
 
-scoped_refptr<base::debug::ConvertableToTraceFormat> Layer::TakeDebugInfo() {
+scoped_refptr<base::trace_event::ConvertableToTraceFormat>
+Layer::TakeDebugInfo() {
   return new LayerDebugInfo(name_);
 }
 

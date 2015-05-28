@@ -5,13 +5,12 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/command_line.h"
-#include "base/debug/trace_event.h"
 #include "base/hash.h"
 #include "base/json/json_writer.h"
 #include "base/memory/shared_memory.h"
 #include "base/time/time.h"
+#include "base/trace_event/trace_event.h"
 #include "build/build_config.h"
-#include "content/common/gpu/devtools_gpu_instrumentation.h"
 #include "content/common/gpu/gpu_channel.h"
 #include "content/common/gpu/gpu_channel_manager.h"
 #include "content/common/gpu/gpu_command_buffer_stub.h"
@@ -28,6 +27,7 @@
 #include "gpu/command_buffer/common/mailbox.h"
 #include "gpu/command_buffer/service/gl_context_virtual.h"
 #include "gpu/command_buffer/service/gl_state_restorer_impl.h"
+#include "gpu/command_buffer/service/image_factory.h"
 #include "gpu/command_buffer/service/image_manager.h"
 #include "gpu/command_buffer/service/logger.h"
 #include "gpu/command_buffer/service/mailbox_manager.h"
@@ -111,10 +111,10 @@ const int64 kHandleMoreWorkPeriodBusyMs = 1;
 // Prevents idle work from being starved.
 const int64 kMaxTimeSinceIdleMs = 10;
 
-class DevToolsChannelData : public base::debug::ConvertableToTraceFormat {
+class DevToolsChannelData : public base::trace_event::ConvertableToTraceFormat {
  public:
-  static scoped_refptr<base::debug::ConvertableToTraceFormat> CreateForChannel(
-      GpuChannel* channel);
+  static scoped_refptr<base::trace_event::ConvertableToTraceFormat>
+  CreateForChannel(GpuChannel* channel);
 
   void AppendAsTraceFormat(std::string* out) const override {
     std::string tmp;
@@ -129,7 +129,7 @@ class DevToolsChannelData : public base::debug::ConvertableToTraceFormat {
   DISALLOW_COPY_AND_ASSIGN(DevToolsChannelData);
 };
 
-scoped_refptr<base::debug::ConvertableToTraceFormat>
+scoped_refptr<base::trace_event::ConvertableToTraceFormat>
 DevToolsChannelData::CreateForChannel(GpuChannel* channel) {
   scoped_ptr<base::DictionaryValue> res(new base::DictionaryValue);
   res->SetInteger("renderer_pid", channel->renderer_pid());
@@ -219,9 +219,6 @@ bool GpuCommandBufferStub::OnMessageReceived(const IPC::Message& message) {
                "GPUTask",
                "data",
                DevToolsChannelData::CreateForChannel(channel()));
-  // TODO(yurys): remove devtools_gpu_instrumentation call once DevTools
-  // Timeline migrates to tracing crbug.com/361045.
-  devtools_gpu_instrumentation::ScopedGpuTask task(channel());
   FastSetActiveURL(active_url_, active_url_hash_);
 
   bool have_context = false;
@@ -960,6 +957,24 @@ void GpuCommandBufferStub::OnCreateImage(int32 id,
     return;
   }
 
+  if (!gpu::ImageFactory::IsGpuMemoryBufferFormatSupported(
+          format, decoder_->GetCapabilities())) {
+    LOG(ERROR) << "Format is not supported.";
+    return;
+  }
+
+  if (!gpu::ImageFactory::IsImageSizeValidForGpuMemoryBufferFormat(size,
+                                                                   format)) {
+    LOG(ERROR) << "Invalid image size for format.";
+    return;
+  }
+
+  if (!gpu::ImageFactory::IsImageFormatCompatibleWithGpuMemoryBufferFormat(
+          internalformat, format)) {
+    LOG(ERROR) << "Incompatible image format.";
+    return;
+  }
+
   scoped_refptr<gfx::GLImage> image = channel()->CreateImageForGpuMemoryBuffer(
       handle, size, format, internalformat);
   if (!image.get())
@@ -1082,9 +1097,15 @@ uint64 GpuCommandBufferStub::GetMemoryUsage() const {
   return GetMemoryManager()->GetClientMemoryUsage(this);
 }
 
-void GpuCommandBufferStub::SwapBuffersCompleted(
+void GpuCommandBufferStub::SendSwapBuffersCompleted(
     const std::vector<ui::LatencyInfo>& latency_info) {
   Send(new GpuCommandBufferMsg_SwapBuffersCompleted(route_id_, latency_info));
+}
+
+void GpuCommandBufferStub::SendUpdateVSyncParameters(base::TimeTicks timebase,
+                                                     base::TimeDelta interval) {
+  Send(new GpuCommandBufferMsg_UpdateVSyncParameters(route_id_, timebase,
+                                                     interval));
 }
 
 }  // namespace content

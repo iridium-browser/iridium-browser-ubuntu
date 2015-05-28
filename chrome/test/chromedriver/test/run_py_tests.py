@@ -50,6 +50,10 @@ _NEGATIVE_FILTER = [
     # This test is flaky since it uses setTimeout.
     # Re-enable once crbug.com/177511 is fixed and we can remove setTimeout.
     'ChromeDriverTest.testAlert',
+    # This test is too flaky on the bots, but seems to run perfectly fine
+    # on developer workstations.
+    'ChromeDriverTest.testEmulateNetworkConditionsNameSpeed',
+    'ChromeDriverTest.testEmulateNetworkConditionsSpeed',
 ]
 
 _VERSION_SPECIFIC_FILTER = {}
@@ -153,6 +157,13 @@ _ANDROID_NEGATIVE_FILTER['chromedriver_webview_shell'] = (
         # https://code.google.com/p/chromedriver/issues/detail?id=913
         'ChromeDriverTest.testChromeDriverSendLargeData',
         'PerformanceLoggerTest.testPerformanceLogger',
+        'ChromeDriverTest.testShadowDom*',
+        # WebView doesn't support emulating network conditions.
+        'ChromeDriverTest.testEmulateNetworkConditions',
+        'ChromeDriverTest.testEmulateNetworkConditionsNameSpeed',
+        'ChromeDriverTest.testEmulateNetworkConditionsOffline',
+        'ChromeDriverTest.testEmulateNetworkConditionsSpeed',
+        'ChromeDriverTest.testEmulateNetworkConditionsName',
     ]
 )
 
@@ -512,13 +523,12 @@ class ChromeDriverTest(ChromeDriverBaseTest):
   def testClearElement(self):
     text = self._driver.ExecuteScript(
         'document.body.innerHTML = \'<input type="text" value="abc">\';'
-        'var input = document.getElementsByTagName("input")[0];'
-        'input.addEventListener("change", function() {'
-        '  document.body.appendChild(document.createElement("br"));'
-        '});'
-        'return input;')
+        'return document.getElementsByTagName("input")[0];')
+    value = self._driver.ExecuteScript('return arguments[0].value;', text)
+    self.assertEquals('abc', value)
     text.Clear()
-    self.assertEquals(1, len(self._driver.FindElements('tag name', 'br')))
+    value = self._driver.ExecuteScript('return arguments[0].value;', text)
+    self.assertEquals('', value)
 
   def testSendKeysToElement(self):
     text = self._driver.ExecuteScript(
@@ -565,6 +575,33 @@ class ChromeDriverTest(ChromeDriverBaseTest):
         'return div;')
     self._driver.MouseMoveTo(div, 10, 10)
     self.assertEquals(1, len(self._driver.FindElements('tag name', 'br')))
+
+  def testMoveToElementAndClick(self):
+    # This page gets rendered differently depending on which platform the test
+    # is running on, and what window size is being used. So we need to do some
+    # sanity checks to make sure that the <a> element is split across two lines
+    # of text.
+    self._driver.Load(self.GetHttpUrlForFile('/chromedriver/multiline.html'))
+
+    # Check that link element spans two lines and that the first ClientRect is
+    # above the second.
+    link = self._driver.FindElements('tag name', 'a')[0]
+    client_rects = self._driver.ExecuteScript(
+        'return arguments[0].getClientRects();', link)
+    self.assertEquals(2, len(client_rects))
+    self.assertTrue(client_rects[0]['bottom'] <= client_rects[1]['top'])
+
+    # Check that the center of the link's bounding ClientRect is outside the
+    # element.
+    bounding_client_rect = self._driver.ExecuteScript(
+        'return arguments[0].getBoundingClientRect();', link)
+    center = bounding_client_rect['left'] + bounding_client_rect['width'] / 2
+    self.assertTrue(client_rects[1]['right'] < center)
+    self.assertTrue(center < client_rects[0]['left'])
+
+    self._driver.MouseMoveTo(link)
+    self._driver.MouseClick()
+    self.assertTrue(self._driver.GetCurrentUrl().endswith('#top'))
 
   def testMouseClick(self):
     div = self._driver.ExecuteScript(
@@ -702,9 +739,22 @@ class ChromeDriverTest(ChromeDriverBaseTest):
   def testConsoleLogSources(self):
     self._driver.Load(self.GetHttpUrlForFile('/chromedriver/console_log.html'))
     logs = self._driver.GetLog('browser')
-    self.assertEquals(len(logs), 2)
-    self.assertEquals(logs[0]['source'], 'network')
-    self.assertEquals(logs[1]['source'], 'javascript')
+
+    self.assertEqual('network', logs[0]['source'])
+    self.assertTrue('nonexistent.png' in logs[0]['message'])
+    self.assertTrue('404' in logs[0]['message'])
+
+    self.assertEqual('javascript', logs[1]['source'])
+    self.assertTrue('TypeError' in logs[1]['message'])
+
+    # Sometimes, we also get an error for a missing favicon.
+    if len(logs) > 2:
+      self.assertEqual('network', logs[2]['source'])
+      self.assertTrue('favicon.ico' in logs[2]['message'])
+      self.assertTrue('404' in logs[2]['message'])
+      self.assertEqual(3, len(logs))
+    else:
+      self.assertEqual(2, len(logs))
 
   def testAutoReporting(self):
     self.assertFalse(self._driver.IsAutoReporting())
@@ -746,6 +796,95 @@ class ChromeDriverTest(ChromeDriverBaseTest):
     script = 's = ""; for (i = 0; i < 10e6; i++) s += "0"; return s;'
     lots_of_data = self._driver.ExecuteScript(script)
     self.assertEquals('0'.zfill(int(10e6)), lots_of_data)
+
+  def testEmulateNetworkConditions(self):
+    # Network conditions must be set before it can be retrieved.
+    self.assertRaises(chromedriver.UnknownError,
+                      self._driver.GetNetworkConditions)
+
+    # DSL: 2Mbps throughput, 5ms RTT
+    latency = 5
+    throughput = 2048 * 1024
+    self._driver.SetNetworkConditions(latency, throughput, throughput)
+
+    network = self._driver.GetNetworkConditions()
+    self.assertEquals(latency, network['latency']);
+    self.assertEquals(throughput, network['download_throughput']);
+    self.assertEquals(throughput, network['upload_throughput']);
+    self.assertEquals(False, network['offline']);
+
+    # Network Conditions again cannot be retrieved after they've been deleted.
+    self._driver.DeleteNetworkConditions()
+    self.assertRaises(chromedriver.UnknownError,
+                      self._driver.GetNetworkConditions)
+
+  def testEmulateNetworkConditionsName(self):
+    # DSL: 2Mbps throughput, 5ms RTT
+    #latency = 5
+    #throughput = 2048 * 1024
+    self._driver.SetNetworkConditionsName('DSL')
+
+    network = self._driver.GetNetworkConditions()
+    self.assertEquals(5, network['latency']);
+    self.assertEquals(2048*1024, network['download_throughput']);
+    self.assertEquals(2048*1024, network['upload_throughput']);
+    self.assertEquals(False, network['offline']);
+
+  def testEmulateNetworkConditionsSpeed(self):
+    # Warm up the browser.
+    self._http_server.SetDataForPath(
+        '/', "<html><body>blank</body></html>")
+    self._driver.Load(self._http_server.GetUrl() + '/')
+
+    # DSL: 2Mbps throughput, 5ms RTT
+    latency = 5
+    throughput_kbps = 2048
+    throughput = throughput_kbps * 1024
+    self._driver.SetNetworkConditions(latency, throughput, throughput)
+
+    _32_bytes = " 0 1 2 3 4 5 6 7 8 9 A B C D E F"
+    _1_megabyte = _32_bytes * 32768
+    self._http_server.SetDataForPath(
+        '/1MB',
+        "<html><body>%s</body></html>" % _1_megabyte)
+    start = time.time()
+    self._driver.Load(self._http_server.GetUrl() + '/1MB')
+    finish = time.time()
+    duration = finish - start
+    actual_throughput_kbps = 1024 / duration
+    self.assertLessEqual(actual_throughput_kbps, throughput_kbps * 1.5)
+    self.assertGreaterEqual(actual_throughput_kbps, throughput_kbps / 1.5)
+
+  def testEmulateNetworkConditionsNameSpeed(self):
+    # Warm up the browser.
+    self._http_server.SetDataForPath(
+        '/', "<html><body>blank</body></html>")
+    self._driver.Load(self._http_server.GetUrl() + '/')
+
+    # DSL: 2Mbps throughput, 5ms RTT
+    throughput_kbps = 2048
+    throughput = throughput_kbps * 1024
+    self._driver.SetNetworkConditionsName('DSL')
+
+    _32_bytes = " 0 1 2 3 4 5 6 7 8 9 A B C D E F"
+    _1_megabyte = _32_bytes * 32768
+    self._http_server.SetDataForPath(
+        '/1MB',
+        "<html><body>%s</body></html>" % _1_megabyte)
+    start = time.time()
+    self._driver.Load(self._http_server.GetUrl() + '/1MB')
+    finish = time.time()
+    duration = finish - start
+    actual_throughput_kbps = 1024 / duration
+    self.assertLessEqual(actual_throughput_kbps, throughput_kbps * 1.5)
+    self.assertGreaterEqual(actual_throughput_kbps, throughput_kbps / 1.5)
+
+  def testEmulateNetworkConditionsOffline(self):
+    # A workaround for crbug.com/177511; when setting offline, the throughputs
+    # must be 0.
+    self._driver.SetNetworkConditions(0, 0, 0, offline=True)
+    self._driver.Load(self.GetHttpUrlForFile('/chromedriver/page_test.html'))
+    self.assertIn('is not available', self._driver.GetTitle())
 
   def testShadowDomFindElementWithSlashDeep(self):
     """Checks that chromedriver can find elements in a shadow DOM using /deep/
@@ -812,8 +951,19 @@ class ChromeDriverTest(ChromeDriverBaseTest):
         '/chromedriver/shadow_dom_test.html'))
     elem = self._driver.FindElement("css", "* /deep/ #olderButton")
     elem.Click()
-    # the butotn's onClicked handler changes the text box's value
+    # the button's onClicked handler changes the text box's value
     self.assertEqual("Button Was Clicked", self._driver.ExecuteScript(
+        'return document.querySelector("* /deep/ #olderTextBox").value;'))
+
+  def testShadowDomHover(self):
+    """Checks that chromedriver can call HoverOver on an element in a
+    shadow DOM."""
+    self._driver.Load(self.GetHttpUrlForFile(
+        '/chromedriver/shadow_dom_test.html'))
+    elem = self._driver.FindElement("css", "* /deep/ #olderButton")
+    elem.HoverOver()
+    # the button's onMouseOver handler changes the text box's value
+    self.assertEqual("Button Was Hovered Over", self._driver.ExecuteScript(
         'return document.querySelector("* /deep/ #olderTextBox").value;'))
 
   def testShadowDomStaleReference(self):
@@ -1188,7 +1338,6 @@ class PerformanceLoggerTest(ChromeDriverBaseTest):
   def testPerformanceLogger(self):
     driver = self.CreateDriver(
         experimental_options={'perfLoggingPrefs': {
-            'enableTimeline': True,
             'traceCategories': 'webkit.console,blink.console'
           }}, performance_log_level='ALL')
     driver.Load(
@@ -1217,7 +1366,7 @@ class PerformanceLoggerTest(ChromeDriverBaseTest):
         self.assertTrue(devtools_message['params']['name'] == 'foobar')
         marked_timeline_events.append(devtools_message)
     self.assertEquals(2, len(marked_timeline_events))
-    self.assertEquals({'Network', 'Page', 'Timeline', 'Tracing'},
+    self.assertEquals({'Network', 'Page', 'Tracing'},
                       set(seen_log_domains.keys()))
 
 
@@ -1248,7 +1397,8 @@ class RemoteBrowserTest(ChromeDriverBaseTest):
     temp_dir = util.MakeTempDir()
     process = subprocess.Popen([_CHROME_BINARY,
                                 '--remote-debugging-port=%d' % port,
-                                '--user-data-dir=%s' % temp_dir])
+                                '--user-data-dir=%s' % temp_dir,
+                                '--use-mock-keychain'])
     if process is None:
       raise RuntimeError('Chrome could not be started with debugging port')
     try:

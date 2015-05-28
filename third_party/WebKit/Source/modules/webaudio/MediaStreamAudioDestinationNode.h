@@ -27,9 +27,9 @@
 
 #if ENABLE(WEB_AUDIO)
 
-#include "platform/audio/AudioBus.h"
 #include "modules/mediastream/MediaStream.h"
 #include "modules/webaudio/AudioBasicInspectorNode.h"
+#include "platform/audio/AudioBus.h"
 #include "wtf/OwnPtr.h"
 #include "wtf/PassRefPtr.h"
 
@@ -37,31 +37,35 @@ namespace blink {
 
 class AudioContext;
 
-class MediaStreamAudioDestinationNode final : public AudioBasicInspectorNode {
-    DEFINE_WRAPPERTYPEINFO();
+class MediaStreamAudioDestinationHandler final : public AudioBasicInspectorHandler {
 public:
-    static MediaStreamAudioDestinationNode* create(AudioContext*, size_t numberOfChannels);
-    virtual ~MediaStreamAudioDestinationNode();
-    virtual void trace(Visitor*) override;
+    MediaStreamAudioDestinationHandler(AudioNode&, size_t numberOfChannels);
+    virtual ~MediaStreamAudioDestinationHandler();
+    DECLARE_VIRTUAL_TRACE();
 
     MediaStream* stream() { return m_stream.get(); }
 
-    // AudioNode.
+    // AudioHandler.
     virtual void dispose() override;
     virtual void process(size_t framesToProcess) override;
 
 private:
-    MediaStreamAudioDestinationNode(AudioContext*, size_t numberOfChannels);
-
-    virtual double tailTime() const override { return 0; }
-    virtual double latencyTime() const override { return 0; }
-
     // As an audio source, we will never propagate silence.
     virtual bool propagatesSilence() const override { return false; }
 
     Member<MediaStream> m_stream;
     RefPtr<MediaStreamSource> m_source;
     RefPtr<AudioBus> m_mixBus;
+};
+
+class MediaStreamAudioDestinationNode final : public AudioNode {
+    DEFINE_WRAPPERTYPEINFO();
+public:
+    static MediaStreamAudioDestinationNode* create(AudioContext*, size_t numberOfChannels);
+    MediaStream* stream() const;
+
+private:
+    MediaStreamAudioDestinationNode(AudioContext&, size_t numberOfChannels);
 };
 
 } // namespace blink

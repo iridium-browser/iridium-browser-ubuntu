@@ -31,7 +31,6 @@
 #include "base/win/windows_version.h"
 #include "chrome/common/importer/ie_importer_utils_win.h"
 #include "chrome/common/importer/imported_bookmark_entry.h"
-#include "chrome/common/importer/imported_favicon_usage.h"
 #include "chrome/common/importer/importer_bridge.h"
 #include "chrome/common/importer/importer_data_types.h"
 #include "chrome/common/importer/importer_url_row.h"
@@ -292,7 +291,7 @@ GURL ReadURLFromInternetShortcut(IUniformResourceLocator* url_locator) {
   base::win::ScopedCoMem<wchar_t> url;
   // GetURL can return S_FALSE (FAILED(S_FALSE) is false) when url == NULL.
   return (FAILED(url_locator->GetURL(&url)) || !url) ?
-      GURL() : GURL(base::WideToUTF16(url.get()));
+      GURL() : GURL(url.get());
 }
 
 // Reads the URL of the favicon of the internet shortcut.
@@ -317,7 +316,7 @@ GURL ReadFaviconURLFromInternetShortcut(IUniformResourceLocator* url_locator) {
   if (FAILED(property_storage->ReadMultiple(1, properties, output.Receive())) ||
       output.get().vt != VT_LPWSTR)
     return GURL();
-  return GURL(base::WideToUTF16(output.get().pwszVal));
+  return GURL(output.get().pwszVal);
 }
 
 // Reads the favicon imaga data in an NTFS alternate data stream. This is where
@@ -366,22 +365,23 @@ bool ReadReencodedFaviconData(const base::string16& file,
 }
 
 // Loads favicon image data and registers to |favicon_map|.
-void UpdateFaviconMap(const base::string16& url_file,
-                      const GURL& url,
-                      IUniformResourceLocator* url_locator,
-                      std::map<GURL, ImportedFaviconUsage>* favicon_map) {
+void UpdateFaviconMap(
+    const base::string16& url_file,
+    const GURL& url,
+    IUniformResourceLocator* url_locator,
+    std::map<GURL, favicon_base::FaviconUsageData>* favicon_map) {
   GURL favicon_url = ReadFaviconURLFromInternetShortcut(url_locator);
   if (!favicon_url.is_valid())
     return;
 
-  std::map<GURL, ImportedFaviconUsage>::iterator it =
-    favicon_map->find(favicon_url);
+  std::map<GURL, favicon_base::FaviconUsageData>::iterator it =
+      favicon_map->find(favicon_url);
   if (it != favicon_map->end()) {
     // Known favicon URL.
     it->second.urls.insert(url);
   } else {
     // New favicon URL. Read the image data and store.
-    ImportedFaviconUsage usage;
+    favicon_base::FaviconUsageData usage;
     if (ReadReencodedFaviconData(url_file, favicon_url, &usage.png_data)) {
       usage.favicon_url = favicon_url;
       usage.urls.insert(url);
@@ -457,7 +457,7 @@ void IEImporter::ImportFavorites() {
     return;
 
   BookmarkVector bookmarks;
-  std::vector<ImportedFaviconUsage> favicons;
+  favicon_base::FaviconUsageDataList favicons;
   ParseFavoritesFolder(info, &bookmarks, &favicons);
 
   if (!bookmarks.empty() && !cancelled()) {
@@ -724,15 +724,15 @@ void IEImporter::ImportSearchEngines() {
     }
   }
   // ProfileWriter::AddKeywords() requires a vector and we have a map.
-  std::vector<importer::URLKeywordInfo> url_keywords;
+  std::vector<importer::SearchEngineInfo> search_engines;
   for (SearchEnginesMap::iterator i = search_engines_map.begin();
        i != search_engines_map.end(); ++i) {
-    importer::URLKeywordInfo url_keyword_info;
-    url_keyword_info.url = GURL(i->first);
-    url_keyword_info.display_name = i->second;
-    url_keywords.push_back(url_keyword_info);
+    importer::SearchEngineInfo search_engine_info;
+    search_engine_info.url = base::UTF8ToUTF16(i->first);
+    search_engine_info.display_name = i->second;
+    search_engines.push_back(search_engine_info);
   }
-  bridge_->SetKeywords(url_keywords, true);
+  bridge_->SetKeywords(search_engines, true);
 }
 
 void IEImporter::ImportHomepage() {
@@ -800,7 +800,7 @@ bool IEImporter::GetFavoritesInfo(IEImporter::FavoritesInfo* info) {
 void IEImporter::ParseFavoritesFolder(
     const FavoritesInfo& info,
     BookmarkVector* bookmarks,
-    std::vector<ImportedFaviconUsage>* favicons) {
+    favicon_base::FaviconUsageDataList* favicons) {
   base::FilePath file;
   std::vector<base::FilePath::StringType> file_list;
   base::FilePath favorites_path(info.path);
@@ -817,7 +817,7 @@ void IEImporter::ParseFavoritesFolder(
 
   // Map from favicon URLs to the favicon data (the binary image data and the
   // set of bookmark URLs referring to the favicon).
-  typedef std::map<GURL, ImportedFaviconUsage> FaviconMap;
+  typedef std::map<GURL, favicon_base::FaviconUsageData> FaviconMap;
   FaviconMap favicon_map;
 
   for (std::vector<base::FilePath::StringType>::iterator it = file_list.begin();

@@ -66,8 +66,10 @@ const char kTargetFaviconUrlField[] = "faviconUrl";
 const char kTargetWebSocketDebuggerUrlField[] = "webSocketDebuggerUrl";
 const char kTargetDevtoolsFrontendUrlField[] = "devtoolsFrontendUrl";
 
-// Maximum write buffer size of devtools http/websocket connectinos.
-const int32 kSendBufferSizeForDevTools = 100 * 1024 * 1024;  // 100Mb
+// Maximum write buffer size of devtools http/websocket connections.
+// TODO(rmcilroy/pfieldman): Reduce this back to 100Mb when we have
+// added back pressure on the TraceComplete message protocol - crbug.com/456845.
+const int32 kSendBufferSizeForDevTools = 256 * 1024 * 1024;  // 256Mb
 
 class BrowserTarget;
 class DevToolsAgentHostClientImpl;
@@ -95,6 +97,7 @@ class DevToolsHttpHandlerImpl : public DevToolsHttpHandler {
 
   void ServerStarted(base::Thread* thread,
                      ServerWrapper* server_wrapper,
+                     ServerSocketFactory* socket_factory,
                      scoped_ptr<net::IPEndPoint> ip_address);
 
  private:
@@ -142,6 +145,7 @@ class DevToolsHttpHandlerImpl : public DevToolsHttpHandler {
   typedef std::map<int, DevToolsAgentHostClientImpl*> ConnectionToClientMap;
   ConnectionToClientMap connection_to_client_;
   const scoped_ptr<DevToolsHttpHandlerDelegate> delegate_;
+  ServerSocketFactory* socket_factory_;
   typedef std::map<std::string, DevToolsTarget*> TargetMap;
   TargetMap target_map_;
   typedef std::map<int, BrowserTarget*> BrowserTargets;
@@ -246,11 +250,17 @@ void ServerWrapper::Close(int connection_id) {
 
 // Thread and ServerWrapper lifetime management ------------------------------
 
-void TerminateOnUI(base::Thread* thread, ServerWrapper* server_wrapper) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+void TerminateOnUI(base::Thread* thread,
+                   ServerWrapper* server_wrapper,
+                   DevToolsHttpHandler::ServerSocketFactory* socket_factory) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   if (server_wrapper) {
     DCHECK(thread);
     thread->message_loop()->DeleteSoon(FROM_HERE, server_wrapper);
+  }
+  if (socket_factory) {
+    DCHECK(thread);
+    thread->message_loop()->DeleteSoon(FROM_HERE, socket_factory);
   }
   if (thread) {
     BrowserThread::DeleteSoon(BrowserThread::FILE, FROM_HERE, thread);
@@ -261,26 +271,28 @@ void ServerStartedOnUI(
     base::WeakPtr<DevToolsHttpHandlerImpl> handler,
     base::Thread* thread,
     ServerWrapper* server_wrapper,
+    DevToolsHttpHandler::ServerSocketFactory* socket_factory,
     scoped_ptr<net::IPEndPoint> ip_address) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   if (handler && thread && server_wrapper) {
-    handler->ServerStarted(thread, server_wrapper, ip_address.Pass());
+    handler->ServerStarted(thread, server_wrapper, socket_factory,
+                           ip_address.Pass());
   } else {
-    TerminateOnUI(thread, server_wrapper);
+    TerminateOnUI(thread, server_wrapper, socket_factory);
   }
 }
 
 void StartServerOnHandlerThread(
     base::WeakPtr<DevToolsHttpHandlerImpl> handler,
     base::Thread* thread,
-    scoped_ptr<DevToolsHttpHandler::ServerSocketFactory> server_socket_factory,
+    DevToolsHttpHandler::ServerSocketFactory* server_socket_factory,
     const base::FilePath& output_directory,
     const base::FilePath& frontend_dir,
     bool bundles_resources) {
   DCHECK_EQ(thread->message_loop(), base::MessageLoop::current());
   ServerWrapper* server_wrapper = nullptr;
   scoped_ptr<net::ServerSocket> server_socket =
-      server_socket_factory->CreateAndListen();
+      server_socket_factory->CreateForHttpServer();
   scoped_ptr<net::IPEndPoint> ip_address(new net::IPEndPoint);
   if (server_socket) {
     server_wrapper = new ServerWrapper(handler, server_socket.Pass(),
@@ -296,16 +308,20 @@ void StartServerOnHandlerThread(
   }
   BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
       base::Bind(&ServerStartedOnUI,
-                 handler, thread, server_wrapper, base::Passed(&ip_address)));
+                 handler,
+                 thread,
+                 server_wrapper,
+                 server_socket_factory,
+                 base::Passed(&ip_address)));
 }
 
 void StartServerOnFile(
     base::WeakPtr<DevToolsHttpHandlerImpl> handler,
-    scoped_ptr<DevToolsHttpHandler::ServerSocketFactory> server_socket_factory,
+    DevToolsHttpHandler::ServerSocketFactory* server_socket_factory,
     const base::FilePath& output_directory,
     const base::FilePath& frontend_dir,
     bool bundles_resources) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::FILE));
+  DCHECK_CURRENTLY_ON(BrowserThread::FILE);
   scoped_ptr<base::Thread> thread(new base::Thread(kDevToolsHandlerThreadName));
   base::Thread::Options options;
   options.message_loop_type = base::MessageLoop::TYPE_IO;
@@ -315,7 +331,7 @@ void StartServerOnFile(
         base::Bind(&StartServerOnHandlerThread,
                    handler,
                    base::Unretained(thread.release()),
-                   base::Passed(&server_socket_factory),
+                   server_socket_factory,
                    output_directory,
                    frontend_dir,
                    bundles_resources));
@@ -397,18 +413,17 @@ class BrowserTarget {
  public:
   BrowserTarget(base::MessageLoop* message_loop,
                 ServerWrapper* server_wrapper,
-                DevToolsHttpHandlerDelegate* delegate,
+                DevToolsHttpHandler::ServerSocketFactory* socket_factory,
                 int connection_id)
       : message_loop_(message_loop),
         server_wrapper_(server_wrapper),
         connection_id_(connection_id),
         system_info_handler_(new devtools::system_info::SystemInfoHandler()),
         tethering_handler_(new devtools::tethering::TetheringHandler(
-            delegate, message_loop->message_loop_proxy())),
+            socket_factory, message_loop->message_loop_proxy())),
         tracing_handler_(new devtools::tracing::TracingHandler(
             devtools::tracing::TracingHandler::Browser)),
         protocol_handler_(new DevToolsProtocolHandler(
-            true /* handle_generic_errors */,
             base::Bind(&BrowserTarget::Respond, base::Unretained(this)))) {
     DevToolsProtocolDispatcher* dispatcher = protocol_handler_->dispatcher();
     dispatcher->SetSystemInfoHandler(system_info_handler_.get());
@@ -417,18 +432,16 @@ class BrowserTarget {
   }
 
   void HandleMessage(const std::string& message) {
-    DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+    DCHECK_CURRENTLY_ON(BrowserThread::UI);
     std::string error_response;
     scoped_ptr<base::DictionaryValue> command =
         protocol_handler_->ParseCommand(message);
-    if (command) {
-      bool result = protocol_handler_->HandleCommand(command.Pass());
-      DCHECK(result);
-    }
+    if (command)
+      protocol_handler_->HandleCommand(command.Pass());
   }
 
   void Respond(const std::string& message) {
-    DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+    DCHECK_CURRENTLY_ON(BrowserThread::UI);
     message_loop_->PostTask(
         FROM_HERE,
         base::Bind(&ServerWrapper::SendOverWebSocket,
@@ -482,32 +495,21 @@ DevToolsHttpHandler* DevToolsHttpHandler::Start(
 
 // DevToolsHttpHandler::ServerSocketFactory ----------------------------------
 
-DevToolsHttpHandler::ServerSocketFactory::ServerSocketFactory(
-    const std::string& address,
-    uint16 port,
-    int backlog)
-    : address_(address),
-      port_(port),
-      backlog_(backlog) {
-}
-
-DevToolsHttpHandler::ServerSocketFactory::~ServerSocketFactory() {
+scoped_ptr<net::ServerSocket>
+DevToolsHttpHandler::ServerSocketFactory::CreateForHttpServer() {
+  return scoped_ptr<net::ServerSocket>();
 }
 
 scoped_ptr<net::ServerSocket>
-DevToolsHttpHandler::ServerSocketFactory::CreateAndListen() const {
-  scoped_ptr<net::ServerSocket> socket = Create();
-  if (socket &&
-      socket->ListenWithAddressAndPort(address_, port_, backlog_) == net::OK) {
-    return socket.Pass();
-  }
+DevToolsHttpHandler::ServerSocketFactory::CreateForTethering(
+    std::string* name) {
   return scoped_ptr<net::ServerSocket>();
 }
 
 // DevToolsHttpHandlerImpl ---------------------------------------------------
 
 DevToolsHttpHandlerImpl::~DevToolsHttpHandlerImpl() {
-  TerminateOnUI(thread_, server_wrapper_);
+  TerminateOnUI(thread_, server_wrapper_, socket_factory_);
   STLDeleteValues(&target_map_);
   STLDeleteValues(&browser_targets_);
   STLDeleteValues(&connection_to_client_);
@@ -576,7 +578,7 @@ void ServerWrapper::OnHttpRequest(int connection_id,
     return;
   }
 
-  if (info.path == "" || info.path == "/") {
+  if (info.path.empty() || info.path == "/") {
     // Discovery page request.
     BrowserThread::PostTask(
         BrowserThread::UI,
@@ -880,7 +882,7 @@ void DevToolsHttpHandlerImpl::OnWebSocketRequest(
   if (browser_pos == 0) {
     browser_targets_[connection_id] = new BrowserTarget(thread_->message_loop(),
                                                         server_wrapper_,
-                                                        delegate_.get(),
+                                                        socket_factory_,
                                                         connection_id);
     AcceptWebSocket(connection_id, request);
     return;
@@ -954,6 +956,7 @@ DevToolsHttpHandlerImpl::DevToolsHttpHandlerImpl(
       frontend_url_(frontend_url),
       server_wrapper_(nullptr),
       delegate_(delegate),
+      socket_factory_(nullptr),
       weak_factory_(this) {
   if (frontend_url_.empty())
     frontend_url_ = "/devtools/inspector.html";
@@ -962,7 +965,7 @@ DevToolsHttpHandlerImpl::DevToolsHttpHandlerImpl(
       BrowserThread::FILE, FROM_HERE,
       base::Bind(&StartServerOnFile,
                  weak_factory_.GetWeakPtr(),
-                 base::Passed(&server_socket_factory),
+                 server_socket_factory.release(),
                  output_directory,
                  delegate_->GetDebugFrontendDir(),
                  delegate_->BundlesFrontendResources()));
@@ -971,9 +974,11 @@ DevToolsHttpHandlerImpl::DevToolsHttpHandlerImpl(
 void DevToolsHttpHandlerImpl::ServerStarted(
     base::Thread* thread,
     ServerWrapper* server_wrapper,
+    ServerSocketFactory* socket_factory,
     scoped_ptr<net::IPEndPoint> ip_address) {
   thread_ = thread;
   server_wrapper_ = server_wrapper;
+  socket_factory_ = socket_factory;
   server_ip_address_.swap(ip_address);
 }
 

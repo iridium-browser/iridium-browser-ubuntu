@@ -171,7 +171,7 @@ protected:
         m_page->document().setSecurityOrigin(SecurityOrigin::createFromString(url));
     }
 
-    void setVisibilityState(PageVisibilityState visibilityState)
+    void setPageVisibilityState(PageVisibilityState visibilityState)
     {
         m_page->page().setVisibilityState(visibilityState, true); // Set as initial state
     }
@@ -229,7 +229,7 @@ TEST_F(ServiceWorkerContainerTest, Register_CrossOriginScriptIsRejected)
     testRegisterRejected(
         "https://www.example.com:8080/", // Differs by port
         "https://www.example.com/",
-        ExpectDOMException("SecurityError", "The origin of the script must match the current origin."));
+        ExpectDOMException("SecurityError", "Failed to register a ServiceWorker: The origin of the provided scriptURL ('https://www.example.com:8080') does not match the current origin ('https://www.example.com')."));
 }
 
 TEST_F(ServiceWorkerContainerTest, Register_CrossOriginScopeIsRejected)
@@ -238,7 +238,7 @@ TEST_F(ServiceWorkerContainerTest, Register_CrossOriginScopeIsRejected)
     testRegisterRejected(
         "https://www.example.com",
         "wss://www.example.com/", // Differs by protocol
-        ExpectDOMException("SecurityError", "The scope must match the current origin."));
+        ExpectDOMException("SecurityError", "Failed to register a ServiceWorker: The origin of the provided scope ('wss://www.example.com') does not match the current origin ('https://www.example.com')."));
 }
 
 TEST_F(ServiceWorkerContainerTest, GetRegistration_NonSecureOriginIsRejected)
@@ -254,7 +254,7 @@ TEST_F(ServiceWorkerContainerTest, GetRegistration_CrossOriginURLIsRejected)
     setPageURL("https://www.example.com/");
     testGetRegistrationRejected(
         "https://foo.example.com/", // Differs by host
-        ExpectDOMException("SecurityError", "The documentURL must match the current origin."));
+        ExpectDOMException("SecurityError", "Failed to get a ServiceWorkerRegistration: The origin of the provided documentURL ('https://foo.example.com') does not match the current origin ('https://www.example.com')."));
 }
 
 class StubWebServiceWorkerProvider {
@@ -307,8 +307,8 @@ private:
 
     private:
         StubWebServiceWorkerProvider& m_owner;
-        Vector<OwnPtr<WebServiceWorkerRegistrationCallbacks> > m_registrationCallbacksToDelete;
-        Vector<OwnPtr<WebServiceWorkerGetRegistrationCallbacks> > m_getRegistrationCallbacksToDelete;
+        Vector<OwnPtr<WebServiceWorkerRegistrationCallbacks>> m_registrationCallbacksToDelete;
+        Vector<OwnPtr<WebServiceWorkerGetRegistrationCallbacks>> m_getRegistrationCallbacksToDelete;
     };
 
 private:
@@ -364,7 +364,7 @@ TEST_F(ServiceWorkerContainerTest, GetRegistration_OmittedDocumentURLDefaultsToP
 
 TEST_F(ServiceWorkerContainerTest, GetClientInfo)
 {
-    setVisibilityState(PageVisibilityStateVisible);
+    setPageVisibilityState(PageVisibilityStateVisible);
     setFocused(true);
     setPageURL("http://localhost/x/index.html");
 
@@ -372,15 +372,15 @@ TEST_F(ServiceWorkerContainerTest, GetClientInfo)
 
     WebServiceWorkerClientInfo info;
     ASSERT_TRUE(container->getClientInfo(&info));
-    EXPECT_EQ(WebString("visible"), info.visibilityState);
+    EXPECT_EQ(WebPageVisibilityStateVisible, info.pageVisibilityState);
     EXPECT_TRUE(info.isFocused);
     EXPECT_EQ(WebURL(KURL(KURL(), "http://localhost/x/index.html")), info.url);
     EXPECT_EQ(WebURLRequest::FrameTypeTopLevel, info.frameType);
 
-    setVisibilityState(PageVisibilityStateHidden);
+    setPageVisibilityState(PageVisibilityStateHidden);
     setFocused(false);
     ASSERT_TRUE(container->getClientInfo(&info));
-    EXPECT_EQ(WebString("hidden"), info.visibilityState);
+    EXPECT_EQ(WebPageVisibilityStateHidden, info.pageVisibilityState);
     EXPECT_FALSE(info.isFocused);
 }
 

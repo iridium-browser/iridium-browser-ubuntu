@@ -165,7 +165,7 @@ FFmpegDemuxerStream::FFmpegDemuxerStream(FFmpegDemuxer* demuxer,
       return;
 
     encryption_key_id_.assign(enc_key_id);
-    demuxer_->OnEncryptedMediaInitData(kWebMInitDataType, enc_key_id);
+    demuxer_->OnEncryptedMediaInitData(EmeInitDataType::WEBM, enc_key_id);
   }
 }
 
@@ -838,10 +838,11 @@ void FFmpegDemuxer::OnFindStreamInfoDone(const PipelineStatusCB& status_cb,
   // If no estimate is found, the stream entry will be kInfiniteDuration().
   std::vector<base::TimeDelta> start_time_estimates(format_context->nb_streams,
                                                     kInfiniteDuration());
-  if (format_context->packet_buffer &&
+  const AVFormatInternal* internal = format_context->internal;
+  if (internal && internal->packet_buffer &&
       format_context->start_time != static_cast<int64>(AV_NOPTS_VALUE)) {
-    struct AVPacketList* packet_buffer = format_context->packet_buffer;
-    while (packet_buffer != format_context->packet_buffer_end) {
+    struct AVPacketList* packet_buffer = internal->packet_buffer;
+    while (packet_buffer != internal->packet_buffer_end) {
       DCHECK_LT(static_cast<size_t>(packet_buffer->pkt.stream_index),
                 start_time_estimates.size());
       const AVStream* stream =
@@ -1258,7 +1259,7 @@ void FFmpegDemuxer::StreamHasEnded() {
 }
 
 void FFmpegDemuxer::OnEncryptedMediaInitData(
-    const std::string& init_data_type,
+    EmeInitDataType init_data_type,
     const std::string& encryption_key_id) {
   std::vector<uint8> key_id_local(encryption_key_id.begin(),
                                   encryption_key_id.end());

@@ -39,63 +39,40 @@ class URLRequest;
 
 namespace data_reduction_proxy {
 
-class DataReductionProxyAuthRequestHandler;
-class DataReductionProxyParams;
-class DataReductionProxyStatisticsPrefs;
-class DataReductionProxyUsageStats;
+class DataReductionProxyConfig;
+class DataReductionProxyConfigurator;
+class DataReductionProxyIOData;
+class DataReductionProxyRequestOptions;
+class DataReductionProxyBypassStats;
 
 // DataReductionProxyNetworkDelegate is a LayeredNetworkDelegate that wraps a
 // NetworkDelegate and adds Data Reduction Proxy specific logic.
 class DataReductionProxyNetworkDelegate : public net::LayeredNetworkDelegate {
  public:
-  // Provides an opportunity to interpose on proxy resolution. Called before
-  // ProxyService.ResolveProxy() returns. The Data Reduction Proxy's
-  // configuration is provided along with the resolution for this URL, in
-  // |result|, whch may be modified. Retry info is presumed to be from the proxy
-  // service.
-  // TODO(sclittle): Remove this, see http://crbug.com/447346.
-  typedef base::Callback<void(
-      const GURL& url,
-      int load_flags,
-      const net::ProxyConfig& data_reduction_proxy_config,
-      const net::ProxyRetryInfoMap& proxy_retry_info_map,
-      const DataReductionProxyParams* params,
-      net::ProxyInfo* result)> OnResolveProxyHandler;
-
   // Provides an additional proxy configuration that can be consulted after
   // proxy resolution. Used to get the Data Reduction Proxy config and give it
   // to the OnResolveProxyHandler and RecordBytesHistograms.
   typedef base::Callback<const net::ProxyConfig&()> ProxyConfigGetter;
 
   // Constructs a DataReductionProxyNetworkdelegate object with the given
-  // |network_delegate|, |params|, |handler|, and |getter|. Takes ownership of
+  // |network_delegate|, |config|, |handler|, and |getter|. Takes ownership of
   // and wraps the |network_delegate|, calling an internal implementation for
   // each delegate method. For example, the implementation of
   // OnHeadersReceived() calls OnHeadersReceivedInternal().
   DataReductionProxyNetworkDelegate(
       scoped_ptr<net::NetworkDelegate> network_delegate,
-      DataReductionProxyParams* params,
-      DataReductionProxyAuthRequestHandler* handler,
-      const ProxyConfigGetter& getter);
+      DataReductionProxyConfig* config,
+      DataReductionProxyRequestOptions* handler,
+      const DataReductionProxyConfigurator* configurator);
   ~DataReductionProxyNetworkDelegate() override;
-
-  // Initializes member variables used for overriding the proxy config.
-  // |proxy_config_getter_| must be non-NULL when this is called.
-  void InitProxyConfigOverrider(const OnResolveProxyHandler& proxy_handler);
 
   // Initializes member variables to record data reduction proxy prefs and
   // report UMA.
-  void InitStatisticsPrefsAndUMA(
+  void InitIODataAndUMA(
       scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner,
-      const base::WeakPtr<DataReductionProxyStatisticsPrefs>& statistics_prefs,
+      DataReductionProxyIOData* io_data,
       BooleanPrefMember* data_reduction_proxy_enabled,
-      DataReductionProxyUsageStats* usage_stats);
-
-  // Creates a |Value| summary of the persistent state of the network session.
-  // The caller is responsible for deleting the returned value.
-  // Must be called on the UI thread.
-  static base::Value* HistoricNetworkStatsInfoToValue(
-      PrefService* profile_prefs);
+      DataReductionProxyBypassStats* bypass_stats);
 
   // Creates a |Value| summary of the state of the network session. The caller
   // is responsible for deleting the returned value.
@@ -142,8 +119,8 @@ class DataReductionProxyNetworkDelegate : public net::LayeredNetworkDelegate {
 
   // Records daily data savings statistics to prefs and reports data savings
   // UMA.
-  void UpdateContentLengthPrefs(int received_content_length,
-                                int original_content_length,
+  void UpdateContentLengthPrefs(int64 received_content_length,
+                                int64 original_content_length,
                                 bool data_reduction_proxy_enabled,
                                 DataReductionProxyRequestType request_type);
 
@@ -159,22 +136,16 @@ class DataReductionProxyNetworkDelegate : public net::LayeredNetworkDelegate {
   // Weak, owned by our owner.
   BooleanPrefMember* data_reduction_proxy_enabled_;
 
-  // Must outlive this DataReductionProxyNetworkDelegate.
-  DataReductionProxyParams* data_reduction_proxy_params_;
+  // All raw Data Reduction Proxy pointers must outlive |this|.
+  DataReductionProxyConfig* data_reduction_proxy_config_;
 
-  // Must outlive this DataReductionProxyNetworkDelegate.
-  DataReductionProxyUsageStats* data_reduction_proxy_usage_stats_;
+  DataReductionProxyBypassStats* data_reduction_proxy_bypass_stats_;
 
-  DataReductionProxyAuthRequestHandler*
-      data_reduction_proxy_auth_request_handler_;
+  DataReductionProxyRequestOptions* data_reduction_proxy_request_options_;
 
-  base::WeakPtr<DataReductionProxyStatisticsPrefs>
-      data_reduction_proxy_statistics_prefs_;
+  DataReductionProxyIOData* data_reduction_proxy_io_data_;
 
-  // TODO(sclittle): Factor this out, see http://crbug.com/447346.
-  OnResolveProxyHandler on_resolve_proxy_handler_;
-
-  ProxyConfigGetter proxy_config_getter_;
+  const DataReductionProxyConfigurator* configurator_;
 
   DISALLOW_COPY_AND_ASSIGN(DataReductionProxyNetworkDelegate);
 };
@@ -189,7 +160,7 @@ void OnResolveProxyHandler(const GURL& url,
                            int load_flags,
                            const net::ProxyConfig& data_reduction_proxy_config,
                            const net::ProxyRetryInfoMap& proxy_retry_info,
-                           const DataReductionProxyParams* params,
+                           const DataReductionProxyConfig* config,
                            net::ProxyInfo* result);
 
 }  // namespace data_reduction_proxy

@@ -8,12 +8,12 @@
 
 #include "base/bind.h"
 #include "base/files/file_util.h"
+#include "base/files/scoped_file.h"
 #include "base/message_loop/message_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "components/cronet/url_request_context_config.h"
 #include "net/android/network_change_notifier_factory_android.h"
 #include "net/base/net_errors.h"
-#include "net/base/net_log_logger.h"
 #include "net/base/net_util.h"
 #include "net/base/network_change_notifier.h"
 #include "net/base/network_delegate_impl.h"
@@ -21,6 +21,7 @@
 #include "net/http/http_auth_handler_factory.h"
 #include "net/http/http_network_layer.h"
 #include "net/http/http_server_properties.h"
+#include "net/log/net_log_logger.h"
 #include "net/proxy/proxy_service.h"
 #include "net/ssl/ssl_config_service_defaults.h"
 #include "net/url_request/static_http_user_agent_settings.h"
@@ -30,16 +31,10 @@
 
 namespace {
 
-// MessageLoop on the main thread, which is where objects that receive Java
-// notifications generally live.
-base::MessageLoop* g_main_message_loop = nullptr;
-
-net::NetworkChangeNotifier* g_network_change_notifier = nullptr;
-
 class BasicNetworkDelegate : public net::NetworkDelegateImpl {
  public:
   BasicNetworkDelegate() {}
-  virtual ~BasicNetworkDelegate() {}
+  ~BasicNetworkDelegate() override {}
 
  private:
   // net::NetworkDelegate implementation.
@@ -120,7 +115,9 @@ namespace cronet {
 
 URLRequestContextAdapter::URLRequestContextAdapter(
     URLRequestContextAdapterDelegate* delegate,
-    std::string user_agent) {
+    std::string user_agent)
+    : load_disable_cache_(true),
+      is_context_initialized_(false) {
   delegate_ = delegate;
   user_agent_ = user_agent;
 }
@@ -135,17 +132,6 @@ void URLRequestContextAdapter::Initialize(
 }
 
 void URLRequestContextAdapter::InitRequestContextOnMainThread() {
-  if (!base::MessageLoop::current()) {
-    DCHECK(!g_main_message_loop);
-    g_main_message_loop = new base::MessageLoopForUI();
-    base::MessageLoopForUI::current()->Start();
-  }
-  DCHECK_EQ(g_main_message_loop, base::MessageLoop::current());
-  if (!g_network_change_notifier) {
-    net::NetworkChangeNotifier::SetFactory(
-        new net::NetworkChangeNotifierFactoryAndroid());
-    g_network_change_notifier = net::NetworkChangeNotifier::Create();
-  }
   proxy_config_service_.reset(net::ProxyService::CreateSystemProxyConfigService(
       GetNetworkTaskRunner(), NULL));
   GetNetworkTaskRunner()->PostTask(
@@ -201,18 +187,19 @@ void URLRequestContextAdapter::InitRequestContextOnNetworkThread() {
 
       net::HostPortPair quic_hint_host_port_pair(canon_host,
                                                  quic_hint.port);
-      context_->http_server_properties()->SetAlternateProtocol(
-          quic_hint_host_port_pair,
-          static_cast<uint16>(quic_hint.alternate_port),
-          net::AlternateProtocol::QUIC,
-          1.0f);
+      net::AlternativeService alternative_service(
+          net::AlternateProtocol::QUIC, "",
+          static_cast<uint16>(quic_hint.alternate_port));
+      context_->http_server_properties()->SetAlternativeService(
+          quic_hint_host_port_pair, alternative_service, 1.0f);
     }
   }
+  load_disable_cache_ = config_->load_disable_cache;
   config_.reset(NULL);
 
   if (VLOG_IS_ON(2)) {
     net_log_observer_.reset(new NetLogObserver());
-    context_->net_log()->AddThreadSafeObserver(net_log_observer_.get(),
+    context_->net_log()->DeprecatedAddObserver(net_log_observer_.get(),
                                                net::NetLog::LOG_ALL_BUT_BYTES);
   }
 
@@ -249,7 +236,7 @@ void URLRequestContextAdapter::RunTaskAfterContextInitOnNetworkThread(
 URLRequestContextAdapter::~URLRequestContextAdapter() {
   DCHECK(GetNetworkTaskRunner()->BelongsToCurrentThread());
   if (net_log_observer_) {
-    context_->net_log()->RemoveThreadSafeObserver(net_log_observer_.get());
+    context_->net_log()->DeprecatedRemoveObserver(net_log_observer_.get());
     net_log_observer_.reset();
   }
   StopNetLogHelper();
@@ -294,19 +281,19 @@ void URLRequestContextAdapter::StartNetLogToFileHelper(
     return;
 
   base::FilePath file_path(file_name);
-  FILE* file = base::OpenFile(file_path, "w");
+  base::ScopedFILE file(base::OpenFile(file_path, "w"));
   if (!file)
     return;
 
-  scoped_ptr<base::Value> constants(net::NetLogLogger::GetConstants());
-  net_log_logger_.reset(new net::NetLogLogger(file, *constants));
-  net_log_logger_->StartObserving(context_->net_log());
+  net_log_logger_.reset(new net::NetLogLogger());
+  net_log_logger_->StartObserving(context_->net_log(), file.Pass(), nullptr,
+                                  context_.get());
 }
 
 void URLRequestContextAdapter::StopNetLogHelper() {
   DCHECK(GetNetworkTaskRunner()->BelongsToCurrentThread());
   if (net_log_logger_) {
-    net_log_logger_->StopObserving();
+    net_log_logger_->StopObserving(context_.get());
     net_log_logger_.reset();
   }
 }

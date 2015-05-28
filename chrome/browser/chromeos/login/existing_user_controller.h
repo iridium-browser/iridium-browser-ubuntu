@@ -17,7 +17,7 @@
 #include "base/time/time.h"
 #include "base/timer/timer.h"
 #include "chrome/browser/chromeos/app_mode/kiosk_app_manager.h"
-#include "chrome/browser/chromeos/login/login_utils.h"
+#include "chrome/browser/chromeos/login/session/user_session_manager.h"
 #include "chrome/browser/chromeos/login/ui/login_display.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/chromeos/settings/device_settings_service.h"
@@ -35,6 +35,7 @@ class ListValue;
 
 namespace chromeos {
 
+class BootstrapUserContextInitializer;
 class CrosSettings;
 class LoginDisplayHost;
 
@@ -52,11 +53,11 @@ class NetworkStateHelper;
 class ExistingUserController : public LoginDisplay::Delegate,
                                public content::NotificationObserver,
                                public LoginPerformer::Delegate,
-                               public LoginUtils::Delegate {
+                               public UserSessionManagerDelegate {
  public:
   // All UI initialization is deferred till Init() call.
   explicit ExistingUserController(LoginDisplayHost* host);
-  virtual ~ExistingUserController();
+  ~ExistingUserController() override;
 
   // Returns the current existing user controller if it has been created.
   static ExistingUserController* current_controller() {
@@ -73,29 +74,29 @@ class ExistingUserController : public LoginDisplay::Delegate,
   void StopPublicSessionAutoLoginTimer();
 
   // LoginDisplay::Delegate: implementation
-  virtual void CancelPasswordChangedFlow() override;
-  virtual void CreateAccount() override;
-  virtual void CompleteLogin(const UserContext& user_context) override;
-  virtual base::string16 GetConnectedNetworkName() override;
-  virtual bool IsSigninInProgress() const override;
-  virtual void Login(const UserContext& user_context,
-                     const SigninSpecifics& specifics) override;
-  virtual void MigrateUserData(const std::string& old_password) override;
-  virtual void OnSigninScreenReady() override;
-  virtual void OnStartEnterpriseEnrollment() override;
-  virtual void OnStartEnableDebuggingScreen() override;
-  virtual void OnStartKioskEnableScreen() override;
-  virtual void OnStartKioskAutolaunchScreen() override;
-  virtual void ResetPublicSessionAutoLoginTimer() override;
-  virtual void ResyncUserData() override;
-  virtual void SetDisplayEmail(const std::string& email) override;
-  virtual void ShowWrongHWIDScreen() override;
-  virtual void Signout() override;
+  void CancelPasswordChangedFlow() override;
+  void CreateAccount() override;
+  void CompleteLogin(const UserContext& user_context) override;
+  base::string16 GetConnectedNetworkName() override;
+  bool IsSigninInProgress() const override;
+  void Login(const UserContext& user_context,
+             const SigninSpecifics& specifics) override;
+  void MigrateUserData(const std::string& old_password) override;
+  void OnSigninScreenReady() override;
+  void OnStartEnterpriseEnrollment() override;
+  void OnStartEnableDebuggingScreen() override;
+  void OnStartKioskEnableScreen() override;
+  void OnStartKioskAutolaunchScreen() override;
+  void ResetPublicSessionAutoLoginTimer() override;
+  void ResyncUserData() override;
+  void SetDisplayEmail(const std::string& email) override;
+  void ShowWrongHWIDScreen() override;
+  void Signout() override;
 
   // content::NotificationObserver implementation.
-  virtual void Observe(int type,
-                       const content::NotificationSource& source,
-                       const content::NotificationDetails& details) override;
+  void Observe(int type,
+               const content::NotificationSource& source,
+               const content::NotificationDetails& details) override;
 
   // Set a delegate that we will pass AuthStatusConsumer events to.
   // Used for testing.
@@ -139,18 +140,16 @@ class ExistingUserController : public LoginDisplay::Delegate,
   void OnPublicSessionAutoLoginTimerFire();
 
   // LoginPerformer::Delegate implementation:
-  virtual void OnAuthFailure(const AuthFailure& error) override;
-  virtual void OnAuthSuccess(const UserContext& user_context) override;
-  virtual void OnOffTheRecordAuthSuccess() override;
-  virtual void OnPasswordChangeDetected() override;
-  virtual void WhiteListCheckFailed(const std::string& email) override;
-  virtual void PolicyLoadFailed() override;
-  virtual void OnOnlineChecked(
-      const std::string& username, bool success) override;
+  void OnAuthFailure(const AuthFailure& error) override;
+  void OnAuthSuccess(const UserContext& user_context) override;
+  void OnOffTheRecordAuthSuccess() override;
+  void OnPasswordChangeDetected() override;
+  void WhiteListCheckFailed(const std::string& email) override;
+  void PolicyLoadFailed() override;
+  void OnOnlineChecked(const std::string& username, bool success) override;
 
-  // LoginUtils::Delegate implementation:
-  virtual void OnProfilePrepared(Profile* profile,
-                                 bool browser_launched) override;
+  // UserSessionManagerDelegate implementation:
+  void OnProfilePrepared(Profile* profile, bool browser_launched) override;
 
   // Called when device settings change.
   void DeviceSettingsChanged();
@@ -235,6 +234,10 @@ class ExistingUserController : public LoginDisplay::Delegate,
   void DoLogin(const UserContext& user_context,
                const SigninSpecifics& specifics);
 
+  // Callback invoked when |bootstrap_user_context_initializer_| has finished.
+  void OnBootstrapUserContextInitialized(bool success,
+                                         const UserContext& user_context);
+
   // Public session auto-login timer.
   scoped_ptr<base::OneShotTimer<ExistingUserController> > auto_login_timer_;
 
@@ -318,6 +321,9 @@ class ExistingUserController : public LoginDisplay::Delegate,
       local_account_auto_login_id_subscription_;
   scoped_ptr<CrosSettings::ObserverSubscription>
       local_account_auto_login_delay_subscription_;
+
+  scoped_ptr<BootstrapUserContextInitializer>
+      bootstrap_user_context_initializer_;
 
   FRIEND_TEST_ALL_PREFIXES(ExistingUserControllerTest, ExistingUserLogin);
 

@@ -26,7 +26,7 @@
 #include "core/html/HTMLOptGroupElement.h"
 
 #include "core/HTMLNames.h"
-#include "core/dom/NodeRenderStyle.h"
+#include "core/dom/NodeComputedStyle.h"
 #include "core/dom/Text.h"
 #include "core/editing/htmlediting.h"
 #include "core/html/HTMLContentElement.h"
@@ -49,7 +49,7 @@ inline HTMLOptGroupElement::HTMLOptGroupElement(Document& document)
 PassRefPtrWillBeRawPtr<HTMLOptGroupElement> HTMLOptGroupElement::create(Document& document)
 {
     RefPtrWillBeRawPtr<HTMLOptGroupElement> optGroupElement = adoptRefWillBeNoop(new HTMLOptGroupElement(document));
-    optGroupElement->ensureUserAgentShadowRoot();
+    optGroupElement->ensureClosedShadowRoot();
     return optGroupElement.release();
 }
 
@@ -98,23 +98,31 @@ void HTMLOptGroupElement::detach(const AttachContext& context)
     HTMLElement::detach(context);
 }
 
-void HTMLOptGroupElement::updateNonRenderStyle()
+bool HTMLOptGroupElement::supportsFocus() const
 {
-    m_style = originalStyleForRenderer();
-    if (renderer()) {
+    RefPtrWillBeRawPtr<HTMLSelectElement> select = ownerSelectElement();
+    if (select && select->usesMenuList())
+        return false;
+    return HTMLElement::supportsFocus();
+}
+
+void HTMLOptGroupElement::updateNonComputedStyle()
+{
+    m_style = originalStyleForLayoutObject();
+    if (layoutObject()) {
         if (HTMLSelectElement* select = ownerSelectElement())
             select->updateListOnRenderer();
     }
 }
 
-RenderStyle* HTMLOptGroupElement::nonRendererStyle() const
+ComputedStyle* HTMLOptGroupElement::nonLayoutObjectComputedStyle() const
 {
     return m_style.get();
 }
 
-PassRefPtr<RenderStyle> HTMLOptGroupElement::customStyleForRenderer()
+PassRefPtr<ComputedStyle> HTMLOptGroupElement::customStyleForLayoutObject()
 {
-    updateNonRenderStyle();
+    updateNonComputedStyle();
     return m_style;
 }
 
@@ -143,7 +151,7 @@ void HTMLOptGroupElement::accessKeyAction(bool)
         select->accessKeyAction(false);
 }
 
-void HTMLOptGroupElement::didAddUserAgentShadowRoot(ShadowRoot& root)
+void HTMLOptGroupElement::didAddClosedShadowRoot(ShadowRoot& root)
 {
     DEFINE_STATIC_LOCAL(AtomicString, labelPadding, ("0 2px 1px 2px", AtomicString::ConstructFromLiteral));
     DEFINE_STATIC_LOCAL(AtomicString, labelMinHeight, ("1.2em", AtomicString::ConstructFromLiteral));
@@ -170,7 +178,7 @@ void HTMLOptGroupElement::updateGroupLabel()
 
 HTMLDivElement& HTMLOptGroupElement::optGroupLabelElement() const
 {
-    return *toHTMLDivElement(userAgentShadowRoot()->getElementById(ShadowElementNames::optGroupLabel()));
+    return *toHTMLDivElement(closedShadowRoot()->getElementById(ShadowElementNames::optGroupLabel()));
 }
 
 } // namespace

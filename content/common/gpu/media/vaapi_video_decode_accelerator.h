@@ -28,6 +28,10 @@
 #include "media/video/picture.h"
 #include "media/video/video_decode_accelerator.h"
 
+namespace gfx {
+class GLImage;
+}
+
 namespace content {
 
 class VaapiPicture;
@@ -44,20 +48,22 @@ class CONTENT_EXPORT VaapiVideoDecodeAccelerator
     : public media::VideoDecodeAccelerator {
  public:
   VaapiVideoDecodeAccelerator(
-      const base::Callback<bool(void)>& make_context_current);
-  virtual ~VaapiVideoDecodeAccelerator();
+      const base::Callback<bool(void)>& make_context_current,
+      const base::Callback<void(uint32, uint32, scoped_refptr<gfx::GLImage>)>&
+          bind_image);
+  ~VaapiVideoDecodeAccelerator() override;
 
   // media::VideoDecodeAccelerator implementation.
-  virtual bool Initialize(media::VideoCodecProfile profile,
-                          Client* client) override;
-  virtual void Decode(const media::BitstreamBuffer& bitstream_buffer) override;
-  virtual void AssignPictureBuffers(
+  bool Initialize(media::VideoCodecProfile profile,
+                  Client* client) override;
+  void Decode(const media::BitstreamBuffer& bitstream_buffer) override;
+  void AssignPictureBuffers(
       const std::vector<media::PictureBuffer>& buffers) override;
-  virtual void ReusePictureBuffer(int32 picture_buffer_id) override;
-  virtual void Flush() override;
-  virtual void Reset() override;
-  virtual void Destroy() override;
-  virtual bool CanDecodeOnIOThread() override;
+  void ReusePictureBuffer(int32 picture_buffer_id) override;
+  void Flush() override;
+  void Reset() override;
+  void Destroy() override;
+  bool CanDecodeOnIOThread() override;
 
 private:
   // Notify the client that an error has occurred and decoding cannot continue.
@@ -263,6 +269,10 @@ private:
   // Last requested number/resolution of output picture buffers.
   size_t requested_num_pics_;
   gfx::Size requested_pic_size_;
+
+  // Binds the provided GLImage to a givenr client texture ID & texture target
+  // combination in GLES.
+  base::Callback<void(uint32, uint32, scoped_refptr<gfx::GLImage>)> bind_image_;
 
   // The WeakPtrFactory for |weak_this_|.
   base::WeakPtrFactory<VaapiVideoDecodeAccelerator> weak_this_factory_;

@@ -54,21 +54,6 @@ DebuggerScript.getAfterCompileScript = function(eventData)
     return DebuggerScript._formatScript(eventData.script_.script_);
 }
 
-DebuggerScript.getWorkerScripts = function()
-{
-    var result = [];
-    var scripts = Debug.scripts();
-    for (var i = 0; i < scripts.length; ++i) {
-        var script = scripts[i];
-        // Workers don't share same V8 heap now so there is no need to complicate stuff with
-        // the context id like we do to discriminate between scripts from different pages.
-        // However we need to filter out v8 native scripts.
-        if (script.context_data && script.context_data === "worker")
-            result.push(DebuggerScript._formatScript(script));
-    }
-    return result;
-}
-
 DebuggerScript.getFunctionScopes = function(fun)
 {
     var mirror = MakeMirror(fun);
@@ -159,24 +144,21 @@ DebuggerScript._setScopeVariableValue = function(scopeHolder, scopeIndex, variab
     return undefined;
 }
 
-DebuggerScript.getScripts = function(contextData)
+DebuggerScript.getScripts = function(contextDataSubstring)
 {
     var result = [];
-
-    if (!contextData)
-        return result;
-    var comma = contextData.indexOf(",");
-    if (comma === -1)
-        return result;
-    // Context data is a string in the following format:
-    // ("page"|"injected")","<page id>
-    var idSuffix = contextData.substring(comma); // including the comma
-
     var scripts = Debug.scripts();
     for (var i = 0; i < scripts.length; ++i) {
         var script = scripts[i];
-        if (script.context_data && script.context_data.lastIndexOf(idSuffix) != -1)
-            result.push(DebuggerScript._formatScript(script));
+        if (contextDataSubstring) {
+            if (!script.context_data)
+                continue;
+            // Context data is a string in the following format:
+            // "["("page"|"injected"|"worker")","<id>"]"
+            if (script.context_data.indexOf(contextDataSubstring) === -1)
+                continue;
+        }
+        result.push(DebuggerScript._formatScript(script));
     }
     return result;
 }
@@ -208,7 +190,8 @@ DebuggerScript._formatScript = function(script)
         startColumn: script.column_offset,
         endLine: endLine,
         endColumn: endColumn,
-        isContentScript: !!script.context_data && script.context_data.indexOf("injected") == 0
+        isContentScript: !!script.context_data && script.context_data.indexOf("[injected,") === 0,
+        isInternalScript: script.is_debugger_script
     };
 }
 
@@ -502,6 +485,18 @@ DebuggerScript._frameMirrorToJSCallFrame = function(frameMirror, callerFrame, sc
         return DebuggerScript._displayFunctionName(ensureFuncMirror());
     }
 
+    function functionLine()
+    {
+        var location = ensureFuncMirror().sourceLocation();
+        return location ? location.line : 0;
+    }
+
+    function functionColumn()
+    {
+        var location = ensureFuncMirror().sourceLocation();
+        return location ? location.column : 0;
+    }
+
     function evaluate(expression, scopeExtension)
     {
         return frameMirror.evaluate(expression, false, scopeExtension).value();
@@ -545,6 +540,8 @@ DebuggerScript._frameMirrorToJSCallFrame = function(frameMirror, callerFrame, sc
         "column": column,
         "scriptName": scriptName,
         "functionName": functionName,
+        "functionLine": functionLine,
+        "functionColumn": functionColumn,
         "thisObject": thisObject,
         "scopeChain": lazyScopeChain,
         "scopeType": lazyScopeTypes,

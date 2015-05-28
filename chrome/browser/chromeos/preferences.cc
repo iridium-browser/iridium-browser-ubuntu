@@ -32,6 +32,7 @@
 #include "chrome/common/pref_names.h"
 #include "chromeos/chromeos_switches.h"
 #include "chromeos/system/statistics_provider.h"
+#include "chromeos/timezone/timezone_resolver.h"
 #include "components/feedback/tracing_manager.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "components/user_manager/user.h"
@@ -87,6 +88,8 @@ void Preferences::RegisterPrefs(PrefRegistrySimple* registry) {
   registry->RegisterBooleanPref(prefs::kAccessibilityVirtualKeyboardEnabled,
                                 false);
   registry->RegisterStringPref(prefs::kLogoutStartedLast, std::string());
+  registry->RegisterBooleanPref(prefs::kResolveDeviceTimezoneByGeolocation,
+                                true);
 }
 
 // static
@@ -316,6 +319,14 @@ void Preferences::RegisterProfilePrefs(
       user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
 
   input_method::InputMethodSyncer::RegisterProfilePrefs(registry);
+
+  registry->RegisterBooleanPref(
+      prefs::kResolveTimezoneByGeolocation, true,
+      user_prefs::PrefRegistrySyncable::SYNCABLE_PREF);
+
+  registry->RegisterBooleanPref(
+      prefs::kCaptivePortalAuthenticationIgnoresProxy, true,
+      user_prefs::PrefRegistrySyncable::UNSYNCABLE_PREF);
 }
 
 void Preferences::InitUserPrefs(PrefServiceSyncable* prefs) {
@@ -355,6 +366,9 @@ void Preferences::InitUserPrefs(PrefServiceSyncable* prefs) {
       prefs::kLanguageXkbAutoRepeatInterval, prefs, callback);
 
   wake_on_wifi_ssid_.Init(prefs::kWakeOnWifiSsid, prefs, callback);
+
+  pref_change_registrar_.Init(prefs);
+  pref_change_registrar_.Add(prefs::kResolveTimezoneByGeolocation, callback);
 }
 
 void Preferences::Init(Profile* profile, const user_manager::User* user) {
@@ -374,10 +388,16 @@ void Preferences::Init(Profile* profile, const user_manager::User* user) {
   UserSessionManager* session_manager = UserSessionManager::GetInstance();
   DCHECK(session_manager);
   ime_state_ = session_manager->GetDefaultIMEState(profile);
-  input_method_manager_->SetState(ime_state_);
 
   // Initialize preferences to currently saved state.
   ApplyPreferences(REASON_INITIALIZATION, "");
+
+  // Note that |ime_state_| was modified by ApplyPreferences(), and
+  // SetState() is modifying |current_input_method_| (via
+  // PersistUserInputMethod() ). This way SetState() here may be called only
+  // after ApplyPreferences().
+  input_method_manager_->SetState(ime_state_);
+
   input_method_syncer_.reset(
       new input_method::InputMethodSyncer(prefs, ime_state_));
   input_method_syncer_->Initialize();
@@ -543,14 +563,12 @@ void Preferences::ApplyPreferences(ApplyReason reason,
   }
   if (reason != REASON_PREF_CHANGED ||
       pref_name == prefs::kTouchHudProjectionEnabled) {
-#if !defined(USE_ATHENA)
     if (user_is_active) {
       const bool enabled = touch_hud_projection_enabled_.GetValue();
       // There may not be a shell, e.g., in some unit tests.
       if (ash::Shell::HasInstance())
         ash::Shell::GetInstance()->SetTouchHudProjectionEnabled(enabled);
     }
-#endif
   }
 
   if (reason != REASON_PREF_CHANGED ||
@@ -608,6 +626,27 @@ void Preferences::ApplyPreferences(ApplyReason reason,
     }
     WakeOnWifiManager::Get()->OnPreferenceChanged(
         static_cast<WakeOnWifiManager::WakeOnWifiFeature>(features));
+  }
+
+  if (pref_name == prefs::kResolveTimezoneByGeolocation &&
+      reason != REASON_ACTIVE_USER_CHANGED) {
+    const bool value = prefs_->GetBoolean(prefs::kResolveTimezoneByGeolocation);
+    if (user_is_owner) {
+      g_browser_process->local_state()->SetBoolean(
+          prefs::kResolveDeviceTimezoneByGeolocation, value);
+    }
+    if (user_is_primary_) {
+      if (value) {
+        g_browser_process->platform_part()->GetTimezoneResolver()->Start();
+      } else {
+        g_browser_process->platform_part()->GetTimezoneResolver()->Stop();
+        if (reason == REASON_PREF_CHANGED) {
+          // Allow immediate timezone update on Stop + Start.
+          g_browser_process->local_state()->ClearPref(
+              TimeZoneResolver::kLastTimeZoneRefreshTime);
+        }
+      }
+    }
   }
 }
 

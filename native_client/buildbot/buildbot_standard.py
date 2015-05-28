@@ -7,17 +7,20 @@
 from __future__ import with_statement
 
 import os.path
+import platform
 import re
+import shutil
 import subprocess
 import sys
 import time
 
 from buildbot_lib import (
     BuildContext, BuildStatus, Command, EnsureDirectoryExists,
-    ParseStandardCommandLine, RemoveDirectory, RemoveGypBuildDirectories,
-    RemoveSconsBuildDirectories, RunBuild, SCons, SetupLinuxEnvironment,
-    SetupMacEnvironment, SetupWindowsEnvironment, SetupAndroidEnvironment,
-    Step, StepLink, StepText, TryToCleanContents, RunningOnBuildbot)
+    ParseStandardCommandLine, RemoveDirectory, RemovePath,
+    RemoveGypBuildDirectories, RemoveSconsBuildDirectories, RunBuild, SCons,
+    SetupLinuxEnvironment, SetupMacEnvironment, SetupWindowsEnvironment,
+    SetupAndroidEnvironment, Step, StepLink, StepText, TryToCleanContents,
+    RunningOnBuildbot)
 
 
 def SetupContextVars(context):
@@ -141,12 +144,59 @@ def BuildScript(status, context):
     EnsureDirectoryExists(tmp_dir)
     print 'Cleaning up the contents of %s...' % tmp_dir
     # Only delete files and directories like:
-    # a) C:\temp\83C4.tmp
-    # b) /tmp/.org.chromium.Chromium.EQrEzl
+    #   */nacl_tmp/*
+    # TODO(bradnelson): Drop this after a bit.
+    # Also drop files and directories like these to cleanup current state:
+    #   */nacl_tmp*
+    #   */nacl*
+    #   83C4.tmp
+    #   .org.chromium.Chromium.EQrEzl
+    #   tmp_platform*
+    #   tmp_mmap*
+    #   tmp_pwrite*
+    #   tmp_syscalls*
+    #   workdir*
+    #   nacl_chrome_download_*
+    #   browserprofile_*
+    #   tmp*
     file_name_re = re.compile(
-        r'[\\/]([0-9a-fA-F]+\.tmp|\.org\.chrom\w+\.Chrom\w+\..+)$')
+        r'[\\/\A]('
+        r'tmp_nacl[\\/].+|'
+        r'tmp_nacl.+|'
+        r'nacl.+|'
+        r'[0-9a-fA-F]+\.tmp|'
+        r'\.org\.chrom\w+\.Chrom\w+\.[^\\/]+|'
+        r'tmp_platform[^\\/]+|'
+        r'tmp_mmap[^\\/]+|'
+        r'tmp_pwrite[^\\/]+|'
+        r'tmp_syscalls[^\\/]+|'
+        r'workdir[^\\/]+|'
+        r'nacl_chrome_download_[^\\/]+|'
+        r'browserprofile_[^\\/]+|'
+        r'tmp[^\\/]+'
+        r')$')
     file_name_filter = lambda fn: file_name_re.search(fn) is not None
+
+    # Clean nacl_tmp/* separately, so we get a list of leaks.
+    nacl_tmp = os.path.join(tmp_dir, 'nacl_tmp')
+    if os.path.exists(nacl_tmp):
+      for bot in os.listdir(nacl_tmp):
+        bot_path = os.path.join(nacl_tmp, bot)
+        print 'Cleaning prior build temp dir: %s' % bot_path
+        sys.stdout.flush()
+        for d in os.listdir(bot_path):
+          path = os.path.join(bot_path, d)
+          print 'Removing leftover: %s' % path
+          sys.stdout.flush()
+          RemovePath(path)
+        os.rmdir(bot_path)
+      os.rmdir(nacl_tmp)
+    # Clean /tmp so we get a list of what's accumulating.
     TryToCleanContents(tmp_dir, file_name_filter)
+
+    # Recreate TEMP, as it may have been clobbered.
+    if not os.path.exists(os.environ['TEMP']):
+      os.makedirs(os.environ['TEMP'])
 
     # Mac has an additional temporary directory; clean it up.
     # TODO(bradnelson): Fix Mac Chromium so that these temp files are created
@@ -205,16 +255,29 @@ def BuildScript(status, context):
       'use_clang_newlib=' + gn_newlib,
     ]
 
+    gn_cmd = [
+      'gn',
+      '--dotfile=../native_client/.gn', '--root=..',
+      # Note: quotes are not needed around this space-separated
+      # list of args.  The shell would remove them before passing
+      # them to a program, and Python bypasses the shell.  Adding
+      # quotes will cause an error because GN will see unexpected
+      # double quotes.
+      '--args=%s' % ' '.join(gn_gen_args),
+      'gen', gn_out,
+      ]
+
+    # If this is a 32-bit build but the kernel reports as 64-bit,
+    # then gn will set build_cpu_arch=x64 when we want build_cpu_arch=x32.
+    # TODO(mcgrathr): dpranke said he'll change gn so that you can override
+    # this on the command line; when that gn arrives, we'll use that argument
+    # rather than this kludge.  The 'linux32' utility runs a command with
+    # the process "personality" set to report i686 rather than x86_64.
+    if context['arch'] == '32' and platform.machine() == 'x86_64':
+      gn_cmd.insert(0, 'linux32')
+
     with Step('gn_compile', status):
-      Command(context,
-              cmd=['gn', '--dotfile=../native_client/.gn', '--root=..',
-                   # Note: quotes are not needed around this space-separated
-                   # list of args.  The shell would remove them before passing
-                   # them to a program, and Python bypasses the shell.  Adding
-                   # quotes will cause an error because GN will see unexpected
-                   # double quotes.
-                   '--args=%s' % ' '.join(gn_gen_args),
-                   'gen', gn_out])
+      Command(context, cmd=gn_cmd)
       Command(context, cmd=['ninja', '-C', gn_out])
 
   if context['clang']:
@@ -264,7 +327,14 @@ def BuildScript(status, context):
               cmd=['bash', '../../breakpad/configure',
                    'CXXFLAGS=-I../..'])  # For third_party/lss
     with Step('breakpad make', status):
-      Command(context, cmd=['make', '-j%d' % context['max_jobs']],
+      Command(context, cmd=['make', '-j%d' % context['max_jobs'],
+                            # This avoids a broken dependency on
+                            # src/third_party/lss files within the breakpad
+                            # source directory.  We are not putting lss
+                            # there, but using the -I switch above to
+                            # find the lss in ../third_party instead.
+                            'includelss_HEADERS=',
+                            ],
               cwd='breakpad-out')
 
   # The main compile step.
@@ -303,6 +373,9 @@ def BuildScript(status, context):
   with Step('medium_tests under IRT', status, halt_on_fail=False):
     SCons(context, mode=context['default_scons_mode'] + ['nacl_irt_test'],
           args=['medium_tests_irt'])
+  with Step('large_tests under IRT', status, halt_on_fail=False):
+    SCons(context, mode=context['default_scons_mode'] + ['nacl_irt_test'],
+          args=['large_tests_irt'])
   ### END tests ###
 
   ### BEGIN GN tests ###

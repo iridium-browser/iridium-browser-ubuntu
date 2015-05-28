@@ -10,8 +10,8 @@
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/logging.h"
-#include "base/process/process_handle.h"
 #include "base/process/kill.h"
+#include "base/process/process.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/stringprintf.h"
 #include "base/test/multiprocess_test.h"
@@ -115,11 +115,13 @@ class WatcherClientTest : public base::MultiProcessTest {
 
     switch (handle_policy) {
       case LEAK_HANDLE:
-        ret.AppendSwitchASCII(kLeakHandle, base::StringPrintf("%d", self_));
+        ret.AppendSwitchASCII(kLeakHandle,
+                              base::StringPrintf("%d", self_.Get()));
         break;
 
       case NO_LEAK_HANDLE:
-        ret.AppendSwitchASCII(kNoLeakHandle, base::StringPrintf("%d", self_));
+        ret.AppendSwitchASCII(kNoLeakHandle,
+                              base::StringPrintf("%d", self_.Get()));
         break;
 
       default:
@@ -135,25 +137,11 @@ class WatcherClientTest : public base::MultiProcessTest {
                       base::Unretained(this), handle_policy);
   }
 
-  void AssertSuccessfulExitCode(base::ProcessHandle handle) {
-    ASSERT_NE(base::kNullProcessHandle, handle);
-
-    // Duplicate the process handle to work around the fact that
-    // WaitForExitCode closes it(!!!).
-    base::ProcessHandle dupe = NULL;
-    ASSERT_TRUE(::DuplicateHandle(base::GetCurrentProcessHandle(),
-                                  handle,
-                                  base::GetCurrentProcessHandle(),
-                                  &dupe,
-                                  SYNCHRONIZE | PROCESS_QUERY_INFORMATION,
-                                  FALSE,
-                                  0));
-    ASSERT_NE(base::kNullProcessHandle, dupe);
+  void AssertSuccessfulExitCode(base::Process process) {
+    ASSERT_TRUE(process.IsValid());
     int exit_code = 0;
-    if (!base::WaitForExitCode(dupe, &exit_code)) {
-      base::CloseProcessHandle(dupe);
-      FAIL() << "WaitForExitCode failed.";
-    }
+    if (!process.WaitForExit(&exit_code))
+      FAIL() << "Process::WaitForExit failed.";
     ASSERT_EQ(0, exit_code);
   }
 
@@ -175,7 +163,8 @@ TEST_F(WatcherClientTest, LaunchWatcherSucceeds) {
 
   client.LaunchWatcher();
 
-  ASSERT_NO_FATAL_FAILURE(AssertSuccessfulExitCode(client.process()));
+  ASSERT_NO_FATAL_FAILURE(
+      AssertSuccessfulExitCode(client.process().Duplicate()));
 }
 
 TEST_F(WatcherClientTest, LaunchWatcherLegacyModeSucceeds) {
@@ -188,7 +177,8 @@ TEST_F(WatcherClientTest, LaunchWatcherLegacyModeSucceeds) {
 
   client.LaunchWatcher();
 
-  ASSERT_NO_FATAL_FAILURE(AssertSuccessfulExitCode(client.process()));
+  ASSERT_NO_FATAL_FAILURE(
+      AssertSuccessfulExitCode(client.process().Duplicate()));
 }
 
 TEST_F(WatcherClientTest, LegacyModeDetectedOnXP) {
@@ -203,7 +193,8 @@ TEST_F(WatcherClientTest, LegacyModeDetectedOnXP) {
 
   client.LaunchWatcher();
 
-  ASSERT_NO_FATAL_FAILURE(AssertSuccessfulExitCode(client.process()));
+  ASSERT_NO_FATAL_FAILURE(
+      AssertSuccessfulExitCode(client.process().Duplicate()));
 }
 
 }  // namespace browser_watcher

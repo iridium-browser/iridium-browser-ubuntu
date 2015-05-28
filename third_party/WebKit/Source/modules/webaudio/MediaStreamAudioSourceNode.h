@@ -27,10 +27,10 @@
 
 #if ENABLE(WEB_AUDIO)
 
-#include "platform/audio/AudioSourceProvider.h"
-#include "platform/audio/AudioSourceProviderClient.h"
 #include "modules/mediastream/MediaStream.h"
 #include "modules/webaudio/AudioSourceNode.h"
+#include "platform/audio/AudioSourceProvider.h"
+#include "platform/audio/AudioSourceProviderClient.h"
 #include "wtf/OwnPtr.h"
 #include "wtf/PassRefPtr.h"
 #include "wtf/Threading.h"
@@ -39,17 +39,15 @@ namespace blink {
 
 class AudioContext;
 
-class MediaStreamAudioSourceNode final : public AudioSourceNode, public AudioSourceProviderClient {
-    DEFINE_WRAPPERTYPEINFO();
-    USING_GARBAGE_COLLECTED_MIXIN(MediaStreamAudioSourceNode);
+class MediaStreamAudioSourceHandler final : public AudioHandler, public AudioSourceProviderClient {
+    USING_GARBAGE_COLLECTED_MIXIN(MediaStreamAudioSourceHandler);
 public:
-    static MediaStreamAudioSourceNode* create(AudioContext*, MediaStream*, MediaStreamTrack*, PassOwnPtr<AudioSourceProvider>);
-
-    virtual ~MediaStreamAudioSourceNode();
+    MediaStreamAudioSourceHandler(AudioNode&, MediaStream*, MediaStreamTrack*, PassOwnPtr<AudioSourceProvider>);
+    virtual ~MediaStreamAudioSourceHandler();
 
     MediaStream* mediaStream() { return m_mediaStream.get(); }
 
-    // AudioNode
+    // AudioHandler
     virtual void dispose() override;
     virtual void process(size_t framesToProcess) override;
 
@@ -58,11 +56,9 @@ public:
 
     AudioSourceProvider* audioSourceProvider() const { return m_audioSourceProvider.get(); }
 
-    virtual void trace(Visitor*) override;
+    DECLARE_VIRTUAL_TRACE();
 
 private:
-    MediaStreamAudioSourceNode(AudioContext*, MediaStream*, MediaStreamTrack*, PassOwnPtr<AudioSourceProvider>);
-
     // As an audio source, we will never propagate silence.
     virtual bool propagatesSilence() const override { return false; }
 
@@ -73,6 +69,18 @@ private:
     Mutex m_processLock;
 
     unsigned m_sourceNumberOfChannels;
+};
+
+class MediaStreamAudioSourceNode final : public AudioSourceNode {
+    DEFINE_WRAPPERTYPEINFO();
+public:
+    static MediaStreamAudioSourceNode* create(AudioContext*, MediaStream*, MediaStreamTrack*, PassOwnPtr<AudioSourceProvider>);
+    MediaStreamAudioSourceHandler& mediaStreamAudioSourceHandler() const;
+
+    MediaStream* mediaStream() const;
+
+private:
+    MediaStreamAudioSourceNode(AudioContext&, MediaStream*, MediaStreamTrack*, PassOwnPtr<AudioSourceProvider>);
 };
 
 } // namespace blink

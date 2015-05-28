@@ -180,7 +180,7 @@ WebInspector.HandlerRegistry.prototype = {
         if (!resourceURL)
             return;
 
-        var uiSourceCode = WebInspector.networkMapping.uiSourceCodeForURL(resourceURL);
+        var uiSourceCode = WebInspector.networkMapping.uiSourceCodeForURLForAnyTarget(resourceURL);
         function open()
         {
             WebInspector.Revealer.reveal(uiSourceCode);
@@ -202,7 +202,7 @@ WebInspector.HandlerRegistry.prototype = {
             else
                 InspectorFrontendHost.openInNewTab(resourceURL);
         }
-        if (WebInspector.resourceForURL(resourceURL))
+        if (!targetNode.enclosingNodeOrSelfWithClassList(["resources", "panel"]) && WebInspector.resourceForURL(resourceURL))
             contextMenu.appendItem(WebInspector.UIString.capitalize("Open ^link in Resources ^panel"), openInResourcesPanel.bind(null, resourceURL));
 
 

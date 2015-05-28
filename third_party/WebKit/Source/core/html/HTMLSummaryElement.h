@@ -38,9 +38,9 @@ public:
 private:
     explicit HTMLSummaryElement(Document&);
 
-    virtual RenderObject* createRenderer(RenderStyle*) override;
+    virtual LayoutObject* createLayoutObject(const ComputedStyle&) override;
     virtual void defaultEventHandler(Event*) override;
-    virtual void didAddUserAgentShadowRoot(ShadowRoot&) override;
+    virtual void didAddClosedShadowRoot(ShadowRoot&) override;
     HTMLDetailsElement* detailsElement() const;
 
     virtual bool supportsFocus() const override;

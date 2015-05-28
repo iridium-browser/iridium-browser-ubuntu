@@ -124,28 +124,19 @@ public:
 class CPDF_Dest : public CFX_Object
 {
 public:
+    CPDF_Dest() : m_pObj(nullptr) { }
+    explicit CPDF_Dest(CPDF_Object* pObj) : m_pObj(pObj) { }
 
-    CPDF_Dest(CPDF_Object* pObj = NULL)
-    {
-        m_pObj = pObj;
-    }
-
-    operator CPDF_Object* () const
-    {
-        return m_pObj;
-    }
+    operator bool () const { return m_pObj != NULL; }
+    CPDF_Object* GetObject() const { return m_pObj; }
 
     CFX_ByteString		GetRemoteName();
-
     int					GetPageIndex(CPDF_Document* pDoc);
-
     FX_DWORD			GetPageObjNum();
-
     int					GetZoomMode();
-
     FX_FLOAT			GetParam(int index);
 
-
+protected:
     CPDF_Object*		m_pObj;
 };
 class CPDF_OCContext : public CFX_Object, public IPDF_OCContext
@@ -264,17 +255,6 @@ public:
 class CPDF_Action : public CFX_Object
 {
 public:
-
-    CPDF_Action(CPDF_Dictionary* pDict = NULL)
-    {
-        m_pDict = pDict;
-    }
-
-    operator CPDF_Dictionary* () const
-    {
-        return m_pDict;
-    }
-
     enum ActionType {
         Unknown = 0,
         GoTo,
@@ -296,6 +276,13 @@ public:
         Trans,
         GoTo3DView
     };
+
+    CPDF_Action() : m_pDict(nullptr) { }
+    explicit CPDF_Action(CPDF_Dictionary* pDict) : m_pDict(pDict) { }
+
+    operator bool () const { return m_pDict != NULL; }
+
+    CPDF_Dictionary* GetDict() const { return m_pDict; }
 
     CFX_ByteString		GetTypeName() const
     {
@@ -422,7 +409,7 @@ public:
 
     CPDF_Action			GetSubAction(FX_DWORD iIndex) const;
 
-
+protected:
     CPDF_Dictionary*	m_pDict;
 };
 class CPDF_AAction : public CFX_Object
@@ -558,26 +545,16 @@ protected:
 class CPDF_Link : public CFX_Object
 {
 public:
+    CPDF_Link() : m_pDict(nullptr) { }
+    explicit CPDF_Link(CPDF_Dictionary* pDict) : m_pDict(pDict) { }
 
-    CPDF_Link(CPDF_Dictionary* pDict = NULL)
-    {
-        m_pDict = pDict;
-    }
-
-    operator CPDF_Dictionary*() const
-    {
-        return m_pDict;
-    }
+    CPDF_Dictionary* GetDict() const { return m_pDict; }
 
     CFX_FloatRect		GetRect();
-
-
-
     CPDF_Dest			GetDest(CPDF_Document* pDoc);
-
     CPDF_Action			GetAction();
 
-
+protected:
     CPDF_Dictionary*	m_pDict;
 };
 #define ANNOTFLAG_INVISIBLE			1

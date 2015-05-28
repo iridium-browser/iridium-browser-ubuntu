@@ -15,11 +15,12 @@
 #include "base/memory/scoped_vector.h"
 #include "base/metrics/histogram.h"
 #include "base/prefs/pref_service.h"
+#include "base/profiler/scoped_tracker.h"
 #include "base/stl_util.h"
-#include "base/strings/string_number_conversions.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/time/default_clock.h"
 #include "base/time/time.h"
 #include "components/rappor/rappor_service.h"
 #include "components/search_engines/search_engines_pref_names.h"
@@ -198,7 +199,7 @@ TemplateURLService::TemplateURLService(
       load_handle_(0),
       default_search_provider_(NULL),
       next_id_(kInvalidTemplateURLID + 1),
-      time_provider_(&base::Time::Now),
+      clock_(new base::DefaultClock),
       models_associated_(false),
       processing_syncer_changes_(false),
       dsp_change_origin_(DSP_CHANGE_OTHER),
@@ -223,7 +224,7 @@ TemplateURLService::TemplateURLService(const Initializer* initializers,
       load_handle_(0),
       default_search_provider_(NULL),
       next_id_(kInvalidTemplateURLID + 1),
-      time_provider_(&base::Time::Now),
+      clock_(new base::DefaultClock),
       models_associated_(false),
       processing_syncer_changes_(false),
       dsp_change_origin_(DSP_CHANGE_OTHER),
@@ -238,103 +239,6 @@ TemplateURLService::~TemplateURLService() {
   // |web_data_service_| should be deleted during Shutdown().
   DCHECK(!web_data_service_.get());
   STLDeleteElements(&template_urls_);
-}
-
-// static
-bool TemplateURLService::LoadDefaultSearchProviderFromPrefs(
-    PrefService* prefs,
-    scoped_ptr<TemplateURLData>* default_provider_data,
-    bool* is_managed) {
-  if (!prefs || !prefs->HasPrefPath(prefs::kDefaultSearchProviderSearchURL) ||
-      !prefs->HasPrefPath(prefs::kDefaultSearchProviderKeyword))
-    return false;
-
-  const PrefService::Preference* pref =
-      prefs->FindPreference(prefs::kDefaultSearchProviderSearchURL);
-  *is_managed = pref && pref->IsManaged();
-
-  if (!prefs->GetBoolean(prefs::kDefaultSearchProviderEnabled)) {
-    // The user doesn't want a default search provider.
-    default_provider_data->reset(NULL);
-    return true;
-  }
-
-  base::string16 name =
-      base::UTF8ToUTF16(prefs->GetString(prefs::kDefaultSearchProviderName));
-  base::string16 keyword =
-      base::UTF8ToUTF16(prefs->GetString(prefs::kDefaultSearchProviderKeyword));
-  if (keyword.empty())
-    return false;
-  std::string search_url =
-      prefs->GetString(prefs::kDefaultSearchProviderSearchURL);
-  // Force URL to be non-empty.  We've never supported this case, but past bugs
-  // might have resulted in it slipping through; eventually this code can be
-  // replaced with a DCHECK(!search_url.empty());.
-  if (search_url.empty())
-    return false;
-  std::string suggest_url =
-      prefs->GetString(prefs::kDefaultSearchProviderSuggestURL);
-  std::string instant_url =
-      prefs->GetString(prefs::kDefaultSearchProviderInstantURL);
-  std::string image_url =
-      prefs->GetString(prefs::kDefaultSearchProviderImageURL);
-  std::string new_tab_url =
-      prefs->GetString(prefs::kDefaultSearchProviderNewTabURL);
-  std::string search_url_post_params =
-      prefs->GetString(prefs::kDefaultSearchProviderSearchURLPostParams);
-  std::string suggest_url_post_params =
-      prefs->GetString(prefs::kDefaultSearchProviderSuggestURLPostParams);
-  std::string instant_url_post_params =
-      prefs->GetString(prefs::kDefaultSearchProviderInstantURLPostParams);
-  std::string image_url_post_params =
-      prefs->GetString(prefs::kDefaultSearchProviderImageURLPostParams);
-  std::string icon_url =
-      prefs->GetString(prefs::kDefaultSearchProviderIconURL);
-  std::string encodings =
-      prefs->GetString(prefs::kDefaultSearchProviderEncodings);
-  std::string id_string = prefs->GetString(prefs::kDefaultSearchProviderID);
-  std::string prepopulate_id =
-      prefs->GetString(prefs::kDefaultSearchProviderPrepopulateID);
-  const base::ListValue* alternate_urls =
-      prefs->GetList(prefs::kDefaultSearchProviderAlternateURLs);
-  std::string search_terms_replacement_key = prefs->GetString(
-      prefs::kDefaultSearchProviderSearchTermsReplacementKey);
-
-  default_provider_data->reset(new TemplateURLData);
-  (*default_provider_data)->short_name = name;
-  (*default_provider_data)->SetKeyword(keyword);
-  (*default_provider_data)->SetURL(search_url);
-  (*default_provider_data)->suggestions_url = suggest_url;
-  (*default_provider_data)->instant_url = instant_url;
-  (*default_provider_data)->image_url = image_url;
-  (*default_provider_data)->new_tab_url = new_tab_url;
-  (*default_provider_data)->search_url_post_params = search_url_post_params;
-  (*default_provider_data)->suggestions_url_post_params =
-      suggest_url_post_params;
-  (*default_provider_data)->instant_url_post_params = instant_url_post_params;
-  (*default_provider_data)->image_url_post_params = image_url_post_params;
-  (*default_provider_data)->favicon_url = GURL(icon_url);
-  (*default_provider_data)->show_in_default_list = true;
-  (*default_provider_data)->alternate_urls.clear();
-  for (size_t i = 0; i < alternate_urls->GetSize(); ++i) {
-    std::string alternate_url;
-    if (alternate_urls->GetString(i, &alternate_url))
-      (*default_provider_data)->alternate_urls.push_back(alternate_url);
-  }
-  (*default_provider_data)->search_terms_replacement_key =
-      search_terms_replacement_key;
-  base::SplitString(encodings, ';', &(*default_provider_data)->input_encodings);
-  if (!id_string.empty() && !*is_managed) {
-    int64 value;
-    base::StringToInt64(id_string, &value);
-    (*default_provider_data)->id = value;
-  }
-  if (!prepopulate_id.empty() && !*is_managed) {
-    int value;
-    base::StringToInt(prepopulate_id, &value);
-    (*default_provider_data)->prepopulate_id = value;
-  }
-  return true;
 }
 
 // static
@@ -370,80 +274,6 @@ base::string16 TemplateURLService::CleanUserInputKeyword(
   // Remove trailing "/".
   return (result.length() > 0 && result[result.length() - 1] == '/') ?
       result.substr(0, result.length() - 1) : result;
-}
-
-// static
-void TemplateURLService::SaveDefaultSearchProviderToPrefs(
-    const TemplateURL* t_url,
-    PrefService* prefs) {
-  if (!prefs)
-    return;
-
-  bool enabled = false;
-  std::string search_url;
-  std::string suggest_url;
-  std::string instant_url;
-  std::string image_url;
-  std::string new_tab_url;
-  std::string search_url_post_params;
-  std::string suggest_url_post_params;
-  std::string instant_url_post_params;
-  std::string image_url_post_params;
-  std::string icon_url;
-  std::string encodings;
-  std::string short_name;
-  std::string keyword;
-  std::string id_string;
-  std::string prepopulate_id;
-  base::ListValue alternate_urls;
-  std::string search_terms_replacement_key;
-  if (t_url) {
-    DCHECK_EQ(TemplateURL::NORMAL, t_url->GetType());
-    enabled = true;
-    search_url = t_url->url();
-    suggest_url = t_url->suggestions_url();
-    instant_url = t_url->instant_url();
-    image_url = t_url->image_url();
-    new_tab_url = t_url->new_tab_url();
-    search_url_post_params = t_url->search_url_post_params();
-    suggest_url_post_params = t_url->suggestions_url_post_params();
-    instant_url_post_params = t_url->instant_url_post_params();
-    image_url_post_params = t_url->image_url_post_params();
-    GURL icon_gurl = t_url->favicon_url();
-    if (!icon_gurl.is_empty())
-      icon_url = icon_gurl.spec();
-    encodings = JoinString(t_url->input_encodings(), ';');
-    short_name = base::UTF16ToUTF8(t_url->short_name());
-    keyword = base::UTF16ToUTF8(t_url->keyword());
-    id_string = base::Int64ToString(t_url->id());
-    prepopulate_id = base::Int64ToString(t_url->prepopulate_id());
-    for (size_t i = 0; i < t_url->alternate_urls().size(); ++i)
-      alternate_urls.AppendString(t_url->alternate_urls()[i]);
-    search_terms_replacement_key = t_url->search_terms_replacement_key();
-  }
-  prefs->SetBoolean(prefs::kDefaultSearchProviderEnabled, enabled);
-  prefs->SetString(prefs::kDefaultSearchProviderSearchURL, search_url);
-  prefs->SetString(prefs::kDefaultSearchProviderSuggestURL, suggest_url);
-  prefs->SetString(prefs::kDefaultSearchProviderInstantURL, instant_url);
-  prefs->SetString(prefs::kDefaultSearchProviderImageURL, image_url);
-  prefs->SetString(prefs::kDefaultSearchProviderNewTabURL, new_tab_url);
-  prefs->SetString(prefs::kDefaultSearchProviderSearchURLPostParams,
-                   search_url_post_params);
-  prefs->SetString(prefs::kDefaultSearchProviderSuggestURLPostParams,
-                   suggest_url_post_params);
-  prefs->SetString(prefs::kDefaultSearchProviderInstantURLPostParams,
-                   instant_url_post_params);
-  prefs->SetString(prefs::kDefaultSearchProviderImageURLPostParams,
-                   image_url_post_params);
-  prefs->SetString(prefs::kDefaultSearchProviderIconURL, icon_url);
-  prefs->SetString(prefs::kDefaultSearchProviderEncodings, encodings);
-  prefs->SetString(prefs::kDefaultSearchProviderName, short_name);
-  prefs->SetString(prefs::kDefaultSearchProviderKeyword, keyword);
-  prefs->SetString(prefs::kDefaultSearchProviderID, id_string);
-  prefs->SetString(prefs::kDefaultSearchProviderPrepopulateID, prepopulate_id);
-  prefs->Set(prefs::kDefaultSearchProviderAlternateURLs, alternate_urls);
-  prefs->SetString(prefs::kDefaultSearchProviderSearchTermsReplacementKey,
-      search_terms_replacement_key);
 }
 
 bool TemplateURLService::CanReplaceKeyword(
@@ -825,11 +655,23 @@ scoped_ptr<TemplateURLService::Subscription>
 void TemplateURLService::OnWebDataServiceRequestDone(
     KeywordWebDataService::Handle h,
     const WDTypedResult* result) {
+  // TODO(robliao): Remove ScopedTracker below once https://crbug.com/422460 is
+  // fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "422460 TemplateURLService::OnWebDataServiceRequestDone"));
+
   // Reset the load_handle so that we don't try and cancel the load in
   // the destructor.
   load_handle_ = 0;
 
   if (!result) {
+    // TODO(robliao): Remove ScopedTracker below once https://crbug.com/422460
+    // is fixed.
+    tracked_objects::ScopedTracker tracking_profile1(
+        FROM_HERE_WITH_EXPLICIT_FUNCTION(
+            "422460 TemplateURLService::OnWebDataServiceRequestDone 1"));
+
     // Results are null if the database went away or (most likely) wasn't
     // loaded.
     load_failed_ = true;
@@ -840,32 +682,79 @@ void TemplateURLService::OnWebDataServiceRequestDone(
 
   TemplateURLVector template_urls;
   int new_resource_keyword_version = 0;
-  GetSearchProvidersUsingKeywordResult(
-      *result, web_data_service_.get(), prefs_, &template_urls,
-      (default_search_provider_source_ == DefaultSearchManager::FROM_USER)
-          ? initial_default_search_provider_.get()
-          : NULL,
-      search_terms_data(), &new_resource_keyword_version, &pre_sync_deletes_);
+  {
+    // TODO(robliao): Remove ScopedTracker below once https://crbug.com/422460
+    // is fixed.
+    tracked_objects::ScopedTracker tracking_profile2(
+        FROM_HERE_WITH_EXPLICIT_FUNCTION(
+            "422460 TemplateURLService::OnWebDataServiceRequestDone 2"));
+
+    GetSearchProvidersUsingKeywordResult(
+        *result, web_data_service_.get(), prefs_, &template_urls,
+        (default_search_provider_source_ == DefaultSearchManager::FROM_USER)
+            ? initial_default_search_provider_.get()
+            : NULL,
+        search_terms_data(), &new_resource_keyword_version, &pre_sync_deletes_);
+  }
 
   KeywordWebDataService::BatchModeScoper scoper(web_data_service_.get());
 
-  PatchMissingSyncGUIDs(&template_urls);
-  SetTemplateURLs(&template_urls);
+  {
+    // TODO(robliao): Remove ScopedTracker below once https://crbug.com/422460
+    // is fixed.
+    tracked_objects::ScopedTracker tracking_profile4(
+        FROM_HERE_WITH_EXPLICIT_FUNCTION(
+            "422460 TemplateURLService::OnWebDataServiceRequestDone 4"));
 
-  // This initializes provider_map_ which should be done before
-  // calling UpdateKeywordSearchTermsForURL.
-  // This also calls NotifyObservers.
-  ChangeToLoadedState();
+    PatchMissingSyncGUIDs(&template_urls);
 
-  // Index any visits that occurred before we finished loading.
-  for (size_t i = 0; i < visits_to_add_.size(); ++i)
-    UpdateKeywordSearchTermsForURL(visits_to_add_[i]);
-  visits_to_add_.clear();
+    // TODO(robliao): Remove ScopedTracker below once https://crbug.com/422460
+    // is fixed.
+    tracked_objects::ScopedTracker tracking_profile41(
+        FROM_HERE_WITH_EXPLICIT_FUNCTION(
+            "422460 TemplateURLService::OnWebDataServiceRequestDone 41"));
 
-  if (new_resource_keyword_version)
-    web_data_service_->SetBuiltinKeywordVersion(new_resource_keyword_version);
+    SetTemplateURLs(&template_urls);
+
+    // TODO(robliao): Remove ScopedTracker below once https://crbug.com/422460
+    // is fixed.
+    tracked_objects::ScopedTracker tracking_profile42(
+        FROM_HERE_WITH_EXPLICIT_FUNCTION(
+            "422460 TemplateURLService::OnWebDataServiceRequestDone 42"));
+
+    // This initializes provider_map_ which should be done before
+    // calling UpdateKeywordSearchTermsForURL.
+    // This also calls NotifyObservers.
+    ChangeToLoadedState();
+
+    // TODO(robliao): Remove ScopedTracker below once https://crbug.com/422460
+    // is fixed.
+    tracked_objects::ScopedTracker tracking_profile43(
+        FROM_HERE_WITH_EXPLICIT_FUNCTION(
+            "422460 TemplateURLService::OnWebDataServiceRequestDone 43"));
+
+    // Index any visits that occurred before we finished loading.
+    for (size_t i = 0; i < visits_to_add_.size(); ++i)
+      UpdateKeywordSearchTermsForURL(visits_to_add_[i]);
+    visits_to_add_.clear();
+
+    // TODO(robliao): Remove ScopedTracker below once https://crbug.com/422460
+    // is fixed.
+    tracked_objects::ScopedTracker tracking_profile44(
+        FROM_HERE_WITH_EXPLICIT_FUNCTION(
+            "422460 TemplateURLService::OnWebDataServiceRequestDone 44"));
+
+    if (new_resource_keyword_version)
+      web_data_service_->SetBuiltinKeywordVersion(new_resource_keyword_version);
+  }
 
   if (default_search_provider_) {
+    // TODO(robliao): Remove ScopedTracker below once https://crbug.com/422460
+    // is fixed.
+    tracked_objects::ScopedTracker tracking_profile5(
+        FROM_HERE_WITH_EXPLICIT_FUNCTION(
+            "422460 TemplateURLService::OnWebDataServiceRequestDone 5"));
+
     UMA_HISTOGRAM_ENUMERATION(
         "Search.DefaultSearchProviderType",
         TemplateURLPrepopulateData::GetEngineType(
@@ -1576,10 +1465,22 @@ void TemplateURLService::SetTemplateURLs(TemplateURLVector* urls) {
 }
 
 void TemplateURLService::ChangeToLoadedState() {
+  // TODO(robliao): Remove ScopedTracker below once https://crbug.com/422460 is
+  // fixed.
+  tracked_objects::ScopedTracker tracking_profile1(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "422460 TemplateURLService::ChangeToLoadedState 1"));
+
   DCHECK(!loaded_);
 
   provider_map_->Init(template_urls_, search_terms_data());
   loaded_ = true;
+
+  // TODO(robliao): Remove ScopedTracker below once https://crbug.com/422460 is
+  // fixed.
+  tracked_objects::ScopedTracker tracking_profile2(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "422460 TemplateURLService::ChangeToLoadedState 2"));
 
   // This will cause a call to NotifyObservers().
   ApplyDefaultSearchChangeNoMetrics(
@@ -1587,6 +1488,13 @@ void TemplateURLService::ChangeToLoadedState() {
           &initial_default_search_provider_->data() : NULL,
       default_search_provider_source_);
   initial_default_search_provider_.reset();
+
+  // TODO(robliao): Remove ScopedTracker below once https://crbug.com/422460 is
+  // fixed.
+  tracked_objects::ScopedTracker tracking_profile3(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "422460 TemplateURLService::ChangeToLoadedState 3"));
+
   on_loaded_callbacks_.Notify();
 }
 
@@ -2067,7 +1975,7 @@ bool TemplateURLService::ResetTemplateURLNoNotify(
     data.favicon_url = GURL();
   }
   data.safe_for_autoreplace = false;
-  data.last_modified = time_provider_();
+  data.last_modified = clock_->Now();
   return UpdateNoNotify(url, TemplateURL(data));
 }
 

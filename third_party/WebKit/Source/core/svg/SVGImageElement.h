@@ -35,10 +35,10 @@ namespace blink {
 class SVGImageElement final : public SVGGraphicsElement,
                               public SVGURIReference {
     DEFINE_WRAPPERTYPEINFO();
-    WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(SVGImageElement);
+    WILL_BE_USING_GARBAGE_COLLECTED_MIXIN_NESTED(SVGImageElement, SVGGraphicsElement);
 public:
     DECLARE_NODE_FACTORY(SVGImageElement);
-    virtual void trace(Visitor*) override;
+    DECLARE_VIRTUAL_TRACE();
 
     bool currentFrameHasSingleSecurityOrigin() const;
 
@@ -54,15 +54,16 @@ private:
     virtual bool isStructurallyExternal() const override { return !hrefString().isNull(); }
 
     bool isSupportedAttribute(const QualifiedName&);
-    virtual void parseAttribute(const QualifiedName&, const AtomicString&) override;
     virtual bool isPresentationAttribute(const QualifiedName&) const override;
+    virtual bool isPresentationAttributeWithSVGDOM(const QualifiedName&) const override;
     virtual void collectStyleForPresentationAttribute(const QualifiedName&, const AtomicString&, MutableStylePropertySet*) override;
+
     virtual void svgAttributeChanged(const QualifiedName&) override;
 
     virtual void attach(const AttachContext& = AttachContext()) override;
     virtual InsertionNotificationRequest insertedInto(ContainerNode*) override;
 
-    virtual RenderObject* createRenderer(RenderStyle*) override;
+    virtual LayoutObject* createLayoutObject(const ComputedStyle&) override;
 
     virtual const AtomicString imageSourceURL() const override;
 

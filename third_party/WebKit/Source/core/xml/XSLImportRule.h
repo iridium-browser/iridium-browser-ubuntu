@@ -31,7 +31,7 @@
 namespace blink {
 
 class XSLImportRule final : public NoBaseWillBeGarbageCollectedFinalized<XSLImportRule> {
-    WTF_MAKE_FAST_ALLOCATED_WILL_BE_REMOVED;
+    WTF_MAKE_FAST_ALLOCATED_WILL_BE_REMOVED(XSLImportRule);
 public:
     static PassOwnPtrWillBeRawPtr<XSLImportRule> create(XSLStyleSheet* parentSheet, const String& href)
     {
@@ -40,7 +40,7 @@ public:
     }
 
     virtual ~XSLImportRule();
-    virtual void trace(Visitor*);
+    DECLARE_VIRTUAL_TRACE();
 
     const String& href() const { return m_strHref; }
     XSLStyleSheet* styleSheet() const { return m_styleSheet.get(); }

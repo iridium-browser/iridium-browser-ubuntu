@@ -46,7 +46,7 @@ class HTMLImportChild;
 // A LinkResource subclasss used for @rel=import.
 //
 class LinkImport final : public LinkResource, public HTMLImportChildClient {
-    WTF_MAKE_FAST_ALLOCATED_WILL_BE_REMOVED;
+    WTF_MAKE_FAST_ALLOCATED_WILL_BE_REMOVED(LinkImport);
     WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(LinkImport);
 public:
 
@@ -59,7 +59,7 @@ public:
     virtual void process() override;
     virtual Type type() const override { return Import; }
     virtual bool hasLoaded() const override;
-    virtual void trace(Visitor*) override;
+    DECLARE_VIRTUAL_TRACE();
     virtual void ownerInserted() override;
 
     // HTMLImportChildClient

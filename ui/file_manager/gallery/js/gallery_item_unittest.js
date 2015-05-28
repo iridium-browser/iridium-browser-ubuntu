@@ -15,12 +15,10 @@ var ImageUtil = {
 };
 
 /**
- * Mock of ImageEncoder
+ * Mock of ImageEncoder. Since some test changes the behavior of ImageEncoder,
+ * this is initialized in setUp().
  */
-var ImageEncoder = {
-  encodeMetadata: function() {},
-  getBlob: function() {}
-};
+var ImageEncoder;
 
 /**
  * Load time data.
@@ -29,6 +27,30 @@ loadTimeData.data = {
   DRIVE_DIRECTORY_LABEL: '',
   DOWNLOADS_DIRECTORY_LABEL: ''
 };
+
+function setUp() {
+  ImageEncoder = {
+    encodeMetadata: function() {},
+    getBlob: function() {}
+  };
+}
+
+/**
+ * Returns a mock of metadata model.
+ * @private
+ * @return {!MetadataModel}
+ */
+function getMockMetadataModel() {
+  return {
+    get: function(entries, names) {
+      return Promise.resolve([
+        {size: 200}
+      ]);
+    },
+    notifyEntriesChanged: function() {
+    }
+  };
+}
 
 /**
  * Tests for GalleryItem#saveToFile.
@@ -49,31 +71,174 @@ function testSaveToFile(callback) {
       }
     });
   };
-  var fetchedMediaCleared = false;
-  var metadataCache = {
-    getLatest: function(entries, type, callback) {
-      callback([{name: 'newMetadata'}]);
-    },
-    clear: function(entries, type) {
-      fetchedMediaCleared = true;
-    }
+  var entryChanged = false;
+  var metadataModel = getMockMetadataModel();
+  metadataModel.notifyEntriesChanged = function() {
+    entryChanged = true;
   };
+
   var item = new Gallery.Item(
       entry,
       {isReadOnly: false},
-      {name: 'oldMetadata'},
-      metadataCache,
+      {size: 100},
+      {},
       /* original */ true);
-  assertEquals('oldMetadata', item.getMetadata().name);
-  assertFalse(fetchedMediaCleared);
+  assertEquals(100, item.getMetadataItem().size);
+  assertFalse(entryChanged);
   reportPromise(
       new Promise(item.saveToFile.bind(
           item,
           {getLocationInfo: function() { return {}; }},
-          null,
-          true,
+          metadataModel,
+          /* fallbackDir */ null,
+          /* overwrite */ true,
           document.createElement('canvas'))).then(function() {
-            assertEquals('newMetadata', item.getMetadata().name);
-            assertTrue(fetchedMediaCleared);
+            assertEquals(200, item.getMetadataItem().size);
+            assertTrue(entryChanged);
+          }), callback);
+}
+
+/**
+ * Tests for GalleryItem#saveToFile. In this test case, fileWriter.write fails
+ * with an error.
+ */
+function testSaveToFileWriteFailCase(callback) {
+  var fileSystem = new MockFileSystem('volumeId');
+  fileSystem.populate(['/test.jpg']);
+  var entry = fileSystem.entries['/test.jpg'];
+
+  entry.createWriter = function(callback) {
+    callback({
+      write: function() {
+        Promise.resolve().then(function() {
+          this.onerror(new Error());
+        }.bind(this));
+      },
+      truncate: function() {
+        Promise.resolve().then(function() {
+          this.onwriteend();
+        }.bind(this));
+      }
+    });
+  };
+
+  var item = new Gallery.Item(
+      entry,
+      {isReadOnly: false},
+      {size: 100},
+      {},
+      /* original */ true);
+  reportPromise(
+      new Promise(item.saveToFile.bind(
+          item,
+          {getLocationInfo: function() { return {}; }},
+          getMockMetadataModel(),
+          /* fallbackDir */ null,
+          /* overwrite */ true,
+          document.createElement('canvas'))).then(function(result) {
+            assertFalse(result);
+          }), callback);
+}
+
+/**
+ * Tests for GalleryItem#saveToFile. In this test case, ImageEncoder.getBlob
+ * fails with an error. This test case confirms that no write operation runs
+ * when it fails to get a blob of new image.
+ */
+function testSaveToFileGetBlobFailCase(callback) {
+  ImageEncoder.getBlob = function() {
+    throw new Error();
+  };
+
+  var fileSystem = new MockFileSystem('volumeId');
+  fileSystem.populate(['/test.jpg']);
+  var entry = fileSystem.entries['/test.jpg'];
+
+  var writeOperationRun = false;
+  entry.createWriter = function(callback) {
+    callback({
+      write: function() {
+        Promise.resolve().then(function() {
+          writeOperationRun = true;
+          this.onwriteend();
+        }.bind(this));
+      },
+      truncate: function() {
+        Promise.resolve().then(function() {
+          writeOperationRun = true;
+          this.onwriteend();
+        }.bind(this));
+      }
+    });
+  };
+
+  var item = new Gallery.Item(
+      entry,
+      {isReadOnly: false},
+      {size: 100},
+      {},
+      /* original */ true);
+  reportPromise(
+      new Promise(item.saveToFile.bind(
+          item,
+          {getLocationInfo: function() { return {}; }},
+          getMockMetadataModel(),
+          /* fallbackDir */ null,
+          /* overwrite */ true,
+          document.createElement('canvas'))).then(function(result) {
+            assertFalse(result);
+            assertFalse(writeOperationRun);
+          }), callback);
+}
+
+function testSaveToFileRaw(callback) {
+  var fileSystem = new MockFileSystem('volumeId');
+  fileSystem.populate(['/test.arw']);
+  fileSystem.entries['/'].getFile = function(name, options, success, error) {
+    if (options.create) {
+      assertEquals('test - Edited.jpg', name);
+      fileSystem.populate(['/test - Edited.jpg']);
+      var entry = fileSystem.entries['/test - Edited.jpg'];
+      entry.createWriter = function(callback) {
+        callback({
+          write: function() {
+            Promise.resolve().then(function() {
+              this.onwriteend();
+            }.bind(this));
+          },
+          truncate: function() {
+            this.write();
+          }
+        });
+      };
+    }
+    MockDirectoryEntry.prototype.getFile.apply(this, arguments);
+  };
+  var entryChanged = false;
+  var metadataModel = getMockMetadataModel();
+  metadataModel.notifyEntriesChanged = function() {
+    entryChanged = true;
+  };
+
+  var item = new Gallery.Item(
+      fileSystem.entries['/test.arw'],
+      {isReadOnly: false},
+      {size: 100},
+      {},
+      /* original */ true);
+  assertEquals(100, item.getMetadataItem().size);
+  assertFalse(entryChanged);
+  reportPromise(
+      new Promise(item.saveToFile.bind(
+          item,
+          {getLocationInfo: function() { return {}; }},
+          metadataModel,
+          /* fallbackDir */ null,
+          /* overwrite is true but ignored */ true,
+          document.createElement('canvas'))).then(function(success) {
+            assertTrue(success);
+            assertEquals(200, item.getMetadataItem().size);
+            assertTrue(entryChanged);
+            assertFalse(item.isOriginal());
           }), callback);
 }

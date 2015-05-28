@@ -34,11 +34,11 @@ class RendererMediaPlayerManager : public RenderFrameObserver {
  public:
   // Constructs a RendererMediaPlayerManager object for the |render_frame|.
   explicit RendererMediaPlayerManager(RenderFrame* render_frame);
-  virtual ~RendererMediaPlayerManager();
+  ~RendererMediaPlayerManager() override;
 
   // RenderFrameObserver overrides.
-  virtual bool OnMessageReceived(const IPC::Message& msg) override;
-  virtual void WasHidden() override;
+  bool OnMessageReceived(const IPC::Message& msg) override;
+  void WasHidden() override;
 
   // Initializes a MediaPlayerAndroid object in browser process.
   void Initialize(MediaPlayerHostMsg_Initialize_Type type,
@@ -96,7 +96,7 @@ class RendererMediaPlayerManager : public RenderFrameObserver {
   void RequestExternalSurface(int player_id, const gfx::RectF& geometry);
 
   // RenderFrameObserver overrides.
-  virtual void DidCommitCompositorFrame() override;
+  void DidCommitCompositorFrame() override;
 
   // Returns true if a media player should use video-overlay for the embedded
   // encrypted video.
@@ -132,6 +132,7 @@ class RendererMediaPlayerManager : public RenderFrameObserver {
   void OnTimeUpdate(int player_id,
                     base::TimeDelta current_timestamp,
                     base::TimeTicks current_time_ticks);
+  void OnWaitingForDecryptionKey(int player_id);
   void OnMediaPlayerReleased(int player_id);
   void OnConnectedToRemoteDevice(int player_id,
       const std::string& remote_playback_message);

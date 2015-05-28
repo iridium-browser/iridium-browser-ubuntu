@@ -6,10 +6,10 @@
 
 #include "base/prefs/pref_service.h"
 #include "chrome/browser/extensions/api/hotword_private/hotword_private_api.h"
-#include "chrome/browser/history/web_history_service.h"
 #include "chrome/browser/history/web_history_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/pref_names.h"
+#include "components/history/core/browser/web_history_service.h"
 
 using extensions::BrowserContextKeyedAPIFactory;
 using extensions::HotwordPrivateEventService;
@@ -97,9 +97,18 @@ void HotwordAudioHistoryHandler::GetAudioHistoryComplete(
   if (success) {
     value = new_enabled_value;
     prefs->SetBoolean(prefs::kHotwordAudioLoggingEnabled, value);
-    // If the setting is now turned off, always on should also be turned off.
-    if (!value)
-      prefs->SetBoolean(prefs::kHotwordAlwaysOnSearchEnabled, false);
+    // If the setting is now turned off, always on should also be turned off,
+    // and the speaker model should be deleted.
+    if (!value) {
+      if (prefs->GetBoolean(prefs::kHotwordAlwaysOnSearchEnabled)) {
+        prefs->SetBoolean(prefs::kHotwordAlwaysOnSearchEnabled, false);
+        HotwordPrivateEventService* event_service =
+            BrowserContextKeyedAPIFactory<HotwordPrivateEventService>::Get(
+                profile_);
+        if (event_service)
+          event_service->OnDeleteSpeakerModel();
+      }
+    }
   }
   callback.Run(success, value);
 }

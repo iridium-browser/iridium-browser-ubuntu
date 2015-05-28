@@ -16,7 +16,6 @@
            BECAUSE YOUR RESOURCES ARE FUNCTIONALLY RELATED OR FALL UNDER THE
            SAME CONDITIONALS. -->
       <if expr="enable_app_list">
-        <structure type="chrome_scaled_image" name="IDR_APP_LIST_EXPERIMENTAL_ICON" file="common/app_list_experimental_icon.png" />
         <structure type="chrome_scaled_image" name="IDR_APP_LIST_ITEM_PROGRESS_BACKGROUND" file="common/app_list_progress_bar_background.png" />
         <structure type="chrome_scaled_image" name="IDR_APP_LIST_ITEM_PROGRESS_LEFT" file="common/app_list_progress_bar_left.png" />
         <structure type="chrome_scaled_image" name="IDR_APP_LIST_ITEM_PROGRESS_CENTER" file="common/app_list_progress_bar_center.png" />
@@ -162,6 +161,7 @@
       <structure type="chrome_scaled_image" name="IDR_CLOSE_2_MASK" file="close_2_mask.png" />
       <structure type="chrome_scaled_image" name="IDR_CLOSE_2_P" file="close_2_pressed.png" />
       <structure type="chrome_scaled_image" name="IDR_CLOSE_3_MASK" file="common/close_3_mask.png" />
+      <structure type="chrome_scaled_image" name="IDR_CLOSE_4_BUTTON" file="common/close_4_button.png" />
       <structure type="chrome_scaled_image" name="IDR_CLOSE_DIALOG" file="close_dialog.png" />
       <structure type="chrome_scaled_image" name="IDR_CLOSE_DIALOG_H" file="close_dialog_hover.png" />
       <structure type="chrome_scaled_image" name="IDR_CLOSE_DIALOG_P" file="close_dialog_pressed.png" />
@@ -297,10 +297,12 @@
         <structure type="chrome_scaled_image" name="IDR_MAXIMIZE_P" file="maximize_pressed.png" />
       </if>
       <if expr="toolkit_views">
-        <structure type="chrome_scaled_image" name="IDR_MENU_HIERARCHY_ARROW" file="common/menu_hierarchy_arrow.png" />
         <structure type="chrome_scaled_image" name="IDR_MENU_HIERARCHY_ARROW_DARK_BACKGROUND" file="common/menu_hierarchy_arrow_white.png" />
       </if>
-      <if expr="(is_macosx or is_ios) and not toolkit_views">
+      <if expr="toolkit_views and not is_macosx">
+        <structure type="chrome_scaled_image" name="IDR_MENU_HIERARCHY_ARROW" file="common/menu_hierarchy_arrow.png" />
+      </if>
+      <if expr="is_macosx or is_ios">
         <structure type="chrome_scaled_image" name="IDR_MENU_HIERARCHY_ARROW" file="mac/menu_hierarchy_arrow.png" />
       </if>
       <structure type="chrome_scaled_image" name="IDR_MENU_CHECK_CHECKED" file="common/menu_check.png" />
@@ -384,13 +386,7 @@
         <structure type="chrome_scaled_image" name="IDR_PANEL_BOTTOM_LEFT_CORNER" file="panel_bottom_left_corner.png" />
         <structure type="chrome_scaled_image" name="IDR_PANEL_BOTTOM_RIGHT_CORNER" file="panel_bottom_right_corner.png" />
       </if>
-      <if expr="is_posix and not is_macosx and not is_ios and not use_aura">
-        <structure type="chrome_scaled_image" name="IDR_PROGRESS_BAR" file="linux/linux-progress-bar.png" />
-        <structure type="chrome_scaled_image" name="IDR_PROGRESS_BORDER_LEFT" file="linux/linux-progress-border-left.png" />
-        <structure type="chrome_scaled_image" name="IDR_PROGRESS_BORDER_RIGHT" file="linux/linux-progress-border-right.png" />
-        <structure type="chrome_scaled_image" name="IDR_PROGRESS_VALUE" file="linux/linux-progress-value.png" />
-      </if>
-      <if expr="use_aura">
+      <if expr="use_aura or toolkit_views or (is_posix and not is_macosx and not is_ios)">
         <structure type="chrome_scaled_image" name="IDR_PROGRESS_BAR" file="linux/linux-progress-bar.png" />
         <structure type="chrome_scaled_image" name="IDR_PROGRESS_BORDER_LEFT" file="linux/linux-progress-border-left.png" />
         <structure type="chrome_scaled_image" name="IDR_PROGRESS_BORDER_RIGHT" file="linux/linux-progress-border-right.png" />
@@ -523,6 +519,15 @@
         <structure type="chrome_scaled_image" name="IDR_TEXTBUTTON_PRESSED_TOP" file="common/textbutton_pressed_top.png" />
         <structure type="chrome_scaled_image" name="IDR_TEXTBUTTON_PRESSED_TOP_LEFT" file="common/textbutton_pressed_top_left.png" />
         <structure type="chrome_scaled_image" name="IDR_TEXTBUTTON_PRESSED_TOP_RIGHT" file="common/textbutton_pressed_top_right.png" />
+        <structure type="chrome_scaled_image" name="IDR_TEXTBUTTON_RAISED_BOTTOM" file="common/textbutton_raised_bottom.png" />
+        <structure type="chrome_scaled_image" name="IDR_TEXTBUTTON_RAISED_BOTTOM_LEFT" file="common/textbutton_raised_bottom_left.png" />
+        <structure type="chrome_scaled_image" name="IDR_TEXTBUTTON_RAISED_BOTTOM_RIGHT" file="common/textbutton_raised_bottom_right.png" />
+        <structure type="chrome_scaled_image" name="IDR_TEXTBUTTON_RAISED_CENTER" file="common/textbutton_raised_center.png" />
+        <structure type="chrome_scaled_image" name="IDR_TEXTBUTTON_RAISED_LEFT" file="common/textbutton_raised_left.png" />
+        <structure type="chrome_scaled_image" name="IDR_TEXTBUTTON_RAISED_RIGHT" file="common/textbutton_raised_right.png" />
+        <structure type="chrome_scaled_image" name="IDR_TEXTBUTTON_RAISED_TOP" file="common/textbutton_raised_top.png" />
+        <structure type="chrome_scaled_image" name="IDR_TEXTBUTTON_RAISED_TOP_LEFT" file="common/textbutton_raised_top_left.png" />
+        <structure type="chrome_scaled_image" name="IDR_TEXTBUTTON_RAISED_TOP_RIGHT" file="common/textbutton_raised_top_right.png" />
       </if>
       <if expr="toolkit_views">
         <structure type="chrome_scaled_image" name="IDR_TEXT_SELECTION_HANDLE_CENTER" file="common/text_selection_handle_center.png" />

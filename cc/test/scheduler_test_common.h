@@ -90,7 +90,7 @@ struct FakeBeginFrameSource : public BeginFrameSourceMixIn {
 
   // BeginFrameSource
   void DidFinishFrame(size_t remaining_frames) override;
-  void AsValueInto(base::debug::TracedValue* dict) const override;
+  void AsValueInto(base::trace_event::TracedValue* dict) const override;
 
   ~FakeBeginFrameSource() override {}
 };
@@ -164,7 +164,6 @@ class TestScheduler : public Scheduler {
       const SchedulerSettings& scheduler_settings,
       int layer_tree_host_id,
       const scoped_refptr<OrderedSimpleTaskRunner>& task_runner,
-      base::PowerMonitor* power_monitor,
       scoped_ptr<BeginFrameSource> external_begin_frame_source) {
     TestSchedulerFrameSourcesConstructor frame_sources_constructor(
         task_runner.get(), now_src.get());
@@ -174,7 +173,6 @@ class TestScheduler : public Scheduler {
                                    scheduler_settings,
                                    layer_tree_host_id,
                                    task_runner,
-                                   power_monitor,
                                    &frame_sources_constructor,
                                    external_begin_frame_source.Pass()));
   }
@@ -188,6 +186,7 @@ class TestScheduler : public Scheduler {
 
   BeginFrameSource& frame_source() { return *frame_source_; }
   bool FrameProductionThrottled() { return throttle_frame_production_; }
+  BeginFrameArgs begin_impl_frame_args() { return begin_impl_frame_args_; }
 
   ~TestScheduler() override;
 
@@ -209,7 +208,6 @@ class TestScheduler : public Scheduler {
       const SchedulerSettings& scheduler_settings,
       int layer_tree_host_id,
       const scoped_refptr<OrderedSimpleTaskRunner>& test_task_runner,
-      base::PowerMonitor* power_monitor,
       TestSchedulerFrameSourcesConstructor* frame_sources_constructor,
       scoped_ptr<BeginFrameSource> external_begin_frame_source);
 

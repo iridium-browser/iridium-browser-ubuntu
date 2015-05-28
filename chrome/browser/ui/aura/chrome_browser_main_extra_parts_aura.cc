@@ -19,15 +19,18 @@
 #include "ui/gfx/screen.h"
 #include "ui/views/widget/native_widget_aura.h"
 
-#if defined(USE_X11) && !defined(OS_CHROMEOS)
+#if defined(OS_LINUX) && !defined(OS_CHROMEOS)
 #include "base/prefs/pref_service.h"
 #include "chrome/browser/profiles/profile.h"
-#include "chrome/browser/ui/libgtk2ui/gtk2_ui.h"
 #include "chrome/common/pref_names.h"
 #include "ui/aura/window.h"
 #include "ui/base/ime/input_method_initializer.h"
 #include "ui/native_theme/native_theme_aura.h"
 #include "ui/views/linux_ui/linux_ui.h"
+#endif
+
+#if defined(USE_X11) && !defined(OS_CHROMEOS)
+#include "chrome/browser/ui/libgtk2ui/gtk2_ui.h"
 #endif
 
 #if defined(USE_ASH)
@@ -123,8 +126,12 @@ void ChromeBrowserMainExtraPartsAura::PreCreateThreads() {
   if (!chrome::ShouldOpenAshOnStartup())
 #endif
   {
-    gfx::Screen::SetScreenInstance(gfx::SCREEN_TYPE_NATIVE,
-                                   views::CreateDesktopScreen());
+    gfx::Screen* screen = views::CreateDesktopScreen();
+    gfx::Screen::SetScreenInstance(gfx::SCREEN_TYPE_NATIVE, screen);
+#if defined(USE_X11)
+    views::LinuxUI::instance()->UpdateDeviceScaleFactor(
+        screen->GetPrimaryDisplay().device_scale_factor());
+#endif
   }
 #endif
 }

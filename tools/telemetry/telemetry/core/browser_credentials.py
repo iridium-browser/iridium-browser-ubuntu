@@ -6,10 +6,10 @@ import json
 import logging
 import os
 
-from telemetry.core import util
 from telemetry.core.backends import codepen_credentials_backend
 from telemetry.core.backends import facebook_credentials_backend
 from telemetry.core.backends import google_credentials_backend
+from telemetry.core import util
 from telemetry.unittest_util import options_for_unittests
 
 
@@ -28,7 +28,8 @@ class BrowserCredentials(object):
         codepen_credentials_backend.CodePenCredentialsBackend(),
         facebook_credentials_backend.FacebookCredentialsBackend(),
         facebook_credentials_backend.FacebookCredentialsBackend2(),
-        google_credentials_backend.GoogleCredentialsBackend()]
+        google_credentials_backend.GoogleCredentialsBackend(),
+        google_credentials_backend.GoogleCredentialsBackend2()]
 
     self._backends = {}
     for backend in backends:
@@ -58,7 +59,7 @@ class BrowserCredentials(object):
           'Unrecognized credentials type: %s', credentials_type)
     if credentials_type not in self._credentials:
       return False
-    from telemetry.page.actions import action_runner
+    from telemetry.page import action_runner
     runner = action_runner.ActionRunner(tab)
     return self._backends[credentials_type].LoginNeeded(
       tab, runner, self._credentials[credentials_type])

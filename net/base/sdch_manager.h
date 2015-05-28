@@ -23,6 +23,7 @@
 #include "base/gtest_prod_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/memory/weak_ptr.h"
 #include "base/observer_list.h"
 #include "base/threading/thread_checker.h"
 #include "base/time/time.h"
@@ -235,7 +236,9 @@ class NET_EXPORT SdchManager {
                                   const GURL& dictionary_url);
 
   // Send out appropriate events notifying observers that a dictionary
-  // was successfully used to decode a request.
+  // was successfully used to decode a request.  Note that this can happen
+  // after a dictionary has been deleted from the SdchManager (because
+  // DictionarySets retain references to deleted dictionaries).
   void OnDictionaryUsed(const std::string& server_hash);
 
   // Get a handle to the available dictionaries that might be used
@@ -292,6 +295,9 @@ class NET_EXPORT SdchManager {
 
   static scoped_ptr<DictionarySet> CreateEmptyDictionarySetForTesting();
 
+  // For investigation of http://crbug.com/454198; remove when resolved.
+  base::WeakPtr<SdchManager> GetWeakPtr();
+
  private:
   struct BlacklistInfo {
     BlacklistInfo() : count(0), exponential_count(0), reason(SDCH_OK) {}
@@ -337,6 +343,8 @@ class NET_EXPORT SdchManager {
   ObserverList<SdchObserver, true> observers_;
 
   base::ThreadChecker thread_checker_;
+
+  base::WeakPtrFactory<SdchManager> factory_;
 
   DISALLOW_COPY_AND_ASSIGN(SdchManager);
 };

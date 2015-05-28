@@ -76,32 +76,14 @@ extern const char kCroshBuiltinAppId[];
 // The extension id of the hotword audio verification dialogue app.
 extern const char kHotwordAudioVerificationAppId[];
 
-// The extension id of the hotword voice search trigger extension.
-extern const char kHotwordExtensionId[];
-
 // The extension id of the new (experimental) hotword extension.
 extern const char kHotwordNewExtensionId[];
 
 // The extension id of the hotword shared module.
 extern const char kHotwordSharedModuleId[];
 
-// The extension id of the PDF extension.
-extern const char kPdfExtensionId[];
-
-// The extension id of the Office Viewer component extension.
-extern const char kQuickOfficeComponentExtensionId[];
-
-// The extension id of the Office Viewer extension on the internal webstore.
-extern const char kQuickOfficeInternalExtensionId[];
-
-// The extension id of the Office Viewer extension.
-extern const char kQuickOfficeExtensionId[];
-
 // The extension id of the settings application.
 extern const char kSettingsAppId[];
-
-// The extension id used for testing streamsPrivate
-extern const char kStreamsPrivateTestExtensionId[];
 
 // The extension id of the Youtube application.
 extern const char kYoutubeAppId[];

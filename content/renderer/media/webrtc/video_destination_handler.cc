@@ -7,16 +7,16 @@
 #include <string>
 
 #include "base/base64.h"
-#include "base/debug/trace_event.h"
 #include "base/logging.h"
 #include "base/rand_util.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/trace_event/trace_event.h"
 #include "content/renderer/media/media_stream.h"
 #include "content/renderer/media/media_stream_registry_interface.h"
 #include "content/renderer/media/media_stream_video_track.h"
 #include "content/renderer/pepper/ppb_image_data_impl.h"
 #include "content/renderer/render_thread_impl.h"
-#include "media/video/capture/video_capture_types.h"
+#include "media/base/video_capture_types.h"
 #include "third_party/WebKit/public/platform/WebMediaStreamTrack.h"
 #include "third_party/WebKit/public/platform/WebURL.h"
 #include "third_party/WebKit/public/web/WebMediaStreamRegistry.h"
@@ -32,14 +32,12 @@ class PpFrameWriter::FrameWriterDelegate
       const scoped_refptr<base::MessageLoopProxy>& io_message_loop_proxy,
       const VideoCaptureDeliverFrameCB& new_frame_callback);
 
-  void DeliverFrame(const scoped_refptr<media::VideoFrame>& frame,
-                    const media::VideoCaptureFormat& format);
+  void DeliverFrame(const scoped_refptr<media::VideoFrame>& frame);
  private:
   friend class base::RefCountedThreadSafe<FrameWriterDelegate>;
   virtual ~FrameWriterDelegate();
 
-  void DeliverFrameOnIO(const scoped_refptr<media::VideoFrame>& frame,
-                        const media::VideoCaptureFormat& format);
+  void DeliverFrameOnIO(const scoped_refptr<media::VideoFrame>& frame);
 
   scoped_refptr<base::MessageLoopProxy> io_message_loop_;
   VideoCaptureDeliverFrameCB new_frame_callback_;
@@ -56,21 +54,18 @@ PpFrameWriter::FrameWriterDelegate::~FrameWriterDelegate() {
 }
 
 void PpFrameWriter::FrameWriterDelegate::DeliverFrame(
-    const scoped_refptr<media::VideoFrame>& frame,
-    const media::VideoCaptureFormat& format) {
+    const scoped_refptr<media::VideoFrame>& frame) {
   io_message_loop_->PostTask(
       FROM_HERE,
-      base::Bind(&FrameWriterDelegate::DeliverFrameOnIO,
-                 this, frame, format));
+      base::Bind(&FrameWriterDelegate::DeliverFrameOnIO, this, frame));
 }
 
 void PpFrameWriter::FrameWriterDelegate::DeliverFrameOnIO(
-     const scoped_refptr<media::VideoFrame>& frame,
-     const media::VideoCaptureFormat& format) {
+     const scoped_refptr<media::VideoFrame>& frame) {
   DCHECK(io_message_loop_->BelongsToCurrentThread());
   // The local time when this frame is generated is unknown so give a null
   // value to |estimated_capture_time|.
-  new_frame_callback_.Run(frame, format, base::TimeTicks());
+  new_frame_callback_.Run(frame, base::TimeTicks());
 }
 
 PpFrameWriter::PpFrameWriter() {
@@ -152,31 +147,19 @@ void PpFrameWriter::PutFrame(PPB_ImageData_Impl* image_data,
   scoped_refptr<media::VideoFrame> new_frame =
       frame_pool_.CreateFrame(media::VideoFrame::YV12, frame_size,
                               gfx::Rect(frame_size), frame_size, timestamp);
-  media::VideoCaptureFormat format(
-      frame_size,
-      MediaStreamVideoSource::kUnknownFrameRate,
-      media::PIXEL_FORMAT_YV12);
 
-  // TODO(magjed): Chrome OS is not ready for switching from BGRA to ARGB.
-  // Remove this once http://crbug/434007 is fixed. We have a corresponding
-  // problem when we send frames to the effects plugin in PepperVideoSourceHost.
-#if defined(OS_CHROMEOS)
-  auto libyuv_xxxx_to_i420 = &libyuv::BGRAToI420;
-#else
-  auto libyuv_xxxx_to_i420 = &libyuv::ARGBToI420;
-#endif
-  libyuv_xxxx_to_i420(src_data,
-                      src_stride,
-                      new_frame->data(media::VideoFrame::kYPlane),
-                      new_frame->stride(media::VideoFrame::kYPlane),
-                      new_frame->data(media::VideoFrame::kUPlane),
-                      new_frame->stride(media::VideoFrame::kUPlane),
-                      new_frame->data(media::VideoFrame::kVPlane),
-                      new_frame->stride(media::VideoFrame::kVPlane),
-                      width,
-                      height);
+  libyuv::ARGBToI420(src_data,
+                     src_stride,
+                     new_frame->data(media::VideoFrame::kYPlane),
+                     new_frame->stride(media::VideoFrame::kYPlane),
+                     new_frame->data(media::VideoFrame::kUPlane),
+                     new_frame->stride(media::VideoFrame::kUPlane),
+                     new_frame->data(media::VideoFrame::kVPlane),
+                     new_frame->stride(media::VideoFrame::kVPlane),
+                     width,
+                     height);
 
-  delegate_->DeliverFrame(new_frame, format);
+  delegate_->DeliverFrame(new_frame);
 }
 
 // PpFrameWriterProxy is a helper class to make sure the user won't use

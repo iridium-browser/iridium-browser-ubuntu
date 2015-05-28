@@ -13,13 +13,14 @@ Octane 2.0 consists of 17 tests, four more than Octane v1.
 
 import os
 
-from metrics import power
 from telemetry import benchmark
 from telemetry import page as page_module
 from telemetry.page import page_set
 from telemetry.page import page_test
 from telemetry.util import statistics
 from telemetry.value import scalar
+
+from metrics import power
 
 _GB = 1024 * 1024 * 1024
 
@@ -67,8 +68,7 @@ DESCRIPTIONS = {
 
 class _OctaneMeasurement(page_test.PageTest):
   def __init__(self):
-    super(_OctaneMeasurement, self).__init__(
-        action_name_to_run='RunPageInteractions')
+    super(_OctaneMeasurement, self).__init__()
     self._power_metric = None
 
   def CustomizeBrowserOptions(self, options):
@@ -136,6 +136,10 @@ class Octane(benchmark.Benchmark):
   http://octane-benchmark.googlecode.com/svn/latest/index.html
   """
   test = _OctaneMeasurement
+
+  @classmethod
+  def Name(cls):
+    return 'octane'
 
   def CreatePageSet(self, options):
     ps = page_set.PageSet(

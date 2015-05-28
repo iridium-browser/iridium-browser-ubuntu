@@ -5,7 +5,7 @@
 #include "net/tools/quic/quic_server_session.h"
 
 #include "base/logging.h"
-#include "net/quic/crypto/cached_network_parameters.h"
+#include "net/quic/proto/cached_network_parameters.pb.h"
 #include "net/quic/quic_connection.h"
 #include "net/quic/quic_flags.h"
 #include "net/quic/reliable_quic_stream.h"
@@ -26,13 +26,13 @@ QuicServerSession::QuicServerSession(const QuicConfig& config,
 QuicServerSession::~QuicServerSession() {}
 
 void QuicServerSession::InitializeSession(
-    const QuicCryptoServerConfig& crypto_config) {
+    const QuicCryptoServerConfig* crypto_config) {
   QuicSession::InitializeSession();
   crypto_stream_.reset(CreateQuicCryptoServerStream(crypto_config));
 }
 
 QuicCryptoServerStream* QuicServerSession::CreateQuicCryptoServerStream(
-    const QuicCryptoServerConfig& crypto_config) {
+    const QuicCryptoServerConfig* crypto_config) {
   return new QuicCryptoServerStream(crypto_config, this);
 }
 
@@ -48,11 +48,14 @@ void QuicServerSession::OnConfigNegotiated() {
   // bandwidth resumption.
   const CachedNetworkParameters* cached_network_params =
       crypto_stream_->previous_cached_network_params();
-  if (FLAGS_quic_enable_bandwidth_resumption_experiment &&
-      cached_network_params != nullptr &&
-      ContainsQuicTag(config()->ReceivedConnectionOptions(), kBWRE) &&
+  const bool max_bandwidth_resumption =
+      ContainsQuicTag(config()->ReceivedConnectionOptions(), kBWMX);
+  if (cached_network_params != nullptr &&
+      (ContainsQuicTag(config()->ReceivedConnectionOptions(), kBWRE) ||
+       max_bandwidth_resumption) &&
       cached_network_params->serving_region() == serving_region_) {
-    connection()->ResumeConnectionState(*cached_network_params);
+    connection()->ResumeConnectionState(*cached_network_params,
+                                        max_bandwidth_resumption);
   }
 
   if (FLAGS_enable_quic_fec &&
@@ -80,10 +83,6 @@ void QuicServerSession::OnWriteBlocked() {
 }
 
 void QuicServerSession::OnCongestionWindowChange(QuicTime now) {
-  if (connection()->version() <= QUIC_VERSION_21) {
-    return;
-  }
-
   // Only send updates when the application has no data to write.
   if (HasDataToWrite()) {
     return;
@@ -160,6 +159,9 @@ void QuicServerSession::OnCongestionWindowChange(QuicTime now) {
   }
 
   crypto_stream_->SendServerConfigUpdate(&cached_network_params);
+
+  connection()->OnSendConnectionState(cached_network_params);
+
   last_scup_time_ = now;
   last_scup_sequence_number_ =
       connection()->sequence_number_of_last_sent_packet();

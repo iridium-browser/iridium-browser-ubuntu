@@ -8,8 +8,9 @@
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/chrome_notification_types.h"
+#include "chrome/browser/ui/exclusive_access/exclusive_access_manager.h"
 #include "chrome/browser/ui/exclusive_access/fullscreen_controller.h"
-#include "chrome/browser/ui/views/frame/browser_view.h"
+#include "chrome/browser/ui/views/exclusive_access_bubble_views_context.h"
 #include "chrome/browser/ui/views/frame/immersive_mode_controller.h"
 #include "chrome/browser/ui/views/frame/top_container_view.h"
 #include "chrome/grit/generated_resources.h"
@@ -56,13 +57,12 @@ class ButtonView : public views::View {
  private:
   views::LabelButton* accept_button_;
   views::LabelButton* deny_button_;
-
   DISALLOW_COPY_AND_ASSIGN(ButtonView);
 };
 
 ButtonView::ButtonView(views::ButtonListener* listener,
                        int between_button_spacing)
-    : accept_button_(NULL), deny_button_(NULL) {
+    : accept_button_(nullptr), deny_button_(nullptr) {
   accept_button_ = new views::LabelButton(listener, base::string16());
   accept_button_->SetStyle(views::Button::STYLE_BUTTON);
   accept_button_->SetFocusable(false);
@@ -126,10 +126,10 @@ ExclusiveAccessBubbleViews::ExclusiveAccessView::ExclusiveAccessView(
     const GURL& url,
     ExclusiveAccessBubbleType bubble_type)
     : bubble_(bubble),
-      link_(NULL),
-      mouse_lock_exit_instruction_(NULL),
-      message_label_(NULL),
-      button_view_(NULL),
+      link_(nullptr),
+      mouse_lock_exit_instruction_(nullptr),
+      message_label_(nullptr),
+      button_view_(nullptr),
       browser_fullscreen_exit_accelerator_(accelerator) {
   scoped_ptr<views::BubbleBorder> bubble_border(
       new views::BubbleBorder(views::BubbleBorder::NONE,
@@ -165,7 +165,6 @@ ExclusiveAccessBubbleViews::ExclusiveAccessView::ExclusiveAccessView(
   mouse_lock_exit_instruction_->SetBackgroundColor(background()->get_color());
 
   button_view_ = new ButtonView(this, kPaddingPx);
-  button_view_->accept_button()->SetText(bubble->GetAllowButtonText());
 
   views::GridLayout* layout = new views::GridLayout(this);
   views::ColumnSet* columns = layout->AddColumnSet(0);
@@ -208,7 +207,7 @@ void ExclusiveAccessBubbleViews::ExclusiveAccessView::ButtonPressed(
 void ExclusiveAccessBubbleViews::ExclusiveAccessView::LinkClicked(
     views::Link* link,
     int event_flags) {
-  bubble_->ToggleFullscreen();
+  bubble_->ExitExclusiveAccess();
 }
 
 void ExclusiveAccessBubbleViews::ExclusiveAccessView::UpdateContent(
@@ -223,6 +222,9 @@ void ExclusiveAccessBubbleViews::ExclusiveAccessView::UpdateContent(
     button_view_->SetVisible(true);
     button_view_->deny_button()->SetText(bubble_->GetCurrentDenyButtonText());
     button_view_->deny_button()->SetMinSize(gfx::Size());
+    button_view_->accept_button()->SetText(
+        bubble_->GetCurrentAllowButtonText());
+    button_view_->accept_button()->SetMinSize(gfx::Size());
   } else {
     bool link_visible = true;
     base::string16 accelerator;
@@ -254,12 +256,14 @@ void ExclusiveAccessBubbleViews::ExclusiveAccessView::UpdateContent(
 // ExclusiveAccessBubbleViews --------------------------------------------------
 
 ExclusiveAccessBubbleViews::ExclusiveAccessBubbleViews(
-    BrowserView* browser_view,
+    ExclusiveAccessBubbleViewsContext* context,
     const GURL& url,
     ExclusiveAccessBubbleType bubble_type)
-    : ExclusiveAccessBubble(browser_view->browser(), url, bubble_type),
-      browser_view_(browser_view),
-      popup_(NULL),
+    : ExclusiveAccessBubble(context->GetExclusiveAccessManager(),
+                            url,
+                            bubble_type),
+      bubble_view_context_(context),
+      popup_(nullptr),
       animation_(new gfx::SlideAnimation(this)),
       animated_attribute_(ANIMATED_ATTRIBUTE_BOUNDS) {
   animation_->Reset(1);
@@ -267,7 +271,8 @@ ExclusiveAccessBubbleViews::ExclusiveAccessBubbleViews(
   // Create the contents view.
   ui::Accelerator accelerator(ui::VKEY_UNKNOWN, ui::EF_NONE);
   bool got_accelerator =
-      browser_view_->GetWidget()->GetAccelerator(IDC_FULLSCREEN, &accelerator);
+      bubble_view_context_->GetBubbleAssociatedWidget()->GetAccelerator(
+          IDC_FULLSCREEN, &accelerator);
   DCHECK(got_accelerator);
   view_ = new ExclusiveAccessView(this, accelerator.GetShortcutText(), url,
                                   bubble_type_);
@@ -280,16 +285,17 @@ ExclusiveAccessBubbleViews::ExclusiveAccessBubbleViews(
   views::Widget::InitParams params(views::Widget::InitParams::TYPE_POPUP);
   params.opacity = views::Widget::InitParams::TRANSLUCENT_WINDOW;
   params.ownership = views::Widget::InitParams::WIDGET_OWNS_NATIVE_WIDGET;
-  params.parent = browser_view_->GetWidget()->GetNativeView();
+  params.parent =
+      bubble_view_context_->GetBubbleAssociatedWidget()->GetNativeView();
   params.bounds = GetPopupRect(false);
   popup_->Init(params);
   gfx::Size size = GetPopupRect(true).size();
   popup_->SetContentsView(view_);
-  // We set layout manager to NULL to prevent the widget from sizing its
+  // We set layout manager to nullptr to prevent the widget from sizing its
   // contents to the same size as itself. This prevents the widget contents from
   // shrinking while we animate the height of the popup to give the impression
   // that it is sliding off the top of the screen.
-  popup_->GetRootView()->SetLayoutManager(NULL);
+  popup_->GetRootView()->SetLayoutManager(nullptr);
   view_->SetBounds(0, 0, size.width(), size.height());
   popup_->ShowInactive();  // This does not activate the popup.
 
@@ -297,7 +303,8 @@ ExclusiveAccessBubbleViews::ExclusiveAccessBubbleViews(
 
   registrar_.Add(this, chrome::NOTIFICATION_FULLSCREEN_CHANGED,
                  content::Source<FullscreenController>(
-                     browser_view_->browser()->fullscreen_controller()));
+                     bubble_view_context_->GetExclusiveAccessManager()
+                         ->fullscreen_controller()));
 
   UpdateForImmersiveState();
 }
@@ -347,6 +354,10 @@ void ExclusiveAccessBubbleViews::RepositionIfVisible() {
     UpdateBounds();
 }
 
+views::View* ExclusiveAccessBubbleViews::GetView() {
+  return view_;
+}
+
 void ExclusiveAccessBubbleViews::UpdateMouseWatcher() {
   bool should_watch_mouse = false;
   if (popup_->IsVisible())
@@ -366,7 +377,7 @@ void ExclusiveAccessBubbleViews::UpdateMouseWatcher() {
 
 void ExclusiveAccessBubbleViews::UpdateForImmersiveState() {
   AnimatedAttribute expected_animated_attribute =
-      browser_view_->immersive_mode_controller()->IsEnabled()
+      bubble_view_context_->IsImmersiveModeEnabled()
           ? ANIMATED_ATTRIBUTE_OPACITY
           : ANIMATED_ATTRIBUTE_BOUNDS;
   if (animated_attribute_ != expected_animated_attribute) {
@@ -398,7 +409,7 @@ void ExclusiveAccessBubbleViews::UpdateBounds() {
 }
 
 views::View* ExclusiveAccessBubbleViews::GetBrowserRootView() const {
-  return browser_view_->GetWidget()->GetRootView();
+  return bubble_view_context_->GetBubbleAssociatedWidget()->GetRootView();
 }
 
 void ExclusiveAccessBubbleViews::AnimationProgressed(
@@ -431,15 +442,16 @@ gfx::Rect ExclusiveAccessBubbleViews::GetPopupRect(
   gfx::Size size(view_->GetPreferredSize());
   // NOTE: don't use the bounds of the root_view_. On linux GTK changing window
   // size is async. Instead we use the size of the screen.
-  gfx::Screen* screen =
-      gfx::Screen::GetScreenFor(browser_view_->GetWidget()->GetNativeView());
+  gfx::Screen* screen = gfx::Screen::GetScreenFor(
+      bubble_view_context_->GetBubbleAssociatedWidget()->GetNativeView());
   gfx::Rect screen_bounds =
       screen->GetDisplayNearestWindow(
-                  browser_view_->GetWidget()->GetNativeView()).bounds();
+                  bubble_view_context_->GetBubbleAssociatedWidget()
+                      ->GetNativeView()).bounds();
   int x = screen_bounds.x() + (screen_bounds.width() - size.width()) / 2;
 
   int top_container_bottom = screen_bounds.y();
-  if (browser_view_->immersive_mode_controller()->IsEnabled()) {
+  if (bubble_view_context_->IsImmersiveModeEnabled()) {
     // Skip querying the top container height in non-immersive fullscreen
     // because:
     // - The top container height is always zero in non-immersive fullscreen.
@@ -450,7 +462,7 @@ gfx::Rect ExclusiveAccessBubbleViews::GetPopupRect(
     // revealed. When revealed, the top container has the same height as before
     // entering fullscreen.
     top_container_bottom =
-        browser_view_->top_container()->GetBoundsInScreen().bottom();
+        bubble_view_context_->GetTopContainerBoundsInScreen().bottom();
   }
   int y = top_container_bottom + kPopupTopPx;
 
@@ -467,7 +479,8 @@ gfx::Rect ExclusiveAccessBubbleViews::GetPopupRect(
 
 gfx::Point ExclusiveAccessBubbleViews::GetCursorScreenPoint() {
   gfx::Point cursor_pos =
-      gfx::Screen::GetScreenFor(browser_view_->GetWidget()->GetNativeView())
+      gfx::Screen::GetScreenFor(
+          bubble_view_context_->GetBubbleAssociatedWidget()->GetNativeView())
           ->GetCursorScreenPoint();
   views::View::ConvertPointFromScreen(GetBrowserRootView(), &cursor_pos);
   return cursor_pos;
@@ -478,7 +491,7 @@ bool ExclusiveAccessBubbleViews::WindowContainsPoint(gfx::Point pos) {
 }
 
 bool ExclusiveAccessBubbleViews::IsWindowActive() {
-  return browser_view_->GetWidget()->IsActive();
+  return bubble_view_context_->GetBubbleAssociatedWidget()->IsActive();
 }
 
 void ExclusiveAccessBubbleViews::Hide() {
@@ -496,7 +509,7 @@ bool ExclusiveAccessBubbleViews::IsAnimating() {
 }
 
 bool ExclusiveAccessBubbleViews::CanMouseTriggerSlideIn() const {
-  return !browser_view_->immersive_mode_controller()->IsEnabled();
+  return !bubble_view_context_->IsImmersiveModeEnabled();
 }
 
 void ExclusiveAccessBubbleViews::Observe(

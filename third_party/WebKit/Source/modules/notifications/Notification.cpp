@@ -31,7 +31,11 @@
 #include "config.h"
 #include "modules/notifications/Notification.h"
 
+#include "bindings/core/v8/ExceptionState.h"
+#include "bindings/core/v8/ScriptState.h"
+#include "bindings/core/v8/ScriptValue.h"
 #include "bindings/core/v8/ScriptWrappable.h"
+#include "bindings/core/v8/SerializedScriptValueFactory.h"
 #include "core/dom/Document.h"
 #include "core/dom/ExecutionContext.h"
 #include "core/dom/ExecutionContextTask.h"
@@ -40,10 +44,13 @@
 #include "core/frame/UseCounter.h"
 #include "modules/notifications/NotificationOptions.h"
 #include "modules/notifications/NotificationPermissionClient.h"
+#include "platform/RuntimeEnabledFeatures.h"
+#include "platform/UserGestureIndicator.h"
 #include "public/platform/Platform.h"
-#include "public/platform/WebNotificationData.h"
-#include "public/platform/WebNotificationManager.h"
 #include "public/platform/WebSerializedOrigin.h"
+#include "public/platform/WebString.h"
+#include "public/platform/modules/notifications/WebNotificationData.h"
+#include "public/platform/modules/notifications/WebNotificationManager.h"
 
 namespace blink {
 namespace {
@@ -55,14 +62,36 @@ WebNotificationManager* notificationManager()
 
 } // namespace
 
-Notification* Notification::create(ExecutionContext* context, const String& title, const NotificationOptions& options)
+Notification* Notification::create(ExecutionContext* context, const String& title, const NotificationOptions& options, ExceptionState& exceptionState)
 {
+    // The Web Notification constructor may be disabled through a runtime feature. The
+    // behavior of the constructor is changing, but not completely agreed upon yet.
+    if (!RuntimeEnabledFeatures::notificationConstructorEnabled()) {
+        exceptionState.throwTypeError("Illegal constructor. Use ServiceWorkerRegistration.showNotification() instead.");
+        return nullptr;
+    }
+
+    // The Web Notification constructor may not be used in Service Worker contexts.
+    if (context->isServiceWorkerGlobalScope()) {
+        exceptionState.throwTypeError("Illegal constructor.");
+        return nullptr;
+    }
+
+    RefPtr<SerializedScriptValue> data;
+    if (options.hasData()) {
+        data = SerializedScriptValueFactory::instance().create(options.data(), nullptr, exceptionState, options.data().isolate());
+        if (exceptionState.hadException())
+            return nullptr;
+    }
+
     Notification* notification = new Notification(title, context);
 
     notification->setBody(options.body());
     notification->setTag(options.tag());
     notification->setLang(options.lang());
     notification->setDir(options.dir());
+    notification->setSilent(options.silent());
+    notification->setSerializedData(data.release());
     if (options.hasIcon()) {
         KURL iconUrl = options.icon().isEmpty() ? KURL() : context->completeURL(options.icon());
         if (!iconUrl.isEmpty() && iconUrl.isValid())
@@ -88,9 +117,15 @@ Notification* Notification::create(ExecutionContext* context, const String& pers
     notification->setLang(data.lang);
     notification->setBody(data.body);
     notification->setTag(data.tag);
+    notification->setSilent(data.silent);
 
     if (!data.icon.isEmpty())
         notification->setIconUrl(data.icon);
+
+    if (!data.data.isEmpty()) {
+        notification->setSerializedData(SerializedScriptValueFactory::instance().createFromWire(data.data));
+        notification->serializedData()->registerMemoryAllocatedWithCurrentScriptContext();
+    }
 
     notification->setState(NotificationStateShowing);
     notification->suspendIfNeeded();
@@ -101,6 +136,7 @@ Notification::Notification(const String& title, ExecutionContext* context)
     : ActiveDOMObject(context)
     , m_title(title)
     , m_dir("auto")
+    , m_silent(false)
     , m_state(NotificationStateIdle)
     , m_asyncRunner(this, &Notification::show)
 {
@@ -130,9 +166,13 @@ void Notification::show()
     SecurityOrigin* origin = executionContext()->securityOrigin();
     ASSERT(origin);
 
-    // FIXME: Associate the appropriate text direction with the notification.
     // FIXME: Do CSP checks on the associated notification icon.
-    WebNotificationData notificationData(m_title, WebNotificationData::DirectionLeftToRight, m_lang, m_body, m_tag, m_iconUrl);
+    WebNotificationData::Direction dir = m_dir == "rtl" ? WebNotificationData::DirectionRightToLeft : WebNotificationData::DirectionLeftToRight;
+
+    // The lifetime and availability of non-persistent notifications is tied to the page
+    // they were created by, and thus the data doesn't have to be known to the embedder.
+    String emptyDataAsWireString;
+    WebNotificationData notificationData(m_title, dir, m_lang, m_body, m_tag, m_iconUrl, m_silent, emptyDataAsWireString);
     notificationManager()->show(WebSerializedOrigin(*origin), notificationData, this);
 
     m_state = NotificationStateShowing;
@@ -145,13 +185,17 @@ void Notification::close()
 
     if (m_persistentId.isEmpty()) {
         // Fire the close event asynchronously.
-        executionContext()->postTask(createSameThreadTask(&Notification::dispatchCloseEvent, this));
+        executionContext()->postTask(FROM_HERE, createSameThreadTask(&Notification::dispatchCloseEvent, this));
 
         m_state = NotificationStateClosing;
         notificationManager()->close(this);
     } else {
         m_state = NotificationStateClosed;
-        notificationManager()->closePersistent(m_persistentId);
+
+        SecurityOrigin* origin = executionContext()->securityOrigin();
+        ASSERT(origin);
+
+        notificationManager()->closePersistent(WebSerializedOrigin(*origin), m_persistentId);
     }
 }
 
@@ -189,26 +233,22 @@ TextDirection Notification::direction() const
     return dir() == "rtl" ? RTL : LTR;
 }
 
-const String& Notification::permissionString(WebNotificationPermission permission)
+String Notification::permissionString(WebNotificationPermission permission)
 {
-    DEFINE_STATIC_LOCAL(const String, allowedPermission, ("granted"));
-    DEFINE_STATIC_LOCAL(const String, deniedPermission, ("denied"));
-    DEFINE_STATIC_LOCAL(const String, defaultPermission, ("default"));
-
     switch (permission) {
     case WebNotificationPermissionAllowed:
-        return allowedPermission;
+        return "granted";
     case WebNotificationPermissionDenied:
-        return deniedPermission;
+        return "denied";
     case WebNotificationPermissionDefault:
-        return defaultPermission;
+        return "default";
     }
 
     ASSERT_NOT_REACHED();
-    return deniedPermission;
+    return "denied";
 }
 
-const String& Notification::permission(ExecutionContext* context)
+String Notification::permission(ExecutionContext* context)
 {
     return permissionString(checkPermission(context));
 }
@@ -254,7 +294,15 @@ bool Notification::hasPendingActivity() const
     return m_state == NotificationStateShowing || m_asyncRunner.isActive();
 }
 
-void Notification::trace(Visitor* visitor)
+ScriptValue Notification::data(ScriptState* scriptState) const
+{
+    if (!m_serializedData)
+        return ScriptValue::createNull(scriptState);
+
+    return ScriptValue(scriptState, m_serializedData->deserialize(scriptState->isolate()));
+}
+
+DEFINE_TRACE(Notification)
 {
     RefCountedGarbageCollectedEventTargetWithInlineData<Notification>::trace(visitor);
     ActiveDOMObject::trace(visitor);

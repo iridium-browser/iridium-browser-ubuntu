@@ -19,12 +19,12 @@
 #include "base/test/sequenced_worker_pool_owner.h"
 #include "base/threading/sequenced_worker_pool.h"
 #include "base/time/time.h"
-#include "content/public/browser/cookie_crypto_delegate.h"
 #include "content/public/browser/cookie_store_factory.h"
 #include "crypto/encryptor.h"
 #include "crypto/symmetric_key.h"
 #include "net/cookies/canonical_cookie.h"
 #include "net/cookies/cookie_constants.h"
+#include "net/extras/sqlite/cookie_crypto_delegate.h"
 #include "sql/connection.h"
 #include "sql/meta_table.h"
 #include "sql/statement.h"
@@ -37,7 +37,7 @@ namespace {
 
 const base::FilePath::CharType kCookieFilename[] = FILE_PATH_LITERAL("Cookies");
 
-class CookieCryptor : public content::CookieCryptoDelegate {
+class CookieCryptor : public net::CookieCryptoDelegate {
  public:
   CookieCryptor();
   bool EncryptString(const std::string& plaintext,
@@ -159,10 +159,9 @@ class SQLitePersistentCookieStoreTest : public testing::Test {
                  const std::string& domain,
                  const std::string& path,
                  const base::Time& creation) {
-    store_->AddCookie(
-        net::CanonicalCookie(GURL(), name, value, domain, path, creation,
-                             creation, creation, false, false,
-                             net::COOKIE_PRIORITY_DEFAULT));
+    store_->AddCookie(net::CanonicalCookie(
+        GURL(), name, value, domain, path, creation, creation, creation, false,
+        false, false, net::COOKIE_PRIORITY_DEFAULT));
   }
 
   std::string ReadRawDBContents() {
@@ -189,7 +188,7 @@ class SQLitePersistentCookieStoreTest : public testing::Test {
   CanonicalCookieVector cookies_;
   base::ScopedTempDir temp_dir_;
   scoped_refptr<SQLitePersistentCookieStore> store_;
-  scoped_ptr<content::CookieCryptoDelegate> cookie_crypto_delegate_;
+  scoped_ptr<net::CookieCryptoDelegate> cookie_crypto_delegate_;
 };
 
 TEST_F(SQLitePersistentCookieStoreTest, TestInvalidMetaTableRecovery) {
@@ -361,11 +360,10 @@ TEST_F(SQLitePersistentCookieStoreTest, TestLoadOldSessionCookies) {
   InitializeStore(false, true);
 
   // Add a session cookie.
-  store_->AddCookie(
-      net::CanonicalCookie(
-          GURL(), "C", "D", "sessioncookie.com", "/", base::Time::Now(),
-          base::Time(), base::Time::Now(), false, false,
-          net::COOKIE_PRIORITY_DEFAULT));
+  store_->AddCookie(net::CanonicalCookie(GURL(), "C", "D", "sessioncookie.com",
+                                         "/", base::Time::Now(), base::Time(),
+                                         base::Time::Now(), false, false, false,
+                                         net::COOKIE_PRIORITY_DEFAULT));
 
   // Force the store to write its data to the disk.
   DestroyStore();
@@ -389,11 +387,10 @@ TEST_F(SQLitePersistentCookieStoreTest, TestDontLoadOldSessionCookies) {
   InitializeStore(false, true);
 
   // Add a session cookie.
-  store_->AddCookie(
-      net::CanonicalCookie(
-          GURL(), "C", "D", "sessioncookie.com", "/", base::Time::Now(),
-          base::Time(), base::Time::Now(), false, false,
-          net::COOKIE_PRIORITY_DEFAULT));
+  store_->AddCookie(net::CanonicalCookie(GURL(), "C", "D", "sessioncookie.com",
+                                         "/", base::Time::Now(), base::Time(),
+                                         base::Time::Now(), false, false, false,
+                                         net::COOKIE_PRIORITY_DEFAULT));
 
   // Force the store to write its data to the disk.
   DestroyStore();
@@ -420,19 +417,16 @@ TEST_F(SQLitePersistentCookieStoreTest, PersistIsPersistent) {
   static const char kPersistentName[] = "persistent";
 
   // Add a session cookie.
-  store_->AddCookie(
-      net::CanonicalCookie(
-          GURL(), kSessionName, "val", "sessioncookie.com", "/",
-          base::Time::Now(), base::Time(), base::Time::Now(), false, false,
-          net::COOKIE_PRIORITY_DEFAULT));
+  store_->AddCookie(net::CanonicalCookie(
+      GURL(), kSessionName, "val", "sessioncookie.com", "/", base::Time::Now(),
+      base::Time(), base::Time::Now(), false, false, false,
+      net::COOKIE_PRIORITY_DEFAULT));
   // Add a persistent cookie.
-  store_->AddCookie(
-      net::CanonicalCookie(
-          GURL(), kPersistentName, "val", "sessioncookie.com", "/",
-          base::Time::Now() - base::TimeDelta::FromDays(1),
-          base::Time::Now() + base::TimeDelta::FromDays(1),
-          base::Time::Now(), false, false,
-          net::COOKIE_PRIORITY_DEFAULT));
+  store_->AddCookie(net::CanonicalCookie(
+      GURL(), kPersistentName, "val", "sessioncookie.com", "/",
+      base::Time::Now() - base::TimeDelta::FromDays(1),
+      base::Time::Now() + base::TimeDelta::FromDays(1), base::Time::Now(),
+      false, false, false, net::COOKIE_PRIORITY_DEFAULT));
 
   // Force the store to write its data to the disk.
   DestroyStore();
@@ -473,31 +467,25 @@ TEST_F(SQLitePersistentCookieStoreTest, PriorityIsPersistent) {
   InitializeStore(false, true);
 
   // Add a low-priority persistent cookie.
-  store_->AddCookie(
-      net::CanonicalCookie(
-          GURL(), kLowName, kCookieValue, kCookieDomain, kCookiePath,
-          base::Time::Now() - base::TimeDelta::FromMinutes(1),
-          base::Time::Now() + base::TimeDelta::FromDays(1),
-          base::Time::Now(), false, false,
-          net::COOKIE_PRIORITY_LOW));
+  store_->AddCookie(net::CanonicalCookie(
+      GURL(), kLowName, kCookieValue, kCookieDomain, kCookiePath,
+      base::Time::Now() - base::TimeDelta::FromMinutes(1),
+      base::Time::Now() + base::TimeDelta::FromDays(1), base::Time::Now(),
+      false, false, false, net::COOKIE_PRIORITY_LOW));
 
   // Add a medium-priority persistent cookie.
-  store_->AddCookie(
-      net::CanonicalCookie(
-          GURL(), kMediumName, kCookieValue, kCookieDomain, kCookiePath,
-          base::Time::Now() - base::TimeDelta::FromMinutes(2),
-          base::Time::Now() + base::TimeDelta::FromDays(1),
-          base::Time::Now(), false, false,
-          net::COOKIE_PRIORITY_MEDIUM));
+  store_->AddCookie(net::CanonicalCookie(
+      GURL(), kMediumName, kCookieValue, kCookieDomain, kCookiePath,
+      base::Time::Now() - base::TimeDelta::FromMinutes(2),
+      base::Time::Now() + base::TimeDelta::FromDays(1), base::Time::Now(),
+      false, false, false, net::COOKIE_PRIORITY_MEDIUM));
 
   // Add a high-priority peristent cookie.
-  store_->AddCookie(
-      net::CanonicalCookie(
-          GURL(), kHighName, kCookieValue, kCookieDomain, kCookiePath,
-          base::Time::Now() - base::TimeDelta::FromMinutes(3),
-          base::Time::Now() + base::TimeDelta::FromDays(1),
-          base::Time::Now(), false, false,
-          net::COOKIE_PRIORITY_HIGH));
+  store_->AddCookie(net::CanonicalCookie(
+      GURL(), kHighName, kCookieValue, kCookieDomain, kCookiePath,
+      base::Time::Now() - base::TimeDelta::FromMinutes(3),
+      base::Time::Now() + base::TimeDelta::FromDays(1), base::Time::Now(),
+      false, false, false, net::COOKIE_PRIORITY_HIGH));
 
   // Force the store to write its data to the disk.
   DestroyStore();

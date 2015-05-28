@@ -32,15 +32,18 @@
 #include "config.h"
 #include "core/loader/LinkLoader.h"
 
-#include "core/FetchInitiatorTypeNames.h"
 #include "core/dom/Document.h"
+#include "core/fetch/FetchInitiatorTypeNames.h"
 #include "core/fetch/FetchRequest.h"
 #include "core/fetch/ResourceFetcher.h"
 #include "core/frame/Settings.h"
 #include "core/html/LinkRelAttribute.h"
+#include "core/inspector/ConsoleMessage.h"
+#include "core/loader/LinkHeader.h"
 #include "core/loader/PrerenderHandle.h"
 #include "platform/Prerender.h"
-#include "platform/network/DNS.h"
+#include "platform/RuntimeEnabledFeatures.h"
+#include "platform/network/NetworkHints.h"
 #include "public/platform/WebPrerender.h"
 
 namespace blink {
@@ -111,15 +114,56 @@ void LinkLoader::didSendDOMContentLoadedForPrerender()
     m_client->didSendDOMContentLoadedForLinkPrerender();
 }
 
-bool LinkLoader::loadLink(const LinkRelAttribute& relAttribute, const AtomicString& crossOriginMode, const String& type, const KURL& href, Document& document)
+static void dnsPrefetchIfNeeded(const LinkRelAttribute& relAttribute, const KURL& href, Document& document)
 {
     if (relAttribute.isDNSPrefetch()) {
         Settings* settings = document.settings();
         // FIXME: The href attribute of the link element can be in "//hostname" form, and we shouldn't attempt
         // to complete that as URL <https://bugs.webkit.org/show_bug.cgi?id=48857>.
-        if (settings && settings->dnsPrefetchingEnabled() && href.isValid() && !href.isEmpty())
+        if (settings && settings->dnsPrefetchingEnabled() && href.isValid() && !href.isEmpty()) {
+            if (settings->logDnsPrefetchAndPreconnect())
+                document.addConsoleMessage(ConsoleMessage::create(OtherMessageSource, DebugMessageLevel, String("DNS prefetch triggered for " + href.host())));
             prefetchDNS(href.host());
+        }
     }
+}
+
+static void preconnectIfNeeded(const LinkRelAttribute& relAttribute, const KURL& href, Document& document)
+{
+    if (relAttribute.isPreconnect() && href.isValid()) {
+        ASSERT(RuntimeEnabledFeatures::linkPreconnectEnabled());
+        if (document.settings()->logDnsPrefetchAndPreconnect())
+            document.addConsoleMessage(ConsoleMessage::create(OtherMessageSource, DebugMessageLevel, String("Preconnect triggered for " + href.host())));
+        preconnect(href);
+    }
+}
+
+bool LinkLoader::loadLinkFromHeader(const String& headerValue, Document* document)
+{
+    if (!document)
+        return false;
+    LinkHeaderSet headerSet(headerValue);
+    for (auto& header : headerSet) {
+        if (!header.valid() || header.url().isEmpty() || header.rel().isEmpty())
+            return false;
+        LinkRelAttribute relAttribute(header.rel());
+        KURL url = document->completeURL(header.url());
+        if (RuntimeEnabledFeatures::linkHeaderEnabled())
+            dnsPrefetchIfNeeded(relAttribute, url, *document);
+
+        if (RuntimeEnabledFeatures::linkPreconnectEnabled())
+            preconnectIfNeeded(relAttribute, url, *document);
+
+        // FIXME: Add more supported headers as needed.
+    }
+    return true;
+}
+
+bool LinkLoader::loadLink(const LinkRelAttribute& relAttribute, const AtomicString& crossOriginMode, const String& type, const KURL& href, Document& document)
+{
+    dnsPrefetchIfNeeded(relAttribute, href, document);
+
+    preconnectIfNeeded(relAttribute, href, document);
 
     // FIXME(crbug.com/323096): Should take care of import.
     if ((relAttribute.isLinkPrefetch() || relAttribute.isLinkSubresource() || relAttribute.isTransitionExitingStylesheet()) && href.isValid() && document.frame()) {
@@ -157,7 +201,7 @@ void LinkLoader::released()
     }
 }
 
-void LinkLoader::trace(Visitor* visitor)
+DEFINE_TRACE(LinkLoader)
 {
     visitor->trace(m_prerender);
 }

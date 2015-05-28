@@ -27,7 +27,10 @@
 #define ContentSecurityPolicy_h
 
 #include "bindings/core/v8/ScriptState.h"
+#include "core/CoreExport.h"
 #include "core/dom/ExecutionContext.h"
+#include "core/dom/SecurityContext.h"
+#include "core/fetch/Resource.h"
 #include "core/frame/ConsoleTypes.h"
 #include "platform/network/ContentSecurityPolicyParsers.h"
 #include "platform/network/HTTPParsers.h"
@@ -59,8 +62,8 @@ typedef int SandboxFlags;
 typedef Vector<OwnPtr<CSPDirectiveList>> CSPDirectiveListVector;
 typedef WillBePersistentHeapVector<RefPtrWillBeMember<ConsoleMessage>> ConsoleMessageVector;
 
-class ContentSecurityPolicy : public RefCounted<ContentSecurityPolicy> {
-    WTF_MAKE_FAST_ALLOCATED;
+class CORE_EXPORT ContentSecurityPolicy : public RefCounted<ContentSecurityPolicy> {
+    WTF_MAKE_FAST_ALLOCATED(ContentSecurityPolicy);
 public:
     // CSP Level 1 Directives
     static const char ConnectSrc[];
@@ -90,11 +93,26 @@ public:
 
     // Mixed Content Directive
     // https://w3c.github.io/webappsec/specs/mixedcontent/#strict-mode
-    static const char StrictMixedContentChecking[];
+    static const char BlockAllMixedContent[];
+
+    // https://w3c.github.io/webappsec/specs/upgrade/
+    static const char UpgradeInsecureRequests[];
 
     enum ReportingStatus {
         SendReport,
         SuppressReport
+    };
+
+    // When a resource is loaded after a redirect, source paths are
+    // ignored in the matching algorithm.
+    enum RedirectStatus {
+        DidRedirect,
+        DidNotRedirect
+    };
+
+    enum ExceptionStatus {
+        WillThrowException,
+        WillNotThrowException
     };
 
     static PassRefPtr<ContentSecurityPolicy> create()
@@ -105,6 +123,7 @@ public:
 
     void bindToExecutionContext(ExecutionContext*);
     void copyStateFrom(const ContentSecurityPolicy*);
+    void copyPluginTypesFrom(const ContentSecurityPolicy*);
 
     void didReceiveHeaders(const ContentSecurityPolicyResponseHeaders&);
     void didReceiveHeader(const String&, ContentSecurityPolicyHeaderType, ContentSecurityPolicyHeaderSource);
@@ -116,26 +135,41 @@ public:
 
     bool allowJavaScriptURLs(const String& contextURL, const WTF::OrdinalNumber& contextLine, ReportingStatus = SendReport) const;
     bool allowInlineEventHandlers(const String& contextURL, const WTF::OrdinalNumber& contextLine, ReportingStatus = SendReport) const;
-    bool allowInlineScript(const String& contextURL, const WTF::OrdinalNumber& contextLine, ReportingStatus = SendReport) const;
-    bool allowInlineStyle(const String& contextURL, const WTF::OrdinalNumber& contextLine, ReportingStatus = SendReport) const;
-    bool allowEval(ScriptState* = nullptr, ReportingStatus = SendReport) const;
+    bool allowInlineScript(const String& contextURL, const WTF::OrdinalNumber& contextLine, const String& scriptContent, ReportingStatus = SendReport) const;
+    bool allowInlineStyle(const String& contextURL, const WTF::OrdinalNumber& contextLine, const String& styleContent, ReportingStatus = SendReport) const;
+    // When the reporting status is |SendReport|, the |ExceptionStatus|
+    // should indicate whether the caller will throw a JavaScript
+    // exception in the event of a violation. When the caller will throw
+    // an exception, ContentSecurityPolicy does not log a violation
+    // message to the console because it would be redundant.
+    bool allowEval(ScriptState* = nullptr, ReportingStatus = SendReport, ExceptionStatus = WillNotThrowException) const;
     bool allowPluginType(const String& type, const String& typeAttribute, const KURL&, ReportingStatus = SendReport) const;
+    // Checks whether the plugin type should be allowed in the given
+    // document; enforces the CSP rule that PluginDocuments inherit
+    // plugin-types directives from the parent document.
+    bool allowPluginTypeForDocument(const Document&, const String& type, const String& typeAttribute, const KURL&, ReportingStatus = SendReport) const;
 
-    bool allowScriptFromSource(const KURL&, ReportingStatus = SendReport) const;
-    bool allowObjectFromSource(const KURL&, ReportingStatus = SendReport) const;
-    bool allowChildFrameFromSource(const KURL&, ReportingStatus = SendReport) const;
-    bool allowImageFromSource(const KURL&, ReportingStatus = SendReport) const;
-    bool allowStyleFromSource(const KURL&, ReportingStatus = SendReport) const;
-    bool allowFontFromSource(const KURL&, ReportingStatus = SendReport) const;
-    bool allowMediaFromSource(const KURL&, ReportingStatus = SendReport) const;
-    bool allowConnectToSource(const KURL&, ReportingStatus = SendReport) const;
-    bool allowFormAction(const KURL&, ReportingStatus = SendReport) const;
-    bool allowBaseURI(const KURL&, ReportingStatus = SendReport) const;
+    bool allowScriptFromSource(const KURL&, RedirectStatus = DidNotRedirect, ReportingStatus = SendReport) const;
+    bool allowObjectFromSource(const KURL&, RedirectStatus = DidNotRedirect, ReportingStatus = SendReport) const;
+    bool allowChildFrameFromSource(const KURL&, RedirectStatus = DidNotRedirect, ReportingStatus = SendReport) const;
+    bool allowImageFromSource(const KURL&, RedirectStatus = DidNotRedirect, ReportingStatus = SendReport) const;
+    bool allowStyleFromSource(const KURL&, RedirectStatus = DidNotRedirect, ReportingStatus = SendReport) const;
+    bool allowFontFromSource(const KURL&, RedirectStatus = DidNotRedirect, ReportingStatus = SendReport) const;
+    bool allowMediaFromSource(const KURL&, RedirectStatus = DidNotRedirect, ReportingStatus = SendReport) const;
+    bool allowConnectToSource(const KURL&, RedirectStatus = DidNotRedirect, ReportingStatus = SendReport) const;
+    bool allowFormAction(const KURL&, RedirectStatus = DidNotRedirect, ReportingStatus = SendReport) const;
+    bool allowBaseURI(const KURL&, RedirectStatus = DidNotRedirect, ReportingStatus = SendReport) const;
+    bool allowWorkerContextFromSource(const KURL&, RedirectStatus = DidNotRedirect, ReportingStatus = SendReport) const;
+
+    bool allowManifestFromSource(const KURL&, RedirectStatus = DidNotRedirect, ReportingStatus = SendReport) const;
+
+    // |allowAncestors| does not need to know whether the resource was a
+    // result of a redirect. After a redirect, source paths are usually
+    // ignored to stop a page from learning the path to which the
+    // request was redirected, but this is not a concern for ancestors,
+    // because a child frame can't manipulate the URL of a cross-origin
+    // parent.
     bool allowAncestors(LocalFrame*, const KURL&, ReportingStatus = SendReport) const;
-    bool allowChildContextFromSource(const KURL&, ReportingStatus = SendReport) const;
-    bool allowWorkerContextFromSource(const KURL&, ReportingStatus = SendReport) const;
-
-    bool allowManifestFromSource(const KURL&, ReportingStatus = SendReport) const;
 
     // The nonce and hash allow functions are guaranteed to not have any side
     // effects, including reporting.
@@ -153,7 +187,6 @@ public:
 
     ReflectedXSSDisposition reflectedXSSDisposition() const;
 
-    ReferrerPolicy referrerPolicy() const;
     bool didSetReferrerPolicy() const;
 
     void setOverrideAllowInlineStyle(bool);
@@ -193,10 +226,15 @@ public:
     void enforceStrictMixedContentChecking();
     String evalDisabledErrorMessage() const;
 
+    void setInsecureRequestsPolicy(SecurityContext::InsecureRequestsPolicy);
+    SecurityContext::InsecureRequestsPolicy insecureRequestsPolicy() const { return m_insecureRequestsPolicy; };
+
     bool urlMatchesSelf(const KURL&) const;
     bool protocolMatchesSelf(const KURL&) const;
 
     bool experimentalFeaturesEnabled() const;
+
+    bool shouldSendCSPHeader(Resource::Type) const;
 
     static bool shouldBypassMainWorld(const ExecutionContext*);
 
@@ -235,6 +273,7 @@ private:
     bool m_enforceStrictMixedContentChecking;
     ReferrerPolicy m_referrerPolicy;
     String m_disableEvalErrorMessage;
+    SecurityContext::InsecureRequestsPolicy m_insecureRequestsPolicy;
 
     OwnPtr<CSPSource> m_selfSource;
     String m_selfProtocol;

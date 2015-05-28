@@ -61,11 +61,11 @@ class DesktopNotificationService : public PermissionContextBase
       const PermissionRequestID& request_id,
       const GURL& requesting_origin,
       bool user_gesture,
-      const base::Callback<void(bool)>& result_callback);
+      const BrowserPermissionCallback& result_callback);
 
   // Returns true if the notifier with |notifier_id| is allowed to send
   // notifications.
-  bool IsNotifierEnabled(const message_center::NotifierId& notifier_id);
+  bool IsNotifierEnabled(const message_center::NotifierId& notifier_id) const;
 
   // Updates the availability of the notifier.
   void SetNotifierEnabled(const message_center::NotifierId& notifier_id,
@@ -93,7 +93,7 @@ class DesktopNotificationService : public PermissionContextBase
   // PermissionContextBase:
   void UpdateContentSetting(const GURL& requesting_origin,
                             const GURL& embedder_origin,
-                            bool allowed) override;
+                            ContentSetting content_setting) override;
 
   // The profile which owns this object.
   Profile* profile_;

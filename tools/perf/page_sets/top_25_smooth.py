@@ -9,7 +9,7 @@ from page_sets import top_pages
 
 def _IssueMarkerAndScroll(action_runner):
   interaction = action_runner.BeginGestureInteraction(
-      'ScrollAction', is_smooth=True)
+      'ScrollAction')
   action_runner.ScrollPage()
   interaction.End()
 
@@ -47,7 +47,7 @@ class GmailSmoothPage(top_pages.GmailPage):
     action_runner.WaitForJavaScriptCondition(
         'window.__scrollableElementForTelemetry != null')
     interaction = action_runner.BeginGestureInteraction(
-        'ScrollAction', is_smooth=True)
+        'ScrollAction')
     action_runner.ScrollElement(
         element_function='window.__scrollableElementForTelemetry')
     interaction.End()
@@ -59,7 +59,7 @@ class GoogleCalendarSmoothPage(top_pages.GoogleCalendarPage):
 
   def RunPageInteractions(self, action_runner):
     interaction = action_runner.BeginGestureInteraction(
-        'ScrollAction', is_smooth=True)
+        'ScrollAction')
     action_runner.ScrollElement(selector='#scrolltimedeventswk')
     interaction.End()
 
@@ -70,7 +70,7 @@ class GoogleDocSmoothPage(top_pages.GoogleDocPage):
 
   def RunPageInteractions(self, action_runner):
     interaction = action_runner.BeginGestureInteraction(
-        'ScrollAction', is_smooth=True)
+        'ScrollAction')
     action_runner.ScrollElement(selector='.kix-appview-editor')
     interaction.End()
 
@@ -81,7 +81,7 @@ class ESPNSmoothPage(top_pages.ESPNPage):
 
   def RunPageInteractions(self, action_runner):
     interaction = action_runner.BeginGestureInteraction(
-        'ScrollAction', is_smooth=True)
+        'ScrollAction')
     action_runner.ScrollPage(left_start_ratio=0.1)
     interaction.End()
 
@@ -93,7 +93,7 @@ class Top25SmoothPageSet(page_set_module.PageSet):
   def __init__(self):
     super(Top25SmoothPageSet, self).__init__(
         user_agent_type='desktop',
-        archive_data_file='data/top_25.json',
+        archive_data_file='data/top_25_smooth.json',
         bucket=page_set_module.PARTNER_BUCKET)
 
     self.AddUserStory(_CreatePageClassWithSmoothInteractions(

@@ -15,8 +15,7 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/threading/thread.h"
 #include "base/values.h"
-#include "chrome/browser/chrome_notification_types.h"
-#include "chrome/browser/history/top_sites.h"
+#include "chrome/browser/history/top_sites_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/webui/favicon_source.h"
 #include "chrome/browser/ui/webui/ntp/ntp_stats.h"
@@ -25,10 +24,10 @@
 #include "chrome/browser/ui/webui/ntp/thumbnail_source.h"
 #include "chrome/common/url_constants.h"
 #include "components/history/core/browser/page_usage_data.h"
+#include "components/history/core/browser/top_sites.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
-#include "content/public/browser/notification_source.h"
 #include "content/public/browser/url_data_source.h"
 #include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
@@ -39,7 +38,8 @@
 using base::UserMetricsAction;
 
 SuggestionsHandler::SuggestionsHandler()
-    : got_first_suggestions_request_(false),
+    : scoped_observer_(this),
+      got_first_suggestions_request_(false),
       suggestions_viewed_(false),
       user_action_logged_(false) {
 }
@@ -69,17 +69,17 @@ void SuggestionsHandler::RegisterMessages() {
 
   // TODO(georgey) change the source of the web-sites to provide our data.
   // Initial commit uses top sites as a data source.
-  history::TopSites* top_sites = profile->GetTopSites();
+  scoped_refptr<history::TopSites> top_sites =
+      TopSitesFactory::GetForProfile(profile);
   if (top_sites) {
     // TopSites updates itself after a delay. This is especially noticable when
     // your profile is empty. Ask TopSites to update itself when we're about to
     // show the new tab page.
     top_sites->SyncWithHistory();
 
-    // Register for notification when TopSites changes so that we can update
-    // ourself.
-    registrar_.Add(this, chrome::NOTIFICATION_TOP_SITES_CHANGED,
-                   content::Source<history::TopSites>(top_sites));
+    // Register as TopSitesObserver so that we can update ourselves when the
+    // TopSites changes.
+    scoped_observer_.Add(top_sites.get());
   }
 
   // Setup the suggestions sources.
@@ -175,11 +175,10 @@ void SuggestionsHandler::HandleSuggestedSitesSelected(
   suggestions_viewed_ = true;
 }
 
-void SuggestionsHandler::Observe(int type,
-                                 const content::NotificationSource& source,
-                                 const content::NotificationDetails& details) {
-  DCHECK_EQ(type, chrome::NOTIFICATION_TOP_SITES_CHANGED);
+void SuggestionsHandler::TopSitesLoaded(history::TopSites* top_sites) {
+}
 
+void SuggestionsHandler::TopSitesChanged(history::TopSites* top_sites) {
   // Suggestions urls changed, query again.
   suggestions_combiner_->FetchItems(Profile::FromWebUI(web_ui()));
 }

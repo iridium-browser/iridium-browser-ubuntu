@@ -51,6 +51,9 @@
 #include "ui/aura/remote_window_tree_host_win.h"
 #endif
 
+using bookmarks::BookmarkModel;
+using bookmarks::BookmarkNode;
+
 namespace extensions {
 
 namespace keys = bookmark_api_constants;
@@ -209,7 +212,8 @@ bool BookmarksFunction::CanBeModified(const BookmarkNode* node) {
     return false;
   }
   ChromeBookmarkClient* client = GetChromeBookmarkClient();
-  if (client->IsDescendantOfManagedNode(node)) {
+  if (::bookmarks::IsDescendantOf(node, client->managed_node()) ||
+      ::bookmarks::IsDescendantOf(node, client->supervised_node())) {
     error_ = keys::kModifyManagedError;
     return false;
   }

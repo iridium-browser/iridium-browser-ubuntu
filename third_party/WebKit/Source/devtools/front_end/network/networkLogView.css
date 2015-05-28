@@ -44,7 +44,7 @@
     overflow: hidden;
 }
 
-.network-summary-bar .warning-icon-small {
+.network-summary-bar label[is=dt-icon-label] {
     margin-right: 6px;
 }
 
@@ -104,6 +104,10 @@
 
 .network-log-grid.data-grid .name-column {
     cursor: pointer;
+}
+
+.network-log-grid.data-grid .timeline-column {
+    padding: 1px 0;
 }
 
 #network-container:not(.brief-mode) .network-log-grid.data-grid td.name-column:hover {
@@ -280,6 +284,10 @@
 .network-timeline-grid .resources-dividers-label-bar {
     right: 12px;
     left: 12px;
+}
+
+.network-timeline-grid .resources-event-dividers {
+    margin-left: 1px;
 }
 
 .network-graph-label {
@@ -502,32 +510,41 @@
     pointer-events: none;
 }
 
-.network-event-divider-padding {
-    position: absolute;
-    width: 8px;
-    top: 0;
-    bottom: 0;
-    pointer-events: auto;
-}
-
 .network-event-divider {
     position: absolute;
     width: 2px;
+    margin-left: -1px;
     top: 31px;
     bottom: 0;
     z-index: 300;
+}
+
+.network-event-divider.invisible {
+    visibility: hidden;
 }
 
 .network-timeline-grid.small .network-event-divider {
     top: 23px;
 }
 
+.network-orange-divider {
+    background-color: rgba(255, 120, 0, 0.5);
+}
+
 .network-red-divider {
     background-color: rgba(255, 0, 0, 0.5);
 }
 
+.network-summary-bar .summary-red {
+    color: red;
+}
+
 .network-blue-divider {
     background-color: rgba(0, 0, 255, 0.5);
+}
+
+.network-summary-bar .summary-blue {
+    color: blue;
 }
 
 .network-log-grid.data-grid .resources-dividers {
@@ -574,33 +591,4 @@
 /* Brief mode peculiarities. */
 #network-container.brief-mode .network-timeline-grid {
     display: none;
-}
-
-.network-expand-timeline-button {
-    position: absolute;
-    right: 0;
-    top: 0;
-    bottom: 0;
-    width: 10px;
-    display: flex;
-    align-items: center;
-}
-
-.network-expand-timeline-glyph {
-    width: 10px;
-    height: 10px;
-    background-color: #888;
-    -webkit-mask-image: url(Images/statusbarButtonGlyphs.png);
-    -webkit-mask-size: 320px 144px;
-    -webkit-mask-position: -4px -96px;
-}
-
-@media (-webkit-min-device-pixel-ratio: 1.5) {
-.network-expand-timeline-glyph {
-    -webkit-mask-image: url(Images/statusbarButtonGlyphs_2x.png);
-}
-} /* media */
-
-.network-expand-timeline-button:hover .network-expand-timeline-glyph {
-    background-color: #000;
 }

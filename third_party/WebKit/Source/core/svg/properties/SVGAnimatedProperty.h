@@ -90,7 +90,7 @@ public:
 
     bool isSpecified() const;
 
-    virtual void trace(Visitor* visitor)
+    DEFINE_INLINE_VIRTUAL_TRACE()
     {
         visitor->trace(m_contextElement);
     }
@@ -165,7 +165,7 @@ public:
         SVGAnimatedPropertyBase::animationEnded();
     }
 
-    virtual void trace(Visitor* visitor) override
+    DEFINE_INLINE_VIRTUAL_TRACE()
     {
         visitor->trace(m_baseValue);
         visitor->trace(m_currentValue);
@@ -249,7 +249,7 @@ protected:
 template <typename Property, typename TearOffType>
 class SVGAnimatedProperty<Property, TearOffType, void> : public SVGAnimatedPropertyCommon<Property> {
 public:
-    static PassRefPtrWillBeRawPtr<SVGAnimatedProperty<Property> > create(SVGElement* contextElement, const QualifiedName& attributeName, PassRefPtrWillBeRawPtr<Property> initialValue)
+    static PassRefPtrWillBeRawPtr<SVGAnimatedProperty<Property>> create(SVGElement* contextElement, const QualifiedName& attributeName, PassRefPtrWillBeRawPtr<Property> initialValue)
     {
         return adoptRefWillBeNoop(new SVGAnimatedProperty<Property>(contextElement, attributeName, initialValue));
     }
@@ -296,7 +296,7 @@ public:
         return m_animValTearOff.get();
     }
 
-    virtual void trace(Visitor* visitor) override
+    DEFINE_INLINE_VIRTUAL_TRACE()
     {
         visitor->trace(m_baseValTearOff);
         visitor->trace(m_animValTearOff);

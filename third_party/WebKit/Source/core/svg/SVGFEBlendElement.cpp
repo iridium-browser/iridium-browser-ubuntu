@@ -99,7 +99,7 @@ inline SVGFEBlendElement::SVGFEBlendElement(Document& document)
     addToPropertyMap(m_mode);
 }
 
-void SVGFEBlendElement::trace(Visitor* visitor)
+DEFINE_TRACE(SVGFEBlendElement)
 {
     visitor->trace(m_in1);
     visitor->trace(m_in2);
@@ -118,11 +118,6 @@ bool SVGFEBlendElement::isSupportedAttribute(const QualifiedName& attrName)
         supportedAttributes.add(SVGNames::in2Attr);
     }
     return supportedAttributes.contains<SVGAttributeHashTranslator>(attrName);
-}
-
-void SVGFEBlendElement::parseAttribute(const QualifiedName& name, const AtomicString& value)
-{
-    parseAttributeNew(name, value);
 }
 
 bool SVGFEBlendElement::setFilterEffectAttribute(FilterEffect* effect, const QualifiedName& attrName)

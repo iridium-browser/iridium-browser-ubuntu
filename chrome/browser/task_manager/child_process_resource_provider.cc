@@ -49,7 +49,7 @@ class ChildProcessResource : public Resource {
 
  private:
   // Returns a localized title for the child process.  For example, a plugin
-  // process would be "Plug-in: Flash" when name is "Flash".
+  // process would be "Plugin: Flash" when name is "Flash".
   base::string16 GetLocalizedTitle() const;
 
   int process_type_;
@@ -172,7 +172,7 @@ base::string16 ChildProcessResource::GetLocalizedTitle() const {
 
   switch (process_type_) {
     case content::PROCESS_TYPE_UTILITY:
-      return l10n_util::GetStringUTF16(IDS_TASK_MANAGER_UTILITY_PREFIX);
+      return l10n_util::GetStringFUTF16(IDS_TASK_MANAGER_UTILITY_PREFIX, title);
     case content::PROCESS_TYPE_GPU:
       return l10n_util::GetStringUTF16(IDS_TASK_MANAGER_GPU_PREFIX);
     case content::PROCESS_TYPE_PLUGIN:

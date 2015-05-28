@@ -10,6 +10,7 @@
 #include "net/quic/congestion_control/prr_sender.h"
 #include "net/quic/congestion_control/rtt_stats.h"
 #include "net/quic/crypto/crypto_protocol.h"
+#include "net/quic/proto/cached_network_parameters.pb.h"
 
 using std::max;
 using std::min;
@@ -20,7 +21,7 @@ namespace {
 // Constants based on TCP defaults.
 // The minimum cwnd based on RFC 3782 (TCP NewReno) for cwnd reductions on a
 // fast retransmission.  The cwnd after a timeout is still 1.
-const QuicPacketCount kMinimumCongestionWindow = 2;
+const QuicPacketCount kDefaultMinimumCongestionWindow = 2;
 const QuicByteCount kMaxSegmentSize = kDefaultTCPMSS;
 const int kMaxBurstLength = 3;
 const float kRenoBeta = 0.7f;  // Reno backoff factor.
@@ -34,7 +35,7 @@ TcpCubicSender::TcpCubicSender(const QuicClock* clock,
                                QuicPacketCount max_tcp_congestion_window,
                                QuicConnectionStats* stats)
     : hybrid_slow_start_(clock),
-      cubic_(clock, stats),
+      cubic_(clock),
       rtt_stats_(rtt_stats),
       stats_(stats),
       reno_(reno),
@@ -44,36 +45,39 @@ TcpCubicSender::TcpCubicSender(const QuicClock* clock,
       largest_acked_sequence_number_(0),
       largest_sent_at_last_cutback_(0),
       congestion_window_(initial_tcp_congestion_window),
-      previous_congestion_window_(0),
+      min_congestion_window_(kDefaultMinimumCongestionWindow),
       slowstart_threshold_(max_tcp_congestion_window),
-      previous_slowstart_threshold_(0),
       last_cutback_exited_slowstart_(false),
       max_tcp_congestion_window_(max_tcp_congestion_window),
-      clock_(clock) {}
+      clock_(clock) {
+  // Disable the ack train mode in hystart when pacing is enabled, since it
+  // may be falsely triggered.
+  hybrid_slow_start_.set_ack_train_detection(false);
+}
 
 TcpCubicSender::~TcpCubicSender() {
   UMA_HISTOGRAM_COUNTS("Net.QuicSession.FinalTcpCwnd", congestion_window_);
 }
 
 void TcpCubicSender::SetFromConfig(const QuicConfig& config,
-                                   bool is_server,
-                                   bool using_pacing) {
-  if (is_server) {
+                                   Perspective perspective) {
+  if (perspective == Perspective::IS_SERVER) {
     if (config.HasReceivedConnectionOptions() &&
         ContainsQuicTag(config.ReceivedConnectionOptions(), kIW10)) {
       // Initial window experiment.
       congestion_window_ = 10;
     }
-    if (using_pacing) {
-      // Disable the ack train mode in hystart when pacing is enabled, since it
-      // may be falsely triggered.
-      hybrid_slow_start_.set_ack_train_detection(false);
+    if (config.HasReceivedConnectionOptions() &&
+        ContainsQuicTag(config.ReceivedConnectionOptions(), kMIN1)) {
+      // Min CWND experiment.
+      min_congestion_window_ = 1;
     }
   }
 }
 
 bool TcpCubicSender::ResumeConnectionState(
-    const CachedNetworkParameters& cached_network_params) {
+    const CachedNetworkParameters& cached_network_params,
+    bool max_bandwidth_resumption) {
   // If the previous bandwidth estimate is less than an hour old, store in
   // preparation for doing bandwidth resumption.
   int64 seconds_since_estimate =
@@ -83,7 +87,9 @@ bool TcpCubicSender::ResumeConnectionState(
   }
 
   QuicBandwidth bandwidth = QuicBandwidth::FromBytesPerSecond(
-      cached_network_params.bandwidth_estimate_bytes_per_second());
+      max_bandwidth_resumption
+          ? cached_network_params.max_bandwidth_estimate_bytes_per_second()
+          : cached_network_params.bandwidth_estimate_bytes_per_second());
   QuicTime::Delta rtt_ms =
       QuicTime::Delta::FromMilliseconds(cached_network_params.min_rtt_ms());
 
@@ -101,6 +107,11 @@ bool TcpCubicSender::ResumeConnectionState(
 void TcpCubicSender::SetNumEmulatedConnections(int num_connections) {
   num_connections_ = max(1, num_connections);
   cubic_.SetNumConnections(num_connections_);
+}
+
+void TcpCubicSender::SetMaxCongestionWindow(
+    QuicByteCount max_congestion_window) {
+  max_tcp_congestion_window_ = max_congestion_window / kMaxPacketSize;
 }
 
 float TcpCubicSender::RenoBeta() const {
@@ -138,8 +149,6 @@ void TcpCubicSender::OnPacketAcked(
     QuicByteCount bytes_in_flight) {
   largest_acked_sequence_number_ = max(acked_sequence_number,
                                        largest_acked_sequence_number_);
-  // As soon as a packet is acked, ensure we're no longer in RTO mode.
-  previous_congestion_window_ = 0;
   if (InRecovery()) {
     // PRR is used when in recovery.
     prr_.OnPacketAcked(acked_bytes);
@@ -177,9 +186,9 @@ void TcpCubicSender::OnPacketLost(QuicPacketSequenceNumber sequence_number,
         cubic_.CongestionWindowAfterPacketLoss(congestion_window_);
   }
   slowstart_threshold_ = congestion_window_;
-  // Enforce TCP's minimum congestion window of 2*MSS.
-  if (congestion_window_ < kMinimumCongestionWindow) {
-    congestion_window_ = kMinimumCongestionWindow;
+  // Enforce a minimum congestion window.
+  if (congestion_window_ < min_congestion_window_) {
+    congestion_window_ = min_congestion_window_;
   }
   largest_sent_at_last_cutback_ = largest_sent_sequence_number_;
   // reset packet count from congestion avoidance mode. We start
@@ -194,6 +203,10 @@ bool TcpCubicSender::OnPacketSent(QuicTime /*sent_time*/,
                                   QuicPacketSequenceNumber sequence_number,
                                   QuicByteCount bytes,
                                   HasRetransmittableData is_retransmittable) {
+  if (InSlowStart()) {
+    ++(stats_->slowstart_packets_sent);
+  }
+
   // Only update bytes_in_flight_ for data packets.
   if (is_retransmittable != HAS_RETRANSMITTABLE_DATA) {
     return false;
@@ -219,7 +232,7 @@ QuicTime::Delta TcpCubicSender::TimeUntilSend(
   if (InRecovery()) {
     // PRR is used when in recovery.
     return prr_.TimeUntilSend(GetCongestionWindow(), bytes_in_flight,
-                              slowstart_threshold_);
+                              slowstart_threshold_ * kMaxSegmentSize);
   }
   if (GetCongestionWindow() > bytes_in_flight) {
     return QuicTime::Delta::Zero();
@@ -347,24 +360,8 @@ void TcpCubicSender::OnRetransmissionTimeout(bool packets_retransmitted) {
   }
   cubic_.Reset();
   hybrid_slow_start_.Restart();
-  // Only reduce ssthresh once over multiple retransmissions.
-  if (previous_congestion_window_ != 0) {
-    return;
-  }
-  previous_slowstart_threshold_ = slowstart_threshold_;
   slowstart_threshold_ = congestion_window_ / 2;
-  previous_congestion_window_ = congestion_window_;
-  congestion_window_ = kMinimumCongestionWindow;
-}
-
-void TcpCubicSender::RevertRetransmissionTimeout() {
-  if (previous_congestion_window_ == 0) {
-    LOG(DFATAL) << "No previous congestion window to revert to.";
-    return;
-  }
-  congestion_window_ = previous_congestion_window_;
-  slowstart_threshold_ = previous_slowstart_threshold_;
-  previous_congestion_window_ = 0;
+  congestion_window_ = min_congestion_window_;
 }
 
 CongestionControlType TcpCubicSender::GetCongestionControlType() const {

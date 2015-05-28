@@ -36,13 +36,12 @@ public:
     PassRefPtrWillBeRawPtr<SVGPointListTearOff> pointsFromJavascript() { return m_points->baseVal(); }
     PassRefPtrWillBeRawPtr<SVGPointListTearOff> animatedPoints() { return m_points->animVal(); }
 
-    virtual void trace(Visitor*) override;
+    DECLARE_VIRTUAL_TRACE();
 
 protected:
     SVGPolyElement(const QualifiedName&, Document&);
 
 private:
-    virtual void parseAttribute(const QualifiedName&, const AtomicString&) override final;
     virtual void svgAttributeChanged(const QualifiedName&) override final;
 
 private:

@@ -37,20 +37,20 @@ namespace blink {
 
 class AXObjectCacheImpl;
 
-class AccessibilityMediaControl : public AXRenderObject {
+class AccessibilityMediaControl : public AXLayoutObject {
 
 public:
-    static PassRefPtr<AXObject> create(RenderObject*, AXObjectCacheImpl*);
+    static PassRefPtr<AXObject> create(LayoutObject*, AXObjectCacheImpl*);
     virtual ~AccessibilityMediaControl() { }
 
     virtual AccessibilityRole roleValue() const override;
 
-    virtual String title() const override final;
+    virtual String title(TextUnderElementMode) const override final;
     virtual String accessibilityDescription() const override;
     virtual String helpText() const override;
 
 protected:
-    AccessibilityMediaControl(RenderObject*, AXObjectCacheImpl*);
+    AccessibilityMediaControl(LayoutObject*, AXObjectCacheImpl*);
     MediaControlElementType controlType() const;
     virtual bool computeAccessibilityIsIgnored() const override;
 };
@@ -59,7 +59,7 @@ protected:
 class AccessibilityMediaTimeline final : public AXSlider {
 
 public:
-    static PassRefPtr<AXObject> create(RenderObject*, AXObjectCacheImpl*);
+    static PassRefPtr<AXObject> create(LayoutObject*, AXObjectCacheImpl*);
     virtual ~AccessibilityMediaTimeline() { }
 
     virtual String helpText() const override;
@@ -67,14 +67,14 @@ public:
     const AtomicString& getAttribute(const QualifiedName& attribute) const;
 
 private:
-    AccessibilityMediaTimeline(RenderObject*, AXObjectCacheImpl*);
+    AccessibilityMediaTimeline(LayoutObject*, AXObjectCacheImpl*);
 };
 
 
 class AXMediaControlsContainer final : public AccessibilityMediaControl {
 
 public:
-    static PassRefPtr<AXObject> create(RenderObject*, AXObjectCacheImpl*);
+    static PassRefPtr<AXObject> create(LayoutObject*, AXObjectCacheImpl*);
     virtual ~AXMediaControlsContainer() { }
 
     virtual AccessibilityRole roleValue() const override { return ToolbarRole; }
@@ -83,7 +83,7 @@ public:
     virtual String accessibilityDescription() const override;
 
 private:
-    AXMediaControlsContainer(RenderObject*, AXObjectCacheImpl*);
+    AXMediaControlsContainer(LayoutObject*, AXObjectCacheImpl*);
     bool controllingVideoElement() const;
     virtual bool computeAccessibilityIsIgnored() const override;
 };
@@ -92,7 +92,7 @@ private:
 class AccessibilityMediaTimeDisplay final : public AccessibilityMediaControl {
 
 public:
-    static PassRefPtr<AXObject> create(RenderObject*, AXObjectCacheImpl*);
+    static PassRefPtr<AXObject> create(LayoutObject*, AXObjectCacheImpl*);
     virtual ~AccessibilityMediaTimeDisplay() { }
 
     virtual AccessibilityRole roleValue() const override { return StaticTextRole; }
@@ -101,7 +101,7 @@ public:
     virtual String accessibilityDescription() const override;
 
 private:
-    AccessibilityMediaTimeDisplay(RenderObject*, AXObjectCacheImpl*);
+    AccessibilityMediaTimeDisplay(LayoutObject*, AXObjectCacheImpl*);
     virtual bool computeAccessibilityIsIgnored() const override;
 };
 

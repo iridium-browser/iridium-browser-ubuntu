@@ -42,21 +42,25 @@
 #include "base/task/cancelable_task_tracker.h"
 #include "base/threading/platform_thread.h"
 #include "base/time/time.h"
-#include "chrome/browser/history/download_row.h"
-#include "chrome/browser/history/history_backend.h"
-#include "chrome/browser/history/history_database.h"
-#include "chrome/browser/history/history_notifications.h"
-#include "chrome/browser/history/history_service.h"
-#include "chrome/browser/history/history_unittest_base.h"
-#include "chrome/browser/history/in_memory_history_backend.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
-#include "chrome/tools/profiles/thumbnail-inl.h"
+#include "components/history/content/browser/download_constants_utils.h"
+#include "components/history/content/browser/history_database_helper.h"
+#include "components/history/core/browser/download_constants.h"
+#include "components/history/core/browser/download_row.h"
+#include "components/history/core/browser/history_backend.h"
 #include "components/history/core/browser/history_constants.h"
+#include "components/history/core/browser/history_database.h"
+#include "components/history/core/browser/history_database_params.h"
 #include "components/history/core/browser/history_db_task.h"
+#include "components/history/core/browser/history_service.h"
 #include "components/history/core/browser/in_memory_database.h"
+#include "components/history/core/browser/in_memory_history_backend.h"
 #include "components/history/core/browser/page_usage_data.h"
 #include "components/history/core/common/thumbnail_score.h"
+#include "components/history/core/test/history_unittest_base.h"
+#include "components/history/core/test/test_history_database.h"
+#include "components/history/core/test/thumbnail-inl.h"
 #include "content/public/browser/download_item.h"
 #include "content/public/browser/notification_details.h"
 #include "content/public/browser/notification_source.h"
@@ -103,8 +107,14 @@ class BackendDelegate : public HistoryBackend::Delegate {
                         const RedirectList& redirects,
                         base::Time visit_time) override {}
   void NotifyURLsModified(const URLRows& changed_urls) override {}
-  void BroadcastNotifications(int type,
-                              scoped_ptr<HistoryDetails> details) override;
+  void NotifyURLsDeleted(bool all_history,
+                         bool expired,
+                         const URLRows& deleted_rows,
+                         const std::set<GURL>& favicon_urls) override {}
+  void NotifyKeywordSearchTermUpdated(const URLRow& row,
+                                      KeywordID keyword_id,
+                                      const base::string16& term) override {}
+  void NotifyKeywordSearchTermDeleted(URLID url_id) override {}
   void DBLoaded() override {}
 
  private:
@@ -126,9 +136,9 @@ class HistoryBackendDBTest : public HistoryUnitTestBase {
   // Creates the HistoryBackend and HistoryDatabase on the current thread,
   // assigning the values to backend_ and db_.
   void CreateBackendAndDatabase() {
-    backend_ =
-        new HistoryBackend(history_dir_, new BackendDelegate(this), NULL);
-    backend_->Init(std::string(), false);
+    backend_ = new HistoryBackend(new BackendDelegate(this), nullptr);
+    backend_->Init(std::string(), false,
+                   HistoryDatabaseParamsForPath(history_dir_));
     db_ = backend_->db_.get();
     DCHECK(in_mem_backend_) << "Mem backend should have been set by "
         "HistoryBackend::Init";
@@ -177,9 +187,7 @@ class HistoryBackendDBTest : public HistoryUnitTestBase {
     base::MessageLoop::current()->Run();
   }
 
-  bool AddDownload(uint32 id,
-                   DownloadItem::DownloadState state,
-                   const Time& time) {
+  bool AddDownload(uint32 id, DownloadState state, const Time& time) {
     std::vector<GURL> url_chain;
     url_chain.push_back(GURL("foo-url"));
 
@@ -196,8 +204,9 @@ class HistoryBackendDBTest : public HistoryUnitTestBase {
                          0,
                          512,
                          state,
-                         content::DOWNLOAD_DANGER_TYPE_NOT_DANGEROUS,
-                         content::DOWNLOAD_INTERRUPT_REASON_NONE,
+                         DownloadDangerType::NOT_DANGEROUS,
+                         ToHistoryDownloadInterruptReason(
+                            content::DOWNLOAD_INTERRUPT_REASON_NONE),
                          id,
                          false,
                          "by_ext_id",
@@ -225,16 +234,6 @@ void BackendDelegate::SetInMemoryBackend(
   history_test_->in_mem_backend_.swap(backend);
 }
 
-void BackendDelegate::BroadcastNotifications(
-    int type,
-    scoped_ptr<HistoryDetails> details) {
-  // Currently, just send the notifications directly to the in-memory database.
-  // We may want do do something more fancy in the future.
-  content::Details<HistoryDetails> det(details.get());
-  history_test_->in_mem_backend_->Observe(type,
-      content::Source<HistoryBackendDBTest>(NULL), det);
-}
-
 TEST_F(HistoryBackendDBTest, ClearBrowsingData_Downloads) {
   CreateBackendAndDatabase();
 
@@ -247,7 +246,7 @@ TEST_F(HistoryBackendDBTest, ClearBrowsingData_Downloads) {
   // was removed.
   Time now = Time();
   uint32 id = 1;
-  EXPECT_TRUE(AddDownload(id, DownloadItem::COMPLETE, Time()));
+  EXPECT_TRUE(AddDownload(id, DownloadState::COMPLETE, Time()));
   db_->QueryDownloads(&downloads);
   EXPECT_EQ(1U, downloads.size());
 
@@ -263,9 +262,8 @@ TEST_F(HistoryBackendDBTest, ClearBrowsingData_Downloads) {
   EXPECT_EQ(now, downloads[0].end_time);
   EXPECT_EQ(0, downloads[0].received_bytes);
   EXPECT_EQ(512, downloads[0].total_bytes);
-  EXPECT_EQ(DownloadItem::COMPLETE, downloads[0].state);
-  EXPECT_EQ(content::DOWNLOAD_DANGER_TYPE_NOT_DANGEROUS,
-            downloads[0].danger_type);
+  EXPECT_EQ(DownloadState::COMPLETE, downloads[0].state);
+  EXPECT_EQ(DownloadDangerType::NOT_DANGEROUS, downloads[0].danger_type);
   EXPECT_EQ(content::DOWNLOAD_INTERRUPT_REASON_NONE,
             downloads[0].interrupt_reason);
   EXPECT_FALSE(downloads[0].opened);
@@ -726,9 +724,9 @@ TEST_F(HistoryBackendDBTest, ConfirmDownloadRowCreateAndDelete) {
 
   // Add some downloads.
   uint32 id1 = 1, id2 = 2, id3 = 3;
-  AddDownload(id1, DownloadItem::COMPLETE, now);
-  AddDownload(id2, DownloadItem::COMPLETE, now + base::TimeDelta::FromDays(2));
-  AddDownload(id3, DownloadItem::COMPLETE, now - base::TimeDelta::FromDays(2));
+  AddDownload(id1, DownloadState::COMPLETE, now);
+  AddDownload(id2, DownloadState::COMPLETE, now + base::TimeDelta::FromDays(2));
+  AddDownload(id3, DownloadState::COMPLETE, now - base::TimeDelta::FromDays(2));
 
   // Confirm that resulted in the correct number of rows in the DB.
   DeleteBackend();
@@ -782,9 +780,10 @@ TEST_F(HistoryBackendDBTest, DownloadNukeRecordsMissingURLs) {
                        std::string(),
                        0,
                        512,
-                       DownloadItem::COMPLETE,
-                       content::DOWNLOAD_DANGER_TYPE_NOT_DANGEROUS,
-                       content::DOWNLOAD_INTERRUPT_REASON_NONE,
+                       DownloadState::COMPLETE,
+                       DownloadDangerType::NOT_DANGEROUS,
+                       ToHistoryDownloadInterruptReason(
+                          content::DOWNLOAD_INTERRUPT_REASON_NONE),
                        1,
                        0,
                        "by_ext_id",
@@ -831,7 +830,7 @@ TEST_F(HistoryBackendDBTest, ConfirmDownloadInProgressCleanup) {
   base::Time now(base::Time::Now());
 
   // Put an IN_PROGRESS download in the DB.
-  AddDownload(1, DownloadItem::IN_PROGRESS, now);
+  AddDownload(1, DownloadState::IN_PROGRESS, now);
 
   // Confirm that they made it into the DB unchanged.
   DeleteBackend();
@@ -846,7 +845,8 @@ TEST_F(HistoryBackendDBTest, ConfirmDownloadInProgressCleanup) {
     sql::Statement statement1(db.GetUniqueStatement(
         "Select state, interrupt_reason from downloads"));
     EXPECT_TRUE(statement1.Step());
-    EXPECT_EQ(DownloadDatabase::kStateInProgress, statement1.ColumnInt(0));
+    EXPECT_EQ(DownloadStateToInt(DownloadState::IN_PROGRESS),
+              statement1.ColumnInt(0));
     EXPECT_EQ(content::DOWNLOAD_INTERRUPT_REASON_NONE, statement1.ColumnInt(1));
     EXPECT_FALSE(statement1.Step());
   }
@@ -857,7 +857,7 @@ TEST_F(HistoryBackendDBTest, ConfirmDownloadInProgressCleanup) {
   std::vector<DownloadRow> results;
   db_->QueryDownloads(&results);
   ASSERT_EQ(1u, results.size());
-  EXPECT_EQ(content::DownloadItem::INTERRUPTED, results[0].state);
+  EXPECT_EQ(DownloadState::INTERRUPTED, results[0].state);
   EXPECT_EQ(content::DOWNLOAD_INTERRUPT_REASON_CRASH,
             results[0].interrupt_reason);
 
@@ -876,7 +876,8 @@ TEST_F(HistoryBackendDBTest, ConfirmDownloadInProgressCleanup) {
     sql::Statement statement1(db.GetUniqueStatement(
         "Select state, interrupt_reason from downloads"));
     EXPECT_TRUE(statement1.Step());
-    EXPECT_EQ(DownloadDatabase::kStateInterrupted, statement1.ColumnInt(0));
+    EXPECT_EQ(DownloadStateToInt(DownloadState::INTERRUPTED),
+              statement1.ColumnInt(0));
     EXPECT_EQ(content::DOWNLOAD_INTERRUPT_REASON_CRASH,
               statement1.ColumnInt(1));
     EXPECT_FALSE(statement1.Step());
@@ -977,9 +978,7 @@ TEST_F(HistoryBackendDBTest,
 
 class HistoryTest : public testing::Test {
  public:
-  HistoryTest()
-      : got_thumbnail_callback_(false),
-        query_url_success_(false) {
+  HistoryTest() : query_url_success_(false) {
   }
 
   ~HistoryTest() override {}
@@ -997,8 +996,9 @@ class HistoryTest : public testing::Test {
     ASSERT_TRUE(temp_dir_.CreateUniqueTempDir());
     history_dir_ = temp_dir_.path().AppendASCII("HistoryTest");
     ASSERT_TRUE(base::CreateDirectory(history_dir_));
-    history_service_.reset(new HistoryService);
-    if (!history_service_->Init(history_dir_)) {
+    history_service_.reset(new history::HistoryService);
+    if (!history_service_->Init(std::string(),
+                                HistoryDatabaseParamsForPath(history_dir_))) {
       history_service_.reset();
       ADD_FAILURE();
     }
@@ -1033,7 +1033,7 @@ class HistoryTest : public testing::Test {
   // Fills the query_url_row_ and query_url_visits_ structures with the
   // information about the given URL and returns true. If the URL was not
   // found, this will return false and those structures will not be changed.
-  bool QueryURL(HistoryService* history, const GURL& url) {
+  bool QueryURL(history::HistoryService* history, const GURL& url) {
     history_service_->QueryURL(
         url,
         true,
@@ -1060,7 +1060,7 @@ class HistoryTest : public testing::Test {
 
   // Fills in saved_redirects_ with the redirect information for the given URL,
   // returning true on success. False means the URL was not found.
-  void QueryRedirectsFrom(HistoryService* history, const GURL& url) {
+  void QueryRedirectsFrom(history::HistoryService* history, const GURL& url) {
     history_service_->QueryRedirectsFrom(
         url,
         base::Bind(&HistoryTest::OnRedirectQueryComplete,
@@ -1088,15 +1088,10 @@ class HistoryTest : public testing::Test {
   // When non-NULL, this will be deleted on tear down and we will block until
   // the backend thread has completed. This allows tests for the history
   // service to use this feature, but other tests to ignore this.
-  scoped_ptr<HistoryService> history_service_;
+  scoped_ptr<history::HistoryService> history_service_;
 
   // names of the database files
   base::FilePath history_dir_;
-
-  // Set by the thumbnail callback when we get data, you should be sure to
-  // clear this before issuing a thumbnail request.
-  bool got_thumbnail_callback_;
-  std::vector<unsigned char> thumbnail_data_;
 
   // Set by the redirect callback when we get data. You should be sure to
   // clear this before issuing a redirect request.

@@ -4,75 +4,53 @@
 
 #include "ui/events/ozone/evdev/input_controller_evdev.h"
 
+#include <algorithm>
 #include <linux/input.h>
-#include <vector>
 
 #include "base/thread_task_runner_handle.h"
-#include "ui/events/ozone/evdev/event_factory_evdev.h"
+#include "ui/events/ozone/evdev/input_device_factory_evdev_proxy.h"
+#include "ui/events/ozone/evdev/keyboard_evdev.h"
 #include "ui/events/ozone/evdev/mouse_button_map_evdev.h"
-
-#if defined(USE_EVDEV_GESTURES)
-#include "ui/events/ozone/evdev/libgestures_glue/gesture_property_provider.h"
-#endif
 
 namespace ui {
 
-namespace {
-
-#if defined(USE_EVDEV_GESTURES)
-void SetGestureIntProperty(GesturePropertyProvider* provider,
-                           int id,
-                           const std::string& name,
-                           int value) {
-  GesturesProp* property = provider->GetProperty(id, name);
-  if (property) {
-    std::vector<int> values(1, value);
-    property->SetIntValue(values);
-  }
-}
-
-void SetGestureBoolProperty(GesturePropertyProvider* provider,
-                            int id,
-                            const std::string& name,
-                            bool value) {
-  GesturesProp* property = provider->GetProperty(id, name);
-  if (property) {
-    std::vector<bool> values(1, value);
-    property->SetBoolValue(values);
-  }
-}
-#endif
-
-}  // namespace
-
-InputControllerEvdev::InputControllerEvdev(
-    EventFactoryEvdev* event_factory,
-    KeyboardEvdev* keyboard,
-    MouseButtonMapEvdev* button_map
-#if defined(USE_EVDEV_GESTURES)
-    ,
-    GesturePropertyProvider* gesture_property_provider
-#endif
-    )
+InputControllerEvdev::InputControllerEvdev(KeyboardEvdev* keyboard,
+                                           MouseButtonMapEvdev* button_map)
     : settings_update_pending_(false),
-      event_factory_(event_factory),
+      input_device_factory_(nullptr),
       keyboard_(keyboard),
       button_map_(button_map),
-#if defined(USE_EVDEV_GESTURES)
-      gesture_property_provider_(gesture_property_provider),
-#endif
+      has_mouse_(false),
+      has_touchpad_(false),
+      caps_lock_led_state_(false),
       weak_ptr_factory_(this) {
 }
 
 InputControllerEvdev::~InputControllerEvdev() {
 }
 
+void InputControllerEvdev::SetInputDeviceFactory(
+    InputDeviceFactoryEvdevProxy* input_device_factory) {
+  input_device_factory_ = input_device_factory;
+
+  UpdateDeviceSettings();
+  UpdateCapsLockLed();
+}
+
+void InputControllerEvdev::set_has_mouse(bool has_mouse) {
+  has_mouse_ = has_mouse;
+}
+
+void InputControllerEvdev::set_has_touchpad(bool has_touchpad) {
+  has_touchpad_ = has_touchpad;
+}
+
 bool InputControllerEvdev::HasMouse() {
-  return event_factory_->GetDeviceIdsByType(DT_MOUSE, NULL);
+  return has_mouse_;
 }
 
 bool InputControllerEvdev::HasTouchpad() {
-  return event_factory_->GetDeviceIdsByType(DT_TOUCHPAD, NULL);
+  return has_touchpad_;
 }
 
 bool InputControllerEvdev::IsCapsLockEnabled() {
@@ -81,6 +59,7 @@ bool InputControllerEvdev::IsCapsLockEnabled() {
 
 void InputControllerEvdev::SetCapsLockEnabled(bool enabled) {
   keyboard_->SetCapsLockEnabled(enabled);
+  UpdateCapsLockLed();
 }
 
 void InputControllerEvdev::SetNumLockEnabled(bool enabled) {
@@ -105,31 +84,27 @@ void InputControllerEvdev::GetAutoRepeatRate(base::TimeDelta* delay,
   keyboard_->GetAutoRepeatRate(delay, interval);
 }
 
-void InputControllerEvdev::SetIntPropertyForOneType(const EventDeviceType type,
-                                                    const std::string& name,
-                                                    int value) {
-#if defined(USE_EVDEV_GESTURES)
-  std::vector<int> ids;
-  event_factory_->GetDeviceIdsByType(type, &ids);
-  for (size_t i = 0; i < ids.size(); ++i) {
-    SetGestureIntProperty(gesture_property_provider_, ids[i], name, value);
-  }
-#endif
-  // In the future, we may add property setting codes for other non-gesture
-  // devices. One example would be keyboard settings.
-  // TODO(sheckylin): See http://crbug.com/398518 for example.
+void InputControllerEvdev::DisableInternalTouchpad() {
+  if (input_device_factory_)
+    input_device_factory_->DisableInternalTouchpad();
 }
 
-void InputControllerEvdev::SetBoolPropertyForOneType(const EventDeviceType type,
-                                                     const std::string& name,
-                                                     bool value) {
-#if defined(USE_EVDEV_GESTURES)
-  std::vector<int> ids;
-  event_factory_->GetDeviceIdsByType(type, &ids);
-  for (size_t i = 0; i < ids.size(); ++i) {
-    SetGestureBoolProperty(gesture_property_provider_, ids[i], name, value);
+void InputControllerEvdev::EnableInternalTouchpad() {
+  if (input_device_factory_)
+    input_device_factory_->EnableInternalTouchpad();
+}
+
+void InputControllerEvdev::DisableInternalKeyboardExceptKeys(
+    scoped_ptr<std::set<DomCode>> excepted_keys) {
+  if (input_device_factory_) {
+    input_device_factory_->DisableInternalKeyboardExceptKeys(
+        excepted_keys.Pass());
   }
-#endif
+}
+
+void InputControllerEvdev::EnableInternalKeyboard() {
+  if (input_device_factory_)
+    input_device_factory_->EnableInternalKeyboard();
 }
 
 void InputControllerEvdev::SetTouchpadSensitivity(int value) {
@@ -172,40 +147,44 @@ void InputControllerEvdev::SetTapToClickPaused(bool state) {
   ScheduleUpdateDeviceSettings();
 }
 
-void InputControllerEvdev::UpdateDeviceSettings() {
-  SetIntPropertyForOneType(DT_TOUCHPAD, "Pointer Sensitivity",
-                           input_device_settings_.touchpad_sensitivity);
-  SetIntPropertyForOneType(DT_TOUCHPAD, "Scroll Sensitivity",
-                           input_device_settings_.touchpad_sensitivity);
+void InputControllerEvdev::GetTouchDeviceStatus(
+    const GetTouchDeviceStatusReply& reply) {
+  if (input_device_factory_)
+    input_device_factory_->GetTouchDeviceStatus(reply);
+  else
+    reply.Run(make_scoped_ptr(new std::string));
+}
 
-  SetBoolPropertyForOneType(DT_TOUCHPAD, "Tap Enable",
-                            input_device_settings_.tap_to_click_enabled);
-  SetBoolPropertyForOneType(DT_TOUCHPAD, "T5R2 Three Finger Click Enable",
-                            input_device_settings_.three_finger_click_enabled);
-  SetBoolPropertyForOneType(DT_TOUCHPAD, "Tap Drag Enable",
-                            input_device_settings_.tap_dragging_enabled);
-
-  SetBoolPropertyForOneType(DT_MULTITOUCH, "Australian Scrolling",
-                            input_device_settings_.natural_scroll_enabled);
-
-  SetIntPropertyForOneType(DT_MOUSE, "Pointer Sensitivity",
-                           input_device_settings_.mouse_sensitivity);
-  SetIntPropertyForOneType(DT_MOUSE, "Scroll Sensitivity",
-                           input_device_settings_.mouse_sensitivity);
-
-  SetBoolPropertyForOneType(DT_TOUCHPAD, "Tap Paused",
-                            input_device_settings_.tap_to_click_paused);
-
-  settings_update_pending_ = false;
+void InputControllerEvdev::GetTouchEventLog(
+    const base::FilePath& out_dir,
+    const GetTouchEventLogReply& reply) {
+  if (input_device_factory_)
+    input_device_factory_->GetTouchEventLog(out_dir, reply);
+  else
+    reply.Run(make_scoped_ptr(new std::vector<base::FilePath>));
 }
 
 void InputControllerEvdev::ScheduleUpdateDeviceSettings() {
-  if (settings_update_pending_)
+  if (!input_device_factory_ || settings_update_pending_)
     return;
   base::ThreadTaskRunnerHandle::Get()->PostTask(
       FROM_HERE, base::Bind(&InputControllerEvdev::UpdateDeviceSettings,
                             weak_ptr_factory_.GetWeakPtr()));
   settings_update_pending_ = true;
+}
+
+void InputControllerEvdev::UpdateDeviceSettings() {
+  input_device_factory_->UpdateInputDeviceSettings(input_device_settings_);
+  settings_update_pending_ = false;
+}
+
+void InputControllerEvdev::UpdateCapsLockLed() {
+  if (!input_device_factory_)
+    return;
+  bool caps_lock_state = IsCapsLockEnabled();
+  if (caps_lock_state != caps_lock_led_state_)
+    input_device_factory_->SetCapsLockLed(caps_lock_state);
+  caps_lock_led_state_ = caps_lock_state;
 }
 
 }  // namespace ui

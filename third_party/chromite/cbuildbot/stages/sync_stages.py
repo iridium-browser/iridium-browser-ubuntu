@@ -11,7 +11,9 @@ import contextlib
 import datetime
 import logging
 import os
+import shutil
 import sys
+import tempfile
 import time
 from xml.etree import ElementTree
 from xml.dom import minidom
@@ -56,7 +58,13 @@ PRECQ_INFLIGHT_TIMEOUT_MSG = (
     'change is not at fault you may mark your change as ready '
     'again. If this problem occurs multiple times please notify '
     'the sheriff and file a bug.')
-
+PRECQ_EXPIRY_MSG = (
+    'The pre-cq verification for this change expired after %s minutes. No '
+    'action is required on your part.'
+    '\n\n'
+    'In order to protect the CQ from picking up stale changes, the pre-cq '
+    'status for changes are cleared after a generous timeout. This change '
+    'will be re-tested by the pre-cq before the CQ picks it up.')
 
 class PatchChangesStage(generic_stages.BuilderStage):
   """Stage that patches a set of Gerrit changes to the buildroot source tree."""
@@ -161,6 +169,12 @@ class BootstrapStage(PatchChangesStage):
     self.chromite_patch_pool = chromite_patch_pool
     self.manifest_patch_pool = manifest_patch_pool
     self.returncode = None
+    # Bootstrap chromite in a subdirectory of the buildroot. This directory
+    # requires exec permissions so that cbuildbot can be re-executed after
+    # chromite is patched.
+    self.tempdir = os.path.join(self._run.options.buildroot,
+                                'chromite-bootstrap')
+    osutils.RmDir(self.tempdir, ignore_missing=True)
 
   def _ApplyManifestPatches(self, patch_pool):
     """Apply a pool of manifest patches to a temp manifest checkout.
@@ -238,7 +252,6 @@ class BootstrapStage(PatchChangesStage):
     else:
       PatchChangesStage.HandleApplyFailures(self, failures)
 
-  @osutils.TempDirDecorator
   def PerformStage(self):
     # The plan for the builders is to use master branch to bootstrap other
     # branches. Now, if we wanted to test patches for both the bootstrap code
@@ -402,14 +415,14 @@ class LKGMSyncStage(SyncStage):
     """Override: Gets the LKGM."""
     # TODO(sosa):  Should really use an initialized manager here.
     if self.internal:
-      mv_dir = 'manifest-versions-internal'
+      mv_dir = constants.INTERNAL_MANIFEST_VERSIONS_PATH
     else:
-      mv_dir = 'manifest-versions'
+      mv_dir = constants.EXTERNAL_MANIFEST_VERSIONS_PATH
 
     manifest_path = os.path.join(self._build_root, mv_dir)
     manifest_repo = self._GetManifestVersionsRepoUrl(read_only=True)
     manifest_version.RefreshManifestCheckout(manifest_path, manifest_repo)
-    return os.path.join(manifest_path, lkgm_manager.LKGMManager.LKGM_PATH)
+    return os.path.join(manifest_path, self._run.config.lkgm_manifest)
 
 
 class ManifestVersionedSyncStage(SyncStage):
@@ -553,6 +566,66 @@ class ManifestVersionedSyncStage(SyncStage):
     else:
       yield manifest
 
+  def CommitProjectSDKManifest(self, manifest, current_version, debug):
+    """Create and submit the Product SDK Manifest.
+
+    Create the Project SDK manifest, and push it to the external manifest
+    repository.
+
+    Args:
+      manifest: Path to new manifest to commit.
+      current_version: Version to use when commiting manifest (e.g. 6770.0.0).
+      debug: Is this a debug build?
+    """
+    # Use a static dir, but don't overlap with other users, we might conflict.
+    git_repo = os.path.join(
+        self._build_root, constants.PROJECT_SDK_MANIFEST_VERSIONS_PATH)
+    external_manifest_url = cbuildbot_config.GetManifestVersionsRepoUrl(
+        internal_build=False,
+        read_only=False,
+        test=debug)
+
+    logging.info('Using manifest URL: %s', external_manifest_url)
+    manifest_version.RefreshManifestCheckout(
+        git_repo, external_manifest_url)
+
+    sdk_manifest_name = '%s.xml' % current_version
+    latest_manifest_path = os.path.join(
+        git_repo, constants.LATEST_PROJECT_SDK_MANIFEST)
+    sdk_manifest_path = os.path.join(
+        git_repo, 'project-sdk', sdk_manifest_name)
+
+    if os.path.exists(sdk_manifest_path):
+      raise failures_lib.StepFailure(
+          'Project SDK Manifest already exists: %s' % sdk_manifest_path)
+
+    # Create branch for pushing new manifest file.
+    branch = 'temp_project_sdk_creation_branch'
+    git.CreatePushBranch(branch, git_repo, sync=False)
+
+    # Create new manifest file.
+    logging.info('Creating Project SDK Manifest as: %s', sdk_manifest_path)
+    osutils.SafeMakedirs(os.path.dirname(sdk_manifest_path))
+    shutil.copyfile(manifest, sdk_manifest_path)
+
+    # Create 'latest' link to new manifest.
+    osutils.SafeUnlink(latest_manifest_path)
+    os.symlink(sdk_manifest_name, latest_manifest_path)
+
+    # Commit it locally.
+    logging.info('Committing Project SDK Manifest.')
+    git.AddPath(sdk_manifest_path)
+    git.AddPath(latest_manifest_path)
+    git.Commit(git_repo, 'Create project_sdk for %s.' % current_version)
+
+    # Push it.
+    logging.info('Pushing Project SDK Manifest.')
+    git.PushWithRetry(branch, git_repo)
+
+    logging.info('Project SDK Manifest \'%s\' published:',
+                 os.path.basename(sdk_manifest_path))
+    logging.info('%s', osutils.ReadFile(manifest))
+
   @failures_lib.SetFailureType(failures_lib.InfrastructureFailure)
   def PerformStage(self):
     self.Initialize()
@@ -579,6 +652,27 @@ class ManifestVersionedSyncStage(SyncStage):
     with self.LocalizeManifest(
         next_manifest, filter_cros=self._run.options.local) as new_manifest:
       self.ManifestCheckout(new_manifest)
+
+    # If we are a Canary Master, create an additional derivative Manifest for
+    # the Project SDK builders.
+    if (cbuildbot_config.IsCanaryType(self._run.config.build_type) and
+        self._run.config.master):
+      logging.info('Creating Project SDK Manifest.')
+      sdk_manifest = None
+      try:
+        with tempfile.NamedTemporaryFile() as pinned_manifest_file:
+          pinned_manifest = self.repo.ExportManifest(mark_revision=True)
+          osutils.WriteFile(pinned_manifest_file.name, pinned_manifest)
+          sdk_manifest = manifest_version.ConvertToProjectSdkManifest(
+              pinned_manifest_file.name)
+
+        self.CommitProjectSDKManifest(
+            sdk_manifest,
+            self.manifest_manager.current_version,
+            self._run.options.debug)
+      finally:
+        if sdk_manifest:
+          os.unlink(sdk_manifest)
 
     # Set the status inflight at the end of the ManifestVersionedSync
     # stage. This guarantees that all syncing has completed.
@@ -701,9 +795,6 @@ class CommitQueueSyncStage(MasterSlaveLKGMSyncStage):
 
   def __init__(self, builder_run, **kwargs):
     super(CommitQueueSyncStage, self).__init__(builder_run, **kwargs)
-    # Figure out the builder's name from the buildbot waterfall.
-    builder_name = self._run.config.paladin_builder_name
-    self.builder_name = builder_name if builder_name else self._run.config.name
 
     # The pool of patches to be picked up by the commit queue.
     # - For the master commit queue, it's initialized in GetNextManifest.
@@ -757,7 +848,7 @@ class CommitQueueSyncStage(MasterSlaveLKGMSyncStage):
     # AcquirePoolFromManifest does not need to sync.
     self.pool = validation_pool.ValidationPool.AcquirePoolFromManifest(
         manifest, self._run.config.overlays, self.repo,
-        self._run.buildnumber, self.builder_name,
+        self._run.buildnumber, self._run.GetBuilderName(),
         self._run.config.master, self._run.options.debug,
         builder_run=self._run)
 
@@ -791,7 +882,7 @@ class CommitQueueSyncStage(MasterSlaveLKGMSyncStage):
 
         self.pool = pool = validation_pool.ValidationPool.AcquirePool(
             self._run.config.overlays, self.repo,
-            self._run.buildnumber, self.builder_name,
+            self._run.buildnumber, self._run.GetBuilderName(),
             query,
             dryrun=self._run.options.debug,
             check_tree_open=(not self._run.options.debug or
@@ -890,24 +981,6 @@ class PreCQSyncStage(SyncStage):
 class PreCQLauncherStage(SyncStage):
   """Scans for CLs and automatically launches Pre-CQ jobs to test them."""
 
-  # The CL is currently being tested by a Pre-CQ trybot.
-  STATUS_INFLIGHT = constants.CL_STATUS_INFLIGHT
-
-  # The CL has passed the Pre-CQ.
-  STATUS_PASSED = constants.CL_STATUS_PASSED
-
-  # The CL has failed the Pre-CQ.
-  STATUS_FAILED = constants.CL_STATUS_FAILED
-
-  # We have requested a Pre-CQ trybot but it has not started yet.
-  STATUS_LAUNCHING = constants.CL_STATUS_LAUNCHING
-
-  # The CL is ready to be retried.
-  STATUS_WAITING = constants.CL_STATUS_WAITING
-
-  # The CL has passed the Pre-CQ and is ready to be submitted.
-  STATUS_READY_TO_SUBMIT = constants.CL_STATUS_READY_TO_SUBMIT
-
   # The number of minutes we wait before launching Pre-CQ jobs. This measures
   # the idle time of a given patch series, so, for example, if a user takes
   # 20 minutes to mark a series of 20 patches as ready, we won't launch a
@@ -915,14 +988,15 @@ class PreCQLauncherStage(SyncStage):
   LAUNCH_DELAY = 2
 
   # The number of minutes we allow before considering a launch attempt failed.
-  # If this window isn't hit in a given launcher run, the window will start
-  # again from scratch in the next run.
   LAUNCH_TIMEOUT = 90
 
-  # The number of minutes we allow before considering an in-flight
-  # job failed. If this window isn't hit in a given launcher run, the window
-  # will start again from scratch in the next run.
-  INFLIGHT_TIMEOUT = 180
+  # The number of minutes we allow before considering an in-flight job failed.
+  INFLIGHT_TIMEOUT = 240
+
+  # The number of minutes we allow before expiring a pre-cq PASSED or
+  # FULLY_VERIFIED status. After this timeout is hit, a CL's status will be
+  # reset to None. This prevents very stale CLs from entering the CQ.
+  STATUS_EXPIRY_TIMEOUT = 60 * 24 * 7
 
   # The maximum number of patches we will allow in a given trybot run. This is
   # needed because our trybot infrastructure can only handle so many patches at
@@ -1127,6 +1201,31 @@ class PreCQLauncherStage(SyncStage):
           change, action_string)
       db.InsertCLActions(build_id, [action])
 
+  def _ProcessExpiry(self, change, status, timestamp, pool, current_time):
+    """Enforce expiry of a PASSED or FULLY_VERIFIED status.
+
+    Args:
+      change: GerritPatch instance to process.
+      status: |change|'s pre-cq status.
+      timestamp: datetime.datetime for when |status| was achieved.
+      pool: The current validation pool.
+      current_time: datetime.datetime for current database time.
+    """
+    if not timestamp:
+      return
+    timed_out = self._HasTimedOut(timestamp, current_time,
+                                  self.STATUS_EXPIRY_TIMEOUT)
+    verified = status in (constants.CL_STATUS_PASSED,
+                          constants.CL_STATUS_FULLY_VERIFIED)
+    if timed_out and verified:
+      msg = PRECQ_EXPIRY_MSG % self.STATUS_EXPIRY_TIMEOUT
+      build_id, db = self._run.GetCIDBHandle()
+      if db:
+        pool.SendNotification(change, '%(details)s', details=msg)
+        action = clactions.CLAction.FromGerritPatchAndAction(
+            change, constants.CL_ACTION_PRE_CQ_RESET)
+        db.InsertCLActions(build_id, [action])
+
   def _ProcessTimeouts(self, change, progress_map, pool, current_time):
     """Enforce per-config launch and inflight timeouts.
 
@@ -1151,13 +1250,11 @@ class PreCQLauncherStage(SyncStage):
       timeout = self.LAUNCH_TIMEOUT if launched else self.INFLIGHT_TIMEOUT
       msg = (PRECQ_LAUNCH_TIMEOUT_MSG if launched
              else PRECQ_INFLIGHT_TIMEOUT_MSG) % (config, timeout)
-      timeout = self.LAUNCH_TIMEOUT
 
       if self._HasTimedOut(timestamp, current_time, timeout):
         pool.SendNotification(change, '%(details)s', details=msg)
         pool.RemoveReady(change, reason=config)
-        pool.UpdateCLPreCQStatus(change, self.STATUS_FAILED)
-
+        pool.UpdateCLPreCQStatus(change, constants.CL_STATUS_FAILED)
 
   def _ProcessVerified(self, change, can_submit, will_submit):
     """Process a change that is fully pre-cq verified.
@@ -1215,8 +1312,18 @@ class PreCQLauncherStage(SyncStage):
     """
     _, db = self._run.GetCIDBHandle()
     action_history = db.GetActionsForChanges(changes)
-    status_map = {c: clactions.GetCLPreCQStatus(c, action_history)
-                  for c in changes}
+    for change in changes:
+      self._ProcessRequeuedAndSpeculative(change, action_history)
+
+    status_and_timestamp_map = {
+        c: clactions.GetCLPreCQStatusAndTime(c, action_history)
+        for c in changes}
+    status_map = {c: v[0] for c, v in status_and_timestamp_map.items()}
+
+    # Filter out failed speculative changes.
+    changes = [c for c in changes if status_map[c] != constants.CL_STATUS_FAILED
+               or c.HasReadyFlag()]
+
     progress_map = clactions.GetPreCQProgressMap(changes, action_history)
     _, inflight, verified = clactions.GetPreCQCategories(progress_map)
     current_db_time = db.GetTime()
@@ -1243,9 +1350,6 @@ class PreCQLauncherStage(SyncStage):
     # Changes that will be passed.
     will_pass = set()
 
-    for change in changes:
-      self._ProcessRequeuedAndSpeculative(change, action_history)
-
     for change in inflight:
       if status_map[change] != constants.CL_STATUS_INFLIGHT:
         build_ids = [x for _, _, x in progress_map[change].values()]
@@ -1270,8 +1374,7 @@ class PreCQLauncherStage(SyncStage):
         continue
 
       # Screen unscreened changes to determine which trybots to test them with.
-      if not any(a.action == constants.CL_ACTION_SCREENED_FOR_PRE_CQ
-                 for a in clactions.ActionsForPatch(change, action_history)):
+      if not clactions.IsChangeScreened(change, action_history):
         self.ScreenChangeForPreCQ(change)
         continue
 
@@ -1281,7 +1384,7 @@ class PreCQLauncherStage(SyncStage):
     # ready or commit ready, before launching.
     launchable_progress_map = {
         k: v for k, v in progress_map.iteritems()
-        if k.HasReadyFlag() or status_map[k] != self.STATUS_FAILED}
+        if k.HasReadyFlag() or status_map[k] != constants.CL_STATUS_FAILED}
 
     for plan, config in self.GetDisjointTransactionsToTest(
         pool, launchable_progress_map):
@@ -1289,6 +1392,10 @@ class PreCQLauncherStage(SyncStage):
 
     # Mark passed changes as passed
     self.UpdateChangeStatuses(will_pass, constants.CL_STATUS_PASSED)
+
+    # Expire any very stale passed or fully verified changes.
+    for c, v in status_and_timestamp_map.items():
+      self._ProcessExpiry(c, v[0], v[1], pool, current_db_time)
 
     # Submit changes that are ready to submit, if we can.
     if tree_status.IsTreeOpen():

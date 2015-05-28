@@ -36,7 +36,7 @@
 #include "core/dom/shadow/ShadowRoot.h"
 #include "core/editing/FrameSelection.h"
 #include "core/editing/SpellChecker.h"
-#include "core/editing/TextIterator.h"
+#include "core/editing/iterators/TextIterator.h"
 #include "core/events/BeforeTextInsertedEvent.h"
 #include "core/events/Event.h"
 #include "core/frame/FrameHost.h"
@@ -46,9 +46,9 @@
 #include "core/html/parser/HTMLParserIdioms.h"
 #include "core/html/shadow/ShadowElementNames.h"
 #include "core/html/shadow/TextControlInnerElements.h"
+#include "core/layout/LayoutTextControlMultiLine.h"
 #include "core/page/Chrome.h"
 #include "core/page/ChromeClient.h"
-#include "core/rendering/RenderTextControlMultiLine.h"
 #include "platform/text/PlatformLocale.h"
 #include "wtf/StdLibExtras.h"
 #include "wtf/text/StringBuilder.h"
@@ -91,11 +91,11 @@ HTMLTextAreaElement::HTMLTextAreaElement(Document& document, HTMLFormElement* fo
 PassRefPtrWillBeRawPtr<HTMLTextAreaElement> HTMLTextAreaElement::create(Document& document, HTMLFormElement* form)
 {
     RefPtrWillBeRawPtr<HTMLTextAreaElement> textArea = adoptRefWillBeNoop(new HTMLTextAreaElement(document, form));
-    textArea->ensureUserAgentShadowRoot();
+    textArea->ensureClosedShadowRoot();
     return textArea.release();
 }
 
-void HTMLTextAreaElement::didAddUserAgentShadowRoot(ShadowRoot& root)
+void HTMLTextAreaElement::didAddClosedShadowRoot(ShadowRoot& root)
 {
     root.appendChild(TextControlInnerEditorElement::create(document()));
 }
@@ -161,8 +161,8 @@ void HTMLTextAreaElement::parseAttribute(const QualifiedName& name, const Atomic
             rows = defaultRows;
         if (m_rows != rows) {
             m_rows = rows;
-            if (renderer())
-                renderer()->setNeedsLayoutAndPrefWidthsRecalcAndFullPaintInvalidation();
+            if (layoutObject())
+                layoutObject()->setNeedsLayoutAndPrefWidthsRecalcAndFullPaintInvalidation(LayoutInvalidationReason::AttributeChanged);
         }
     } else if (name == colsAttr) {
         int cols = 0;
@@ -170,8 +170,8 @@ void HTMLTextAreaElement::parseAttribute(const QualifiedName& name, const Atomic
             cols = defaultCols;
         if (m_cols != cols) {
             m_cols = cols;
-            if (renderer())
-                renderer()->setNeedsLayoutAndPrefWidthsRecalcAndFullPaintInvalidation();
+            if (LayoutObject* layoutObject = this->layoutObject())
+                layoutObject->setNeedsLayoutAndPrefWidthsRecalcAndFullPaintInvalidation(LayoutInvalidationReason::AttributeChanged);
         }
     } else if (name == wrapAttr) {
         // The virtual/physical values were a Netscape extension of HTML 3.0, now deprecated.
@@ -185,8 +185,8 @@ void HTMLTextAreaElement::parseAttribute(const QualifiedName& name, const Atomic
             wrap = SoftWrap;
         if (wrap != m_wrap) {
             m_wrap = wrap;
-            if (renderer())
-                renderer()->setNeedsLayoutAndPrefWidthsRecalcAndFullPaintInvalidation();
+            if (LayoutObject* layoutObject = this->layoutObject())
+                layoutObject->setNeedsLayoutAndPrefWidthsRecalcAndFullPaintInvalidation(LayoutInvalidationReason::AttributeChanged);
         }
     } else if (name == accesskeyAttr) {
         // ignore for the moment
@@ -198,9 +198,9 @@ void HTMLTextAreaElement::parseAttribute(const QualifiedName& name, const Atomic
         HTMLTextFormControlElement::parseAttribute(name, value);
 }
 
-RenderObject* HTMLTextAreaElement::createRenderer(RenderStyle*)
+LayoutObject* HTMLTextAreaElement::createLayoutObject(const ComputedStyle&)
 {
-    return new RenderTextControlMultiLine(this);
+    return new LayoutTextControlMultiLine(this);
 }
 
 bool HTMLTextAreaElement::appendFormData(FormDataList& encoding, bool)
@@ -253,15 +253,15 @@ void HTMLTextAreaElement::updateFocusAppearance(bool restorePreviousSelection)
 
 void HTMLTextAreaElement::defaultEventHandler(Event* event)
 {
-    if (renderer() && (event->isMouseEvent() || event->isDragEvent() || event->hasInterface(EventNames::WheelEvent) || event->type() == EventTypeNames::blur))
+    if (layoutObject() && (event->isMouseEvent() || event->isDragEvent() || event->hasInterface(EventNames::WheelEvent) || event->type() == EventTypeNames::blur))
         forwardEvent(event);
-    else if (renderer() && event->isBeforeTextInsertedEvent())
+    else if (layoutObject() && event->isBeforeTextInsertedEvent())
         handleBeforeTextInsertedEvent(static_cast<BeforeTextInsertedEvent*>(event));
 
     HTMLTextFormControlElement::defaultEventHandler(event);
 }
 
-void HTMLTextAreaElement::handleFocusEvent(Element*, FocusType)
+void HTMLTextAreaElement::handleFocusEvent(Element*, WebFocusType)
 {
     if (LocalFrame* frame = document().frame())
         frame->spellChecker().didBeginEditing(this);
@@ -287,7 +287,7 @@ void HTMLTextAreaElement::subtreeHasChanged()
 void HTMLTextAreaElement::handleBeforeTextInsertedEvent(BeforeTextInsertedEvent* event) const
 {
     ASSERT(event);
-    ASSERT(renderer());
+    ASSERT(layoutObject());
     int signedMaxLength = maxLength();
     if (signedMaxLength < 0)
         return;
@@ -525,7 +525,7 @@ String HTMLTextAreaElement::validationMessage() const
 bool HTMLTextAreaElement::valueMissing() const
 {
     // We should not call value() for performance.
-    return willValidate() && valueMissing(0);
+    return willValidate() && valueMissing(nullptr);
 }
 
 bool HTMLTextAreaElement::valueMissing(const String* value) const
@@ -536,13 +536,13 @@ bool HTMLTextAreaElement::valueMissing(const String* value) const
 bool HTMLTextAreaElement::tooLong() const
 {
     // We should not call value() for performance.
-    return willValidate() && tooLong(0, CheckDirtyFlag);
+    return willValidate() && tooLong(nullptr, CheckDirtyFlag);
 }
 
 bool HTMLTextAreaElement::tooShort() const
 {
     // We should not call value() for performance.
-    return willValidate() && tooShort(0, CheckDirtyFlag);
+    return willValidate() && tooShort(nullptr, CheckDirtyFlag);
 }
 
 bool HTMLTextAreaElement::tooLong(const String* value, NeedsToCheckDirtyFlag check) const
@@ -609,7 +609,7 @@ void HTMLTextAreaElement::updatePlaceholderText()
     const AtomicString& placeholderText = fastGetAttribute(placeholderAttr);
     if (placeholderText.isEmpty()) {
         if (placeholder)
-            userAgentShadowRoot()->removeChild(placeholder);
+            closedShadowRoot()->removeChild(placeholder);
         return;
     }
     if (!placeholder) {
@@ -617,7 +617,7 @@ void HTMLTextAreaElement::updatePlaceholderText()
         placeholder = newElement.get();
         placeholder->setShadowPseudoId(AtomicString("-webkit-input-placeholder", AtomicString::ConstructFromLiteral));
         placeholder->setAttribute(idAttr, ShadowElementNames::placeholder());
-        userAgentShadowRoot()->insertBefore(placeholder, innerEditorElement()->nextSibling());
+        closedShadowRoot()->insertBefore(placeholder, innerEditorElement()->nextSibling());
     }
     placeholder->setTextContent(placeholderText);
 }
@@ -632,4 +632,10 @@ bool HTMLTextAreaElement::supportsAutofocus() const
     return true;
 }
 
+const AtomicString& HTMLTextAreaElement::defaultAutocapitalize() const
+{
+    DEFINE_STATIC_LOCAL(const AtomicString, sentences, ("sentences", AtomicString::ConstructFromLiteral));
+    return sentences;
 }
+
+} // namespace blink

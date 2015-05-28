@@ -60,7 +60,7 @@ static PassRefPtr<SkSurface> createSkSurface(GrContext* gr, const IntSize& size,
     gr->resetContext();
     SkImageInfo info = SkImageInfo::MakeN32Premul(size.width(), size.height());
     SkSurfaceProps disableLCDProps(0, kUnknown_SkPixelGeometry);
-    return adoptRef(SkSurface::NewRenderTarget(gr, info,  msaaSampleCount,
+    return adoptRef(SkSurface::NewRenderTarget(gr, SkSurface::kNo_Budgeted, info,  msaaSampleCount,
         Opaque == opacityMode ? 0 : &disableLCDProps));
 }
 
@@ -91,7 +91,7 @@ Canvas2DLayerBridge::Canvas2DLayerBridge(PassOwnPtr<WebGraphicsContext3DProvider
     , m_framesPending(0)
     , m_destructionInProgress(false)
     , m_rateLimitingEnabled(false)
-    , m_filterLevel(SkPaint::kLow_FilterLevel)
+    , m_filterQuality(kLow_SkFilterQuality)
     , m_isHidden(false)
     , m_next(0)
     , m_prev(0)
@@ -109,7 +109,7 @@ Canvas2DLayerBridge::Canvas2DLayerBridge(PassOwnPtr<WebGraphicsContext3DProvider
     m_layer->setBlendBackgroundColor(opacityMode != Opaque);
     GraphicsLayer::registerContentsLayer(m_layer->layer());
     m_layer->setRateLimitContext(m_rateLimitingEnabled);
-    m_layer->setNearestNeighbor(m_filterLevel == SkPaint::kNone_FilterLevel);
+    m_layer->setNearestNeighbor(m_filterQuality == kNone_SkFilterQuality);
     m_canvas->setNotificationClient(this);
 #ifndef NDEBUG
     canvas2DLayerBridgeInstanceCounter.increment();
@@ -120,6 +120,8 @@ Canvas2DLayerBridge::~Canvas2DLayerBridge()
 {
     ASSERT(m_destructionInProgress);
     ASSERT(!Canvas2DLayerManager::get().isInList(this));
+    if (m_canvas)
+        m_canvas->setNotificationClient(nullptr);
     m_layer.clear();
     ASSERT(m_mailboxes.size() == 0);
 #ifndef NDEBUG
@@ -150,11 +152,11 @@ void Canvas2DLayerBridge::beginDestruction()
     ASSERT(!m_bytesAllocated);
 }
 
-void Canvas2DLayerBridge::setFilterLevel(SkPaint::FilterLevel filterLevel)
+void Canvas2DLayerBridge::setFilterQuality(SkFilterQuality filterQuality)
 {
     ASSERT(!m_destructionInProgress);
-    m_filterLevel = filterLevel;
-    m_layer->setNearestNeighbor(m_filterLevel == SkPaint::kNone_FilterLevel);
+    m_filterQuality = filterQuality;
+    m_layer->setNearestNeighbor(m_filterQuality == kNone_SkFilterQuality);
 }
 
 void Canvas2DLayerBridge::setIsHidden(bool hidden)
@@ -373,7 +375,7 @@ bool Canvas2DLayerBridge::prepareMailbox(WebExternalTextureMailbox* outMailbox, 
     RefPtr<SkImage> image = adoptRef(m_canvas->newImageSnapshot());
 
     // Early exit if canvas was not drawn to since last prepareMailbox
-    GLenum filter = m_filterLevel == SkPaint::kNone_FilterLevel ? GL_NEAREST : GL_LINEAR;
+    GLenum filter = m_filterQuality == kNone_SkFilterQuality ? GL_NEAREST : GL_LINEAR;
     if (image->uniqueID() == m_lastImageId && filter == m_lastFilter)
         return false;
     m_lastImageId = image->uniqueID();
@@ -412,8 +414,8 @@ bool Canvas2DLayerBridge::prepareMailbox(WebExternalTextureMailbox* outMailbox, 
         memcpy(&mailboxInfo.m_mailbox.name[0], image->getTexture()->getCustomData()->data(), sizeof(mailboxInfo.m_mailbox.name));
     } else {
         context()->genMailboxCHROMIUM(mailboxInfo.m_mailbox.name);
-        RefPtr<SkData> mialboxNameData = adoptRef(SkData::NewWithCopy(&mailboxInfo.m_mailbox.name[0], sizeof(mailboxInfo.m_mailbox.name)));
-        image->getTexture()->setCustomData(mialboxNameData.get());
+        RefPtr<SkData> mailboxNameData = adoptRef(SkData::NewWithCopy(&mailboxInfo.m_mailbox.name[0], sizeof(mailboxInfo.m_mailbox.name)));
+        image->getTexture()->setCustomData(mailboxNameData.get());
         webContext->produceTextureCHROMIUM(GL_TEXTURE_2D, mailboxInfo.m_mailbox.name);
     }
 

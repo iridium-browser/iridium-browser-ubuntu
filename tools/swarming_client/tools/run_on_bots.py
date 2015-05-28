@@ -5,7 +5,7 @@
 
 """Automated maintenance tool to run a script on bots.
 
-To use this script, write a self-contained python script (use a .par if
+To use this script, write a self-contained python script (use a .zip if
 necessary), specify it on the command line and it will be packaged and triggered
 on all the swarming bots corresponding to the --dimension filters specified, or
 all the bots if no filter is specified.
@@ -52,7 +52,7 @@ def archive(isolate_server, script):
       'files': [base_script],
     },
   }
-  tempdir = tempfile.mkdtemp(prefix='run_on_bots')
+  tempdir = tempfile.mkdtemp(prefix=u'run_on_bots')
   try:
     isolate_file = os.path.join(tempdir, 'tool.isolate')
     isolated_file = os.path.join(tempdir, 'tool.isolated')

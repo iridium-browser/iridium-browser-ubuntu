@@ -8,7 +8,7 @@
 #include "base/process/process_handle.h"
 #include "ipc/ipc_message_utils.h"
 #include "ipc/ipc_platform_file.h"
-#include "mojo/edk/embedder/platform_channel_pair.h"
+#include "third_party/mojo/src/mojo/edk/embedder/platform_channel_pair.h"
 
 namespace IPC {
 
@@ -61,7 +61,7 @@ void MojoServerBootstrap::SendClientPipe() {
     // GetFileHandleForProcess() only fails on Windows.
     NOTREACHED();
 #endif
-    DLOG(WARNING) << "Failed to translate file handle for client process.";
+    LOG(WARNING) << "Failed to translate file handle for client process.";
     Fail();
     return;
   }
@@ -143,7 +143,7 @@ bool MojoClientBootstrap::OnMessageReceived(const Message& message) {
   PlatformFileForTransit pipe;
   PickleIterator iter(message);
   if (!ParamTraits<PlatformFileForTransit>::Read(&message, &iter, &pipe)) {
-    DLOG(WARNING) << "Failed to read a file handle from bootstrap channel.";
+    LOG(WARNING) << "Failed to read a file handle from bootstrap channel.";
     message.set_dispatch_error();
     return false;
   }
@@ -198,6 +198,10 @@ void MojoBootstrap::Init(scoped_ptr<Channel> channel, Delegate* delegate) {
 
 bool MojoBootstrap::Connect() {
   return channel_->Connect();
+}
+
+base::ProcessId MojoBootstrap::GetSelfPID() const {
+  return channel_->GetSelfPID();
 }
 
 void MojoBootstrap::OnBadMessageReceived(const Message& message) {

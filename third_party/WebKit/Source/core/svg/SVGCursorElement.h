@@ -49,7 +49,7 @@ public:
     SVGAnimatedLength* x() const { return m_x.get(); }
     SVGAnimatedLength* y() const { return m_y.get(); }
 
-    virtual void trace(Visitor*) override;
+    DECLARE_VIRTUAL_TRACE();
 
 private:
     explicit SVGCursorElement(Document&);
@@ -57,15 +57,14 @@ private:
     virtual bool isValid() const override { return SVGTests::isValid(document()); }
 
     bool isSupportedAttribute(const QualifiedName&);
-    virtual void parseAttribute(const QualifiedName&, const AtomicString&) override;
     virtual void svgAttributeChanged(const QualifiedName&) override;
 
-    virtual bool rendererIsNeeded(const RenderStyle&) override { return false; }
+    virtual bool layoutObjectIsNeeded(const ComputedStyle&) override { return false; }
 
     RefPtrWillBeMember<SVGAnimatedLength> m_x;
     RefPtrWillBeMember<SVGAnimatedLength> m_y;
 
-    WillBeHeapHashSet<RawPtrWillBeWeakMember<SVGElement> > m_clients;
+    WillBeHeapHashSet<RawPtrWillBeWeakMember<SVGElement>> m_clients;
 };
 
 } // namespace blink

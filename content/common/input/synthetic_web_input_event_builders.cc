@@ -68,6 +68,7 @@ WebMouseWheelEvent SyntheticWebMouseWheelEventBuilder::Build(float dx,
     result.wheelTicksY = dy > 0.0f ? 1.0f : -1.0f;
   result.modifiers = modifiers;
   result.hasPreciseScrollingDeltas = precise;
+  result.canScroll = true;
   return result;
 }
 
@@ -176,6 +177,8 @@ int SyntheticWebTouchEvent::PressPoint(float x, float y) {
   point.position.y = point.screenPosition.y = y;
   point.state = WebTouchPoint::StatePressed;
   point.radiusX = point.radiusY = 1.f;
+  point.rotationAngle = 1.f;
+  point.force = 1.f;
   ++touchesLength;
   WebTouchEventTraits::ResetType(
       WebInputEvent::TouchStart, timeStampSeconds, this);

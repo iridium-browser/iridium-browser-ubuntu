@@ -2,14 +2,13 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "base/debug/trace_event.h"
 #include "base/logging.h"
+#include "base/trace_event/trace_event.h"
 #include "skia/ext/analysis_canvas.h"
 #include "third_party/skia/include/core/SkDraw.h"
 #include "third_party/skia/include/core/SkRRect.h"
 #include "third_party/skia/include/core/SkShader.h"
 #include "third_party/skia/src/core/SkRasterClip.h"
-#include "ui/gfx/geometry/rect_conversions.h"
 
 namespace {
 
@@ -419,7 +418,7 @@ SkCanvas::SaveLayerStrategy AnalysisCanvas::willSaveLayer(
   SkXfermode::Mode xfermode = SkXfermode::kSrc_Mode;
   if (paint)
     SkXfermode::AsMode(paint->getXfermode(), &xfermode);
-  if (xfermode != SkXfermode::kSrc_Mode) {
+  if (xfermode != SkXfermode::kDst_Mode) {
     if (force_not_transparent_stack_level_ == kNoLayer) {
       force_not_transparent_stack_level_ = saved_stack_size_;
       SetForceNotTransparent(true);

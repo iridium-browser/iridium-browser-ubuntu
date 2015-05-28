@@ -269,6 +269,9 @@ def SetUpArgumentBits(env):
   BitFromArgument(env, 'translate_fast', default=False,
     desc='When using pnacl TC (bitcode=1) use accelerated translation step')
 
+  BitFromArgument(env, 'use_sz', default=False,
+    desc='When using pnacl TC (bitcode=1) use Subzero for fast translation')
+
   BitFromArgument(env, 'built_elsewhere', default=False,
     desc='The programs have already been built by another system')
 
@@ -404,6 +407,7 @@ def SetUpArgumentBits(env):
                         'pnacl_unsandboxed',
                         'skip_nonstable_bitcode',
                         'translate_fast',
+                        'use_sz',
                         'use_sandboxed_translator')
 
     for flag_name in pnacl_only_flags:
@@ -685,21 +689,27 @@ nacl_glibc_skiplist.update(['%s_irt' % test for test in nacl_glibc_skiplist])
 nonsfi_test_whitelist = set([
     'run_arm_float_abi_test',
     'run_clock_get_test',
+    'run_clone_test',
+    'run_directory_test',
     'run_dup_test',
     'run_exception_test',
     'run_fcntl_test',
+    'run_file_descriptor_test',
     'run_float_test',
     'run_fork_test',
     'run_getpid_test',
     'run_hello_world_test',
+    'run_icache_test',
     'run_irt_futex_test',
     'run_malloc_realloc_calloc_free_test',
     'run_mmap_test',
     'run_nanosleep_test',
+    'run_nonsfi_syscall_test',
     'run_prctl_test',
     'run_printf_test',
     'run_pwrite_test',
     'run_random_test',
+    'run_rlimit_test',
     'run_sigaction_test',
     'run_signal_sigbus_test',
     'run_signal_test',
@@ -747,7 +757,6 @@ ACCEPTABLE_TEST_SUITES = set([
   'mmap_race_tests',
   'minsfi_tests',
   'nonpexe_tests',
-  'performance_tests',
   'pnacl_abi_tests',
   'sel_ldr_sled_tests',
   'sel_ldr_tests',
@@ -1562,6 +1571,7 @@ def GetFinalizedPexe(env, pexe):
   node = env.Command(target=final_name, source=[pexe_name],
                      action=[Action('${PNACLFINALIZECOM}',
                                     '${PNACLFINALIZECOMSTR}')])
+  env.Alias('all_programs', node)
   assert len(node) == 1, node
   return node[0]
 
@@ -1608,6 +1618,7 @@ def GetTranslatedNexe(env, pexe):
     command += ' --allow-llvm-bitcode-input'
   node = env.Command(target=nexe_name, source=[pexe_name],
                      action=[Action(command, '${TRANSLATECOMSTR}')])
+  env.Alias('all_programs', node)
   assert len(node) == 1, node
   return node[0]
 
@@ -1636,19 +1647,19 @@ def CommandTestFileDumpCheck(env,
 
 pre_base_env.AddMethod(CommandTestFileDumpCheck)
 
-
 def CommandTestFileCheck(env, name, cmd, check_file):
   """Create a test that runs a |cmd| (array of strings),
   which is expected to print to stdout.  The results
   of stdout will then be piped to the file_check.py tool which
   will search for the regexes specified in |check_file|. """
 
-  return env.CommandTest(name,
-                         ['${PYTHON}',
-                          env.File('${SCONSTRUCT_DIR}/tools/file_check.py'),
-                          check_file] + cmd,
-                         # don't run ${PYTHON} under the emulator.
-                         direct_emulation=False)
+  return env.CommandTest(
+          name,
+          ['${PYTHON}',
+          env.File('${SCONSTRUCT_DIR}/tools/llvm_file_check_wrapper.py'),
+          '${FILECHECK}',
+          check_file] + cmd,
+          direct_emulation=False)
 
 pre_base_env.AddMethod(CommandTestFileCheck)
 
@@ -1812,6 +1823,7 @@ def GetPerfEnvDescription(env):
   bit_to_description = [ ('tests_use_irt', ('with_irt', '')),
                          ('bitcode', ('pnacl', 'nnacl')),
                          ('translate_fast', ('fast', '')),
+                         ('use_sz', ('sz', '')),
                          ('nacl_glibc', ('glibc', 'newlib')),
                          ('nacl_static_link', ('static', 'dynamic')),
                          ]
@@ -2142,13 +2154,6 @@ that the given target requires that argument be given."""
 pre_base_env.AddMethod(GetAbsDirArg)
 
 
-pre_base_env.Append(
-    CPPDEFINES = [
-        ['NACL_BUILD_ARCH', '${BUILD_ARCHITECTURE}' ],
-        ['NACL_BUILD_SUBARCH', '${BUILD_SUBARCH}' ],
-        ],
-    )
-
 def MakeGTestEnv(env):
   # Create an environment to run unit tests using Gtest.
   gtest_env = env.Clone()
@@ -2220,7 +2225,6 @@ def MakeBaseTrustedEnv(platform=None):
       'src/nonsfi/loader/build.scons',
       'src/shared/gio/build.scons',
       'src/shared/imc/build.scons',
-      'src/shared/ldr/build.scons',
       'src/shared/platform/build.scons',
       'src/shared/serialization/build.scons',
       'src/shared/srpc/build.scons',
@@ -2229,15 +2233,12 @@ def MakeBaseTrustedEnv(platform=None):
       'src/trusted/cpu_features/build.scons',
       'src/trusted/debug_stub/build.scons',
       'src/trusted/desc/build.scons',
-      'src/trusted/desc_cacheability/build.scons',
       'src/trusted/fault_injection/build.scons',
       'src/trusted/interval_multiset/build.scons',
-      'src/trusted/manifest_name_service_proxy/build.scons',
       'src/trusted/nacl_base/build.scons',
       'src/trusted/nonnacl_util/build.scons',
       'src/trusted/perf_counter/build.scons',
       'src/trusted/platform_qualify/build.scons',
-      'src/trusted/reverse_service/build.scons',
       'src/trusted/seccomp_bpf/build.scons',
       'src/trusted/sel_universal/build.scons',
       'src/trusted/service_runtime/build.scons',
@@ -2309,9 +2310,6 @@ Common tasks:
 * smoke test:         scons --mode=nacl,opt-linux -k pp=1 smoke_tests
 
 * sel_ldr:            scons --mode=opt-linux sel_ldr
-
-* build the plugin:         scons --mode=opt-linux ppNaClPlugin
-*      or:                  scons --mode=opt-linux src/trusted/plugin
 
 Targets to build trusted code destined for the SDK:
 * build trusted-code tools:     scons build_bin
@@ -2450,10 +2448,6 @@ def MakeWindowsEnv(platform=None):
 
   windows_env.Append(
       CPPDEFINES = [
-          ['NACL_WINDOWS', '1'],
-          ['NACL_OSX', '0'],
-          ['NACL_LINUX', '0'],
-          ['NACL_ANDROID', '0'],
           ['_WIN32_WINNT', '0x0501'],
           ['__STDC_LIMIT_MACROS', '1'],
           ['NOMINMAX', '1'],
@@ -2467,7 +2461,7 @@ def MakeWindowsEnv(platform=None):
       LIBS = ['ws2_32', 'advapi32'],
       # TODO(bsy) remove 4355 once cross-repo
       # NACL_ALLOW_THIS_IN_INITIALIZER_LIST changes go in.
-      CCFLAGS = ['/EHsc', '/WX', '/wd4355', '/wd4800'],
+      CCFLAGS = ['/EHsc', '/WX', '/wd4355', '/wd4800']
   )
 
   # This linker option allows us to ensure our builds are compatible with
@@ -2574,15 +2568,12 @@ def MakeMacEnv(platform=None):
       CCFLAGS=[subarch_flag, '-fPIC'],
       ASFLAGS=[subarch_flag],
       LINKFLAGS=[subarch_flag, '-fPIC'],
-      CPPDEFINES = [['NACL_WINDOWS', '0'],
-                    ['NACL_OSX', '1'],
-                    ['NACL_LINUX', '0'],
-                    ['NACL_ANDROID', '0'],
-                    # defining _DARWIN_C_SOURCE breaks 10.4
+      CPPDEFINES = [# defining _DARWIN_C_SOURCE breaks 10.4
                     #['_DARWIN_C_SOURCE', '1'],
                     #['__STDC_LIMIT_MACROS', '1']
                     ],
   )
+
   return mac_env
 
 (mac_debug_env, mac_optimized_env) = GenerateOptimizationLevels(MakeMacEnv())
@@ -2628,8 +2619,6 @@ def SetUpLinuxEnvArm(env):
 
 def SetUpAndroidEnv(env):
   env.FilterOut(CPPDEFINES=[['_LARGEFILE64_SOURCE', '1']])
-  env.FilterOut(CPPDEFINES=[['NACL_ANDROID', '0']])
-  env.Prepend(CPPDEFINES=[['NACL_ANDROID', '1']])
   android_ndk_root = os.path.join('${SOURCE_ROOT}', 'third_party',
                                   'android_tools', 'ndk')
   android_ndk_experimental_root = os.path.join('${SOURCE_ROOT}',
@@ -2775,9 +2764,7 @@ def SetUpLinuxEnvMips(env):
                 LD=os.path.join(tc_dir, 'mipsel-linux-gnu-ld'),
                 ASFLAGS=[],
                 LIBPATH=['${LIB_DIR}',
-                         jail + '/sysroot/usr/lib'],
-                LINKFLAGS=['-T',
-                    os.path.join(jail, 'ld_script_mips_trusted')]
+                         jail + '/sysroot/usr/lib']
                 )
 
     env.Append(LIBS=['rt', 'dl', 'pthread'],
@@ -2800,11 +2787,7 @@ def MakeGenericLinuxEnv(platform=None):
 
   # Prepend so we can disable warnings via Append
   linux_env.Prepend(
-      CPPDEFINES = [['NACL_WINDOWS', '0'],
-                    ['NACL_OSX', '0'],
-                    ['NACL_LINUX', '1'],
-                    ['NACL_ANDROID', '0'],
-                    ['_DEFAULT_SOURCE', '1'],
+      CPPDEFINES = [['_DEFAULT_SOURCE', '1'],
                     ['_BSD_SOURCE', '1'],
                     ['_POSIX_C_SOURCE', '199506'],
                     ['_XOPEN_SOURCE', '600'],
@@ -2984,7 +2967,7 @@ def UnderWindowsCoverage(env):
 
 nacl_env.AddMethod(UnderWindowsCoverage)
 
-def AllowNonStableBitcode(env, allow_sb_translator=False):
+def SetNonStableBitcodeIfAllowed(env, allow_sb_translator=False):
   """ This modifies the environment to allow features that aren't part
       of PNaCl's stable ABI.  If tests using these features should be
       skipped entirely, this returns False.  Otherwise, on success, it
@@ -3003,7 +2986,7 @@ def AllowNonStableBitcode(env, allow_sb_translator=False):
   env.SetBits('nonstable_bitcode')
   return True
 
-nacl_env.AddMethod(AllowNonStableBitcode)
+nacl_env.AddMethod(SetNonStableBitcodeIfAllowed)
 
 
 def AllowInlineAssembly(env):
@@ -3114,10 +3097,8 @@ nacl_env.Append(
         ['DYNAMIC_ANNOTATIONS_ENABLED', '1' ],
         ['DYNAMIC_ANNOTATIONS_PREFIX', 'NACL_' ],
 
-        ['NACL_WINDOWS', '0'],
-        ['NACL_OSX', '0'],
-        ['NACL_LINUX', '0'],
-        ['NACL_ANDROID', '0'],
+        ['NACL_BUILD_ARCH', '${BUILD_ARCHITECTURE}'],
+        ['NACL_BUILD_SUBARCH', '${BUILD_SUBARCH}'],
         ],
     )
 
@@ -3149,6 +3130,8 @@ if nacl_env.Bit('bitcode'):
   if nacl_env.Bit('translate_fast'):
     nacl_env.Append(LINKFLAGS=['-Xlinker', '-translate-fast'])
     nacl_env.Append(TRANSLATEFLAGS=['-translate-fast'])
+  if nacl_env.Bit('use_sz'):
+    nacl_env.Append(TRANSLATEFLAGS=['--use-sz'])
 
   # With pnacl's clang base/ code uses the "override" keyword.
   nacl_env.Append(CXXFLAGS=['-Wno-c++11-extensions'])
@@ -3167,9 +3150,6 @@ if nacl_env.Bit('nacl_clang'):
   # https://code.google.com/p/nativeclient/issues/detail?id=3974
   # TODO(dschuff): change it to __asm__ and remove this suppression.
   nacl_env.Append(CCFLAGS=['-Wno-language-extension-token'])
-  # src/untrusted/valgrind/valgrind_interceptors.c uses a non-string-literal
-  # variable for printf.
-  nacl_env.Append(CCFLAGS=['-Wno-format-security'])
 
 # We use a special environment for building the IRT image because it must
 # always use the newlib toolchain, regardless of --nacl_glibc.  We clone
@@ -3194,6 +3174,7 @@ nacl_irt_env.Append(CPPPATH='${MAIN_DIR}/src/untrusted/pthread')
 target_variant_map = [
     ('bitcode', 'pnacl'),
     ('translate_fast', 'fast'),
+    ('use_sz', 'subzero'),
     ('nacl_pic', 'pic'),
     ('use_sandboxed_translator', 'sbtc'),
     ('nacl_glibc', 'glibc'),
@@ -3209,8 +3190,6 @@ if nacl_env.Bit('bitcode'):
   nacl_env['TARGET_VARIANT'] += '-clang'
 
 nacl_env.Replace(TESTRUNNER_LIBS=['testrunner'])
-# TODO(mseaborn): Drop this once chrome side has inlined this.
-nacl_env.Replace(PPAPI_LIBS=['ppapi'])
 
 # TODO(mseaborn): Make nacl-glibc-based static linking work with just
 # "-static", without specifying a linker script.
@@ -3266,7 +3245,6 @@ nacl_env.Append(
     'src/nonsfi/loader/build.scons',
     'src/shared/gio/nacl.scons',
     'src/shared/imc/nacl.scons',
-    'src/shared/ldr/nacl.scons',
     'src/shared/platform/nacl.scons',
     'src/shared/srpc/nacl.scons',
     'src/trusted/service_runtime/nacl.scons',
@@ -3344,7 +3322,6 @@ irt_variant_tests = [
     'tests/mmap_prot_exec/nacl.scons',
     'tests/mmap_race_protect/nacl.scons',
     'tests/nacl_log/nacl.scons',
-    'tests/nameservice/nacl.scons',
     'tests/nanosleep/nacl.scons',
     'tests/nonsfi/nacl.scons',
     'tests/noop/nacl.scons',
@@ -3357,7 +3334,6 @@ irt_variant_tests = [
     'tests/pnacl_abi/nacl.scons',
     'tests/pnacl_dynamic_loading/nacl.scons',
     'tests/pnacl_native_objects/nacl.scons',
-    'tests/process_create/nacl.scons',
     'tests/random/nacl.scons',
     'tests/redir/nacl.scons',
     'tests/rodata_not_writable/nacl.scons',
@@ -3373,7 +3349,6 @@ irt_variant_tests = [
     'tests/srpc_message/nacl.scons',
     'tests/stack_alignment/nacl.scons',
     'tests/stubout_mode/nacl.scons',
-    'tests/subprocess/nacl.scons',
     'tests/sysbasic/nacl.scons',
     'tests/syscall_return_regs/nacl.scons',
     'tests/syscall_return_sandboxing/nacl.scons',
@@ -3382,7 +3357,6 @@ irt_variant_tests = [
     'tests/threads/nacl.scons',
     'tests/time/nacl.scons',
     'tests/tls/nacl.scons',
-    'tests/tls_perf/nacl.scons',
     'tests/tls_segment_x86_32/nacl.scons',
     'tests/toolchain/nacl.scons',
     'tests/toolchain/arm/nacl.scons',
@@ -3481,8 +3455,6 @@ def RawSyscallObjects(env, sources):
   raw_syscall_env.Append(
     CPPDEFINES = [
       ['USE_RAW_SYSCALLS', '1'],
-      ['NACL_BUILD_ARCH', '${BUILD_ARCHITECTURE}' ],
-      ['NACL_BUILD_SUBARCH', '${BUILD_SUBARCH}' ],
       ],
   )
   objects = []
@@ -3503,6 +3475,7 @@ nacl_env.AddMethod(RawSyscallObjects)
 # TODO(mcgrathr,bradnelson): could get cleaner if naclsdk.py got folded back in.
 nacl_irt_env.ClearBits('nacl_glibc')
 nacl_irt_env.ClearBits('nacl_pic')
+nacl_irt_env.ClearBits('nacl_clang')
 # The choice of toolchain used to build the IRT does not depend on the toolchain
 # used to build user/test code. The PNaCl toolchain is used on x86, except on
 # Windows (because pnacl-clang doesn't run on Windows XP. If we stop supporting

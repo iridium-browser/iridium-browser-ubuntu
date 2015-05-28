@@ -78,20 +78,16 @@ typedef int32_t             SkFixed;
 #define SkFixedAbs(x)       SkAbs32(x)
 #define SkFixedAve(a, b)    (((a) + (b)) >> 1)
 
-SkFixed SkFixedMul_portable(SkFixed, SkFixed);
-
 #define SkFixedDiv(numer, denom)    SkDivBits(numer, denom, 16)
 
 //////////////////////////////////////////////////////////////////////////////////////////////////////
 // Now look for ASM overrides for our portable versions (should consider putting this in its own file)
 
-#ifdef SkLONGLONG
-    inline SkFixed SkFixedMul_longlong(SkFixed a, SkFixed b)
-    {
-        return (SkFixed)((int64_t)a * b >> 16);
-    }
-    #define SkFixedMul(a,b)     SkFixedMul_longlong(a,b)
-#endif
+inline SkFixed SkFixedMul_longlong(SkFixed a, SkFixed b) {
+    return (SkFixed)((int64_t)a * b >> 16);
+}
+#define SkFixedMul(a,b)     SkFixedMul_longlong(a,b)
+
 
 #if defined(SK_CPU_ARM32)
     /* This guy does not handle NaN or other obscurities, but is faster than
@@ -134,10 +130,6 @@ SkFixed SkFixedMul_portable(SkFixed, SkFixed);
     #define SkFloatToFixed(x)  SkFloatToFixed_arm(x)
 #endif
 
-#ifndef SkFixedMul
-    #define SkFixedMul(x, y)    SkFixedMul_portable(x, y)
-#endif
-
 ///////////////////////////////////////////////////////////////////////////////
 
 typedef int64_t SkFixed3232;   // 32.32
@@ -149,5 +141,20 @@ typedef int64_t SkFixed3232;   // 32.32
 #define SkFloatToFixed3232(x)     ((SkFixed3232)((x) * (65536.0f * 65536.0f)))
 
 #define SkScalarToFixed3232(x)    SkFloatToFixed3232(x)
+
+///////////////////////////////////////////////////////////////////////////////
+
+// 64bits wide, with a 16bit bias. Useful when accumulating lots of 16.16 so
+// we don't overflow along the way
+typedef int64_t Sk48Dot16;
+
+#define Sk48Dot16FloorToInt(x)    static_cast<int>((x) >> 16)
+
+static inline float Sk48Dot16ToScalar(Sk48Dot16 x) {
+    return static_cast<float>(x * 1.5258789e-5);  // x * (1.0f / (1 << 16))
+}
+#define SkFloatTo48Dot16(x)       (static_cast<Sk48Dot16>((x) * (1 << 16)))
+
+#define SkScalarTo48Dot16(x)      SkFloatTo48Dot16(x)
 
 #endif

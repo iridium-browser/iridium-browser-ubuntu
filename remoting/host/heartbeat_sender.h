@@ -19,6 +19,7 @@
 
 namespace base {
 class MessageLoopProxy;
+class TimeDelta;
 }  // namespace base
 
 namespace buzz {
@@ -47,8 +48,9 @@ class IqSender;
 // accept new connections from a client, but the rem:heartbeat xml element can
 // optionally include a rem:host-offline-reason attribute, which indicates that
 // the host cannot accept connections from the client (and might possibly be
-// shutting down).  The value of the host-offline-reason attribute can be a
-// string from host_exit_codes.cc (i.e. "INVALID_HOST_CONFIGURATION" string).
+// shutting down).  The value of the host-offline-reason attribute can be either
+// a string from host_exit_codes.cc (i.e. "INVALID_HOST_CONFIGURATION" string)
+// or one of kHostOfflineReasonXxx constants (i.e. "POLICY_READ_ERROR" string).
 //
 // The sequence-id attribute of the heartbeat is a zero-based incrementally
 // increasing integer unique to each heartbeat from a single host.
@@ -91,25 +93,33 @@ class HeartbeatSender : public SignalStrategy::Listener {
   // |signal_strategy| and |delegate| must outlive this
   // object. Heartbeats will start when the supplied SignalStrategy
   // enters the CONNECTED state.
+  //
+  // |on_heartbeat_successful_callback| is invoked after the first successful
+  // heartbeat.
+  //
+  // |on_unknown_host_id_error| is invoked when the host ID is permanently not
+  // recognized by the server.
   HeartbeatSender(const base::Closure& on_heartbeat_successful_callback,
                   const base::Closure& on_unknown_host_id_error,
                   const std::string& host_id,
                   SignalStrategy* signal_strategy,
-                  scoped_refptr<RsaKeyPair> key_pair,
+                  const scoped_refptr<const RsaKeyPair>& host_key_pair,
                   const std::string& directory_bot_jid);
   ~HeartbeatSender() override;
 
-  // Sets host offline reason for future heartbeat stanzas,
-  // as well as intiates sending a stanza right away.
+  // Sets host offline reason for future heartbeat stanzas, and initiates
+  // sending a stanza right away.
   //
-  // See rem:host-offline-reason class-level comments for discussion
-  // of allowed values for |host_offline_reason| string.
+  // For discussion of allowed values for |host_offline_reason| argument,
+  // please see the description of rem:host-offline-reason xml attribute in
+  // the class-level comments above.
   //
-  // |ack_callback| will be called once, when the bot acks
-  // receiving the |host_offline_reason|.
+  // |ack_callback| will be called once, when the bot acks receiving the
+  // |host_offline_reason| or when |timeout| is reached.
   void SetHostOfflineReason(
       const std::string& host_offline_reason,
-      const base::Closure& ack_callback);
+      const base::TimeDelta& timeout,
+      const base::Callback<void(bool success)>& ack_callback);
 
   // SignalStrategy::Listener interface.
   void OnSignalStrategyStateChange(SignalStrategy::State state) override;
@@ -132,6 +142,10 @@ class HeartbeatSender : public SignalStrategy::Listener {
   void SetInterval(int interval);
   void SetSequenceId(int sequence_id);
 
+  // Handlers for host-offline-reason completion and timeout.
+  void OnHostOfflineReasonTimeout();
+  void OnHostOfflineReasonAck();
+
   // Helper methods used by DoSendStanza() to generate heartbeat stanzas.
   scoped_ptr<buzz::XmlElement> CreateHeartbeatMessage();
   scoped_ptr<buzz::XmlElement> CreateSignature();
@@ -140,7 +154,7 @@ class HeartbeatSender : public SignalStrategy::Listener {
   base::Closure on_unknown_host_id_error_;
   std::string host_id_;
   SignalStrategy* signal_strategy_;
-  scoped_refptr<RsaKeyPair> key_pair_;
+  scoped_refptr<const RsaKeyPair> host_key_pair_;
   std::string directory_bot_jid_;
   scoped_ptr<IqSender> iq_sender_;
   scoped_ptr<IqRequest> request_;
@@ -152,8 +166,11 @@ class HeartbeatSender : public SignalStrategy::Listener {
   int sequence_id_recent_set_num_;
   bool heartbeat_succeeded_;
   int failed_startup_heartbeat_count_;
+
+  // Fields to send and indicate completion of sending host-offline-reason.
   std::string host_offline_reason_;
-  base::Closure host_offline_reason_ack_callback_;
+  base::Callback<void(bool success)> host_offline_reason_ack_callback_;
+  base::OneShotTimer<HeartbeatSender> host_offline_reason_timeout_timer_;
 
   base::ThreadChecker thread_checker_;
 

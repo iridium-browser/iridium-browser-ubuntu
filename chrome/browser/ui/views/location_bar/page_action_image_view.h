@@ -57,8 +57,7 @@ class PageActionImageView : public ToolbarActionViewDelegateViews,
   static const char kViewClassName[];
 
   // Overridden from View.
-  void PaintChildren(gfx::Canvas* canvas,
-                     const views::CullSet& cull_set) override;
+  void PaintChildren(const ui::PaintContext& context) override;
 
   // ToolbarActionViewDelegateViews:
   void UpdateState() override;
@@ -70,7 +69,6 @@ class PageActionImageView : public ToolbarActionViewDelegateViews,
   views::View* GetReferenceViewForPopup() override;
   views::MenuButton* GetContextMenuButton() override;
   content::WebContents* GetCurrentWebContents() const override;
-  void HideActivePopup() override;
 
   // The controller for this ExtensionAction view.
   scoped_ptr<ExtensionActionViewController> view_controller_;

@@ -26,6 +26,7 @@
         '../resources/ui_resources.gyp:ui_resources',
         '../resources/ui_resources.gyp:ui_test_pak',
         '../strings/ui_strings.gyp:ui_strings',
+        'ime/ui_base_ime.gyp:ui_base_ime',
         'ui_base.gyp:ui_base',
         'ui_base.gyp:ui_base_test_support',
       ],
@@ -33,11 +34,12 @@
       # are built on iOS.
       'common_sources' : [
         # Note: file list duplicated in GN build.
-        'layout_unittest.cc',
+        'ios/cru_context_menu_controller_unittest.mm',
         'l10n/l10n_util_mac_unittest.mm',
         'l10n/l10n_util_unittest.cc',
         'l10n/l10n_util_win_unittest.cc',
         'l10n/time_format_unittest.cc',
+        'layout_unittest.cc',
         'models/tree_node_iterator_unittest.cc',
         'resource/data_pack_literal.cc',
         'resource/data_pack_unittest.cc',
@@ -62,6 +64,7 @@
         'cocoa/menu_controller_unittest.mm',
         'cocoa/nsgraphics_context_additions_unittest.mm',
         'cocoa/nsview_additions_unittest.mm',
+        'cocoa/three_part_image_unittest.mm',
         'cocoa/tracking_area_unittest.mm',
         'dragdrop/os_exchange_data_provider_aurax11_unittest.cc',
         'ime/candidate_window_unittest.cc',
@@ -75,8 +78,8 @@
         'models/list_model_unittest.cc',
         'models/list_selection_model_unittest.cc',
         'models/tree_node_model_unittest.cc',
-        'test/test_clipboard_unittest.cc',
         'test/data/resource.h',
+        'test/test_clipboard_unittest.cc',
         'text/bytes_formatting_unittest.cc',
         'touch/selection_bound_unittest.cc',
         'user_activity/user_activity_detector_unittest.cc',
@@ -213,8 +216,8 @@
         ['use_x11==0', {
           'sources!': [
             'ime/chromeos/character_composer_unittest.cc',
-            'ime/input_method_chromeos_unittest.cc',
             'ime/composition_text_util_pango_unittest.cc',
+            'ime/input_method_chromeos_unittest.cc',
           ],
         }],
       ],

@@ -7,33 +7,38 @@
 
 #include "core/animation/StyleInterpolation.h"
 #include "core/css/CSSShadowValue.h"
-#include "core/rendering/style/RenderStyle.h"
+#include "core/style/ComputedStyle.h"
 #include "platform/Length.h"
 
 namespace blink {
 
 class ShadowStyleInterpolation : public StyleInterpolation {
 public:
-    static PassRefPtrWillBeRawPtr<ShadowStyleInterpolation> create(const CSSValue& start, const CSSValue& end, CSSPropertyID id, bool styleFlag)
+    typedef bool NonInterpolableType;
+
+    static bool canCreateFrom(const CSSValue& start, const CSSValue& end);
+
+    static bool usesDefaultStyleInterpolation(const CSSValue& start, const CSSValue& end);
+
+    static PassOwnPtrWillBeRawPtr<InterpolableValue> toInterpolableValue(const CSSValue&, NonInterpolableType&);
+    static PassRefPtrWillBeRawPtr<CSSValue> fromInterpolableValue(const InterpolableValue&, NonInterpolableType, InterpolationRange = RangeAll);
+
+private:
+    ShadowStyleInterpolation(PassOwnPtrWillBeRawPtr<InterpolableValue> start, PassOwnPtrWillBeRawPtr<InterpolableValue> end, CSSPropertyID id)
+        : StyleInterpolation(start, end, id)
     {
-        return adoptRefWillBeNoop(new ShadowStyleInterpolation(shadowToInterpolableValue(start), shadowToInterpolableValue(end), id, styleFlag));
     }
 
-    static bool canCreateFrom(const CSSValue&);
+    static PassOwnPtrWillBeRawPtr<InterpolableValue> shadowToInterpolableValue(const CSSValue& value, NonInterpolableType& type)
+    {
+        return toInterpolableValue(value, type);
+    }
+    static PassRefPtrWillBeRawPtr<CSSValue> interpolableValueToShadow(const InterpolableValue& value, NonInterpolableType type, InterpolationRange range = RangeAll)
+    {
+        return fromInterpolableValue(value, type, range);
+    }
 
-    virtual void apply(StyleResolverState&) const override;
-    virtual void trace(Visitor*);
-
-    static PassRefPtrWillBeRawPtr<ShadowStyleInterpolation> maybeCreateFromShadow(const CSSValue& start, const CSSValue& end, CSSPropertyID);
-private:
-    ShadowStyleInterpolation(PassOwnPtrWillBeRawPtr<InterpolableValue> start, PassOwnPtrWillBeRawPtr<InterpolableValue> end, CSSPropertyID id, bool styleFlag)
-        : StyleInterpolation(start, end, id), m_styleFlag(styleFlag)
-    { }
-
-    bool m_styleFlag;
-
-    static PassOwnPtrWillBeRawPtr<InterpolableValue> shadowToInterpolableValue(const CSSValue&);
-    static PassRefPtrWillBeRawPtr<CSSValue> interpolableValueToShadow(InterpolableValue*, bool styleFlag);
+    static PassOwnPtrWillBeRawPtr<InterpolableValue> lengthToInterpolableValue(PassRefPtrWillBeRawPtr<CSSPrimitiveValue>);
 
     friend class AnimationShadowStyleInterpolationTest;
 };

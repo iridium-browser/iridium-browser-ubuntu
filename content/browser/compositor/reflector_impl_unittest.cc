@@ -42,12 +42,8 @@ class TestOutputSurface : public BrowserCompositorOutputSurface {
  public:
   TestOutputSurface(
       const scoped_refptr<cc::ContextProvider>& context_provider,
-      int surface_id,
-      IDMap<BrowserCompositorOutputSurface>* output_surface_map,
       const scoped_refptr<ui::CompositorVSyncManager>& vsync_manager)
       : BrowserCompositorOutputSurface(context_provider,
-                                       surface_id,
-                                       output_surface_map,
                                        vsync_manager) {}
 
   void SetFlip(bool flip) { capabilities_.flipped_output_surface = flip; }
@@ -87,17 +83,19 @@ class ReflectorImplTest : public testing::Test {
         cc::TestWebGraphicsContext3D::Create().Pass());
     output_surface_ =
         scoped_ptr<TestOutputSurface>(
-            new TestOutputSurface(context_provider_, 1, &surface_map_,
+            new TestOutputSurface(context_provider_,
                                   compositor_->vsync_manager())).Pass();
     CHECK(output_surface_->BindToClient(&output_surface_client_));
 
-    mirroring_layer_.reset(new ui::Layer());
+    mirroring_layer_.reset(new ui::Layer(ui::LAYER_SOLID_COLOR));
     gfx::Size size = output_surface_->SurfaceSize();
     mirroring_layer_->SetBounds(gfx::Rect(size.width(), size.height()));
+  }
 
-    int32 surface_id = 1;
-    reflector_ = new ReflectorImpl(compositor_.get(), mirroring_layer_.get(),
-                                   &surface_map_, proxy_.get(), surface_id);
+  void SetUpReflector() {
+    reflector_ = make_scoped_ptr(
+        new ReflectorImpl(compositor_.get(), mirroring_layer_.get()));
+    reflector_->OnSourceSurfaceReady(output_surface_.get());
   }
 
   void TearDown() override {
@@ -111,30 +109,24 @@ class ReflectorImplTest : public testing::Test {
     ImageTransportFactory::Terminate();
   }
 
-  void Init() { base::RunLoop().RunUntilIdle(); }
-
-  void UpdateTexture() {
-    reflector_->UpdateSubBufferOnMainThread(output_surface_->SurfaceSize(),
-                                            kSubRect);
-  }
+  void UpdateTexture() { reflector_->OnSourcePostSubBuffer(kSubRect); }
 
  protected:
   scoped_refptr<base::SingleThreadTaskRunner> compositor_task_runner_;
-  IDMap<BrowserCompositorOutputSurface> surface_map_;
   scoped_refptr<cc::ContextProvider> context_provider_;
   cc::FakeOutputSurfaceClient output_surface_client_;
   scoped_ptr<base::MessageLoop> message_loop_;
   scoped_refptr<base::MessageLoopProxy> proxy_;
   scoped_ptr<ui::Compositor> compositor_;
   scoped_ptr<ui::Layer> mirroring_layer_;
-  scoped_refptr<ReflectorImpl> reflector_;
+  scoped_ptr<ReflectorImpl> reflector_;
   scoped_ptr<TestOutputSurface> output_surface_;
 };
 
 namespace {
 TEST_F(ReflectorImplTest, CheckNormalOutputSurface) {
   output_surface_->SetFlip(false);
-  Init();
+  SetUpReflector();
   UpdateTexture();
   EXPECT_TRUE(mirroring_layer_->TextureFlipped());
   EXPECT_EQ(SkRegion(SkIRect::MakeXYWH(
@@ -145,7 +137,7 @@ TEST_F(ReflectorImplTest, CheckNormalOutputSurface) {
 
 TEST_F(ReflectorImplTest, CheckInvertedOutputSurface) {
   output_surface_->SetFlip(true);
-  Init();
+  SetUpReflector();
   UpdateTexture();
   EXPECT_FALSE(mirroring_layer_->TextureFlipped());
   EXPECT_EQ(SkRegion(kSkSubRect), mirroring_layer_->damaged_region());

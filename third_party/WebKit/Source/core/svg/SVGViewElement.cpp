@@ -34,7 +34,7 @@ inline SVGViewElement::SVGViewElement(Document& document)
 
 DEFINE_NODE_FACTORY(SVGViewElement)
 
-void SVGViewElement::trace(Visitor* visitor)
+DEFINE_TRACE(SVGViewElement)
 {
     visitor->trace(m_viewTarget);
     SVGElement::trace(visitor);
@@ -46,7 +46,7 @@ void SVGViewElement::parseAttribute(const QualifiedName& name, const AtomicStrin
     if (SVGZoomAndPan::parseAttribute(name, value))
         return;
 
-    parseAttributeNew(name, value);
+    SVGElement::parseAttribute(name, value);
 }
 
 } // namespace blink

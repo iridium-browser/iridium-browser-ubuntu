@@ -1,4 +1,3 @@
-#!/usr/bin/python
 # Copyright (c) 2012 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -8,22 +7,18 @@
 from __future__ import print_function
 
 import copy
+import mock
 import mox
 import os
 import multiprocessing
-import sys
 import tempfile
 
-sys.path.insert(0, os.path.join(os.path.dirname(os.path.realpath(__file__)),
-                                '..', '..'))
 from chromite.scripts import upload_prebuilts as prebuilt
 from chromite.lib import cros_test_lib
 from chromite.lib import gs
 from chromite.lib import binpkg
 from chromite.lib import osutils
 from chromite.lib import portage_util
-
-import mock
 
 
 # pylint: disable=E1120,W0212,R0904
@@ -295,7 +290,7 @@ class TestWritePackageIndex(cros_test_lib.MockTestCase, TestPkgIndex):
     self.assertEqual(f.read(), '')
 
 
-class TestUploadPrebuilt(cros_test_lib.MoxTestCase):
+class TestUploadPrebuilt(cros_test_lib.MoxTempDirTestCase):
   """Tests for the _UploadPrebuilt function."""
 
   def setUp(self):
@@ -305,7 +300,7 @@ class TestUploadPrebuilt(cros_test_lib.MoxTestCase):
         self.name = name
     self.pkgindex = SimplePackageIndex()
     self.mox.StubOutWithMock(binpkg, 'GrabLocalPackageIndex')
-    binpkg.GrabLocalPackageIndex('/packages').AndReturn(self.pkgindex)
+    binpkg.GrabLocalPackageIndex(self.tempdir).AndReturn(self.pkgindex)
     self.mox.StubOutWithMock(prebuilt, 'RemoteUpload')
     self.mox.StubOutWithMock(self.pkgindex, 'ResolveDuplicateUploads')
     self.pkgindex.ResolveDuplicateUploads([]).AndReturn(PRIVATE_PACKAGES)
@@ -315,11 +310,14 @@ class TestUploadPrebuilt(cros_test_lib.MoxTestCase):
     self.pkgindex.WriteToNamedTemporaryFile().AndReturn(fake_pkgs_file)
 
   def testSuccessfulGsUpload(self):
-    uploads = {'/packages/private.tbz2': 'gs://foo/private.tbz2'}
+    uploads = {
+        os.path.join(self.tempdir, 'private.tbz2'): 'gs://foo/private.tbz2'}
     self.mox.StubOutWithMock(prebuilt, 'GenerateUploadDict')
-    prebuilt.GenerateUploadDict(
-        '/packages', 'gs://foo/suffix',
-        PRIVATE_PACKAGES).AndReturn(uploads)
+    packages = list(PRIVATE_PACKAGES)
+    packages.append({'CPV': 'dev-only-extras'})
+    osutils.Touch(os.path.join(self.tempdir, 'dev-only-extras.tbz2'), 'w')
+    prebuilt.GenerateUploadDict(self.tempdir, 'gs://foo/suffix',
+                                packages).AndReturn(uploads)
     uploads = uploads.copy()
     uploads['fake'] = 'gs://foo/suffix/Packages'
     acl = 'public-read'
@@ -330,7 +328,7 @@ class TestUploadPrebuilt(cros_test_lib.MoxTestCase):
     uri = self.pkgindex.header['URI']
     uploader = prebuilt.PrebuiltUploader('gs://foo', acl, uri, [], '/', [],
                                          False, 'foo', False, 'x86-foo', [], '')
-    uploader._UploadPrebuilt('/packages', 'suffix')
+    uploader._UploadPrebuilt(self.tempdir, 'suffix')
 
 
 class TestSyncPrebuilts(cros_test_lib.MoxTestCase):
@@ -523,7 +521,3 @@ class TestSdk(cros_test_lib.MockTestCase):
     )
     tc_upload_path = '1994/04/%(target)s-1994.04.02.tar.xz'
     self.testSdkUpload(tc_tarballs, tc_upload_path)
-
-
-if __name__ == '__main__':
-  cros_test_lib.main()

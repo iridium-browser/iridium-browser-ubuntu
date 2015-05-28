@@ -9,6 +9,7 @@
  */
 
 #include "testing/gtest/include/gtest/gtest.h"
+#include "webrtc/base/checks.h"
 #include "webrtc/base/common.h"
 #include "webrtc/modules/rtp_rtcp/interface/receive_statistics.h"
 #include "webrtc/modules/rtp_rtcp/interface/rtp_header_parser.h"
@@ -92,7 +93,7 @@ void StreamObserver::set_start_bitrate_bps(unsigned int start_bitrate_bps) {
 void StreamObserver::OnReceiveBitrateChanged(
     const std::vector<unsigned int>& ssrcs, unsigned int bitrate) {
   CriticalSectionScoped lock(crit_.get());
-  assert(expected_bitrate_bps_ > 0);
+  DCHECK_GT(expected_bitrate_bps_, 0u);
   if (start_bitrate_bps_ != 0) {
     // For tests with an explicitly set start bitrate, verify the first
     // bitrate estimate is close to the start bitrate and lower than the
@@ -197,7 +198,7 @@ LowRateStreamObserver::LowRateStreamObserver(
       feedback_transport_(feedback_transport),
       receive_stats_(ReceiveStatistics::Create(clock)),
       crit_(CriticalSectionWrapper::CreateCriticalSection()),
-      send_stream_(NULL),
+      send_stream_(nullptr),
       test_state_(kFirstRampup),
       state_start_ms_(clock_->TimeInMilliseconds()),
       interval_start_ms_(state_start_ms_),
@@ -298,7 +299,7 @@ std::string LowRateStreamObserver::GetModifierString() {
 void LowRateStreamObserver::EvolveTestState(unsigned int bitrate_bps) {
   int64_t now = clock_->TimeInMilliseconds();
   CriticalSectionScoped lock(crit_.get());
-  assert(send_stream_ != NULL);
+  DCHECK(send_stream_ != nullptr);
   switch (test_state_) {
     case kFirstRampup: {
       EXPECT_FALSE(suspended_in_stats_);
@@ -380,7 +381,7 @@ void RampUpTest::RunRampUpTest(bool rtx,
 
   CreateSendConfig(num_streams);
 
-  scoped_ptr<RemoteBitrateEstimatorFactory> rbe_factory;
+  rtc::scoped_ptr<RemoteBitrateEstimatorFactory> rbe_factory;
   RateControlType control_type;
   if (extension_type == RtpExtension::kAbsSendTime) {
     control_type = kAimdControl;
@@ -403,7 +404,7 @@ void RampUpTest::RunRampUpTest(bool rtx,
 
   Call::Config call_config(&stream_observer);
   if (start_bitrate_bps != 0) {
-    call_config.stream_bitrates.start_bitrate_bps = start_bitrate_bps;
+    call_config.bitrate_config.start_bitrate_bps = start_bitrate_bps;
     stream_observer.set_start_bitrate_bps(start_bitrate_bps);
   }
 

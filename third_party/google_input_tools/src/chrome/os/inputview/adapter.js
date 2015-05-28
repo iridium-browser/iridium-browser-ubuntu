@@ -19,6 +19,9 @@ goog.require('goog.events.EventTarget');
 goog.require('goog.events.EventType');
 goog.require('goog.object');
 goog.require('i18n.input.chrome.DataSource');
+goog.require('i18n.input.chrome.inputview.FeatureName');
+goog.require('i18n.input.chrome.inputview.FeatureTracker');
+goog.require('i18n.input.chrome.inputview.GlobalFlags');
 goog.require('i18n.input.chrome.inputview.ReadyState');
 goog.require('i18n.input.chrome.inputview.StateType');
 goog.require('i18n.input.chrome.inputview.events.EventType');
@@ -32,8 +35,10 @@ goog.require('i18n.input.chrome.message.Type');
 goog.scope(function() {
 var CandidatesBackEvent = i18n.input.chrome.DataSource.CandidatesBackEvent;
 var ContextType = i18n.input.chrome.message.ContextType;
-var Type = i18n.input.chrome.message.Type;
+var FeatureTracker = i18n.input.chrome.inputview.FeatureTracker;
+var FeatureName = i18n.input.chrome.inputview.FeatureName;
 var Name = i18n.input.chrome.message.Name;
+var Type = i18n.input.chrome.message.Type;
 
 
 
@@ -62,6 +67,15 @@ i18n.input.chrome.inputview.Adapter = function(readyState) {
    */
   this.modifierState_ = {};
 
+
+  /**
+   * Tracker for which FeatureName are enabled.
+   *
+   * @type {!FeatureTracker};
+   */
+  this.features = new FeatureTracker();
+
+
   /**
    * The system ready state.
    *
@@ -73,12 +87,28 @@ i18n.input.chrome.inputview.Adapter = function(readyState) {
 
   /** @private {!goog.events.EventHandler} */
   this.handler_ = new goog.events.EventHandler(this);
-  this.handler_.listen(document, 'webkitvisibilitychange',
-      this.onVisibilityChange_);
+  this.handler_.
+      listen(document, 'webkitvisibilitychange', this.onVisibilityChange_).
+      // When screen rotate, will trigger resize event.
+      listen(window, goog.events.EventType.RESIZE, this.onVisibilityChange_);
+
+  // Notifies the initial visibility change message to background.
+  this.onVisibilityChange_();
 };
 goog.inherits(i18n.input.chrome.inputview.Adapter,
     goog.events.EventTarget);
 var Adapter = i18n.input.chrome.inputview.Adapter;
+
+
+/**
+ * URL prefixes of common Google sites.
+ *
+ * @enum {string}
+ */
+Adapter.GoogleSites = {
+  // TODO: Add support for spreadsheets.
+  DOCS: 'https://docs.google.com/document/d'
+};
 
 
 /** @type {boolean} */
@@ -86,7 +116,7 @@ Adapter.prototype.isA11yMode = false;
 
 
 /** @type {boolean} */
-Adapter.prototype.isExperimental = false;
+Adapter.prototype.isVoiceInputEnabled = true;
 
 
 /** @type {boolean} */
@@ -109,6 +139,10 @@ Adapter.prototype.isChromeVoxOn = false;
 Adapter.prototype.textBeforeCursor = '';
 
 
+/** @type {boolean} */
+Adapter.prototype.isQPInputView = false;
+
+
 /**
   * Whether the background controller is on switching.
   *
@@ -125,6 +159,7 @@ Adapter.prototype.isBgControllerSwitching_ = false;
  */
 Adapter.prototype.onUpdateSettings_ = function(message) {
   this.screen = message[Name.SCREEN];
+  this.queryCurrentSite();
   this.contextType = /** @type {string} */ (message[Name.CONTEXT_TYPE]);
   // Resets the flag, since when inputview receive the update setting response,
   // it means the background switching is done.
@@ -160,14 +195,25 @@ Adapter.prototype.clearModifierStates = function() {
  * @param {string} code
  * @param {number=} opt_keyCode The key code.
  * @param {!Object=} opt_spatialData .
+ * @param {!Object.<{ctrl: boolean, shift: boolean}>=} opt_modifiers .
  */
 Adapter.prototype.sendKeyDownAndUpEvent = function(key, code, opt_keyCode,
-    opt_spatialData) {
+    opt_spatialData, opt_modifiers) {
   this.sendKeyEvent_([
     this.generateKeyboardEvent_(
-        goog.events.EventType.KEYDOWN, key, code, opt_keyCode, opt_spatialData),
+        goog.events.EventType.KEYDOWN,
+        key,
+        code,
+        opt_keyCode,
+        opt_spatialData,
+        opt_modifiers),
     this.generateKeyboardEvent_(
-        goog.events.EventType.KEYUP, key, code, opt_keyCode, opt_spatialData)
+        goog.events.EventType.KEYUP,
+        key,
+        code,
+        opt_keyCode,
+        opt_spatialData,
+        opt_modifiers)
   ]);
 };
 
@@ -224,14 +270,23 @@ Adapter.prototype.sendKeyEvent_ = function(keyData) {
  * @param {string} code The code.
  * @param {number=} opt_keyCode The key code.
  * @param {!Object=} opt_spatialData .
+ * @param {!Object.<{ctrl: boolean, shift: boolean}>=} opt_modifiers .
  * @return {!Object.<string, string|boolean>}
  * @private
  */
 Adapter.prototype.generateKeyboardEvent_ = function(
-    type, key, code, opt_keyCode, opt_spatialData) {
+    type, key, code, opt_keyCode, opt_spatialData, opt_modifiers) {
   var StateType = i18n.input.chrome.inputview.StateType;
   var ctrl = !!this.modifierState_[StateType.CTRL];
   var alt = !!this.modifierState_[StateType.ALT];
+  var shift = !!this.modifierState_[StateType.SHIFT];
+
+  if (opt_modifiers) {
+    if (opt_modifiers.ctrl)
+      ctrl = opt_modifiers.ctrl;
+    if (opt_modifiers.shift)
+      shift = opt_modifiers.shift;
+  }
 
   if (ctrl || alt) {
     key = '';
@@ -246,7 +301,7 @@ Adapter.prototype.generateKeyboardEvent_ = function(
 
   result['altKey'] = alt;
   result['ctrlKey'] = ctrl;
-  result['shiftKey'] = !!this.modifierState_[StateType.SHIFT];
+  result['shiftKey'] = shift;
   result['capsLock'] = !!this.modifierState_[StateType.CAPSLOCK];
 
   return result;
@@ -257,12 +312,14 @@ Adapter.prototype.generateKeyboardEvent_ = function(
  * Callback when surrounding text is changed.
  *
  * @param {string} text .
+ * @param {number} anchor .
+ * @param {number} focus .
  * @private
  */
-Adapter.prototype.onSurroundingTextChanged_ = function(text) {
+Adapter.prototype.onSurroundingTextChanged_ = function(text, anchor, focus) {
   this.textBeforeCursor = text;
   this.dispatchEvent(new i18n.input.chrome.inputview.events.
-      SurroundingTextChangedEvent(this.textBeforeCursor));
+      SurroundingTextChangedEvent(this.textBeforeCursor, anchor, focus));
 };
 
 
@@ -301,6 +358,31 @@ Adapter.prototype.isPasswordBox = function() {
 
 
 /**
+ * True to enable gesture deletion.
+ *
+ * @return {boolean}
+ */
+Adapter.prototype.isGestureDeletionEnabled = function() {
+  // TODO: Omni bar sends wrong anchor/focus when autocompleting
+  // URLs. Re-enable when that is fixed.
+  if (this.contextType == ContextType.URL) {
+    return false;
+  }
+  return this.features.isEnabled(FeatureName.GESTURE_DELETION);
+};
+
+
+/**
+ * True to enable gesture typing.
+ *
+ * @return {boolean}
+ */
+Adapter.prototype.isGestureTypingEnabled = function() {
+  return this.features.isEnabled(FeatureName.GESTURE_TYPING);
+};
+
+
+/**
  * Callback when blurs in the context.
  *
  * @private
@@ -313,12 +395,55 @@ Adapter.prototype.onContextBlur_ = function() {
 
 
 /**
+ * Asynchronously queries the current site.
+ */
+Adapter.prototype.queryCurrentSite = function() {
+  var adapter = this;
+  var criteria = {'active': true, 'lastFocusedWindow': true};
+  if (chrome && chrome.tabs) {
+    chrome.tabs.query(criteria, function(tabs) {
+      tabs[0] && adapter.setCurrentSite_(tabs[0].url);
+    });
+  }
+};
+
+
+/**
+ * Sets the current context URL.
+ *
+ * @param {string} url .
+ * @private
+ */
+Adapter.prototype.setCurrentSite_ = function(url) {
+  if (url != this.currentSite_) {
+    this.currentSite_ = url;
+    this.dispatchEvent(new goog.events.Event(
+        i18n.input.chrome.inputview.events.EventType.URL_CHANGED));
+  }
+};
+
+
+/**
+ * Returns whether the current context is Google Documents.
+ *
+ * @return {boolean} .
+ */
+Adapter.prototype.isGoogleDocument = function() {
+  return this.currentSite_ &&
+      this.currentSite_.lastIndexOf(Adapter.GoogleSites.DOCS) === 0;
+};
+
+
+/**
  * Callback when focus on a context.
  *
  * @param {!Object<string, *>} message .
  * @private
  */
 Adapter.prototype.onContextFocus_ = function(message) {
+  // URL might have changed.
+  this.queryCurrentSite();
+
   this.contextType = /** @type {string} */ (message[Name.CONTEXT_TYPE]);
   this.dispatchEvent(new goog.events.Event(
       i18n.input.chrome.inputview.events.EventType.CONTEXT_FOCUS));
@@ -326,21 +451,15 @@ Adapter.prototype.onContextFocus_ = function(message) {
 
 
 /**
- * Intializes the communication to background page.
+ * Initializes the communication to background page.
  *
- * @param {string} languageCode The language code.
  * @private
  */
-Adapter.prototype.initBackground_ = function(languageCode) {
+Adapter.prototype.initBackground_ = function() {
   chrome.runtime.getBackgroundPage((function() {
     this.isBgControllerSwitching_ = true;
     chrome.runtime.sendMessage(
         goog.object.create(Name.TYPE, Type.CONNECT));
-    chrome.runtime.sendMessage(goog.object.create(Name.TYPE,
-        Type.VISIBILITY_CHANGE, Name.VISIBILITY, !document.webkitHidden));
-    if (languageCode) {
-      this.setLanguage(languageCode);
-    }
   }).bind(this));
 };
 
@@ -358,48 +477,69 @@ Adapter.prototype.initialize = function(languageCode) {
     }).bind(this));
     chrome.accessibilityFeatures.spokenFeedback.onChange.addListener((function(
         details) {
+          if (!this.isChromeVoxOn && details['value']) {
+            this.dispatchEvent(new goog.events.Event(
+                i18n.input.chrome.inputview.events.EventType.REFRESH));
+          }
           this.isChromeVoxOn = details['value'];
         }).bind(this));
   }
 
-  this.initBackground_(languageCode);
+  this.initBackground_();
 
   var StateType = i18n.input.chrome.inputview.ReadyState.StateType;
   if (window.inputview) {
-    if (inputview.getKeyboardConfig) {
-      inputview.getKeyboardConfig((function(config) {
-        this.isA11yMode = !!config['a11ymode'];
-        this.isExperimental = !!config['experimental'];
-        this.readyState_.markStateReady(StateType.KEYBOARD_CONFIG_READY);
-        if (this.readyState_.isReady(StateType.IME_LIST_READY)) {
-          this.dispatchEvent(new goog.events.Event(
-              i18n.input.chrome.inputview.events.EventType.SETTINGS_READY));
-        }
-      }).bind(this));
-    } else {
+    inputview.getKeyboardConfig((function(config) {
+      this.isA11yMode = !!config['a11ymode'];
+      this.features.initialize(config);
       this.readyState_.markStateReady(StateType.KEYBOARD_CONFIG_READY);
-    }
-    if (inputview.getInputMethods) {
-      inputview.getInputMethods((function(inputMethods) {
-        // Only show globe key to switching between IMEs when there are more
-        // than one IME.
-        this.showGlobeKey = inputMethods.length > 1;
-        this.readyState_.markStateReady(StateType.IME_LIST_READY);
-        if (this.readyState_.isReady(StateType.KEYBOARD_CONFIG_READY)) {
-          this.dispatchEvent(new goog.events.Event(
-              i18n.input.chrome.inputview.events.EventType.SETTINGS_READY));
-        }
-      }).bind(this));
-    } else {
+      this.maybeDispatchSettingsReadyEvent_();
+    }).bind(this));
+    inputview.getInputMethods((function(inputMethods) {
+      // Only show globe key to switching between IMEs when there are more
+      // than one IME.
+      this.showGlobeKey = inputMethods.length > 1;
       this.readyState_.markStateReady(StateType.IME_LIST_READY);
-    }
+      this.maybeDispatchSettingsReadyEvent_();
+    }).bind(this));
+    inputview.getInputMethodConfig((function(config) {
+      this.isQPInputView = !!config['isNewQPInputViewEnabled'] ||
+          !!config['isNewMDInputViewEnabled'];
+      var voiceEnabled = config['isVoiceInputEnabled'];
+      if (goog.isDef(voiceEnabled)) {
+        this.isVoiceInputEnabled = !!voiceEnabled;
+      }
+      i18n.input.chrome.inputview.GlobalFlags.isQPInputView =
+          this.isQPInputView;
+      this.readyState_.markStateReady(StateType.INPUT_METHOD_CONFIG_READY);
+      this.maybeDispatchSettingsReadyEvent_();
+    }).bind(this));
   } else {
     this.readyState_.markStateReady(StateType.IME_LIST_READY);
     this.readyState_.markStateReady(StateType.KEYBOARD_CONFIG_READY);
+    this.readyState_.markStateReady(StateType.INPUT_METHOD_CONFIG_READY);
   }
 
-  if (this.readyState_.isReady(StateType.KEYBOARD_CONFIG_READY) &&
-      this.readyState_.isReady(StateType.IME_LIST_READY)) {
+  this.maybeDispatchSettingsReadyEvent_();
+};
+
+
+/**
+ * Dispatch event SETTINGS_READY if all required bits are flipped.
+ *
+ * @private
+ */
+Adapter.prototype.maybeDispatchSettingsReadyEvent_ = function() {
+  var StateType = i18n.input.chrome.inputview.ReadyState.StateType;
+  var states = [
+    StateType.KEYBOARD_CONFIG_READY,
+    StateType.IME_LIST_READY,
+    StateType.INPUT_METHOD_CONFIG_READY];
+  var ready = true;
+  for (var i = 0; i < states.length; i++) {
+    ready = ready && this.readyState_.isReady(states[i]);
+  }
+  if (ready) {
     window.setTimeout((function() {
       this.dispatchEvent(new goog.events.Event(
           i18n.input.chrome.inputview.events.EventType.SETTINGS_READY));
@@ -459,8 +599,10 @@ Adapter.prototype.onVisibilityChange_ = function() {
   this.isVisible = !document.webkitHidden;
   this.dispatchEvent(new goog.events.Event(i18n.input.chrome.inputview.
       events.EventType.VISIBILITY_CHANGE));
-  chrome.runtime.sendMessage(goog.object.create(Name.TYPE,
-      Type.VISIBILITY_CHANGE, Name.VISIBILITY, !document.webkitHidden));
+  chrome.runtime.sendMessage(goog.object.create(
+      Name.TYPE, Type.VISIBILITY_CHANGE,
+      Name.VISIBILITY, !document.webkitHidden,
+      Name.WORKSPACE_HEIGHT, screen.height - window.innerHeight));
 };
 
 
@@ -589,13 +731,15 @@ Adapter.prototype.onMessage_ = function(request, sender, sendResponse) {
       this.onContextBlur_();
       break;
     case Type.SURROUNDING_TEXT_CHANGED:
-      this.onSurroundingTextChanged_(request[Name.TEXT]);
+      this.onSurroundingTextChanged_(request[Name.TEXT],
+          request[Name.ANCHOR],
+          request[Name.FOCUS]);
       break;
     case Type.UPDATE_SETTINGS:
       this.onUpdateSettings_(msg);
       break;
+    case Type.VOICE_STATE_CHANGE:
     case Type.HWT_NETWORK_ERROR:
-    case Type.HWT_PRIVACY_INFO:
     case Type.FRONT_TOGGLE_LANGUAGE_STATE:
       this.dispatchEvent(new i18n.input.chrome.message.Event(type, msg));
       break;
@@ -604,13 +748,13 @@ Adapter.prototype.onMessage_ = function(request, sender, sendResponse) {
 
 
 /**
- * Sends the privacy confirmed message to background and broadcasts it.
+ * Sends the voice state to background.
+ *
+ * @param {boolean} state .
  */
-Adapter.prototype.sendHwtPrivacyConfirmMessage = function() {
-  chrome.runtime.sendMessage(
-      goog.object.create(Name.TYPE, Type.HWT_PRIVACY_GOT_IT));
-  this.dispatchEvent(
-      new goog.events.Event(Type.HWT_PRIVACY_GOT_IT));
+Adapter.prototype.sendVoiceViewStateChange = function(state) {
+  chrome.runtime.sendMessage(goog.object.create(
+      Name.TYPE, Type.VOICE_VIEW_STATE_CHANGE, Name.MSG, state));
 };
 
 

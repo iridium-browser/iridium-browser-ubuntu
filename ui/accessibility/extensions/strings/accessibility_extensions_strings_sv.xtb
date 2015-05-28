@@ -1,9 +1,11 @@
 <?xml version="1.0" ?><!DOCTYPE translationbundle><translationbundle lang="sv">
 <translation id="1408730541890277710">Ersätta bilder med deras alternativa text.</translation>
+<translation id="6017514345406065928">Grön</translation>
 <translation id="595639123821853262">Omvänd gråskala</translation>
 <translation id="8260673944985561857">Alternativ för textmarkörläget</translation>
 <translation id="3410969471888629217">Glöm anpassningar av webbplats</translation>
 <translation id="6050189528197190982">Gråskala</translation>
+<translation id="8261559421026395104">Förbättra uppfattningen av:</translation>
 <translation id="5094574508723441140">Ökad kontrast</translation>
 <translation id="8609925175482059018">Tryck på &lt;span class='key'&gt;F7&lt;/span&gt; om du vill aktivera textmarkörläget. Tryck igen om du vill inaktivera det.</translation>
 <translation id="3435896845095436175">Aktivera</translation>
@@ -14,6 +16,8 @@
 <translation id="2394933097471027016">Prova nu – textmarkörläget är alltid aktiverat på den här sidan!</translation>
 <translation id="3622586652998721735">Ange som standardschema</translation>
 <translation id="2179565792157161713">Öppna lång beskrivning på ny flik</translation>
+<translation id="7942349550061667556">Röd</translation>
+<translation id="1555130319947370107">Blå</translation>
 <translation id="2471847333270902538">Färgschema för <ph name="SITE"/>:</translation>
 <translation id="381767806621926835">Högerklicka på någonting med attributet longdesc eller aria-describedat för att komma åt den långa beskrivningen.</translation>
 <translation id="786423340267544509">Lägg till ramar i element med attributen aria-describedat eller longdesc.</translation>
@@ -31,6 +35,7 @@
 <translation id="4896660567607030658">Ingen feedback, visa bara markören.</translation>
 <translation id="5631241868147802353">Standardschema för färger:</translation>
 <translation id="5173942593318174089">Visa markörens position med en animering.</translation>
+<translation id="7379645913608427028">Nivå</translation>
 <translation id="894241283505723656">Långa beskrivningar i snabbmenyn</translation>
 <translation id="5555153510860501336">Hög kontrast är inaktiverat</translation>
 <translation id="1703735871906654364">Textmarkörläge</translation>
@@ -38,6 +43,7 @@
 <translation id="6550675742724504774">Alternativ</translation>
 <translation id="5650358096585648000">Visuell feedback</translation>
 <translation id="4388820049312272371">Låt markören blinka till för att visa sin position.</translation>
+<translation id="2223143012868735942">Ett anpassningsbart färgfilter tillämpas på webbsidor för att förbättra färguppfattningen.</translation>
 <translation id="4023902424053835668">Bläddra igenom texten på webbsidor med piltangenterna.</translation>
 <translation id="2795227192542594043">Med det här tillägget får du en flyttbar markör på webbsidan så att du kan markera text med tangentbordet.</translation>
 <translation id="4394049700291259645">Inaktivera</translation>

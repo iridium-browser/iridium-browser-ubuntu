@@ -65,7 +65,7 @@ public:
 
     void willBeDetachedFromFrame();
 
-    virtual void trace(Visitor*) override;
+    DECLARE_VIRTUAL_TRACE();
 
     PassRefPtrWillBeRawPtr<ServiceWorker> controller() { return m_controller.get(); }
     ScriptPromise ready(ScriptState*);
@@ -76,7 +76,6 @@ public:
 
     // WebServiceWorkerProviderClient overrides.
     virtual void setController(WebServiceWorker*, bool shouldNotifyControllerChange) override;
-    virtual void setReadyRegistration(WebServiceWorkerRegistration*) override;
     virtual void dispatchMessageEvent(const WebString& message, const WebMessagePortChannelArray&) override;
     virtual bool getClientInfo(WebServiceWorkerClientInfo*);
 
@@ -89,12 +88,12 @@ public:
 private:
     explicit ServiceWorkerContainer(ExecutionContext*);
 
-    typedef ScriptPromiseProperty<Member<ServiceWorkerContainer>, Member<ServiceWorkerRegistration>, Member<ServiceWorkerRegistration> > ReadyProperty;
+    class GetRegistrationForReadyCallback;
+    typedef ScriptPromiseProperty<Member<ServiceWorkerContainer>, Member<ServiceWorkerRegistration>, Member<ServiceWorkerRegistration>> ReadyProperty;
     ReadyProperty* createReadyProperty();
 
     WebServiceWorkerProvider* m_provider;
     RefPtrWillBeMember<ServiceWorker> m_controller;
-    Member<ServiceWorkerRegistration> m_readyRegistration;
     Member<ReadyProperty> m_ready;
 };
 

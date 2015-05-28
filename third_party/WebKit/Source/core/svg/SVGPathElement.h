@@ -28,7 +28,6 @@
 #include "core/svg/SVGGeometryElement.h"
 #include "core/svg/SVGPathByteStream.h"
 #include "platform/heap/Handle.h"
-#include "wtf/WeakPtr.h"
 
 namespace blink {
 
@@ -97,13 +96,12 @@ public:
 
     virtual FloatRect getBBox() override;
 
-    virtual void trace(Visitor*) override;
+    DECLARE_VIRTUAL_TRACE();
 
 private:
     explicit SVGPathElement(Document&);
 
     bool isSupportedAttribute(const QualifiedName&);
-    virtual void parseAttribute(const QualifiedName&, const AtomicString&) override;
     virtual void svgAttributeChanged(const QualifiedName&) override;
 
     virtual Node::InsertionNotificationRequest insertedInto(ContainerNode*) override;

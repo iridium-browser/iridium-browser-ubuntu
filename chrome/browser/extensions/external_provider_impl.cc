@@ -13,6 +13,7 @@
 #include "base/memory/linked_ptr.h"
 #include "base/metrics/field_trial.h"
 #include "base/strings/string_util.h"
+#include "base/trace_event/trace_event.h"
 #include "base/values.h"
 #include "base/version.h"
 #include "chrome/browser/app_mode/app_mode_utils.h"
@@ -364,6 +365,8 @@ void ExternalProviderImpl::CreateExternalProviders(
     VisitorInterface* service,
     Profile* profile,
     ProviderCollection* provider_list) {
+  TRACE_EVENT0("browser,startup",
+               "ExternalProviderImpl::CreateExternalProviders");
   scoped_refptr<ExternalLoader> external_loader;
   scoped_refptr<ExternalLoader> external_recommended_loader;
   extensions::Manifest::Location crx_location = Manifest::INVALID_LOCATION;
@@ -477,15 +480,15 @@ void ExternalProviderImpl::CreateExternalProviders(
     int external_apps_path_id = profile->IsSupervised() ?
         chrome::DIR_SUPERVISED_USERS_DEFAULT_APPS :
         chrome::DIR_STANDALONE_EXTERNAL_EXTENSIONS;
+    ExternalPrefLoader::Options pref_load_flags =
+        profile->IsNewProfile()
+            ? ExternalPrefLoader::DELAY_LOAD_UNTIL_PRIORITY_SYNC
+            : ExternalPrefLoader::NONE;
     provider_list->push_back(
         linked_ptr<ExternalProviderInterface>(new ExternalProviderImpl(
-            service,
-            new ExternalPrefLoader(external_apps_path_id,
-                                   ExternalPrefLoader::NONE,
-                                   profile),
-            profile,
-            Manifest::EXTERNAL_PREF,
-            Manifest::EXTERNAL_PREF_DOWNLOAD,
+            service, new ExternalPrefLoader(external_apps_path_id,
+                                            pref_load_flags, profile),
+            profile, Manifest::EXTERNAL_PREF, Manifest::EXTERNAL_PREF_DOWNLOAD,
             bundled_extension_creation_flags)));
 
     // OEM default apps.
@@ -502,7 +505,7 @@ void ExternalProviderImpl::CreateExternalProviders(
                                  oem_extension_creation_flags)));
   }
 #elif defined(OS_LINUX)
-  if (!profile->IsSupervised()) {
+  if (!profile->IsLegacySupervised()) {
     provider_list->push_back(
         linked_ptr<ExternalProviderInterface>(
             new ExternalProviderImpl(
@@ -518,7 +521,7 @@ void ExternalProviderImpl::CreateExternalProviders(
   }
 #endif
 
-  if (!profile->IsSupervised()) {
+  if (!profile->IsLegacySupervised()) {
 #if defined(OS_WIN)
     provider_list->push_back(
         linked_ptr<ExternalProviderInterface>(
@@ -574,17 +577,17 @@ void ExternalProviderImpl::CreateExternalProviders(
                 Extension::FROM_WEBSTORE |
                     Extension::WAS_INSTALLED_BY_DEFAULT)));
 #endif
-
-    provider_list->push_back(
-      linked_ptr<ExternalProviderInterface>(
-        new ExternalProviderImpl(
-            service,
-            new ExternalComponentLoader(profile),
-            profile,
-            Manifest::INVALID_LOCATION,
-            Manifest::EXTERNAL_COMPONENT,
-            Extension::FROM_WEBSTORE | Extension::WAS_INSTALLED_BY_DEFAULT)));
   }
+
+  provider_list->push_back(
+    linked_ptr<ExternalProviderInterface>(
+      new ExternalProviderImpl(
+          service,
+          new ExternalComponentLoader(profile),
+          profile,
+          Manifest::INVALID_LOCATION,
+          Manifest::EXTERNAL_COMPONENT,
+          Extension::FROM_WEBSTORE | Extension::WAS_INSTALLED_BY_DEFAULT)));
 }
 
 }  // namespace extensions

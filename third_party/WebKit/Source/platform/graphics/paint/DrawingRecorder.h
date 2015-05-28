@@ -20,24 +20,25 @@ class GraphicsContext;
 
 class PLATFORM_EXPORT DrawingRecorder {
 public:
-    explicit DrawingRecorder(GraphicsContext*, const DisplayItemClient, DisplayItem::Type, const FloatRect& bounds);
-
+    DrawingRecorder(GraphicsContext&, const DisplayItemClientWrapper&, DisplayItem::Type, const FloatRect& bounds);
     ~DrawingRecorder();
 
-    bool canUseCachedDrawing() const { return m_canUseCachedDrawing; }
-
-#ifndef NDEBUG
-    void setClientDebugString(const WTF::String&);
+    bool canUseCachedDrawing() const
+    {
+#if ENABLE(ASSERT)
+        m_checkedCachedDrawing = true;
 #endif
+        return m_canUseCachedDrawing;
+    }
 
 private:
-    GraphicsContext* m_context;
-    DisplayItemClient m_displayItemClient;
+    GraphicsContext& m_context;
+    DisplayItemClientWrapper m_displayItemClient;
     const DisplayItem::Type m_displayItemType;
-    const FloatRect m_bounds;
     bool m_canUseCachedDrawing;
-#ifndef NDEBUG
-    WTF::String m_clientDebugString;
+#if ENABLE(ASSERT)
+    mutable bool m_checkedCachedDrawing;
+    size_t m_displayItemPosition;
 #endif
 };
 

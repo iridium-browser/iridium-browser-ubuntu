@@ -32,13 +32,13 @@
 #include "core/inspector/PageRuntimeAgent.h"
 
 #include "bindings/core/v8/DOMWrapperWorld.h"
+#include "bindings/core/v8/PageScriptDebugServer.h"
 #include "bindings/core/v8/ScriptController.h"
 #include "bindings/core/v8/ScriptState.h"
 #include "core/frame/FrameConsole.h"
 #include "core/frame/LocalFrame.h"
 #include "core/inspector/InjectedScript.h"
 #include "core/inspector/InjectedScriptManager.h"
-#include "core/inspector/InspectorClient.h"
 #include "core/inspector/InspectorPageAgent.h"
 #include "core/inspector/InstrumentingAgents.h"
 #include "core/page/Page.h"
@@ -46,12 +46,13 @@
 
 namespace blink {
 
-PageRuntimeAgent::PageRuntimeAgent(InjectedScriptManager* injectedScriptManager, InspectorClient* client, ScriptDebugServer* scriptDebugServer, Page* page, InspectorPageAgent* pageAgent)
-    : InspectorRuntimeAgent(injectedScriptManager, scriptDebugServer)
-    , m_client(client)
-    , m_inspectedPage(page)
+static int s_nextDebuggerId = 1;
+
+PageRuntimeAgent::PageRuntimeAgent(InjectedScriptManager* injectedScriptManager, Client* client, ScriptDebugServer* scriptDebugServer, InspectorPageAgent* pageAgent)
+    : InspectorRuntimeAgent(injectedScriptManager, scriptDebugServer, client)
     , m_pageAgent(pageAgent)
     , m_mainWorldContextCreated(false)
+    , m_debuggerId(s_nextDebuggerId++)
 {
 }
 
@@ -62,9 +63,8 @@ PageRuntimeAgent::~PageRuntimeAgent()
 #endif
 }
 
-void PageRuntimeAgent::trace(Visitor* visitor)
+DEFINE_TRACE(PageRuntimeAgent)
 {
-    visitor->trace(m_inspectedPage);
     visitor->trace(m_pageAgent);
     InspectorRuntimeAgent::trace(visitor);
 }
@@ -88,30 +88,31 @@ void PageRuntimeAgent::enable(ErrorString* errorString)
         reportExecutionContextCreation();
 }
 
-void PageRuntimeAgent::run(ErrorString* errorString)
-{
-    m_client->resumeStartup();
-}
-
 void PageRuntimeAgent::didClearDocumentOfWindowObject(LocalFrame* frame)
 {
     m_mainWorldContextCreated = true;
 
     if (!m_enabled)
         return;
-    ASSERT(m_frontend);
+    ASSERT(frontend());
 
     frame->script().initializeMainWorld();
 }
 
-void PageRuntimeAgent::didCreateScriptContext(LocalFrame* frame, ScriptState* scriptState, SecurityOrigin* origin, bool isMainWorldContext)
+void PageRuntimeAgent::didCreateScriptContext(LocalFrame* frame, ScriptState* scriptState, SecurityOrigin* origin, int worldId)
 {
+    bool isMainWorld = worldId == MainWorldId;
+
+    // Name the context for debugging.
+    String type = isMainWorld ? "page" : "injected";
+    PageScriptDebugServer::setContextDebugData(scriptState->context(), type, m_debuggerId);
+
     if (!m_enabled)
         return;
-    ASSERT(m_frontend);
+    ASSERT(frontend());
     String originString = origin ? origin->toRawString() : "";
     String frameId = m_pageAgent->frameId(frame);
-    addExecutionContextToFrontend(scriptState, isMainWorldContext, originString, frameId);
+    addExecutionContextToFrontend(scriptState, isMainWorld, originString, frameId);
 }
 
 void PageRuntimeAgent::willReleaseScriptContext(LocalFrame* frame, ScriptState* scriptState)
@@ -122,13 +123,13 @@ void PageRuntimeAgent::willReleaseScriptContext(LocalFrame* frame, ScriptState* 
         return;
     int id = it->value;
     m_scriptStateToId.remove(scriptState);
-    m_frontend->executionContextDestroyed(id);
+    frontend()->executionContextDestroyed(id);
 }
 
 InjectedScript PageRuntimeAgent::injectedScriptForEval(ErrorString* errorString, const int* executionContextId)
 {
     if (!executionContextId) {
-        ScriptState* scriptState = ScriptState::forMainWorld(m_inspectedPage->deprecatedLocalMainFrame());
+        ScriptState* scriptState = ScriptState::forMainWorld(m_pageAgent->inspectedFrame());
         InjectedScript result = injectedScriptManager()->injectedScriptFor(scriptState);
         if (result.isEmpty())
             *errorString = "Internal error: main world execution context not found.";
@@ -153,7 +154,7 @@ void PageRuntimeAgent::unmuteConsole()
 void PageRuntimeAgent::reportExecutionContextCreation()
 {
     Vector<std::pair<ScriptState*, SecurityOrigin*> > isolatedContexts;
-    for (Frame* frame = m_inspectedPage->mainFrame(); frame; frame = frame->tree().traverseNext()) {
+    for (Frame* frame = m_pageAgent->inspectedFrame(); frame; frame = frame->tree().traverseNext(m_pageAgent->inspectedFrame())) {
         if (!frame->isLocalFrame())
             continue;
         LocalFrame* localFrame = toLocalFrame(frame);

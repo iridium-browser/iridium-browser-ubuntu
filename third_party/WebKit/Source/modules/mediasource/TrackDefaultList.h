@@ -18,13 +18,13 @@ class TrackDefaultList final : public GarbageCollected<TrackDefaultList>, public
 public:
     static TrackDefaultList* create(); // Creates an empty TrackDefaultList.
 
+    // Implement the IDL
     static TrackDefaultList* create(const HeapVector<Member<TrackDefault>>&, ExceptionState&);
 
-    // Implement the IDL
     unsigned length() const { return m_trackDefaults.size(); }
     TrackDefault* item(unsigned) const;
 
-    void trace(Visitor*);
+    DECLARE_TRACE();
 
 private:
     TrackDefaultList();

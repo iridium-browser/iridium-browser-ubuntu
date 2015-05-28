@@ -10,18 +10,30 @@
 #include "base/macros.h"
 #include "content/public/renderer/content_renderer_client.h"
 
-namespace dns_prefetch {
+namespace IPC {
+class MessageFilter;
+}
+
+namespace network_hints {
 class PrescientNetworkingDispatcher;
-}  // namespace dns_prefetch
+}  // namespace network_hints
 
 namespace chromecast {
 namespace shell {
 class CastRenderProcessObserver;
 
+// Adds any platform-specific bindings to the current frame.
+void PlatformAddRendererNativeBindings(blink::WebLocalFrame* frame);
+
 class CastContentRendererClient : public content::ContentRendererClient {
  public:
   CastContentRendererClient();
   ~CastContentRendererClient() override;
+
+  // Returns any MessageFilters from the platform implementation that should
+  // be added to the render process.
+  std::vector<scoped_refptr<IPC::MessageFilter>>
+  PlatformGetRendererMessageFilters();
 
   // ContentRendererClient implementation:
   void RenderThreadStarted() override;
@@ -30,14 +42,15 @@ class CastContentRendererClient : public content::ContentRendererClient {
       std::vector< ::media::KeySystemInfo>* key_systems) override;
 #if !defined(OS_ANDROID)
   scoped_ptr<media::RendererFactory> CreateMediaRendererFactory(
-      content::RenderFrame* render_frame) override;
+      content::RenderFrame* render_frame,
+      const scoped_refptr<media::MediaLog>& media_log) override;
 #endif
   blink::WebPrescientNetworking* GetPrescientNetworking() override;
   void DeferMediaLoad(content::RenderFrame* render_frame,
                       const base::Closure& closure) override;
 
  private:
-  scoped_ptr<dns_prefetch::PrescientNetworkingDispatcher>
+  scoped_ptr<network_hints::PrescientNetworkingDispatcher>
       prescient_networking_dispatcher_;
   scoped_ptr<CastRenderProcessObserver> cast_observer_;
 

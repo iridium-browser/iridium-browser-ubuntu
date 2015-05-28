@@ -30,6 +30,7 @@
 #include "core/frame/Console.h"
 
 #include "bindings/core/v8/ScriptCallStackFactory.h"
+#include "core/inspector/ConsoleMessage.h"
 #include "core/inspector/InspectorConsoleInstrumentation.h"
 #include "core/inspector/InspectorTraceEvents.h"
 #include "core/inspector/ScriptArguments.h"
@@ -139,7 +140,6 @@ void ConsoleBase::profileEnd(const String& title)
 
 void ConsoleBase::time(const String& title)
 {
-    InspectorInstrumentation::consoleTime(context(), title);
     TRACE_EVENT_COPY_ASYNC_BEGIN0("blink.console", title.utf8().data(), this);
 
     if (title.isNull())
@@ -151,7 +151,6 @@ void ConsoleBase::time(const String& title)
 void ConsoleBase::timeEnd(ScriptState* scriptState, const String& title)
 {
     TRACE_EVENT_COPY_ASYNC_END0("blink.console", title.utf8().data(), this);
-    InspectorInstrumentation::consoleTimeEnd(context(), title, scriptState);
 
     // Follow Firebug's behavior of requiring a title that is not null or
     // undefined for timing functions
@@ -178,8 +177,6 @@ void ConsoleBase::timeEnd(ScriptState* scriptState, const String& title)
 void ConsoleBase::timeStamp(const String& title)
 {
     TRACE_EVENT_INSTANT1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline"), "TimeStamp", "data", InspectorTimeStampEvent::data(context(), title));
-    // FIXME(361045): remove InspectorInstrumentation calls once DevTools Timeline migrates to tracing.
-    InspectorInstrumentation::consoleTimeStamp(context(), title);
 }
 
 static String formatTimelineTitle(const String& title)

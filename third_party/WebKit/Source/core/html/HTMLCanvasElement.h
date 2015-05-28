@@ -39,7 +39,6 @@
 #include "platform/graphics/GraphicsTypes3D.h"
 #include "platform/graphics/ImageBufferClient.h"
 #include "platform/heap/Handle.h"
-#include "public/platform/WebThread.h"
 
 #define CanvasDefaultInterpolationQuality InterpolationLow
 
@@ -56,7 +55,6 @@ class ImageData;
 class ImageBuffer;
 class ImageBufferSurface;
 class IntSize;
-class RecordingImageBufferFallbackSurfaceFactory;
 
 class CanvasObserver : public WillBeGarbageCollectedMixin {
     DECLARE_EMPTY_VIRTUAL_DESTRUCTOR_WILL_BE_REMOVED(CanvasObserver);
@@ -67,10 +65,10 @@ public:
     virtual void canvasDestroyed(HTMLCanvasElement*) = 0;
 #endif
 
-    virtual void trace(Visitor*) { }
+    DEFINE_INLINE_VIRTUAL_TRACE() { }
 };
 
-class HTMLCanvasElement final : public HTMLElement, public DocumentVisibilityObserver, public CanvasImageSource, public ImageBufferClient, public blink::WebThread::TaskObserver {
+class HTMLCanvasElement final : public HTMLElement, public DocumentVisibilityObserver, public CanvasImageSource, public ImageBufferClient {
     DEFINE_WRAPPERTYPEINFO();
     WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(HTMLCanvasElement);
 public:
@@ -109,8 +107,8 @@ public:
     bool isPaintable() const;
 
     static String toEncodingMimeType(const String& mimeType);
-    String toDataURL(const String& mimeType, const double* quality, ExceptionState&) const;
-    String toDataURL(const String& mimeType, ExceptionState& exceptionState) const { return toDataURL(mimeType, 0, exceptionState); }
+    String toDataURL(const String& mimeType, const ScriptValue& qualityArgument, ExceptionState&) const;
+    String toDataURL(const String& mimeType, ExceptionState& exceptionState) const { return toDataURL(mimeType, ScriptValue(), exceptionState); }
 
     // Used for rendering
     void didDraw(const FloatRect&);
@@ -118,8 +116,9 @@ public:
 
     void paint(GraphicsContext*, const LayoutRect&);
 
-    GraphicsContext* drawingContext() const;
-    GraphicsContext* existingDrawingContext() const;
+    GraphicsContext* drawingContext() const; // Deprecated: use drawingCanvas
+    SkCanvas* drawingCanvas() const;
+    SkCanvas* existingDrawingCanvas() const;
 
     CanvasRenderingContext* renderingContext() const { return m_context.get(); }
 
@@ -129,7 +128,7 @@ public:
     void clearCopiedImage();
 
     SecurityOrigin* securityOrigin() const;
-    bool originClean() const { return m_originClean; }
+    bool originClean() const;
     void setOriginTainted() { m_originClean = false; }
 
     AffineTransform baseTransform() const;
@@ -137,10 +136,11 @@ public:
     bool is3D() const;
 
     bool hasImageBuffer() const { return m_imageBuffer; }
-    bool hasValidImageBuffer() const;
     void discardImageBuffer();
 
     bool shouldAccelerate(const IntSize&) const;
+
+    bool shouldBeDirectComposited() const;
 
     virtual const AtomicString imageSourceURL() const override;
 
@@ -154,6 +154,7 @@ public:
     virtual bool wouldTaintOrigin(SecurityOrigin*) const override;
     virtual FloatSize sourceSize() const override;
     virtual bool isCanvasElement() const override { return true; }
+    virtual bool isOpaque() const override;
 
     // ImageBufferClient implementation
     virtual void notifySurfaceInvalid() override;
@@ -161,11 +162,12 @@ public:
     virtual void didFinalizeFrame() override;
     virtual void restoreCanvasMatrixClipStack() override;
 
-    // Implementation of WebThread::TaskObserver methods
-    virtual void willProcessTask() override;
-    virtual void didProcessTask() override;
+    void doDeferredPaintInvalidation();
 
-    virtual void trace(Visitor*) override;
+    DECLARE_VIRTUAL_TRACE();
+
+    // Methods used for testing
+    void createImageBufferUsingSurface(PassOwnPtr<ImageBufferSurface>);
 
 protected:
     virtual void didMoveToNewDocument(Document& oldDocument) override;
@@ -174,19 +176,16 @@ private:
     explicit HTMLCanvasElement(Document&);
 
     virtual void parseAttribute(const QualifiedName&, const AtomicString&) override;
-    virtual RenderObject* createRenderer(RenderStyle*) override;
+    virtual LayoutObject* createLayoutObject(const ComputedStyle&) override;
     virtual void didRecalcStyle(StyleRecalcChange) override;
     virtual bool areAuthorShadowsAllowed() const override { return false; }
 
     void reset();
 
-    PassOwnPtr<RecordingImageBufferFallbackSurfaceFactory> createSurfaceFactory(const IntSize& deviceSize, int* msaaSampleCount) const;
     PassOwnPtr<ImageBufferSurface> createImageBufferSurface(const IntSize& deviceSize, int* msaaSampleCount);
     void createImageBuffer();
-    void createImageBufferInternal();
+    void createImageBufferInternal(PassOwnPtr<ImageBufferSurface> externalSurface);
     bool shouldUseDisplayList(const IntSize& deviceSize);
-
-    void resetDirtyRect();
 
     void setSurfaceSize(const IntSize&);
 

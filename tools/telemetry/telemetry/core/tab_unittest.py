@@ -5,14 +5,14 @@
 import logging
 import tempfile
 
+from telemetry.core import exceptions
+from telemetry.core.platform import tracing_category_filter
+from telemetry.core.platform import tracing_options
+from telemetry.core import util
+from telemetry.core import video
 from telemetry import decorators
 from telemetry.image_processing import image_util
 from telemetry.image_processing import rgba_color
-from telemetry.core import exceptions
-from telemetry.core import util
-from telemetry.core import video
-from telemetry.core.platform import tracing_category_filter
-from telemetry.core.platform import tracing_options
 from telemetry.timeline import model
 from telemetry.unittest_util import tab_test_case
 
@@ -83,13 +83,6 @@ class TabTest(tab_test_case.TabTestCase):
     self._tab.Navigate(url)
     self.assertEquals(self._tab.url, url)
 
-  def testIsTimelineRecordingRunningTab(self):
-    self.assertFalse(self._tab.is_timeline_recording_running)
-    self._tab.StartTimelineRecording()
-    self.assertTrue(self._tab.is_timeline_recording_running)
-    self._tab.StopTimelineRecording()
-    self.assertFalse(self._tab.is_timeline_recording_running)
-
   #pylint: disable=W0212
   def testIsVideoCaptureRunning(self):
     original_platform_backend = self._tab.browser._platform_backend
@@ -104,8 +97,8 @@ class TabTest(tab_test_case.TabTestCase):
       self._tab.browser._platform_backend = original_platform_backend
 
   # Test failing on android: http://crbug.com/437057
-  # Also, for chromeos: http://crbug.com/412713
-  @decorators.Disabled('android', 'chromeos')
+  # and mac: http://crbug.com/468675
+  @decorators.Disabled('android', 'chromeos', 'mac')
   def testHighlight(self):
     self.assertEquals(self._tab.url, 'about:blank')
     options = tracing_options.TracingOptions()
@@ -126,7 +119,6 @@ class TabTest(tab_test_case.TabTestCase):
     self.assertTrue(found_video_start_event)
 
   @decorators.Enabled('has tabs')
-  @decorators.Disabled('chromeos') # crbug.com/412713.
   def testGetRendererThreadFromTabId(self):
     self.assertEquals(self._tab.url, 'about:blank')
     # Create 3 tabs. The third tab is closed before we call
@@ -170,6 +162,18 @@ class TabTest(tab_test_case.TabTestCase):
     # Third tab wasn't available when we start tracing, so there is no
     # renderer_thread corresponding to it in the the trace.
     self.assertIs(None, timeline_model.GetRendererThreadFromTabId(third_tab.id))
+
+  @decorators.Disabled('android') # https://crbug.com/463933
+  def testTabIsAlive(self):
+    self.assertEquals(self._tab.url, 'about:blank')
+    self.assertTrue(self._tab.IsAlive())
+
+    self._tab.Navigate(self.UrlOfUnittestFile('blank.html'))
+    self.assertTrue(self._tab.IsAlive())
+
+    self.assertRaises(exceptions.DevtoolsTargetCrashException,
+        lambda: self._tab.Navigate(self.UrlOfUnittestFile('chrome://crash')))
+    self.assertFalse(self._tab.IsAlive())
 
 
 class GpuTabTest(tab_test_case.TabTestCase):

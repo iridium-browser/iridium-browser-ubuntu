@@ -53,11 +53,15 @@ bool RenderWidgetHostViewChildFrame::IsSurfaceAvailableForCopy() const {
 }
 
 void RenderWidgetHostViewChildFrame::Show() {
-  WasShown();
+  if (!host_->is_hidden())
+    return;
+  host_->WasShown(ui::LatencyInfo());
 }
 
 void RenderWidgetHostViewChildFrame::Hide() {
-  WasHidden();
+  if (host_->is_hidden())
+    return;
+  host_->WasHidden();
 }
 
 bool RenderWidgetHostViewChildFrame::IsShowing() {
@@ -103,7 +107,7 @@ gfx::Size RenderWidgetHostViewChildFrame::GetPhysicalBackingSize() const {
 
 void RenderWidgetHostViewChildFrame::InitAsPopup(
     RenderWidgetHostView* parent_host_view,
-    const gfx::Rect& pos) {
+    const gfx::Rect& bounds) {
   NOTREACHED();
 }
 
@@ -120,18 +124,6 @@ void RenderWidgetHostViewChildFrame::ImeCompositionRangeChanged(
     const gfx::Range& range,
     const std::vector<gfx::Rect>& character_bounds) {
   NOTREACHED();
-}
-
-void RenderWidgetHostViewChildFrame::WasShown() {
-  if (!host_->is_hidden())
-    return;
-  host_->WasShown(ui::LatencyInfo());
-}
-
-void RenderWidgetHostViewChildFrame::WasHidden() {
-  if (host_->is_hidden())
-    return;
-  host_->WasHidden();
 }
 
 void RenderWidgetHostViewChildFrame::MovePluginWindows(
@@ -153,7 +145,7 @@ void RenderWidgetHostViewChildFrame::TextInputTypeChanged(
     ui::TextInputMode input_mode,
     bool can_compose_inline,
     int flags) {
-  NOTREACHED();
+  // TODO(kenrb): Implement.
 }
 
 void RenderWidgetHostViewChildFrame::RenderProcessGone(

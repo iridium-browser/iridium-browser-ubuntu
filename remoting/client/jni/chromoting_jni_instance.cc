@@ -63,7 +63,6 @@ ChromotingJniInstance::ChromotingJniInstance(ChromotingJniRuntime* jni_runtime,
   xmpp_config_.use_tls = kXmppUseTls;
   xmpp_config_.username = username;
   xmpp_config_.auth_token = auth_token;
-  xmpp_config_.auth_service = "oauth2";
 
   // Initialize |authenticator_|.
   scoped_ptr<protocol::ThirdPartyClientAuthenticator::TokenFetcher>
@@ -250,6 +249,19 @@ void ChromotingJniInstance::SendTextEvent(const std::string& text) {
   protocol::TextEvent event;
   event.set_text(text);
   client_->input_stub()->InjectTextEvent(event);
+}
+
+void ChromotingJniInstance::EnableVideoChannel(bool enable) {
+  if (!jni_runtime_->network_task_runner()->BelongsToCurrentThread()) {
+    jni_runtime_->network_task_runner()->PostTask(
+        FROM_HERE,
+        base::Bind(&ChromotingJniInstance::EnableVideoChannel, this, enable));
+    return;
+  }
+
+  protocol::VideoControl video_control;
+  video_control.set_enable(enable);
+  client_->host_stub()->ControlVideo(video_control);
 }
 
 void ChromotingJniInstance::SendClientMessage(const std::string& type,

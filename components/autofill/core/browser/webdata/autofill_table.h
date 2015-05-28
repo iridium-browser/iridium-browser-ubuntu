@@ -34,7 +34,9 @@ struct FormFieldData;
 //
 // Note: The database stores time in seconds, UTC.
 //
-// autofill
+// autofill             This table contains autocomplete history data (not
+//                      structured information).
+//
 //   name               The name of the input as specified in the html.
 //   value              The literal contents of the text field.
 //   value_lower        The contents of the text field made lower_case.
@@ -65,8 +67,12 @@ struct FormFieldData;
 //                      contiguous.  The canonical example is CEDEX in France.
 //                      Added in version 54.
 //   country_code
-//   date_modified      The date on which this profile was last modified.
-//                      Added in version 30.
+//   use_count          The number of times this profile has been used to fill
+//                      a form. Added in version 61.
+//   use_date           The date this profile was last used to fill a form,
+//                      in time_t. Added in version 61.
+//   date_modified      The date on which this profile was last modified, in
+//                      time_t. Added in version 30.
 //   origin             The domain of origin for this profile.
 //                      Added in version 50.
 //   language_code      The BCP 47 language code used to format the address for
@@ -120,8 +126,12 @@ struct FormFieldData;
 //   expiration_year
 //   card_number_encrypted
 //                      Stores encrypted credit card number.
-//   date_modified      The date on which this entry was last modified.
-//                      Added in version 30.
+//   use_count          The number of times this card has been used to fill
+//                      a form. Added in version 61.
+//   use_date           The date this card was last used to fill a form,
+//                      in time_t. Added in version 61.
+//   date_modified      The date on which this entry was last modified, in
+//                      time_t. Added in version 30.
 //   origin             The domain of origin for this profile.
 //                      Added in version 50.
 //
@@ -153,6 +163,12 @@ struct FormFieldData;
 //                      masked_credit_cards table to get the rest of the data.
 //   card_number_encrypted
 //                      Full card number, encrypted.
+//   use_count          The number of times this card has been used to fill
+//                      a form. Added in version 62.
+//   use_date           The date this card was last used to fill a form, in
+//                      internal time format (NOT time_t). Added in version 62.
+//   unmask_date        The date this card was unmasked in units of
+//                      Time::ToInternalValue. Added in version 64.
 //
 // server_addresses     This table contains Autofill address data synced from
 //                      the wallet server. It's basically the same as the
@@ -160,6 +176,7 @@ struct FormFieldData;
 //
 //   id                 String assigned by the server to identify this address.
 //                      This is opaque to the client.
+//   recipient_name     Added in v63.
 //   company_name
 //   street_address     The combined lines of the street address.
 //   address_1          Also known as "administrative area". This is normally
@@ -179,7 +196,8 @@ struct FormFieldData;
 //                      display. For example, a JP address with "ja" language
 //                      code starts with the postal code, but a JP address with
 //                      "ja-latn" language code starts with the recipient name.
-//
+//   phone_number       Phone number. This is a string and has no formatting
+//                      constraints. Added in version 64.
 class AutofillTable : public WebDatabaseTable {
  public:
   explicit AutofillTable(const std::string& app_locale);
@@ -266,12 +284,11 @@ class AutofillTable : public WebDatabaseTable {
   // Retrieves local/server profiles in the database. Caller owns the returned
   // profiles.
   virtual bool GetAutofillProfiles(std::vector<AutofillProfile*>* profiles);
-  virtual bool GetAutofillServerProfiles(
-      std::vector<AutofillProfile*>* profiles);
+  virtual bool GetServerProfiles(std::vector<AutofillProfile*>* profiles);
 
   // Sets the server profiles. All old profiles are deleted and replaced with
   // the given ones.
-  void SetAutofillServerProfiles(const std::vector<AutofillProfile>& profiles);
+  void SetServerProfiles(const std::vector<AutofillProfile>& profiles);
 
   // Records a single credit card in the credit_cards table.
   bool AddCreditCard(const CreditCard& credit_card);
@@ -302,6 +319,14 @@ class AutofillTable : public WebDatabaseTable {
   bool UnmaskServerCreditCard(const std::string& id,
                               const base::string16& full_number);
   bool MaskServerCreditCard(const std::string& id);
+
+  // Updates the use count and last use date for an unmasked server card.
+  bool UpdateUnmaskedCardUsageStats(const CreditCard& credit_card);
+
+  // Deletes all data from the server card and profile tables. Returns true if
+  // any data was deleted, false if not (so false means "commit not needed"
+  // rather than "error").
+  bool ClearAllServerData();
 
   // Removes rows from autofill_profiles and credit_cards if they were created
   // on or after |delete_begin| and strictly before |delete_end|.  Returns the
@@ -341,25 +366,15 @@ class AutofillTable : public WebDatabaseTable {
   bool ClearAutofillProfiles();
 
   // Table migration functions.
-  // Removes empty values for autofill that were incorrectly stored in the DB
-  // See bug http://crbug.com/6111
-  bool MigrateToVersion22ClearAutofillEmptyValueElements();
-  bool MigrateToVersion23AddCardNumberEncryptedColumn();
-  bool MigrateToVersion24CleanupOversizedStringFields();
-  bool MigrateToVersion27UpdateLegacyCreditCards();
-  bool MigrateToVersion30AddDateModifed();
-  bool MigrateToVersion31AddGUIDToCreditCardsAndProfiles();
-  bool MigrateToVersion32UpdateProfilesAndCreditCards();
-  bool MigrateToVersion33ProfilesBasedOnFirstName();
-  bool MigrateToVersion34ProfilesBasedOnCountryCode();
-  bool MigrateToVersion35GreatBritainCountryCodes();
-  bool MigrateToVersion37MergeAndCullOlderProfiles();
-  bool MigrateToVersion51AddOriginColumn();
   bool MigrateToVersion54AddI18nFieldsAndRemoveDeprecatedFields();
   bool MigrateToVersion55MergeAutofillDatesTable();
   bool MigrateToVersion56AddProfileLanguageCodeForFormatting();
   bool MigrateToVersion57AddFullNameField();
   bool MigrateToVersion60AddServerCards();
+  bool MigrateToVersion61AddUsageStats();
+  bool MigrateToVersion62AddUsageStatsForUnmaskedCards();
+  bool MigrateToVersion63AddServerRecipientName();
+  bool MigrateToVersion64AddUnmaskDate();
 
   // Max data length saved in the table;
   static const size_t kMaxDataLength;

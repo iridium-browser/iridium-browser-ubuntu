@@ -38,6 +38,7 @@ typedef std::pair<std::string, std::string> StringPair;
 const char* kProviderNames[] = {
   "platform_app",
   "policy",
+  "supervised_user",
   "extension",
   "override",
   "preference",
@@ -57,6 +58,7 @@ const char kExtensionScheme[] = "chrome-extension";
 content_settings::SettingSource kProviderSourceMap[] = {
   content_settings::SETTING_SOURCE_EXTENSION,
   content_settings::SETTING_SOURCE_POLICY,
+  content_settings::SETTING_SOURCE_SUPERVISED,
   content_settings::SETTING_SOURCE_EXTENSION,
   content_settings::SETTING_SOURCE_USER,
   content_settings::SETTING_SOURCE_USER,
@@ -67,7 +69,7 @@ static_assert(arraysize(kProviderSourceMap) ==
               "kProviderSourceMap should have NUM_PROVIDER_TYPES elements");
 
 // Returns true if the |content_type| supports a resource identifier.
-// Resource identifiers are supported (but not required) for plug-ins.
+// Resource identifiers are supported (but not required) for plugins.
 bool SupportsResourceIdentifier(ContentSettingsType content_type) {
   return content_type == CONTENT_SETTINGS_TYPE_PLUGINS;
 }
@@ -224,7 +226,7 @@ void HostContentSettingsMap::GetSettingsForOneType(
 void HostContentSettingsMap::SetDefaultContentSetting(
     ContentSettingsType content_type,
     ContentSetting setting) {
-  DCHECK(IsSettingAllowedForType(prefs_, setting, content_type));
+  DCHECK(IsDefaultSettingAllowedForType(prefs_, setting, content_type));
 
   base::Value* value = NULL;
   if (setting != CONTENT_SETTING_DEFAULT)
@@ -480,6 +482,21 @@ bool HostContentSettingsMap::IsValueAllowedForType(
 }
 
 // static
+bool HostContentSettingsMap::IsDefaultSettingAllowedForType(
+    PrefService* prefs,
+    ContentSetting setting,
+    ContentSettingsType content_type) {
+#if defined(OS_ANDROID) || defined(OS_CHROMEOS)
+  // Don't support ALLOW for protected media default setting until migration.
+  if (content_type == CONTENT_SETTINGS_TYPE_PROTECTED_MEDIA_IDENTIFIER &&
+      setting == CONTENT_SETTING_ALLOW) {
+    return false;
+  }
+#endif
+  return IsSettingAllowedForType(prefs, setting, content_type);
+}
+
+// static
 bool HostContentSettingsMap::IsSettingAllowedForType(
     PrefService* prefs,
     ContentSetting setting,
@@ -494,17 +511,15 @@ bool HostContentSettingsMap::IsSettingAllowedForType(
     return false;
   }
 
-  // We don't support ALLOW for media default setting.
-  if (content_type == CONTENT_SETTINGS_TYPE_MEDIASTREAM &&
-      setting == CONTENT_SETTING_ALLOW) {
+  // TODO(msramek): MEDIASTREAM is deprecated. Remove this check when all
+  // references to MEDIASTREAM are removed from the code.
+  if (content_type == CONTENT_SETTINGS_TYPE_MEDIASTREAM) {
     return false;
   }
 
-#if defined(OS_ANDROID)
-  // App banners store a dictionary.
-  if (content_type == CONTENT_SETTINGS_TYPE_APP_BANNER)
+  // Compound types cannot be mapped to the type |ContentSetting|.
+  if (ContentTypeHasCompoundValue(content_type))
     return false;
-#endif
 
   // DEFAULT, ALLOW and BLOCK are always allowed.
   if (setting == CONTENT_SETTING_DEFAULT ||
@@ -518,15 +533,19 @@ bool HostContentSettingsMap::IsSettingAllowedForType(
     case CONTENT_SETTINGS_TYPE_PLUGINS:
       return setting == CONTENT_SETTING_ASK ||
              setting == CONTENT_SETTING_DETECT_IMPORTANT_CONTENT;
+    case CONTENT_SETTINGS_TYPE_AUTOMATIC_DOWNLOADS:
+    case CONTENT_SETTINGS_TYPE_FULLSCREEN:
     case CONTENT_SETTINGS_TYPE_GEOLOCATION:
-    case CONTENT_SETTINGS_TYPE_NOTIFICATIONS:
     case CONTENT_SETTINGS_TYPE_MOUSELOCK:
     case CONTENT_SETTINGS_TYPE_MEDIASTREAM:
     case CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC:
     case CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA:
-    case CONTENT_SETTINGS_TYPE_PPAPI_BROKER:
-    case CONTENT_SETTINGS_TYPE_AUTOMATIC_DOWNLOADS:
     case CONTENT_SETTINGS_TYPE_MIDI_SYSEX:
+    case CONTENT_SETTINGS_TYPE_NOTIFICATIONS:
+    case CONTENT_SETTINGS_TYPE_PPAPI_BROKER:
+#if defined(OS_ANDROID) || defined(OS_CHROMEOS)
+    case CONTENT_SETTINGS_TYPE_PROTECTED_MEDIA_IDENTIFIER:
+#endif
     case CONTENT_SETTINGS_TYPE_PUSH_MESSAGING:
       return setting == CONTENT_SETTING_ASK;
     default:
@@ -538,17 +557,12 @@ bool HostContentSettingsMap::IsSettingAllowedForType(
 bool HostContentSettingsMap::ContentTypeHasCompoundValue(
     ContentSettingsType type) {
   // Values for content type CONTENT_SETTINGS_TYPE_AUTO_SELECT_CERTIFICATE,
-  // CONTENT_SETTINGS_TYPE_MEDIASTREAM, and
+  // CONTENT_SETTINGS_TYPE_APP_BANNER, and
   // CONTENT_SETTINGS_TYPE_SSL_CERT_DECISIONS are of type dictionary/map.
   // Compound types like dictionaries can't be mapped to the type
   // |ContentSetting|.
-#if defined(OS_ANDROID)
-  if (type == CONTENT_SETTINGS_TYPE_APP_BANNER)
-    return true;
-#endif
-
   return (type == CONTENT_SETTINGS_TYPE_AUTO_SELECT_CERTIFICATE ||
-          type == CONTENT_SETTINGS_TYPE_MEDIASTREAM ||
+          type == CONTENT_SETTINGS_TYPE_APP_BANNER ||
           type == CONTENT_SETTINGS_TYPE_SSL_CERT_DECISIONS);
 }
 
@@ -714,6 +728,10 @@ scoped_ptr<base::Value> HostContentSettingsMap::GetWebsiteSettingInternal(
     const std::string& resource_identifier,
     content_settings::SettingInfo* info,
     bool get_override) const {
+  // TODO(msramek): MEDIASTREAM is deprecated. Remove this check when all
+  // references to MEDIASTREAM are removed from the code.
+  DCHECK_NE(CONTENT_SETTINGS_TYPE_MEDIASTREAM, content_type);
+
   UsedContentSettingsProviders();
   ContentSettingsPattern* primary_pattern = NULL;
   ContentSettingsPattern* secondary_pattern = NULL;

@@ -66,7 +66,7 @@ public:
 
     // ********** new module functions ************ //
     virtual int32_t RenderFrame(const uint32_t streamId,
-                                I420VideoFrame& videoFrame);
+                                const I420VideoFrame& videoFrame);
 
     // ********** new module helper functions ***** //
     int ChangeContext(NSOpenGLContext *nsglContext);
@@ -78,7 +78,7 @@ public:
 private:
 
     NSOpenGLContext* _nsglContext;
-    int _id;
+    const int _id;
     VideoRenderNSOpenGL* _owner;
     int32_t _width;
     int32_t _height;
@@ -125,7 +125,6 @@ public: // methods
 
     // ********** new module functions ************ //
     int ChangeWindow(CocoaRenderView* newWindowRef);
-    int32_t ChangeUniqueID(int32_t id);
     int32_t StartRender();
     int32_t StopRender();
     int32_t DeleteNSGLChannel(const uint32_t streamID);
@@ -170,7 +169,7 @@ private: // variables
     bool _fullScreen;
     int _id;
     CriticalSectionWrapper& _nsglContextCritSec;
-    ThreadWrapper* _screenUpdateThread;
+    rtc::scoped_ptr<ThreadWrapper> _screenUpdateThread;
     EventWrapper* _screenUpdateEvent;
     NSOpenGLContext* _nsglContext;
     NSOpenGLContext* _nsglFullScreenContext;
@@ -180,7 +179,6 @@ private: // variables
     int _windowHeight;
     std::map<int, VideoChannelNSOpenGL*> _nsglChannels;
     std::multimap<int, int> _zOrderToChannel;
-    unsigned int _threadID;
     bool _renderingIsPaused;
     NSView* _windowRefSuperView;
     NSRect _windowRefSuperViewFrame;

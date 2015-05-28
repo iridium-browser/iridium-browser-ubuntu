@@ -11,9 +11,13 @@
 #include "bindings/core/v8/V8ArrayBuffer.h"
 #include "bindings/core/v8/V8ThrowException.h"
 #include "core/dom/DOMArrayBuffer.h"
+#include "core/dom/DOMTypedArray.h"
 #include "core/fileapi/Blob.h"
 #include "core/fileapi/FileReaderLoader.h"
 #include "core/fileapi/FileReaderLoaderClient.h"
+#include "core/frame/UseCounter.h"
+#include "core/streams/ReadableByteStream.h"
+#include "core/streams/ReadableByteStreamReader.h"
 #include "core/streams/UnderlyingSource.h"
 #include "modules/fetch/BodyStreamBuffer.h"
 
@@ -37,7 +41,7 @@ public:
         m_body->didBlobHandleReceiveError(exception);
         m_body = nullptr;
     }
-    void trace(Visitor* visitor) override
+    DEFINE_INLINE_VIRTUAL_TRACE()
     {
         BodyStreamBuffer::BlobHandleCreatorClient::trace(visitor);
         visitor->trace(m_body);
@@ -46,59 +50,224 @@ private:
     Member<Body> m_body;
 };
 
-class Body::ReadableStreamSource : public GarbageCollectedFinalized<ReadableStreamSource>, public UnderlyingSource {
+class Body::ReadableStreamSource : public BodyStreamBuffer::Observer , public UnderlyingSource, public FileReaderLoaderClient {
     USING_GARBAGE_COLLECTED_MIXIN(ReadableStreamSource);
 public:
-    ReadableStreamSource(Body* body) : m_body(body) { }
+    enum State {
+        Initial,
+        Streaming,
+        ReadingBlob,
+        Closed,
+        Errored,
+    };
+    ReadableStreamSource(Body* body) : m_body(body), m_state(Initial) { }
     ~ReadableStreamSource() override { }
-    void pullSource() override { m_body->pullSource(); }
 
-    ScriptPromise cancelSource(ScriptState* scriptState, ScriptValue reason) override
+    State state() const { return m_state; }
+
+    void startStream(ReadableByteStream* stream)
     {
-        return ScriptPromise();
+        m_stream = stream;
+        stream->didSourceStart();
     }
+    // Creates a new BodyStreamBuffer to drain the data.
+    BodyStreamBuffer* createDrainingStream()
+    {
+        ASSERT(m_state != Initial);
 
-    void trace(Visitor* visitor) override
+        auto drainingStreamBuffer = new BodyStreamBuffer(new Canceller(this));
+        if (m_stream->stateInternal() == ReadableByteStream::Closed) {
+            drainingStreamBuffer->close();
+            return drainingStreamBuffer;
+        }
+        if (m_stream->stateInternal() == ReadableByteStream::Errored) {
+            drainingStreamBuffer->error(exception());
+            return drainingStreamBuffer;
+        }
+
+        ASSERT(!m_drainingStreamBuffer);
+        // Take back the data in |m_stream|.
+        Deque<std::pair<RefPtr<DOMArrayBufferView>, size_t>> tmp_queue;
+        ASSERT(m_stream->stateInternal() == ReadableStream::Readable);
+        m_stream->readInternal(tmp_queue);
+        while (!tmp_queue.isEmpty()) {
+            std::pair<RefPtr<DOMArrayBufferView>, size_t> data = tmp_queue.takeFirst();
+            drainingStreamBuffer->write(data.first->buffer());
+        }
+        if (m_state == Closed)
+            drainingStreamBuffer->close();
+
+        m_drainingStreamBuffer = drainingStreamBuffer;
+        return m_drainingStreamBuffer;
+    }
+    DEFINE_INLINE_VIRTUAL_TRACE()
     {
         visitor->trace(m_body);
+        visitor->trace(m_bodyStreamBuffer);
+        visitor->trace(m_drainingStreamBuffer);
+        visitor->trace(m_stream);
+        BodyStreamBuffer::Observer::trace(visitor);
         UnderlyingSource::trace(visitor);
     }
 
-private:
-    Member<Body> m_body;
-};
+    void close()
+    {
+        if (m_state == Closed) {
+            // It is possible to call |close| from the source side (such
+            // as blob loading finish) and from the consumer side (such as
+            // calling |cancel|). Thus we should ignore it here.
+            return;
+        }
+        m_state = Closed;
+        if (m_drainingStreamBuffer)
+            m_drainingStreamBuffer->close();
+        m_stream->close();
+    }
+    void error()
+    {
+        m_state = Errored;
+        if (m_drainingStreamBuffer)
+            m_drainingStreamBuffer->error(exception());
+        m_stream->error(exception());
+    }
 
-void Body::pullSource()
-{
-    if (!m_streamAccessed) {
-        // We do not download data unless the user explicitly uses the
-        // ReadableStream object in order to avoid performance regression,
-        // because currently Chrome cannot handle Streams efficiently
-        // especially with ServiceWorker or Blob.
-        return;
+private:
+    class Canceller : public BodyStreamBuffer::Canceller {
+    public:
+        Canceller(ReadableStreamSource* source) : m_source(source) { }
+        void cancel() override
+        {
+            m_source->cancel();
+        }
+
+        DEFINE_INLINE_VIRTUAL_TRACE()
+        {
+            visitor->trace(m_source);
+            BodyStreamBuffer::Canceller::trace(visitor);
+        }
+
+    private:
+        Member<ReadableStreamSource> m_source;
+    };
+
+    // UnderlyingSource functions.
+    void pullSource() override
+    {
+        // Note that one |pull| is called only when |read| is called on the
+        // associated ReadableByteStreamReader because we create a stream with
+        // StrictStrategy.
+
+        if (m_state == Initial) {
+            if (m_body->buffer()) {
+                m_bodyStreamBuffer = m_body->buffer();
+                m_state = Streaming;
+                m_bodyStreamBuffer->registerObserver(this);
+                onWrite();
+                if (m_bodyStreamBuffer->hasError())
+                    return onError();
+                if (m_bodyStreamBuffer->isClosed())
+                    return onClose();
+            } else {
+                m_blobDataHandle = m_body->blobDataHandle() ? m_body->blobDataHandle() : BlobDataHandle::create(BlobData::create(), 0);
+                m_state = ReadingBlob;
+                FileReaderLoader::ReadType readType = FileReaderLoader::ReadAsArrayBuffer;
+                m_loader = adoptPtr(new FileReaderLoader(readType, this));
+                m_loader->start(m_body->executionContext(), m_blobDataHandle);
+            }
+        }
     }
-    if (m_bodyUsed) {
-        m_stream->error(DOMException::create(InvalidStateError, "The stream is locked."));
-        return;
+
+    ScriptPromise cancelSource(ScriptState* scriptState, ScriptValue reason) override
+    {
+        cancel();
+        return ScriptPromise::cast(scriptState, v8::Undefined(scriptState->isolate()));
     }
-    ASSERT(!m_loader);
-    if (buffer()) {
-        // If the body has a body buffer, we read all data from the buffer and
-        // create a blob and then put the data from the blob to |m_stream|.
-        // FIXME: Put the data directry from the buffer.
-        buffer()->readAllAndCreateBlobHandle(contentTypeForBuffer(), new BlobHandleReceiver(this));
-        return;
+
+    // BodyStreamBuffer::Observer functions.
+    void onWrite() override
+    {
+        ASSERT(m_state == Streaming);
+        while (RefPtr<DOMArrayBuffer> buf = m_bodyStreamBuffer->read()) {
+            write(buf);
+        }
     }
-    RefPtr<BlobDataHandle> blobHandle = blobDataHandle();
-    if (!blobHandle.get()) {
-        blobHandle = BlobDataHandle::create(BlobData::create(), 0);
+    void onClose() override
+    {
+        ASSERT(m_state == Streaming);
+        close();
+        m_bodyStreamBuffer->unregisterObserver();
     }
-    readAsyncFromBlob(blobHandle);
-}
+    void onError() override
+    {
+        ASSERT(m_state == Streaming);
+        error();
+        m_bodyStreamBuffer->unregisterObserver();
+    }
+
+    // FileReaderLoaderClient functions.
+    void didStartLoading() override { }
+    void didReceiveData() override { }
+    void didFinishLoading() override
+    {
+        ASSERT(m_state == ReadingBlob);
+        write(m_loader->arrayBufferResult());
+        close();
+    }
+    void didFail(FileError::ErrorCode) override
+    {
+        ASSERT(m_state == ReadingBlob);
+        error();
+    }
+
+    void write(PassRefPtr<DOMArrayBuffer> buf)
+    {
+        if (m_drainingStreamBuffer) {
+            m_drainingStreamBuffer->write(buf);
+        } else {
+            auto size = buf->byteLength();
+            m_stream->enqueue(DOMUint8Array::create(buf, 0, size));
+        }
+    }
+    void cancel()
+    {
+        if (m_bodyStreamBuffer) {
+            m_bodyStreamBuffer->cancel();
+            // We should not close the stream here, because it is canceller's
+            // responsibility.
+        } else {
+            if (m_loader)
+                m_loader->cancel();
+            close();
+        }
+    }
+
+    PassRefPtrWillBeRawPtr<DOMException> exception()
+    {
+        if (m_state != Errored)
+            return nullptr;
+        if (m_bodyStreamBuffer) {
+            ASSERT(m_bodyStreamBuffer->exception());
+            return m_bodyStreamBuffer->exception();
+        }
+        return DOMException::create(NetworkError, "network error");
+    }
+
+    Member<Body> m_body;
+    // Set when the data container of the Body is a BodyStreamBuffer.
+    Member<BodyStreamBuffer> m_bodyStreamBuffer;
+    // Set when the data container of the Body is a BlobDataHandle.
+    RefPtr<BlobDataHandle> m_blobDataHandle;
+    // Used to read the data from BlobDataHandle.
+    OwnPtr<FileReaderLoader> m_loader;
+    // Created when createDrainingStream is called to drain the data.
+    Member<BodyStreamBuffer> m_drainingStreamBuffer;
+    Member<ReadableByteStream> m_stream;
+    State m_state;
+};
 
 ScriptPromise Body::readAsync(ScriptState* scriptState, ResponseType type)
 {
-    if (m_bodyUsed)
+    if (bodyUsed())
         return ScriptPromise::reject(scriptState, V8ThrowException::createTypeError(scriptState->isolate(), "Already read"));
 
     // When the main thread sends a V8::TerminateExecution() signal to a worker
@@ -111,54 +280,62 @@ ScriptPromise Body::readAsync(ScriptState* scriptState, ResponseType type)
     if (!executionContext)
         return ScriptPromise();
 
-    m_bodyUsed = true;
+    lockBody();
     m_responseType = type;
 
     ASSERT(!m_resolver);
     m_resolver = ScriptPromiseResolver::create(scriptState);
     ScriptPromise promise = m_resolver->promise();
 
-    if (m_streamAccessed) {
-        // 'body' attribute was accessed and the stream source started pulling.
-        switch (m_stream->state()) {
-        case ReadableStream::Readable:
-            readAllFromStream(scriptState);
-            return promise;
-        case ReadableStream::Waiting:
-            // m_loader is working and m_resolver will be resolved when it
-            // ends.
-            return promise;
-        case ReadableStream::Closed:
-        case ReadableStream::Errored:
-            m_resolver->resolve(m_stream->closed(scriptState).v8Value());
-            return promise;
+    if (m_stream->stateInternal() == ReadableStream::Closed) {
+        // We resolve the resolver manually in order not to use member
+        // variables.
+        switch (m_responseType) {
+        case ResponseAsArrayBuffer:
+            m_resolver->resolve(DOMArrayBuffer::create(nullptr, 0));
+            break;
+        case ResponseAsBlob: {
+            OwnPtr<BlobData> blobData = BlobData::create();
+            blobData->setContentType(mimeType());
+            m_resolver->resolve(Blob::create(BlobDataHandle::create(blobData.release(), 0)));
             break;
         }
-        ASSERT_NOT_REACHED();
-        return promise;
+        case ResponseAsText:
+            m_resolver->resolve(String());
+            break;
+        case ResponseAsFormData:
+            // TODO(yhirano): Implement this.
+            ASSERT_NOT_REACHED();
+            break;
+        case ResponseAsJSON: {
+            ScriptState::Scope scope(m_resolver->scriptState());
+            m_resolver->reject(V8ThrowException::createSyntaxError(m_resolver->scriptState()->isolate(), "Unexpected end of input"));
+            break;
+        }
+        case ResponseUnknown:
+            ASSERT_NOT_REACHED();
+            break;
+        }
+        m_resolver.clear();
+    } else if (m_stream->stateInternal() == ReadableStream::Errored) {
+        m_resolver->reject(m_stream->storedException());
+        m_resolver.clear();
+    } else if (isBodyConsumed()) {
+        m_streamSource->createDrainingStream()->readAllAndCreateBlobHandle(mimeType(), new BlobHandleReceiver(this));
+    } else if (buffer()) {
+        buffer()->readAllAndCreateBlobHandle(mimeType(), new BlobHandleReceiver(this));
+    } else {
+        readAsyncFromBlob(blobDataHandle());
     }
-
-    if (buffer()) {
-        buffer()->readAllAndCreateBlobHandle(contentTypeForBuffer(), new BlobHandleReceiver(this));
-        return promise;
-    }
-    readAsyncFromBlob(blobDataHandle());
     return promise;
 }
 
 void Body::readAsyncFromBlob(PassRefPtr<BlobDataHandle> handle)
 {
-    if (m_streamAccessed) {
-        FileReaderLoader::ReadType readType = FileReaderLoader::ReadAsArrayBuffer;
-        m_loader = adoptPtr(new FileReaderLoader(readType, this));
-        m_loader->start(executionContext(), handle);
-        return;
-    }
     FileReaderLoader::ReadType readType = FileReaderLoader::ReadAsText;
     RefPtr<BlobDataHandle> blobHandle = handle;
-    if (!blobHandle.get()) {
+    if (!blobHandle)
         blobHandle = BlobDataHandle::create(BlobData::create(), 0);
-    }
     switch (m_responseType) {
     case ResponseAsArrayBuffer:
         readType = FileReaderLoader::ReadAsArrayBuffer;
@@ -167,7 +344,12 @@ void Body::readAsyncFromBlob(PassRefPtr<BlobDataHandle> handle)
         if (blobHandle->size() != kuint64max) {
             // If the size of |blobHandle| is set correctly, creates Blob from
             // it.
-            m_resolver->resolve(Blob::create(blobHandle));
+            if (blobHandle->type() != mimeType()) {
+                // A new BlobDataHandle is created to override the Blob's type.
+                m_resolver->resolve(Blob::create(BlobDataHandle::create(blobHandle->uuid(), mimeType(), blobHandle->size())));
+            } else {
+                m_resolver->resolve(Blob::create(blobHandle));
+            }
             m_resolver.clear();
             return;
         }
@@ -195,23 +377,6 @@ void Body::readAsyncFromBlob(PassRefPtr<BlobDataHandle> handle)
     return;
 }
 
-void Body::readAllFromStream(ScriptState* scriptState)
-{
-    // With the current loading mechanism, the data is loaded atomically.
-    ASSERT(m_stream->isDraining());
-    TrackExceptionState es;
-    // FIXME: Implement and use another |read| method that doesn't
-    // need an exception state and V8ArrayBuffer.
-    ScriptValue value = m_stream->read(scriptState, es);
-    ASSERT(!es.hadException());
-    ASSERT(m_stream->state() == ReadableStream::Closed);
-    ASSERT(!value.isEmpty() && V8ArrayBuffer::hasInstance(value.v8Value(), scriptState->isolate()));
-    DOMArrayBuffer* buffer = V8ArrayBuffer::toImpl(value.v8Value().As<v8::Object>());
-    didFinishLoadingViaStream(buffer);
-    m_resolver.clear();
-    m_stream->close();
-}
-
 ScriptPromise Body::arrayBuffer(ScriptState* scriptState)
 {
     return readAsync(scriptState, ResponseAsArrayBuffer);
@@ -237,34 +402,56 @@ ScriptPromise Body::text(ScriptState* scriptState)
     return readAsync(scriptState, ResponseAsText);
 }
 
-ReadableStream* Body::body()
+ReadableByteStream* Body::body()
 {
-    if (!m_streamAccessed) {
-        m_streamAccessed = true;
-        if (m_stream->isPulling()) {
-            // The stream has been pulling, but the source ignored the
-            // instruction because it didn't know the user wanted to use the
-            // ReadableStream interface. Now it knows the user does, so have
-            // the source start pulling.
-            m_streamSource->pullSource();
-        }
-    }
+    UseCounter::count(executionContext(), UseCounter::FetchBodyStream);
     return m_stream;
 }
 
 bool Body::bodyUsed() const
 {
-    return m_bodyUsed;
+    return m_bodyUsed || m_stream->isLocked();
 }
 
-void Body::setBodyUsed()
+void Body::lockBody(LockBodyOption option)
 {
-    m_bodyUsed = true;
+    ASSERT(!bodyUsed());
+    if (option == PassBody)
+        m_bodyUsed = true;
+    ASSERT(!m_stream->isLocked());
+    TrackExceptionState exceptionState;
+    m_stream->getBytesReader(executionContext(), exceptionState);
+    ASSERT(!exceptionState.hadException());
 }
 
-bool Body::streamAccessed() const
+bool Body::isBodyConsumed() const
 {
-    return m_streamAccessed;
+    if (m_streamSource->state() != m_streamSource->Initial) {
+        // Some data is pulled from the source.
+        return true;
+    }
+    if (m_stream->stateInternal() == ReadableStream::Closed) {
+        // Return true if the blob handle is originally not empty.
+        RefPtr<BlobDataHandle> handle = blobDataHandle();
+        return handle && handle->size();
+    }
+    if (m_stream->stateInternal() == ReadableStream::Errored) {
+        // The stream is errored. That means an effort to read data was made.
+        return true;
+    }
+    return false;
+}
+
+void Body::refreshBody()
+{
+    m_streamSource = new ReadableStreamSource(this);
+    m_stream = new ReadableByteStream(m_streamSource, new ReadableByteStream::StrictStrategy);
+    m_streamSource->startStream(m_stream);
+}
+
+BodyStreamBuffer* Body::createDrainingStream()
+{
+    return m_streamSource->createDrainingStream();
 }
 
 void Body::stop()
@@ -276,14 +463,16 @@ void Body::stop()
 
 bool Body::hasPendingActivity() const
 {
+    if (executionContext()->activeDOMObjectsAreStopped())
+        return false;
     if (m_resolver)
         return true;
-    if (m_streamAccessed && (m_stream->state() == ReadableStream::Readable || m_stream->state() == ReadableStream::Waiting))
+    if (m_stream->isLocked())
         return true;
     return false;
 }
 
-void Body::trace(Visitor* visitor)
+DEFINE_TRACE(Body)
 {
     visitor->trace(m_resolver);
     visitor->trace(m_stream);
@@ -294,22 +483,11 @@ void Body::trace(Visitor* visitor)
 Body::Body(ExecutionContext* context)
     : ActiveDOMObject(context)
     , m_bodyUsed(false)
-    , m_streamAccessed(false)
     , m_responseType(ResponseType::ResponseUnknown)
     , m_streamSource(new ReadableStreamSource(this))
-    , m_stream(new ReadableStreamImpl<ReadableStreamChunkTypeTraits<DOMArrayBuffer>>(context, m_streamSource))
+    , m_stream(new ReadableByteStream(m_streamSource, new ReadableByteStream::StrictStrategy))
 {
-    m_stream->didSourceStart();
-}
-
-Body::Body(const Body& copy_from)
-    : ActiveDOMObject(copy_from.lifecycleContext())
-    , m_bodyUsed(copy_from.bodyUsed())
-    , m_responseType(ResponseType::ResponseUnknown)
-    , m_streamSource(new ReadableStreamSource(this))
-    , m_stream(new ReadableStreamImpl<ReadableStreamChunkTypeTraits<DOMArrayBuffer>>(copy_from.executionContext(), m_streamSource))
-{
-    m_stream->didSourceStart();
+    m_streamSource->startStream(m_stream);
 }
 
 void Body::resolveJSON(const String& string)
@@ -319,15 +497,11 @@ void Body::resolveJSON(const String& string)
     v8::Isolate* isolate = m_resolver->scriptState()->isolate();
     v8::Local<v8::String> inputString = v8String(isolate, string);
     v8::TryCatch trycatch;
-    v8::Local<v8::Value> parsed = v8::JSON::Parse(inputString);
-    if (parsed.IsEmpty()) {
-        if (trycatch.HasCaught())
-            m_resolver->reject(trycatch.Exception());
-        else
-            m_resolver->reject(v8::Exception::Error(v8::String::NewFromUtf8(isolate, "JSON parse error")));
-        return;
-    }
-    m_resolver->resolve(parsed);
+    v8::Local<v8::Value> parsed;
+    if (v8Call(v8::JSON::Parse(isolate, inputString), parsed, trycatch))
+        m_resolver->resolve(parsed);
+    else
+        m_resolver->reject(trycatch.Exception());
 }
 
 // FileReaderLoaderClient functions.
@@ -338,13 +512,6 @@ void Body::didFinishLoading()
     if (!executionContext() || executionContext()->activeDOMObjectsAreStopped())
         return;
 
-    if (m_streamAccessed) {
-        didFinishLoadingViaStream(m_loader->arrayBufferResult().get());
-        m_resolver.clear();
-        m_stream->close();
-        return;
-    }
-
     switch (m_responseType) {
     case ResponseAsArrayBuffer:
         m_resolver->resolve(m_loader->arrayBufferResult());
@@ -354,6 +521,7 @@ void Body::didFinishLoading()
         OwnPtr<BlobData> blobData = BlobData::create();
         RefPtr<DOMArrayBuffer> buffer = m_loader->arrayBufferResult();
         blobData->appendBytes(buffer->data(), buffer->byteLength());
+        blobData->setContentType(mimeType());
         const size_t length = blobData->length();
         m_resolver->resolve(Blob::create(BlobDataHandle::create(blobData.release(), length)));
         break;
@@ -370,51 +538,8 @@ void Body::didFinishLoading()
     default:
         ASSERT_NOT_REACHED();
     }
+    m_streamSource->close();
     m_resolver.clear();
-    m_stream->close();
-}
-
-void Body::didFinishLoadingViaStream(DOMArrayBuffer* buffer)
-{
-    if (!m_bodyUsed) {
-        // |m_stream| is pulling.
-        ASSERT(m_streamAccessed);
-        m_stream->enqueue(buffer);
-        return;
-    }
-
-    switch (m_responseType) {
-    case ResponseAsArrayBuffer:
-        m_resolver->resolve(buffer);
-        break;
-    case ResponseAsBlob: {
-        OwnPtr<BlobData> blobData = BlobData::create();
-        blobData->appendBytes(buffer->data(), buffer->byteLength());
-        m_resolver->resolve(Blob::create(BlobDataHandle::create(blobData.release(), blobData->length())));
-        break;
-    }
-    case ResponseAsFormData:
-        ASSERT_NOT_REACHED();
-        break;
-    case ResponseAsJSON: {
-        String s = String::fromUTF8(static_cast<const char*>(buffer->data()), buffer->byteLength());
-        if (s.isNull())
-            m_resolver->reject(DOMException::create(NetworkError, "Invalid utf-8 string"));
-        else
-            resolveJSON(s);
-        break;
-    }
-    case ResponseAsText: {
-        String s = String::fromUTF8(static_cast<const char*>(buffer->data()), buffer->byteLength());
-        if (s.isNull())
-            m_resolver->reject(DOMException::create(NetworkError, "Invalid utf-8 string"));
-        else
-            m_resolver->resolve(s);
-        break;
-    }
-    default:
-        ASSERT_NOT_REACHED();
-    }
 }
 
 void Body::didFail(FileError::ErrorCode code)
@@ -422,18 +547,19 @@ void Body::didFail(FileError::ErrorCode code)
     if (!executionContext() || executionContext()->activeDOMObjectsAreStopped())
         return;
 
+    m_streamSource->error();
     if (m_resolver) {
         // FIXME: We should reject the promise.
         m_resolver->resolve("");
         m_resolver.clear();
     }
-    m_stream->error(DOMException::create(NetworkError, "network error"));
 }
 
 void Body::didBlobHandleReceiveError(PassRefPtrWillBeRawPtr<DOMException> exception)
 {
     if (!m_resolver)
         return;
+    m_streamSource->error();
     m_resolver->reject(exception);
     m_resolver.clear();
 }

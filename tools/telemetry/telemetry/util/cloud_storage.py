@@ -4,6 +4,7 @@
 
 """Wrappers for gsutil, for basic interaction with Google Cloud Storage."""
 
+import collections
 import contextlib
 import cStringIO
 import hashlib
@@ -15,6 +16,7 @@ import tarfile
 import urllib2
 
 from telemetry.core import util
+from telemetry import decorators
 from telemetry.util import path
 
 
@@ -23,11 +25,13 @@ PARTNER_BUCKET = 'chrome-partner-telemetry'
 INTERNAL_BUCKET = 'chrome-telemetry'
 
 
-BUCKET_ALIASES = {
-    'public': PUBLIC_BUCKET,
-    'partner': PARTNER_BUCKET,
-    'internal': INTERNAL_BUCKET,
-}
+# Uses ordered dict to make sure that bucket's key-value items are ordered from
+# the most open to the most restrictive.
+BUCKET_ALIASES = collections.OrderedDict((
+    ('public', PUBLIC_BUCKET),
+    ('partner', PARTNER_BUCKET),
+    ('internal', INTERNAL_BUCKET),
+))
 
 
 _GSUTIL_URL = 'http://storage.googleapis.com/pub/gsutil.tar.gz'
@@ -175,6 +179,24 @@ def Move(bucket1, bucket2, remote_path):
   _RunCommand(['mv', url1, url2])
 
 
+def Copy(bucket_from, bucket_to, remote_path_from, remote_path_to):
+  """Copy a file from one location in CloudStorage to another.
+
+  Args:
+      bucket_from: The cloud storage bucket where the file is currently located.
+      bucket_to: The cloud storage bucket it is being copied to.
+      remote_path_from: The file path where the file is located in bucket_from.
+      remote_path_to: The file path it is being copied to in bucket_to.
+
+  It should: cause no changes locally or to the starting file, and will
+  overwrite any existing files in the destination location.
+  """
+  url1 = 'gs://%s/%s' % (bucket_from, remote_path_from)
+  url2 = 'gs://%s/%s' % (bucket_to, remote_path_to)
+  logging.info('Copying %s to %s' % (url1, url2))
+  _RunCommand(['cp', url1, url2])
+
+
 def Delete(bucket, remote_path):
   url = 'gs://%s/%s' % (bucket, remote_path)
   logging.info('Deleting %s' % url)
@@ -216,14 +238,16 @@ def Insert(bucket, remote_path, local_path, publicly_readable=False):
       bucket, remote_path)
 
 
-def GetIfChanged(file_path, bucket=None):
-  """Gets the file at file_path if it has a hash file that doesn't match.
-
-  If the file is not in Cloud Storage, log a warning instead of raising an
-  exception. We assume that the user just hasn't uploaded the file yet.
+def GetIfChanged(file_path, bucket):
+  """Gets the file at file_path if it has a hash file that doesn't match or
+  if there is no local copy of file_path, but there is a hash file for it.
 
   Returns:
     True if the binary was changed.
+  Raises:
+    CredentialsError if the user has no configured credentials.
+    PermissionError if the user does not have permission to access the bucket.
+    NotFoundError if the file is not in the given bucket in cloud_storage.
   """
   hash_path = file_path + '.sha1'
   if not os.path.exists(hash_path):
@@ -234,21 +258,28 @@ def GetIfChanged(file_path, bucket=None):
   if os.path.exists(file_path) and CalculateHash(file_path) == expected_hash:
     return False
 
-  if bucket:
-    buckets = [bucket]
-  else:
-    buckets = [PUBLIC_BUCKET, PARTNER_BUCKET, INTERNAL_BUCKET]
+  Get(bucket, expected_hash, file_path)
+  return True
 
-  for bucket in buckets:
-    try:
-      Get(bucket, expected_hash, file_path)
-      return True
-    except NotFoundError:
-      continue
-
-  logging.warning('Unable to find file in Cloud Storage: %s', file_path)
-  return False
-
+# TODO(aiolos): remove @decorators.Cache for http://crbug.com/459787
+@decorators.Cache
+def GetFilesInDirectoryIfChanged(directory, bucket):
+  """ Scan the directory for .sha1 files, and download them from the given
+  bucket in cloud storage if the local and remote hash don't match or
+  there is no local copy.
+  """
+  if not os.path.isdir(directory):
+    raise ValueError('Must provide a valid directory.')
+  # Don't allow the root directory to be a serving_dir.
+  if directory == os.path.abspath(os.sep):
+    raise ValueError('Trying to serve root directory from HTTP server.')
+  for dirpath, _, filenames in os.walk(directory):
+    for filename in filenames:
+      path_name, extension = os.path.splitext(
+          os.path.join(dirpath, filename))
+      if extension != '.sha1':
+        continue
+      GetIfChanged(path_name, bucket)
 
 def CalculateHash(file_path):
   """Calculates and returns the hash of the file at file_path."""

@@ -1,9 +1,11 @@
 <?xml version="1.0" ?><!DOCTYPE translationbundle><translationbundle lang="hr">
 <translation id="1408730541890277710">Zamijenite slike njihovim alternativnim tekstom.</translation>
+<translation id="6017514345406065928">Zelena</translation>
 <translation id="595639123821853262">Obrnuti sivi tonovi</translation>
 <translation id="8260673944985561857">Opcije Pregledavanja kursorom</translation>
 <translation id="3410969471888629217">Zaboravi prilagodbe web-lokacije</translation>
 <translation id="6050189528197190982">Sivi tonovi</translation>
+<translation id="8261559421026395104">Poboljšavanje raspoznavanja za:</translation>
 <translation id="5094574508723441140">Povećani kontrast</translation>
 <translation id="8609925175482059018">Pritisnite &lt;span class='key'&gt;F7&lt;/span&gt; da biste uključili Pregledavanje kursorom. Pritisnite ponovo za isključivanje.</translation>
 <translation id="3435896845095436175">Omogući</translation>
@@ -14,6 +16,8 @@
 <translation id="2394933097471027016">Isprobajte odmah – Pregledavanje kursorom uvijek je omogućeno na toj stranici!</translation>
 <translation id="3622586652998721735">Postavi kao zadanu shemu</translation>
 <translation id="2179565792157161713">Otvori dugi opis na novoj kartici</translation>
+<translation id="7942349550061667556">Crvena</translation>
+<translation id="1555130319947370107">Plava</translation>
 <translation id="2471847333270902538">Shema boja za <ph name="SITE"/>:</translation>
 <translation id="381767806621926835">Kliknite desnom tipkom bilo koju stavku s atributima &quot;longdesc&quot; ili &quot;aria-describedat&quot; da biste pristupili dugom opisu.</translation>
 <translation id="786423340267544509">Dodajte granicu elementima s atributima aria-describedat ili longdesc.</translation>
@@ -31,6 +35,7 @@
 <translation id="4896660567607030658">Bez povratnih informacija, samo prikaži kursor.</translation>
 <translation id="5631241868147802353">Zadana shema boja:</translation>
 <translation id="5173942593318174089">Istakni položaj kursora animacijom.</translation>
+<translation id="7379645913608427028">Stupanj</translation>
 <translation id="894241283505723656">Dugi opisi na kontekstnom izborniku</translation>
 <translation id="5555153510860501336">Visoki kontrast nije omogućen</translation>
 <translation id="1703735871906654364">Pregledavanje kursorom</translation>
@@ -38,6 +43,7 @@
 <translation id="6550675742724504774">Opcije</translation>
 <translation id="5650358096585648000">Vizualne povratne informacije</translation>
 <translation id="4388820049312272371">Istakni položaj kursora brzim bljeskanjem.</translation>
+<translation id="2223143012868735942">Prilagodljivi filtar boja koji se primjenjuje na web-stranice radi boljeg raspoznavanja boja.</translation>
 <translation id="4023902424053835668">Pregledavajte tekst web-stranica pomoću tipki strelica.</translation>
 <translation id="2795227192542594043">To proširenje pruža pokretni kursor na web-stranici, tako da tekst možete odabrati pomoću tipkovnice.</translation>
 <translation id="4394049700291259645">Onemogući</translation>

@@ -23,31 +23,28 @@
 #ifndef CSSPropertyParser_h
 #define CSSPropertyParser_h
 
-// FIXME: Way too many.
-#include "core/CSSPropertyNames.h"
-#include "core/CSSValueKeywords.h"
-#include "core/css/CSSCalculationValue.h"
-#include "core/css/CSSFilterValue.h"
 #include "core/css/CSSGradientValue.h"
 #include "core/css/CSSGridTemplateAreasValue.h"
-#include "core/css/CSSProperty.h"
 #include "core/css/CSSPropertySourceData.h"
-#include "core/css/CSSSelector.h"
-#include "core/css/parser/CSSParserMode.h"
-#include "core/css/parser/CSSParserValues.h"
-#include "platform/graphics/Color.h"
-#include "wtf/OwnPtr.h"
-#include "wtf/Vector.h"
+#include "platform/Length.h"
 
 namespace blink {
 
+class BorderImageParseContext;
 class CSSBorderImageSliceValue;
-class CSSPrimitiveValue;
-class CSSValue;
-class CSSValueList;
 class CSSBasicShape;
 class CSSBasicShapeInset;
+class CSSFunctionValue;
+class CSSGradientValue;
 class CSSGridLineNamesValue;
+class CSSLineBoxContainValue;
+struct CSSParserString;
+struct CSSParserValue;
+class CSSParserValueList;
+class CSSPrimitiveValue;
+class CSSProperty;
+class CSSValue;
+class CSSValueList;
 class StylePropertyShorthand;
 
 // Inputs: PropertyID, isImportant bool, CSSParserValueList.
@@ -75,7 +72,7 @@ public:
 
     static bool parseValue(CSSPropertyID, bool important,
         CSSParserValueList*, const CSSParserContext&, bool inViewport,
-        WillBeHeapVector<CSSProperty, 256>&, CSSRuleSourceData::Type);
+        WillBeHeapVector<CSSProperty, 256>&, StyleRule::Type);
 
     // FIXME: This should probably move to CSSParserFastPaths
     template<typename StringType>
@@ -85,7 +82,7 @@ public:
 
 private:
     CSSPropertyParser(CSSParserValueList*, const CSSParserContext&, bool inViewport,
-        WillBeHeapVector<CSSProperty, 256>&, CSSRuleSourceData::Type);
+        WillBeHeapVector<CSSProperty, 256>&, StyleRule::Type);
 
     bool parseValue(CSSPropertyID, bool important);
 
@@ -128,7 +125,7 @@ private:
     void parse4ValuesFillPosition(CSSParserValueList*, RefPtrWillBeRawPtr<CSSValue>&, RefPtrWillBeRawPtr<CSSValue>&, PassRefPtrWillBeRawPtr<CSSPrimitiveValue>, PassRefPtrWillBeRawPtr<CSSPrimitiveValue>);
 
     void parseFillRepeat(RefPtrWillBeRawPtr<CSSValue>&, RefPtrWillBeRawPtr<CSSValue>&);
-    PassRefPtrWillBeRawPtr<CSSValue> parseFillSize(CSSPropertyID, bool &allowComma);
+    PassRefPtrWillBeRawPtr<CSSValue> parseFillSize(CSSPropertyID);
 
     bool parseFillProperty(CSSPropertyID propId, CSSPropertyID& propId1, CSSPropertyID& propId2, RefPtrWillBeRawPtr<CSSValue>&, RefPtrWillBeRawPtr<CSSValue>&);
     bool parseFillShorthand(CSSPropertyID, const CSSPropertyID* properties, int numProperties, bool important);
@@ -169,7 +166,7 @@ private:
     PassRefPtrWillBeRawPtr<CSSPrimitiveValue> parseGridBreadth(CSSParserValue*);
     bool parseGridTemplateAreasRow(NamedGridAreaMap&, const size_t, size_t&);
     PassRefPtrWillBeRawPtr<CSSValue> parseGridTemplateAreas();
-    bool parseGridLineNames(CSSParserValueList&, CSSValueList&, CSSGridLineNamesValue* = 0);
+    void maybeParseGridLineNames(CSSParserValueList&, CSSValueList&, CSSGridLineNamesValue* = 0);
     PassRefPtrWillBeRawPtr<CSSValue> parseGridAutoFlow(CSSParserValueList&);
 
     bool parseClipShape(CSSPropertyID, bool important);
@@ -245,7 +242,7 @@ private:
     PassRefPtrWillBeRawPtr<CSSValue> parseWillChange();
 
     PassRefPtrWillBeRawPtr<CSSValueList> parseFilter();
-    PassRefPtrWillBeRawPtr<CSSFilterValue> parseBuiltinFilterArguments(CSSParserValueList*, CSSFilterValue::FilterOperationType);
+    PassRefPtrWillBeRawPtr<CSSFunctionValue> parseBuiltinFilterArguments(CSSParserValueList*, CSSValueID);
 
     PassRefPtrWillBeRawPtr<CSSValueList> parseTransformOrigin();
     PassRefPtrWillBeRawPtr<CSSValueList> parseTransform(CSSPropertyID);
@@ -254,22 +251,21 @@ private:
     PassRefPtrWillBeRawPtr<CSSValue> parseMotionPath();
     PassRefPtrWillBeRawPtr<CSSValue> parseMotionRotation();
 
-    bool parseTextEmphasisStyle(bool important);
+    PassRefPtrWillBeRawPtr<CSSValue> parseTextEmphasisStyle();
 
     PassRefPtrWillBeRawPtr<CSSValue> parseTouchAction();
     PassRefPtrWillBeRawPtr<CSSValue> parseScrollBlocksOn();
 
     void addTextDecorationProperty(CSSPropertyID, PassRefPtrWillBeRawPtr<CSSValue>, bool important);
     bool parseTextDecoration(CSSPropertyID propId, bool important);
-    bool parseTextUnderlinePosition(bool important);
 
     PassRefPtrWillBeRawPtr<CSSValue> parseTextIndent();
 
-    bool parseLineBoxContain(bool important);
+    PassRefPtrWillBeRawPtr<CSSLineBoxContainValue> parseLineBoxContain();
     bool parseCalculation(CSSParserValue*, ValueRange);
 
     bool parseFontFeatureTag(CSSValueList*);
-    bool parseFontFeatureSettings(bool important);
+    PassRefPtrWillBeRawPtr<CSSValue> parseFontFeatureSettings();
 
     bool parseFontVariantLigatures(bool important);
 
@@ -277,6 +273,7 @@ private:
 
     PassRefPtrWillBeRawPtr<CSSPrimitiveValue> createPrimitiveNumericValue(CSSParserValue*);
     PassRefPtrWillBeRawPtr<CSSPrimitiveValue> createPrimitiveStringValue(CSSParserValue*);
+    PassRefPtrWillBeRawPtr<CSSPrimitiveValue> createPrimitiveCustomIdentValue(CSSParserValue*);
 
     PassRefPtrWillBeRawPtr<CSSValue> createCSSImageValueWithReferrer(const String& rawValue, const KURL&);
 
@@ -357,6 +354,12 @@ private:
     int colorIntFromValue(CSSParserValue*);
     bool isCalculation(CSSParserValue*);
 
+    bool buildBorderImageParseContext(CSSPropertyID, BorderImageParseContext&);
+
+    bool parseDeprecatedGradientColorStop(CSSParserValue*, CSSGradientColorStop&);
+
+    void commitBorderImageProperty(CSSPropertyID, PassRefPtrWillBeRawPtr<CSSValue>, bool important);
+
 private:
     // Inputs:
     CSSParserValueList* m_valueList;
@@ -365,23 +368,13 @@ private:
 
     // Outputs:
     WillBeHeapVector<CSSProperty, 256>& m_parsedProperties;
-    CSSRuleSourceData::Type m_ruleType;
+    StyleRule::Type m_ruleType;
 
     // Locals during parsing:
     int m_inParseShorthand;
     CSSPropertyID m_currentShorthand;
     bool m_implicitShorthand;
     RefPtrWillBeMember<CSSCalcValue> m_parsedCalculation;
-
-    // FIXME: There is probably a small set of APIs we could expose for these
-    // classes w/o needing to make them friends.
-    friend class ShadowParseContext;
-    friend class BorderImageParseContext;
-    friend class BorderImageSliceParseContext;
-    friend class BorderImageQuadParseContext;
-    friend class TransformOperationInfo;
-    friend bool parseDeprecatedGradientColorStop(CSSPropertyParser*, CSSParserValue*, CSSGradientColorStop&);
-    friend PassRefPtrWillBeRawPtr<CSSPrimitiveValue> parseGradientColorOrKeyword(CSSPropertyParser*, CSSParserValue*);
 };
 
 CSSPropertyID cssPropertyID(const CSSParserString&);

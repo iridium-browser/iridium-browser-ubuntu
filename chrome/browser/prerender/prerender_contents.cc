@@ -18,7 +18,6 @@
 #include "chrome/browser/prerender/prerender_manager.h"
 #include "chrome/browser/prerender/prerender_manager_factory.h"
 #include "chrome/browser/prerender/prerender_resource_throttle.h"
-#include "chrome/browser/prerender/prerender_tracker.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/tab_helpers.h"
@@ -38,7 +37,6 @@
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_delegate.h"
 #include "content/public/common/frame_navigate_params.h"
-#include "net/url_request/url_request_context_getter.h"
 #include "ui/base/page_transition_types.h"
 #include "ui/gfx/geometry/rect.h"
 
@@ -55,31 +53,6 @@ namespace prerender {
 
 namespace {
 
-// Internal cookie event.
-// Whenever a prerender interacts with the cookie store, either sending
-// existing cookies that existed before the prerender started, or when a cookie
-// is changed, we record these events for histogramming purposes.
-enum InternalCookieEvent {
-  INTERNAL_COOKIE_EVENT_MAIN_FRAME_SEND = 0,
-  INTERNAL_COOKIE_EVENT_MAIN_FRAME_CHANGE = 1,
-  INTERNAL_COOKIE_EVENT_OTHER_SEND = 2,
-  INTERNAL_COOKIE_EVENT_OTHER_CHANGE = 3,
-  INTERNAL_COOKIE_EVENT_MAX
-};
-
-// Indicates whether existing cookies were sent, and if they were third party
-// cookies, and whether they were for blocking resources.
-// Each value may be inclusive of previous values. We only care about the
-// value with the highest index that has ever occurred in the course of a
-// prerender.
-enum CookieSendType {
-  COOKIE_SEND_TYPE_NONE = 0,
-  COOKIE_SEND_TYPE_FIRST_PARTY = 1,
-  COOKIE_SEND_TYPE_THIRD_PARTY = 2,
-  COOKIE_SEND_TYPE_THIRD_PARTY_BLOCKING_RESOURCE = 3,
-  COOKIE_SEND_TYPE_MAX
-};
-
 void ResumeThrottles(
     std::vector<base::WeakPtr<PrerenderResourceThrottle> > throttles) {
   for (size_t i = 0; i < throttles.size(); i++) {
@@ -89,13 +62,6 @@ void ResumeThrottles(
 }
 
 }  // namespace
-
-// static
-const int PrerenderContents::kNumCookieStatuses =
-    (1 << INTERNAL_COOKIE_EVENT_MAX);
-
-// static
-const int PrerenderContents::kNumCookieSendTypes = COOKIE_SEND_TYPE_MAX;
 
 class PrerenderContentsFactoryImpl : public PrerenderContents::Factory {
  public:
@@ -241,8 +207,6 @@ PrerenderContents::PrerenderContents(
       route_id_(-1),
       origin_(origin),
       experiment_id_(experiment_id),
-      cookie_status_(0),
-      cookie_send_type_(COOKIE_SEND_TYPE_NONE),
       network_bytes_(0) {
   DCHECK(prerender_manager != NULL);
 }
@@ -293,8 +257,7 @@ PrerenderContents* PrerenderContents::FromWebContents(
 
 void PrerenderContents::StartPrerendering(
     const gfx::Size& size,
-    SessionStorageNamespace* session_storage_namespace,
-    net::URLRequestContextGetter* request_context) {
+    SessionStorageNamespace* session_storage_namespace) {
   DCHECK(profile_ != NULL);
   DCHECK(!size.IsEmpty());
   DCHECK(!prerendering_has_started_);
@@ -307,7 +270,6 @@ void PrerenderContents::StartPrerendering(
 
   DCHECK(load_start_time_.is_null());
   load_start_time_ = base::TimeTicks::Now();
-  start_time_ = base::Time::Now();
 
   // Everything after this point sets up the WebContents object and associated
   // RenderView for the prerender page. Don't do this for members of the
@@ -322,9 +284,7 @@ void PrerenderContents::StartPrerendering(
 
   prerendering_has_started_ = true;
 
-  alias_session_storage_namespace = session_storage_namespace->CreateAlias();
-  prerender_contents_.reset(
-      CreateWebContents(alias_session_storage_namespace.get()));
+  prerender_contents_.reset(CreateWebContents(session_storage_namespace));
   TabHelpers::AttachTabHelpers(prerender_contents_.get());
   content::WebContentsObserver::Observe(prerender_contents_.get());
 
@@ -333,34 +293,15 @@ void PrerenderContents::StartPrerendering(
   // Set the size of the prerender WebContents.
   ResizeWebContents(prerender_contents_.get(), size_);
 
+  // TODO(davidben): This logic assumes each prerender has at most one
+  // route. https://crbug.com/440544
   child_id_ = GetRenderViewHost()->GetProcess()->GetID();
   route_id_ = GetRenderViewHost()->GetRoutingID();
 
-  // Log transactions to see if we could merge session storage namespaces in
-  // the event of a mismatch.
-  alias_session_storage_namespace->AddTransactionLogProcessId(child_id_);
-
-  // Add the RenderProcessHost to the Prerender Manager.
+  // TODO(davidben): This logic assumes each prerender has at most one
+  // process. https://crbug.com/440544
   prerender_manager()->AddPrerenderProcessHost(
       GetRenderViewHost()->GetProcess());
-
-  // In the prerender tracker, create a Prerender Cookie Store to keep track of
-  // cookie changes performed by the prerender. Once the prerender is shown,
-  // the cookie changes will be committed to the actual cookie store,
-  // otherwise, they will be discarded.
-  // If |request_context| is NULL, the feature must be disabled, so the
-  // operation will not be performed.
-  if (request_context) {
-    BrowserThread::PostTask(
-        BrowserThread::IO, FROM_HERE,
-        base::Bind(&PrerenderTracker::AddPrerenderCookieStoreOnIOThread,
-                   base::Unretained(prerender_manager()->prerender_tracker()),
-                   GetRenderViewHost()->GetProcess()->GetID(),
-                   make_scoped_refptr(request_context),
-                   base::Bind(&PrerenderContents::Destroy,
-                              AsWeakPtr(),
-                              FINAL_STATUS_COOKIE_CONFLICT)));
-  }
 
   NotifyPrerenderStart();
 
@@ -425,15 +366,7 @@ PrerenderContents::~PrerenderContents() {
   DCHECK(
       prerendering_has_been_cancelled() || final_status() == FINAL_STATUS_USED);
   DCHECK_NE(ORIGIN_MAX, origin());
-  // Since a lot of prerenders terminate before any meaningful cookie action
-  // would have happened, only record the cookie status for prerenders who
-  // were used, cancelled, or timed out.
-  if (prerendering_has_started_ && final_status() == FINAL_STATUS_USED) {
-    prerender_manager_->RecordCookieStatus(origin(), experiment_id(),
-                                           cookie_status_);
-    prerender_manager_->RecordCookieSendType(origin(), experiment_id(),
-                                             cookie_send_type_);
-  }
+
   prerender_manager_->RecordFinalStatusWithMatchCompleteStatus(
       origin(), experiment_id(), match_complete_status(), final_status());
 
@@ -588,6 +521,8 @@ bool PrerenderContents::AddAliasURL(const GURL& url) {
 bool PrerenderContents::Matches(
     const GURL& url,
     const SessionStorageNamespace* session_storage_namespace) const {
+  // TODO(davidben): Remove any consumers that pass in a NULL
+  // session_storage_namespace and only test with matches.
   if (session_storage_namespace &&
       session_storage_namespace_id_ != session_storage_namespace->id()) {
     return false;
@@ -610,8 +545,7 @@ void PrerenderContents::RenderFrameCreated(
       render_frame_host->GetRoutingID(), true));
 }
 
-void PrerenderContents::DidStopLoading(
-    content::RenderViewHost* render_view_host) {
+void PrerenderContents::DidStopLoading() {
   has_stopped_loading_ = true;
   NotifyPrerenderStopLoading();
 }
@@ -746,8 +680,6 @@ void PrerenderContents::DestroyWhenUsingTooManyResources() {
 WebContents* PrerenderContents::ReleasePrerenderContents() {
   prerender_contents_->SetDelegate(NULL);
   content::WebContentsObserver::Observe(NULL);
-  if (alias_session_storage_namespace.get())
-    alias_session_storage_namespace->RemoveTransactionLogProcessId(child_id_);
   return prerender_contents_.release();
 }
 
@@ -809,85 +741,17 @@ void PrerenderContents::PrepareForUse() {
   resource_throttles_.clear();
 }
 
-SessionStorageNamespace* PrerenderContents::GetSessionStorageNamespace() const {
-  if (!prerender_contents())
-    return NULL;
-  return prerender_contents()->GetController().
-      GetDefaultSessionStorageNamespace();
-}
-
 void PrerenderContents::OnCancelPrerenderForPrinting() {
   Destroy(FINAL_STATUS_WINDOW_PRINT);
 }
 
-void PrerenderContents::RecordCookieEvent(CookieEvent event,
-                                          bool is_main_frame_http_request,
-                                          bool is_third_party_cookie,
-                                          bool is_for_blocking_resource,
-                                          base::Time earliest_create_date) {
-  // We don't care about sent cookies that were created after this prerender
-  // started.
-  // The reason is that for the purpose of the histograms emitted, we only care
-  // about cookies that existed before the prerender was started, but not
-  // about cookies that were created as part of the prerender. Using the
-  // earliest creation timestamp of all cookies provided by the cookie monster
-  // is a heuristic that yields the desired result pretty closely.
-  // In particular, we pretend no other WebContents make changes to the cookies
-  // relevant to the prerender, which may not actually always be the case, but
-  // hopefully most of the times.
-  if (event == COOKIE_EVENT_SEND && earliest_create_date > start_time_)
-    return;
-
-  InternalCookieEvent internal_event = INTERNAL_COOKIE_EVENT_MAX;
-
-  if (is_main_frame_http_request) {
-    if (event == COOKIE_EVENT_SEND) {
-      internal_event = INTERNAL_COOKIE_EVENT_MAIN_FRAME_SEND;
-    } else {
-      internal_event = INTERNAL_COOKIE_EVENT_MAIN_FRAME_CHANGE;
-    }
-  } else {
-    if (event == COOKIE_EVENT_SEND) {
-      internal_event = INTERNAL_COOKIE_EVENT_OTHER_SEND;
-    } else {
-      internal_event = INTERNAL_COOKIE_EVENT_OTHER_CHANGE;
-    }
-  }
-
-  DCHECK_GE(internal_event, 0);
-  DCHECK_LT(internal_event, INTERNAL_COOKIE_EVENT_MAX);
-
-  cookie_status_ |= (1 << internal_event);
-
-  DCHECK_GE(cookie_status_, 0);
-  DCHECK_LT(cookie_status_, kNumCookieStatuses);
-
-  CookieSendType send_type = COOKIE_SEND_TYPE_NONE;
-  if (event == COOKIE_EVENT_SEND) {
-    if (!is_third_party_cookie) {
-      send_type = COOKIE_SEND_TYPE_FIRST_PARTY;
-    } else {
-      if (is_for_blocking_resource) {
-        send_type = COOKIE_SEND_TYPE_THIRD_PARTY_BLOCKING_RESOURCE;
-      } else {
-        send_type = COOKIE_SEND_TYPE_THIRD_PARTY;
-      }
-    }
-  }
-  DCHECK_GE(send_type, 0);
-  DCHECK_LT(send_type, COOKIE_SEND_TYPE_MAX);
-
-  if (cookie_send_type_ < send_type)
-    cookie_send_type_ = send_type;
+void PrerenderContents::AddResourceThrottle(
+    const base::WeakPtr<PrerenderResourceThrottle>& throttle) {
+  resource_throttles_.push_back(throttle);
 }
 
- void PrerenderContents::AddResourceThrottle(
-     const base::WeakPtr<PrerenderResourceThrottle>& throttle) {
-   resource_throttles_.push_back(throttle);
- }
-
- void PrerenderContents::AddNetworkBytes(int64 bytes) {
-   network_bytes_ += bytes;
- }
+void PrerenderContents::AddNetworkBytes(int64 bytes) {
+  network_bytes_ += bytes;
+}
 
 }  // namespace prerender

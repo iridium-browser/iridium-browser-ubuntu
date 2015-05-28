@@ -41,7 +41,7 @@ TEST(SourceDir, ResolveRelativeFile) {
   // expect an absolute path.
 #if defined(OS_WIN)
   EXPECT_TRUE(base.ResolveRelativeFile("../../foo", source_root) ==
-              SourceFile("C:/source/foo"));
+              SourceFile("/C:/source/foo"));
 #else
   EXPECT_TRUE(base.ResolveRelativeFile("../../foo", source_root) ==
               SourceFile("/source/foo"));
@@ -85,16 +85,16 @@ TEST(SourceDir, ResolveRelativeDir) {
   // expect an absolute path.
 #if defined(OS_WIN)
   EXPECT_TRUE(base.ResolveRelativeDir("../../foo", source_root) ==
-              SourceDir("C:/source/foo/"));
+              SourceDir("/C:/source/foo/"));
 #else
   EXPECT_TRUE(base.ResolveRelativeDir("../../foo", source_root) ==
               SourceDir("/source/foo/"));
 #endif
 
 #if defined(OS_WIN)
-  // Note that we don't canonicalize the existing backslashes to forward
-  // slashes. This could potentially be changed in the future which would mean
-  // we should just change the expected result.
+  // Canonicalize the existing backslashes to forward slashes and add a
+  // leading slash if necessary.
+  EXPECT_TRUE(base.ResolveRelativeDir("\\C:\\foo") == SourceDir("/C:/foo/"));
   EXPECT_TRUE(base.ResolveRelativeDir("C:\\foo") == SourceDir("/C:/foo/"));
 #endif
 }

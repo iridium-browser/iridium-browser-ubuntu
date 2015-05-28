@@ -70,8 +70,8 @@ const CGFloat kInternalPageImageSize = 26;
 // Square size of the permission images.
 const CGFloat kPermissionImageSize = 19;
 
-// Vertical adjustment for the permission images.
-// They have an extra pixel of padding on the bottom edge.
+// Vertical adjustment for the permission images. They have an extra pixel of
+// padding on the bottom edge.
 const CGFloat kPermissionImageYAdjust = 1;
 
 // Spacing between a permission image and the text.
@@ -507,8 +507,8 @@ NSColor* IdentityVerifiedTextColor() {
   [contentView addSubview:cookiesView_];
   [contentView addSubview:permissionsView_];
 
-  // Create the link button to view cookies and site data.
-  // Its position will be set in performLayout.
+  // Create the link button to view cookies and site data. Its position will be
+  // set in performLayout.
   NSString* cookieButtonText = l10n_util::GetNSString(
       IDS_WEBSITE_SETTINGS_SHOW_SITE_DATA);
   cookiesButton_ = [self addLinkButtonWithText:cookieButtonText
@@ -516,15 +516,36 @@ NSColor* IdentityVerifiedTextColor() {
   [cookiesButton_ setTarget:self];
   [cookiesButton_ setAction:@selector(showCookiesAndSiteData:)];
 
+  // Create the link button to view site settings. Its position will be set in
+  // performLayout.
+  NSString* siteSettingsButtonText =
+      l10n_util::GetNSString(IDS_PAGE_INFO_SITE_SETTINGS_LINK);
+  siteSettingsButton_ =
+      [self addLinkButtonWithText:siteSettingsButtonText toView:contentView];
+  [siteSettingsButton_ setTarget:self];
+  [siteSettingsButton_ setAction:@selector(showSiteSettingsData:)];
+
   return contentView.get();
 }
 
 // Handler for the link button below the list of cookies.
 - (void)showCookiesAndSiteData:(id)sender {
   DCHECK(webContents_);
+  DCHECK(presenter_);
   presenter_->RecordWebsiteSettingsAction(
       WebsiteSettings::WEBSITE_SETTINGS_COOKIES_DIALOG_OPENED);
   TabDialogs::FromWebContents(webContents_)->ShowCollectedCookies();
+}
+
+// Handler for the site settings button below the list of permissions.
+- (void)showSiteSettingsData:(id)sender {
+  DCHECK(webContents_);
+  DCHECK(presenter_);
+  presenter_->RecordWebsiteSettingsAction(
+      WebsiteSettings::WEBSITE_SETTINGS_SITE_SETTINGS_OPENED);
+  webContents_->OpenURL(content::OpenURLParams(
+      GURL(chrome::kChromeUIContentSettingsURL), content::Referrer(),
+      NEW_FOREGROUND_TAB, ui::PAGE_TRANSITION_LINK, false));
 }
 
 // Handler for the link button to show certificate information.
@@ -666,14 +687,15 @@ NSColor* IdentityVerifiedTextColor() {
   yPos = [self setYPositionOfView:cookiesView_ to:kFramePadding];
 
   // Put the link button for cookies and site data just below the cookie info.
-  NSRect cookiesButtonFrame = [cookiesButton_ frame];
-  cookiesButtonFrame.origin.y = yPos;
-  cookiesButtonFrame.origin.x = kFramePadding;
-  [cookiesButton_ setFrame:cookiesButtonFrame];
+  [cookiesButton_ setFrameOrigin:NSMakePoint(kFramePadding, yPos)];
 
   // Put the permission info just below the link button.
-  [self setYPositionOfView:permissionsView_
-                        to:NSMaxY(cookiesButtonFrame) + kFramePadding];
+  yPos =
+      [self setYPositionOfView:permissionsView_
+                            to:NSMaxY([cookiesButton_ frame]) + kFramePadding];
+
+  // Put the link button for site settings just below the permissions.
+  [siteSettingsButton_ setFrameOrigin:NSMakePoint(kFramePadding, yPos)];
 
   // Lay out the Connection tab.
 
@@ -732,8 +754,8 @@ NSColor* IdentityVerifiedTextColor() {
 
   NSRect tabViewFrame = [tabView_ frame];
   tabViewFrame.origin.y = yPos;
-  tabViewFrame.size.height =
-      std::max(connectionTabHeight, NSMaxY([permissionsView_ frame]));
+  tabViewFrame.size.height = std::max(
+      connectionTabHeight, NSMaxY([siteSettingsButton_ frame]) + kFramePadding);
   tabViewFrame.size.width = contentWidth;
   [tabView_ setFrame:tabViewFrame];
 
@@ -1113,10 +1135,9 @@ NSColor* IdentityVerifiedTextColor() {
 }
 
 - (void)setCookieInfo:(const CookieInfoList&)cookieInfoList {
-  // The contents of the permissions view can cause the whole window to get
-  // bigger, but currently permissions are always set before cookie info.
-  // Check to make sure that's still the case.
-  DCHECK_GT([[permissionsView_ subviews] count], 0U);
+  // A result of re-ordering of the permissions (crbug.com/444244) is
+  // that sometimes permissions may not be displayed at all, so it's
+  // incorrect to check they are set before the cookie info.
 
   [cookiesView_ setSubviews:[NSArray array]];
   NSPoint controlOrigin = NSMakePoint(kFramePadding, 0);
@@ -1151,27 +1172,30 @@ NSColor* IdentityVerifiedTextColor() {
   [permissionsView_ setSubviews:[NSArray array]];
   NSPoint controlOrigin = NSMakePoint(kFramePadding, 0);
 
-  base::string16 sectionTitle = l10n_util::GetStringUTF16(
-      IDS_WEBSITE_SETTINGS_TITLE_SITE_PERMISSIONS);
-  NSTextField* header = [self addText:sectionTitle
-                             withSize:[NSFont smallSystemFontSize]
-                                 bold:YES
-                               toView:permissionsView_
-                              atPoint:controlOrigin];
-  [self sizeTextFieldHeightToFit:header];
-  controlOrigin.y += NSHeight([header frame]) + kPermissionsHeadlineSpacing;
+  if (permissionInfoList.size() > 0) {
+    base::string16 sectionTitle = l10n_util::GetStringUTF16(
+        IDS_WEBSITE_SETTINGS_TITLE_SITE_PERMISSIONS);
+    NSTextField* header = [self addText:sectionTitle
+                               withSize:[NSFont smallSystemFontSize]
+                                   bold:YES
+                                 toView:permissionsView_
+                                atPoint:controlOrigin];
+    [self sizeTextFieldHeightToFit:header];
+    controlOrigin.y += NSHeight([header frame]) + kPermissionsHeadlineSpacing;
 
-  for (PermissionInfoList::const_iterator permission =
-           permissionInfoList.begin();
-       permission != permissionInfoList.end();
-       ++permission) {
-    controlOrigin.y += kPermissionsTabSpacing;
-    NSPoint rowBottomRight = [self addPermission:*permission
-                                          toView:permissionsView_
-                                         atPoint:controlOrigin];
-    controlOrigin.y = rowBottomRight.y;
+    for (PermissionInfoList::const_iterator permission =
+             permissionInfoList.begin();
+         permission != permissionInfoList.end();
+         ++permission) {
+      controlOrigin.y += kPermissionsTabSpacing;
+      NSPoint rowBottomRight = [self addPermission:*permission
+                                            toView:permissionsView_
+                                           atPoint:controlOrigin];
+      controlOrigin.y = rowBottomRight.y;
+    }
+    controlOrigin.y += kFramePadding;
   }
-  controlOrigin.y += kFramePadding;
+
   [permissionsView_ setFrameSize:
       NSMakeSize(NSWidth([permissionsView_ frame]), controlOrigin.y)];
   [self performLayout];

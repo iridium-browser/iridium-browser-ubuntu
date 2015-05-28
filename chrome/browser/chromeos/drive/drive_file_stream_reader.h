@@ -13,7 +13,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
 #include "chrome/browser/chromeos/drive/file_errors.h"
-#include "google_apis/drive/gdata_errorcode.h"
+#include "google_apis/drive/drive_api_error_codes.h"
 #include "net/base/completion_callback.h"
 
 namespace base {
@@ -59,13 +59,14 @@ class LocalReaderProxy : public ReaderProxy {
   // smaller than the remaining data size in the |file_reader|.
   LocalReaderProxy(
       scoped_ptr<util::LocalFileReader> file_reader, int64 length);
-  virtual ~LocalReaderProxy();
+  ~LocalReaderProxy() override;
 
   // ReaderProxy overrides.
-  virtual int Read(net::IOBuffer* buffer, int buffer_length,
-                   const net::CompletionCallback& callback) override;
-  virtual void OnGetContent(scoped_ptr<std::string> data) override;
-  virtual void OnCompleted(FileError error) override;
+  int Read(net::IOBuffer* buffer,
+           int buffer_length,
+           const net::CompletionCallback& callback) override;
+  void OnGetContent(scoped_ptr<std::string> data) override;
+  void OnCompleted(FileError error) override;
 
  private:
   scoped_ptr<util::LocalFileReader> file_reader_;
@@ -93,13 +94,14 @@ class NetworkReaderProxy : public ReaderProxy {
   NetworkReaderProxy(
       int64 offset, int64 content_length, int64 full_content_length,
       const base::Closure& job_canceller);
-  virtual ~NetworkReaderProxy();
+  ~NetworkReaderProxy() override;
 
   // ReaderProxy overrides.
-  virtual int Read(net::IOBuffer* buffer, int buffer_length,
-                   const net::CompletionCallback& callback) override;
-  virtual void OnGetContent(scoped_ptr<std::string> data) override;
-  virtual void OnCompleted(FileError error) override;
+  int Read(net::IOBuffer* buffer,
+           int buffer_length,
+           const net::CompletionCallback& callback) override;
+  void OnGetContent(scoped_ptr<std::string> data) override;
+  void OnCompleted(FileError error) override;
 
  private:
   // The data received from the server, but not yet read.
@@ -199,7 +201,7 @@ class DriveFileStreamReader {
       int open_result);
 
   // Called when the data is received from the server.
-  void OnGetContent(google_apis::GDataErrorCode error_code,
+  void OnGetContent(google_apis::DriveApiErrorCode error_code,
                     scoped_ptr<std::string> data);
 
   // Called when GetFileContent is completed.

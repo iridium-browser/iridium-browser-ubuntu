@@ -14,16 +14,21 @@
 #include "base/values.h"
 #include "base/version.h"
 // TODO(ddorwin): Find a better place for ReadManifest.
-#include "components/component_updater/component_unpacker.h"
-#include "components/component_updater/component_updater_configurator.h"
+#include "components/component_updater/component_updater_service.h"
 #include "components/component_updater/default_component_installer.h"
+#include "components/update_client/component_unpacker.h"
+#include "components/update_client/utils.h"
+
+using update_client::CrxComponent;
 
 namespace component_updater {
 
 namespace {
+
 // Version "0" corresponds to no installed version. By the server's conventions,
 // we represent it as a dotted quad.
 const char kNullVersion[] = "0.0.0.0";
+
 }  // namespace
 
 ComponentInstallerTraits::~ComponentInstallerTraits() {
@@ -37,10 +42,11 @@ DefaultComponentInstaller::DefaultComponentInstaller(
 }
 
 DefaultComponentInstaller::~DefaultComponentInstaller() {
-  DCHECK(thread_checker_.CalledOnValidThread());
 }
 
-void DefaultComponentInstaller::Register(ComponentUpdateService* cus) {
+void DefaultComponentInstaller::Register(
+    ComponentUpdateService* cus,
+    const base::Closure& callback) {
   DCHECK(thread_checker_.CalledOnValidThread());
   task_runner_ = cus->GetSequencedTaskRunner();
 
@@ -49,11 +55,12 @@ void DefaultComponentInstaller::Register(ComponentUpdateService* cus) {
                  << "has no installer traits.";
     return;
   }
-  task_runner_->PostTask(
+  task_runner_->PostTaskAndReply(
       FROM_HERE,
       base::Bind(&DefaultComponentInstaller::StartRegistration,
-                 base::Unretained(this),
-                 cus));
+                 this, cus),
+      base::Bind(&DefaultComponentInstaller::FinishRegistration,
+                 this, cus, callback));
 }
 
 void DefaultComponentInstaller::OnUpdateError(int error) {
@@ -75,6 +82,8 @@ bool DefaultComponentInstaller::InstallHelper(
 
 bool DefaultComponentInstaller::Install(const base::DictionaryValue& manifest,
                                         const base::FilePath& unpack_path) {
+  DCHECK(task_runner_->RunsTasksOnCurrentThread());
+
   std::string manifest_version;
   manifest.GetStringASCII("version", &manifest_version);
   base::Version version(manifest_version.c_str());
@@ -100,11 +109,8 @@ bool DefaultComponentInstaller::Install(const base::DictionaryValue& manifest,
       current_manifest_->DeepCopy());
   main_task_runner_->PostTask(
       FROM_HERE,
-      base::Bind(&ComponentInstallerTraits::ComponentReady,
-                 base::Unretained(installer_traits_.get()),
-                 current_version_,
-                 GetInstallDirectory(),
-                 base::Passed(&manifest_copy)));
+      base::Bind(&DefaultComponentInstaller::ComponentReady,
+                 this, base::Passed(&manifest_copy)));
   return true;
 }
 
@@ -117,6 +123,13 @@ bool DefaultComponentInstaller::GetInstalledFile(
   *installed_file = installer_traits_->GetBaseDirectory()
                         .AppendASCII(current_version_.GetString())
                         .AppendASCII(file);
+  return true;
+}
+
+bool DefaultComponentInstaller::Uninstall() {
+  task_runner_->PostTask(
+      FROM_HERE,
+      base::Bind(&DefaultComponentInstaller::UninstallOnTaskRunner, this));
   return true;
 }
 
@@ -155,7 +168,8 @@ void DefaultComponentInstaller::StartRegistration(ComponentUpdateService* cus) {
       continue;
     }
 
-    scoped_ptr<base::DictionaryValue> manifest = ReadManifest(path);
+    scoped_ptr<base::DictionaryValue> manifest =
+        update_client::ReadManifest(path);
     if (!manifest || !installer_traits_->VerifyInstallation(*manifest, path)) {
       DLOG(ERROR) << "Failed to read manifest or verify installation for "
                   << installer_traits_->GetName() << " ("
@@ -189,12 +203,33 @@ void DefaultComponentInstaller::StartRegistration(ComponentUpdateService* cus) {
   // browser startup.
   for (const auto& older_path : older_paths)
     base::DeleteFile(older_path, true);
+}
 
-  main_task_runner_->PostTask(
-      FROM_HERE,
-      base::Bind(&DefaultComponentInstaller::FinishRegistration,
-                 base::Unretained(this),
-                 cus));
+void DefaultComponentInstaller::UninstallOnTaskRunner() {
+  DCHECK(task_runner_.get());
+  DCHECK(task_runner_->RunsTasksOnCurrentThread());
+  const base::FilePath base_dir = installer_traits_->GetBaseDirectory();
+
+  base::FileEnumerator file_enumerator(base_dir, false,
+                                       base::FileEnumerator::DIRECTORIES);
+  for (base::FilePath path = file_enumerator.Next(); !path.value().empty();
+       path = file_enumerator.Next()) {
+    base::Version version(path.BaseName().MaybeAsASCII());
+
+    // Ignore folders that don't have valid version names. These folders are not
+    // managed by the component installer, so do not try to remove them.
+    if (!version.IsValid())
+      continue;
+
+    if (!base::DeleteFile(path, true))
+      DLOG(ERROR) << "Couldn't delete " << path.value();
+  }
+
+  // Delete the base directory if it's empty now.
+  if (base::IsDirectoryEmpty(base_dir)) {
+    if (base::DeleteFile(base_dir, false))
+      DLOG(ERROR) << "Couldn't delete " << base_dir.value();
+  }
 }
 
 base::FilePath DefaultComponentInstaller::GetInstallDirectory() {
@@ -203,7 +238,8 @@ base::FilePath DefaultComponentInstaller::GetInstallDirectory() {
 }
 
 void DefaultComponentInstaller::FinishRegistration(
-    ComponentUpdateService* cus) {
+    ComponentUpdateService* cus,
+    const base::Closure& callback) {
   DCHECK(thread_checker_.CalledOnValidThread());
   if (installer_traits_->CanAutoUpdate()) {
     CrxComponent crx;
@@ -219,6 +255,9 @@ void DefaultComponentInstaller::FinishRegistration(
                    << installer_traits_->GetName();
       return;
     }
+
+    if (!callback.is_null())
+      callback.Run();
   }
 
   if (!current_manifest_)
@@ -226,8 +265,13 @@ void DefaultComponentInstaller::FinishRegistration(
 
   scoped_ptr<base::DictionaryValue> manifest_copy(
       current_manifest_->DeepCopy());
+  ComponentReady(manifest_copy.Pass());
+}
+
+void DefaultComponentInstaller::ComponentReady(
+    scoped_ptr<base::DictionaryValue> manifest) {
   installer_traits_->ComponentReady(
-      current_version_, GetInstallDirectory(), manifest_copy.Pass());
+      current_version_, GetInstallDirectory(), manifest.Pass());
 }
 
 }  // namespace component_updater

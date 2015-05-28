@@ -13,10 +13,10 @@
 #include "base/metrics/histogram.h"
 #include "base/strings/string_tokenizer.h"
 #include "base/strings/string_util.h"
+#include "base/trace_event/trace_event.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/content_settings/cookie_settings.h"
 #include "chrome/browser/extensions/component_loader.h"
-#include "chrome/browser/extensions/declarative_user_script_manager.h"
 #include "chrome/browser/extensions/error_console/error_console.h"
 #include "chrome/browser/extensions/extension_error_reporter.h"
 #include "chrome/browser/extensions/extension_management.h"
@@ -40,6 +40,7 @@
 #include "content/public/browser/url_data_source.h"
 #include "extensions/browser/content_verifier.h"
 #include "extensions/browser/content_verifier_delegate.h"
+#include "extensions/browser/declarative_user_script_manager.h"
 #include "extensions/browser/event_router.h"
 #include "extensions/browser/extension_pref_store.h"
 #include "extensions/browser/extension_pref_value_map.h"
@@ -294,6 +295,7 @@ class ContentVerifierDelegateImpl : public ContentVerifierDelegate {
 }  // namespace
 
 void ExtensionSystemImpl::Shared::Init(bool extensions_enabled) {
+  TRACE_EVENT0("browser,startup", "ExtensionSystemImpl::Shared::Init");
   const base::CommandLine* command_line =
       base::CommandLine::ForCurrentProcess();
 
@@ -313,7 +315,7 @@ void ExtensionSystemImpl::Shared::Init(bool extensions_enabled) {
 #if defined(OS_CHROMEOS)
   if (!extensions_enabled)
     autoupdate_enabled = false;
-#endif
+#endif  // defined(OS_CHROMEOS)
   extension_service_.reset(new ExtensionService(
       profile_, base::CommandLine::ForCurrentProcess(),
       profile_->GetPath().AppendASCII(extensions::kInstallDirectoryName),
@@ -332,7 +334,7 @@ void ExtensionSystemImpl::Shared::Init(bool extensions_enabled) {
         ContentVerifierDelegateImpl::GetDefaultMode();
 #if defined(OS_CHROMEOS)
     mode = std::max(mode, ContentVerifierDelegate::BOOTSTRAP);
-#endif
+#endif  // defined(OS_CHROMEOS)
     if (mode >= ContentVerifierDelegate::BOOTSTRAP)
       content_verifier_->Start();
     info_map()->SetContentVerifier(content_verifier_.get());
@@ -486,6 +488,7 @@ void ExtensionSystemImpl::Shutdown() {
 }
 
 void ExtensionSystemImpl::InitForRegularProfile(bool extensions_enabled) {
+  TRACE_EVENT0("browser,startup", "ExtensionSystemImpl::InitForRegularProfile");
   DCHECK(!profile_->IsOffTheRecord());
   if (shared_user_script_master() || extension_service())
     return;  // Already initialized.

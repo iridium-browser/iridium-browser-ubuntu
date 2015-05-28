@@ -8,13 +8,12 @@
 #include "base/android/jni_android.h"
 #include "base/android/jni_weak_ref.h"
 #include "base/basictypes.h"
-#include "base/strings/string16.h"
 #include "base/task/cancelable_task_tracker.h"
+#include "chrome/browser/android/shortcut_info.h"
 #include "chrome/common/web_application_info.h"
 #include "components/favicon_base/favicon_types.h"
 #include "content/public/browser/web_contents_observer.h"
 #include "content/public/common/manifest.h"
-#include "third_party/WebKit/public/platform/WebScreenOrientationLockType.h"
 
 namespace content {
 class WebContents;
@@ -79,26 +78,21 @@ class ShortcutHelper : public content::WebContentsObserver {
       const favicon_base::FaviconRawBitmapResult& bitmap_result);
 
   // WebContentsObserver
-  virtual bool OnMessageReceived(const IPC::Message& message) override;
-  virtual void WebContentsDestroyed() override;
+  bool OnMessageReceived(const IPC::Message& message) override;
+  void WebContentsDestroyed() override;
 
   // Adds a shortcut to the launcher using a FaviconRawBitmapResult.
   // Must be called from a WorkerPool task.
   static void AddShortcutInBackgroundWithRawBitmap(
-      const GURL& url,
-      const base::string16& title,
-      content::Manifest::DisplayMode display,
-      const favicon_base::FaviconRawBitmapResult& bitmap_result,
-      blink::WebScreenOrientationLockType orientation);
+      const ShortcutInfo& info,
+      const favicon_base::FaviconRawBitmapResult& bitmap_result);
 
   // Adds a shortcut to the launcher using a SkBitmap.
   // Must be called from a WorkerPool task.
   static void AddShortcutInBackgroundWithSkBitmap(
-      const GURL& url,
-      const base::string16& title,
-      content::Manifest::DisplayMode display,
+      const ShortcutInfo& info,
       const SkBitmap& icon_bitmap,
-      blink::WebScreenOrientationLockType orientation);
+      const bool return_to_homescreen);
 
   // Registers JNI hooks.
   static bool RegisterShortcutHelper(JNIEnv* env);
@@ -110,43 +104,17 @@ class ShortcutHelper : public content::WebContentsObserver {
     MANIFEST_ICON_STATUS_DONE
   };
 
-  virtual ~ShortcutHelper();
+  ~ShortcutHelper() override;
 
   void Destroy();
 
-  // Runs the algorithm to find the best matching icon in the icons listed in
-  // the Manifest.
-  // Returns the icon url if a suitable icon is found. An empty URL otherwise.
-  GURL FindBestMatchingIcon(
-      const std::vector<content::Manifest::Icon>& icons) const;
-
-  // Runs an algorithm only based on icon declared sizes. It will try to find
-  // size that is the closest to preferred_icon_size_in_px_ but bigger than
-  // preferred_icon_size_in_px_ if possible.
-  // Returns the icon url if a suitable icon is found. An empty URL otherwise.
-  GURL FindBestMatchingIcon(const std::vector<content::Manifest::Icon>& icons,
-                            float density) const;
-
-  // Returns an array containing the items in |icons| without the unsupported
-  // image MIME types.
-  static std::vector<content::Manifest::Icon> FilterIconsByType(
-      const std::vector<content::Manifest::Icon>& icons);
-
-  // Returns whether the preferred_icon_size_in_px_ is in the given |sizes|.
-  bool IconSizesContainsPreferredSize(
-      const std::vector<gfx::Size>& sizes) const;
-
-  // Returns whether the 'any' (ie. gfx::Size(0,0)) is in the given |sizes|.
-  bool IconSizesContainsAny(const std::vector<gfx::Size>& sizes) const;
+  void RecordAddToHomescreen();
 
   JavaObjectWeakGlobalRef java_ref_;
 
-  GURL url_;
-  base::string16 title_;
-  content::Manifest::DisplayMode display_;
+  ShortcutInfo shortcut_info_;
   SkBitmap manifest_icon_;
   base::CancelableTaskTracker cancelable_task_tracker_;
-  blink::WebScreenOrientationLockType orientation_;
 
   bool add_shortcut_requested_;
 
@@ -156,7 +124,6 @@ class ShortcutHelper : public content::WebContentsObserver {
 
   base::WeakPtrFactory<ShortcutHelper> weak_ptr_factory_;
 
-  friend class ShortcutHelperTest;
   DISALLOW_COPY_AND_ASSIGN(ShortcutHelper);
 };
 

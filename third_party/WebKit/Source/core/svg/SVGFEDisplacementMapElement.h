@@ -43,13 +43,12 @@ public:
     SVGAnimatedEnumeration<ChannelSelectorType>* xChannelSelector() { return m_xChannelSelector.get(); }
     SVGAnimatedEnumeration<ChannelSelectorType>* yChannelSelector() { return m_yChannelSelector.get(); }
 
-    virtual void trace(Visitor*) override;
+    DECLARE_VIRTUAL_TRACE();
 
 private:
     explicit SVGFEDisplacementMapElement(Document&);
 
     bool isSupportedAttribute(const QualifiedName&);
-    virtual void parseAttribute(const QualifiedName&, const AtomicString&) override;
     virtual bool setFilterEffectAttribute(FilterEffect*, const QualifiedName& attrName) override;
     virtual void svgAttributeChanged(const QualifiedName&) override;
     virtual PassRefPtrWillBeRawPtr<FilterEffect> build(SVGFilterBuilder*, Filter*) override;
@@ -57,8 +56,8 @@ private:
     RefPtrWillBeMember<SVGAnimatedNumber> m_scale;
     RefPtrWillBeMember<SVGAnimatedString> m_in1;
     RefPtrWillBeMember<SVGAnimatedString> m_in2;
-    RefPtrWillBeMember<SVGAnimatedEnumeration<ChannelSelectorType> > m_xChannelSelector;
-    RefPtrWillBeMember<SVGAnimatedEnumeration<ChannelSelectorType> > m_yChannelSelector;
+    RefPtrWillBeMember<SVGAnimatedEnumeration<ChannelSelectorType>> m_xChannelSelector;
+    RefPtrWillBeMember<SVGAnimatedEnumeration<ChannelSelectorType>> m_yChannelSelector;
 };
 
 } // namespace blink

@@ -6,6 +6,12 @@
 
 namespace cc {
 namespace frame_viewer_instrumentation {
+
+const char kCategoryLayerTree[] =
+    TRACE_DISABLED_BY_DEFAULT("cc.debug") ","
+    TRACE_DISABLED_BY_DEFAULT("cc.debug.quads") ","
+    TRACE_DISABLED_BY_DEFAULT("devtools.timeline.layers");
+
 namespace {
 
 const char kCategory[] = "cc," TRACE_DISABLED_BY_DEFAULT("devtools.timeline");
@@ -18,12 +24,13 @@ const char kSourceFrameNumber[] = "sourceFrameNumber";
 const char kAnalyzeTask[] = "AnalyzeTask";
 const char kRasterTask[] = "RasterTask";
 
-scoped_refptr<base::debug::ConvertableToTraceFormat> TileDataAsValue(
+scoped_refptr<base::trace_event::ConvertableToTraceFormat> TileDataAsValue(
     const void* tile_id,
     TileResolution tile_resolution,
     int source_frame_number,
     int layer_id) {
-  scoped_refptr<base::debug::TracedValue> res(new base::debug::TracedValue());
+  scoped_refptr<base::trace_event::TracedValue> res(
+      new base::trace_event::TracedValue());
   TracedValue::SetIDRef(tile_id, res.get(), kTileId);
   res->SetString(kTileResolution, TileResolutionToString(tile_resolution));
   res->SetInteger(kSourceFrameNumber, source_frame_number);
@@ -57,6 +64,12 @@ ScopedRasterTask::ScopedRasterTask(const void* tile_id,
 
 ScopedRasterTask::~ScopedRasterTask() {
   TRACE_EVENT_END0(kCategory, kRasterTask);
+}
+
+bool IsTracingLayerTreeSnapshots() {
+  bool category_enabled;
+  TRACE_EVENT_CATEGORY_GROUP_ENABLED(kCategoryLayerTree, &category_enabled);
+  return category_enabled;
 }
 
 }  // namespace frame_viewer_instrumentation

@@ -57,7 +57,7 @@ AbortCallback ThrottledFileSystem::OpenFile(const base::FilePath& file_path,
                                             OpenFileMode mode,
                                             const OpenFileCallback& callback) {
   const size_t task_token = open_queue_->NewToken();
-  return open_queue_->Enqueue(
+  open_queue_->Enqueue(
       task_token,
       base::Bind(
           &ProvidedFileSystemInterface::OpenFile,
@@ -65,6 +65,8 @@ AbortCallback ThrottledFileSystem::OpenFile(const base::FilePath& file_path,
           file_path, mode,
           base::Bind(&ThrottledFileSystem::OnOpenFileCompleted,
                      weak_ptr_factory_.GetWeakPtr(), task_token, callback)));
+  return base::Bind(&ThrottledFileSystem::Abort, weak_ptr_factory_.GetWeakPtr(),
+                    task_token);
 }
 
 AbortCallback ThrottledFileSystem::CloseFile(
@@ -158,6 +160,10 @@ Watchers* ThrottledFileSystem::GetWatchers() {
   return file_system_->GetWatchers();
 }
 
+const OpenedFiles& ThrottledFileSystem::GetOpenedFiles() const {
+  return file_system_->GetOpenedFiles();
+}
+
 void ThrottledFileSystem::AddObserver(ProvidedFileSystemObserver* observer) {
   file_system_->AddObserver(observer);
 }
@@ -181,19 +187,20 @@ base::WeakPtr<ProvidedFileSystemInterface> ThrottledFileSystem::GetWeakPtr() {
   return weak_ptr_factory_.GetWeakPtr();
 }
 
+void ThrottledFileSystem::Abort(int queue_token) {
+  open_queue_->Abort(queue_token);
+}
+
 void ThrottledFileSystem::OnOpenFileCompleted(int queue_token,
                                               const OpenFileCallback& callback,
                                               int file_handle,
                                               base::File::Error result) {
-  if (result != base::File::FILE_ERROR_ABORT)
-    open_queue_->Complete(queue_token);
-
   // If the file is opened successfully then hold the queue token until the file
   // is closed.
   if (result == base::File::FILE_OK)
     opened_files_[file_handle] = queue_token;
   else
-    open_queue_->Remove(queue_token);
+    open_queue_->Complete(queue_token);
 
   callback.Run(file_handle, result);
 }
@@ -209,7 +216,7 @@ void ThrottledFileSystem::OnCloseFileCompleted(
   DCHECK(it != opened_files_.end());
 
   const int queue_token = it->second;
-  open_queue_->Remove(queue_token);
+  open_queue_->Complete(queue_token);
   opened_files_.erase(file_handle);
 
   callback.Run(result);

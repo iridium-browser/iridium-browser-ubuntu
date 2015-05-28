@@ -162,12 +162,16 @@ NSArray* BuildAllAttributesArray() {
       @"AXARIALive",
       @"AXARIARelevant",
       NSAccessibilityColumnIndexRangeAttribute,
+      @"AXDropEffects",
       NSAccessibilityEnabledAttribute,
+      NSAccessibilityExpandedAttribute,
       NSAccessibilityFocusedAttribute,
+      @"AXGrabbed",
       NSAccessibilityIndexAttribute,
       @"AXLoaded",
       @"AXLoadingProcess",
       NSAccessibilityNumberOfCharactersAttribute,
+      NSAccessibilitySortDirectionAttribute,
       NSAccessibilityOrientationAttribute,
       @"AXPlaceholder",
       @"AXRequired",
@@ -179,7 +183,6 @@ NSArray* BuildAllAttributesArray() {
       NSAccessibilityVisibleChildrenAttribute,
       @"AXVisited",
       @"AXLinkedUIElements",
-      NSAccessibilityExpandedAttribute,
       nil];
   return [array retain];
 }

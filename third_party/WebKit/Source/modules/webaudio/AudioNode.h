@@ -38,6 +38,7 @@
 namespace blink {
 
 class AudioContext;
+class AudioNode;
 class AudioNodeInput;
 class AudioNodeOutput;
 class AudioParam;
@@ -49,9 +50,7 @@ class ExceptionState;
 // An AudioDestinationNode has one input and no outputs and represents the final destination to the audio hardware.
 // Most processing nodes such as filters will have one input and one output, although multiple inputs and outputs are possible.
 
-class AudioNode : public RefCountedGarbageCollectedEventTargetWithInlineData<AudioNode> {
-    DEFINE_EVENT_TARGET_REFCOUNTING_WILL_BE_REMOVED(RefCountedGarbageCollected<AudioNode>);
-    DEFINE_WRAPPERTYPEINFO();
+class AudioHandler : public GarbageCollectedFinalized<AudioHandler> {
 public:
     enum { ProcessingSizeInFrames = 128 };
 
@@ -78,13 +77,15 @@ public:
         NodeTypeEnd
     };
 
-    AudioNode(NodeType, AudioContext*, float sampleRate);
-    virtual ~AudioNode();
+    AudioHandler(NodeType, AudioNode&, float sampleRate);
+    virtual ~AudioHandler();
     // dispose() is called just before the destructor. This must be called in
     // the main thread, and while the graph lock is held.
     virtual void dispose();
     static unsigned instanceCount() { return s_instanceCount; }
 
+    // node() always returns a valid pointer for now.
+    AudioNode* node() const { return m_node; }
     AudioContext* context() { return m_context.get(); }
     const AudioContext* context() const { return m_context.get(); }
 
@@ -136,9 +137,20 @@ public:
     AudioNodeOutput* output(unsigned);
 
     // Called from main thread by corresponding JavaScript methods.
-    virtual void connect(AudioNode*, unsigned outputIndex, unsigned inputIndex, ExceptionState&);
+    virtual void connect(AudioHandler*, unsigned outputIndex, unsigned inputIndex, ExceptionState&);
     void connect(AudioParam*, unsigned outputIndex, ExceptionState&);
+
+    virtual void disconnect();
     virtual void disconnect(unsigned outputIndex, ExceptionState&);
+    virtual void disconnect(AudioHandler*, ExceptionState&);
+    virtual void disconnect(AudioHandler*, unsigned outputIndex, ExceptionState&);
+    virtual void disconnect(AudioHandler*, unsigned outputIndex, unsigned inputIndex, ExceptionState&);
+    virtual void disconnect(AudioParam*, ExceptionState&);
+    virtual void disconnect(AudioParam*, unsigned outputIndex, ExceptionState&);
+
+    // Like disconnect, but no exception is thrown if the outputIndex is invalid.  Just do nothing
+    // in that case.
+    virtual void disconnectWithoutException(unsigned outputIndex);
 
     virtual float sampleRate() const { return m_sampleRate; }
 
@@ -157,12 +169,17 @@ public:
     static void printNodeCounts();
 #endif
 
-    // tailTime() is the length of time (not counting latency time) where non-zero output may occur after continuous silent input.
-    virtual double tailTime() const = 0;
-    // latencyTime() is the length of time it takes for non-zero output to appear after non-zero input is provided. This only applies to
-    // processing delay which is an artifact of the processing algorithm chosen and is *not* part of the intrinsic desired effect. For
-    // example, a "delay" effect is expected to delay the signal, and thus would not be considered latency.
-    virtual double latencyTime() const = 0;
+    // tailTime() is the length of time (not counting latency time) where
+    // non-zero output may occur after continuous silent input.
+    virtual double tailTime() const;
+
+    // latencyTime() is the length of time it takes for non-zero output to
+    // appear after non-zero input is provided. This only applies to processing
+    // delay which is an artifact of the processing algorithm chosen and is
+    // *not* part of the intrinsic desired effect. For example, a "delay" effect
+    // is expected to delay the signal, and thus would not be considered
+    // latency.
+    virtual double latencyTime() const;
 
     // propagatesSilence() should return true if the node will generate silent output when given silent input. By default, AudioNode
     // will take tailTime() and latencyTime() into account when determining whether the node will propagate silence.
@@ -186,18 +203,14 @@ public:
     ChannelCountMode internalChannelCountMode() const { return m_channelCountMode; }
     AudioBus::ChannelInterpretation internalChannelInterpretation() const { return m_channelInterpretation; }
 
-    // EventTarget
-    virtual const AtomicString& interfaceName() const override final;
-    virtual ExecutionContext* executionContext() const override final;
-
     void updateChannelCountMode();
 
-    virtual void trace(Visitor*) override;
+    DECLARE_VIRTUAL_TRACE();
 
 protected:
     // Inputs and outputs must be created before the AudioNode is initialized.
     void addInput();
-    void addOutput(AudioNodeOutput*);
+    void addOutput(unsigned numberOfChannels);
 
     // Called by processIfNecessary() to cause all parts of the rendering graph connected to us to process.
     // Each rendering quantum, the audio data for each of the AudioNode's inputs will be available after this method is called.
@@ -212,10 +225,19 @@ private:
 
     volatile bool m_isInitialized;
     NodeType m_nodeType;
+    Member<AudioNode> m_node;
     Member<AudioContext> m_context;
     float m_sampleRate;
-    HeapVector<Member<AudioNodeInput> > m_inputs;
-    HeapVector<Member<AudioNodeOutput> > m_outputs;
+    Vector<OwnPtr<AudioNodeInput>> m_inputs;
+    Vector<OwnPtr<AudioNodeOutput>> m_outputs;
+    // Represents audio node graph with Oilpan references. N-th HeapHashSet
+    // represents a set of AudioNode objects connected to this AudioNode's N-th
+    // output.
+    HeapVector<Member<HeapHashSet<Member<AudioHandler>>>> m_connectedNodes;
+    // Represents audio node graph with Oilpan references. N-th HeapHashSet
+    // represents a set of AudioParam objects connected to this AudioNode's N-th
+    // output.
+    HeapVector<Member<HeapHashSet<Member<AudioParam>>>> m_connectedParams;
 
     double m_lastProcessingTime;
     double m_lastNonSilentTime;
@@ -237,6 +259,49 @@ protected:
     // The new channel count mode that will be used to set the actual mode in the pre or post
     // rendering phase.
     ChannelCountMode m_newChannelCountMode;
+};
+
+class AudioNode : public RefCountedGarbageCollectedEventTargetWithInlineData<AudioNode> {
+    DEFINE_EVENT_TARGET_REFCOUNTING_WILL_BE_REMOVED(RefCountedGarbageCollected<AudioNode>);
+    DEFINE_WRAPPERTYPEINFO();
+    USING_PRE_FINALIZER(AudioNode, dispose);
+public:
+    DECLARE_VIRTUAL_TRACE();
+    AudioHandler& handler() const;
+
+    void connect(AudioNode*, unsigned outputIndex, unsigned inputIndex, ExceptionState&);
+    void connect(AudioParam*, unsigned outputIndex, ExceptionState&);
+    void disconnect();
+    void disconnect(unsigned outputIndex, ExceptionState&);
+    void disconnect(AudioNode*, ExceptionState&);
+    void disconnect(AudioNode*, unsigned outputIndex, ExceptionState&);
+    void disconnect(AudioNode*, unsigned outputIndex, unsigned inputIndex, ExceptionState&);
+    void disconnect(AudioParam*, ExceptionState&);
+    void disconnect(AudioParam*, unsigned outputIndex, ExceptionState&);
+    AudioContext* context() const;
+    unsigned numberOfInputs() const;
+    unsigned numberOfOutputs() const;
+    unsigned long channelCount() const;
+    void setChannelCount(unsigned long, ExceptionState&);
+    String channelCountMode() const;
+    void setChannelCountMode(const String&, ExceptionState&);
+    String channelInterpretation() const;
+    void setChannelInterpretation(const String&, ExceptionState&);
+
+    // EventTarget
+    virtual const AtomicString& interfaceName() const override final;
+    virtual ExecutionContext* executionContext() const override final;
+
+protected:
+    explicit AudioNode(AudioContext&);
+    // This should be called in a constructor.
+    void setHandler(AudioHandler*);
+
+private:
+    void dispose();
+
+    Member<AudioContext> m_context;
+    Member<AudioHandler> m_handler;
 };
 
 } // namespace blink

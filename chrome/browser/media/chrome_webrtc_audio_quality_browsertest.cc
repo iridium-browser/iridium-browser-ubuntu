@@ -29,31 +29,16 @@
 #include "net/test/embedded_test_server/embedded_test_server.h"
 #include "testing/perf/perf_test.h"
 
-// These are relative to the reference file dir defined by
-// webrtc_browsertest_common.h (i.e. chrome/test/data/webrtc/resources).
-static const base::FilePath::CharType kReferenceFile[] =
-#if defined (OS_WIN)
-    FILE_PATH_LITERAL("human-voice-win.wav");
-#elif defined (OS_MACOSX)
-    FILE_PATH_LITERAL("human-voice-mac.wav");
-#else
-    FILE_PATH_LITERAL("human-voice-linux.wav");
-#endif
+namespace {
 
-static const base::FilePath::CharType kAgcTestReferenceFile[] =
+static const base::FilePath::CharType kReferenceFile[] =
     FILE_PATH_LITERAL("speech_44kHz_16bit_stereo.wav");
 
 // The javascript will load the reference file relative to its location,
 // which is in /webrtc on the web server. The files we are looking for are in
 // webrtc/resources in the chrome/test/data folder.
 static const char kReferenceFileRelativeUrl[] =
-#if defined (OS_WIN)
-    "resources/human-voice-win.wav";
-#elif defined (OS_MACOSX)
-    "resources/human-voice-mac.wav";
-#else
-    "resources/human-voice-linux.wav";
-#endif
+    "resources/speech_44kHz_16bit_stereo.wav";
 
 static const char kWebRtcAudioTestHtmlPage[] =
     "/webrtc/webrtc_audio_quality_test.html";
@@ -64,6 +49,8 @@ static const char kWebRtcAudioTestHtmlPage[] =
 // Not implemented on Android, ChromeOS etc.
 #define MAYBE_WebRtcAudioQualityBrowserTest DISABLED_WebRtcAudioQualityBrowserTest
 #endif
+
+}  // namespace
 
 // Test we can set up a WebRTC call and play audio through it.
 //
@@ -79,7 +66,7 @@ static const char kWebRtcAudioTestHtmlPage[] =
 // 2. For the user who will run the test: # pavucontrol
 // 3. In a separate terminal, # arecord dummy
 // 4. In pavucontrol, go to the recording tab.
-// 5. For the ALSA plug-in [aplay]: ALSA Capture from, change from <x> to
+// 5. For the ALSA plugin [aplay]: ALSA Capture from, change from <x> to
 //    <Monitor of x>, where x is whatever your primary sound device is called.
 // 6. Try launching chrome as the target user on the target machine, try
 //    playing, say, a YouTube video, and record with # arecord -f dat tmp.dat.
@@ -90,6 +77,7 @@ static const char kWebRtcAudioTestHtmlPage[] =
 //       running this test on Linux.
 //
 // On Mac:
+// TODO(phoglund): download sox from gs instead.
 // 1. Get SoundFlower: http://rogueamoeba.com/freebies/soundflower/download.php
 // 2. Install it + reboot.
 // 3. Install MacPorts (http://www.macports.org/).
@@ -168,6 +156,12 @@ class MAYBE_WebRtcAudioQualityBrowserTest : public WebRtcTestBase {
     return tab;
   }
 
+  void MuteMediaElement(const std::string& element_id,
+                        content::WebContents* tab_contents) {
+    EXPECT_EQ("ok-muted", ExecuteJavascript(
+        "setMediaElementMuted('" + element_id + "', true)", tab_contents));
+  }
+
  protected:
   void TestAutoGainControl(const base::FilePath::StringType& reference_filename,
                            const std::string& constraints,
@@ -186,14 +180,10 @@ class AudioRecorder {
   ~AudioRecorder() {}
 
   // Starts the recording program for the specified duration. Returns true
-  // on success. We record in 44.1 kHz 16-bit format unless |record_cd| is
-  // false, in which case we record in 48 kHz 16-bit format. We record in stereo
-  // unless |mono| is true.
-  // TODO(phoglund): make win and mac also support the record_cd parameter. Or,
-  // even better, make everybody use the CD format rather than DAT.
+  // on success. We record in 16-bit 44.1 kHz Stereo (mostly because that's
+  // what SoundRecorder.exe will give us and we can't change that).
   bool StartRecording(base::TimeDelta recording_time,
-                      const base::FilePath& output_file, bool mono,
-                      bool record_cd) {
+                      const base::FilePath& output_file) {
     EXPECT_FALSE(recording_application_.IsValid())
         << "Tried to record, but is already recording.";
 
@@ -239,24 +229,14 @@ class AudioRecorder {
     command_line.AppendArg("trim");
     command_line.AppendArg("0");
     command_line.AppendArg(base::StringPrintf("%d", duration_sec));
-    command_line.AppendArg("rate");
-    command_line.AppendArg("16k");
-    if (mono) {
-      command_line.AppendArg("remix");
-      command_line.AppendArg("-");
-    }
 #else
-    int num_channels = mono ? 1 : 2;
     command_line.SetProgram(base::FilePath("arecord"));
     command_line.AppendArg("-d");
     command_line.AppendArg(base::StringPrintf("%d", duration_sec));
     command_line.AppendArg("-f");
-    if (record_cd)
-      command_line.AppendArg("cd");
-    else
-      command_line.AppendArg("dat");
+    command_line.AppendArg("cd");
     command_line.AppendArg("-c");
-    command_line.AppendArg(base::StringPrintf("%d", num_channels));
+    command_line.AppendArg("2");
     command_line.AppendArgPath(output_file);
 #endif
 
@@ -293,7 +273,7 @@ bool ForceMicrophoneVolumeTo100Percent() {
   command_line.AppendArg("-e");
   command_line.AppendArg("set volume input volume 100");
   command_line.AppendArg("-e");
-  command_line.AppendArg("set volume output volume 100");
+  command_line.AppendArg("set volume output volume 85");
 
   std::string result;
   if (!base::GetAppOutput(command_line, &result)) {
@@ -325,8 +305,7 @@ bool ForceMicrophoneVolumeTo100Percent() {
 // silence trimming. See http://sox.sourceforge.net.
 base::CommandLine MakeSoxCommandLine() {
 #if defined(OS_WIN)
-  base::FilePath sox_path = test::GetReferenceFilesDir().Append(
-      FILE_PATH_LITERAL("tools/sox.exe"));
+  base::FilePath sox_path = test::GetToolForPlatform("sox");
   if (!base::PathExists(sox_path)) {
     LOG(ERROR) << "Missing sox.exe binary in " << sox_path.value()
                << "; you may have to provide this binary yourself.";
@@ -334,6 +313,8 @@ base::CommandLine MakeSoxCommandLine() {
   }
   base::CommandLine command_line(sox_path);
 #else
+  // TODO(phoglund): call checked-in sox rather than system sox on mac/linux.
+  // Same for rec invocations on Mac, above.
   base::CommandLine command_line(base::FilePath(FILE_PATH_LITERAL("sox")));
 #endif
   return command_line;
@@ -439,17 +420,7 @@ bool RunPesq(const base::FilePath& reference_file,
   EXPECT_LT(reference_file.value().length(), 128u);
   EXPECT_LT(actual_file.value().length(), 128u);
 
-#if defined(OS_WIN)
-  base::FilePath pesq_path =
-      test::GetReferenceFilesDir().Append(FILE_PATH_LITERAL("tools/pesq.exe"));
-#elif defined(OS_MACOSX)
-  base::FilePath pesq_path =
-      test::GetReferenceFilesDir().Append(FILE_PATH_LITERAL("tools/pesq_mac"));
-#else
-  base::FilePath pesq_path =
-      test::GetReferenceFilesDir().Append(FILE_PATH_LITERAL("tools/pesq"));
-#endif
-
+  base::FilePath pesq_path = test::GetToolForPlatform("pesq");
   if (!base::PathExists(pesq_path)) {
     LOG(ERROR) << "Missing PESQ binary in " << pesq_path.value()
                << "; you may have to provide this binary yourself.";
@@ -573,7 +544,7 @@ void ComputeAndPrintPesqResults(const base::FilePath& reference_file,
   base::FilePath trimmed_reference = CreateTemporaryWaveFile();
   base::FilePath trimmed_recording = CreateTemporaryWaveFile();
 
-  ASSERT_TRUE(RemoveSilence(recording, trimmed_reference));
+  ASSERT_TRUE(RemoveSilence(reference_file, trimmed_reference));
   ASSERT_TRUE(RemoveSilence(recording, trimmed_recording));
 
   std::string raw_mos;
@@ -592,7 +563,7 @@ void ComputeAndPrintPesqResults(const base::FilePath& reference_file,
 
 }  // namespace
 
-// Sets up a one-way WebRTC call and records its output to |recording|, using
+// Sets up a two-way WebRTC call and records its output to |recording|, using
 // getUserMedia.
 //
 // |reference_file| should have at least two seconds of silence in the
@@ -614,17 +585,20 @@ void MAYBE_WebRtcAudioQualityBrowserTest::SetupAndRecordAudioCall(
 
   ConfigureFakeDeviceToPlayFile(reference_file);
 
-  // Create a one-way call.
+  // Create a two-way call. Mute one of the receivers though; that way it will
+  // be receiving audio bytes, but we will not be playing out of both elements.
   GURL test_page = embedded_test_server()->GetURL(kWebRtcAudioTestHtmlPage);
   content::WebContents* left_tab =
       OpenPageAndGetUserMediaInNewTabWithConstraints(test_page, constraints);
   SetupPeerconnectionWithLocalStream(left_tab);
+  MuteMediaElement("remote-view", left_tab);
 
   content::WebContents* right_tab =
-      OpenPageWithoutGetUserMedia(kWebRtcAudioTestHtmlPage);
+      OpenPageAndGetUserMediaInNewTabWithConstraints(test_page, constraints);
+  SetupPeerconnectionWithLocalStream(right_tab);
 
   AudioRecorder recorder;
-  ASSERT_TRUE(recorder.StartRecording(recording_time, recording, false, true));
+  ASSERT_TRUE(recorder.StartRecording(recording_time, recording));
 
   NegotiateCall(left_tab, right_tab);
 
@@ -634,17 +608,8 @@ void MAYBE_WebRtcAudioQualityBrowserTest::SetupAndRecordAudioCall(
   HangUp(left_tab);
 }
 
-#if defined(OS_MACOSX)
-// Broken on Mac for some reason: http://crbug.com/446859.
-#define MAYBE_MANUAL_TestCallQualityWithAudioFromFakeDevice \
-    DISABLED_MANUAL_TestCallQualityWithAudioFromFakeDevice
-#else
-#define MAYBE_MANUAL_TestCallQualityWithAudioFromFakeDevice \
-    MANUAL_TestCallQualityWithAudioFromFakeDevice
-#endif
-
 IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcAudioQualityBrowserTest,
-                       MAYBE_MANUAL_TestCallQualityWithAudioFromFakeDevice) {
+                       MANUAL_TestCallQualityWithAudioFromFakeDevice) {
   if (OnWinXp() || OnWin8()) {
     // http://crbug.com/379798.
     LOG(ERROR) << "This test is not implemented for Windows XP/Win8.";
@@ -690,7 +655,7 @@ IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcAudioQualityBrowserTest,
   // safety margins on each side.
   AudioRecorder recorder;
   ASSERT_TRUE(recorder.StartRecording(base::TimeDelta::FromSeconds(20),
-                                      recording, true, false));
+                                      recording));
 
   PlayAudioFileThroughWebAudio(left_tab);
 
@@ -788,7 +753,7 @@ void MAYBE_WebRtcAudioQualityBrowserTest::TestAutoGainControl(
 IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcAudioQualityBrowserTest,
                        MAYBE_MANUAL_TestAutoGainControlOnLowAudio) {
   ASSERT_NO_FATAL_FAILURE(TestAutoGainControl(
-      kAgcTestReferenceFile, kAudioOnlyCallConstraints, "_with_agc"));
+      kReferenceFile, kAudioOnlyCallConstraints, "_with_agc"));
 }
 
 // Only implemented for Linux for now.
@@ -806,5 +771,5 @@ IN_PROC_BROWSER_TEST_F(MAYBE_WebRtcAudioQualityBrowserTest,
   const char* kAudioCallWithoutAudioProcessing =
       "{audio: { mandatory: { echoCancellation: false } } }";
   ASSERT_NO_FATAL_FAILURE(TestAutoGainControl(
-      kAgcTestReferenceFile, kAudioCallWithoutAudioProcessing, "_no_agc"));
+      kReferenceFile, kAudioCallWithoutAudioProcessing, "_no_agc"));
 }

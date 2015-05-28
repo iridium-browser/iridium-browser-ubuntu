@@ -20,7 +20,7 @@ using base::TimeTicks;
 
 namespace {
 
-const char* kBlockName = "data_";
+const char kBlockName[] = "data_";
 
 // This array is used to perform a fast lookup of the nibble bit pattern to the
 // type of entry that can be stored there (number of consecutive blocks).
@@ -548,7 +548,7 @@ bool BlockFiles::GrowBlockFile(MappedFile* file, BlockFileHeader* header) {
 }
 
 MappedFile* BlockFiles::FileForNewBlock(FileType block_type, int block_count) {
-  COMPILE_ASSERT(RANKINGS == 1, invalid_file_type);
+  static_assert(RANKINGS == 1, "invalid file type");
   MappedFile* file = block_files_[block_type - 1];
   BlockHeader file_header(file);
 
@@ -656,11 +656,11 @@ bool BlockFiles::FixBlockFileHeader(MappedFile* file) {
   if (file_size < file_header.Size())
     return false;  // file_size > 2GB is also an error.
 
-  const int kMinBlockSize = 36;
-  const int kMaxBlockSize = 4096;
+  const int kMinHeaderBlockSize = 36;
+  const int kMaxHeaderBlockSize = 4096;
   BlockFileHeader* header = file_header.Header();
-  if (header->entry_size < kMinBlockSize ||
-      header->entry_size > kMaxBlockSize || header->num_entries < 0)
+  if (header->entry_size < kMinHeaderBlockSize ||
+      header->entry_size > kMaxHeaderBlockSize || header->num_entries < 0)
     return false;
 
   // Make sure that we survive crashes.

@@ -5,6 +5,8 @@
 #ifndef NET_BASE_NETWORK_CHANGE_NOTIFIER_H_
 #define NET_BASE_NETWORK_CHANGE_NOTIFIER_H_
 
+#include <vector>
+
 #include "base/basictypes.h"
 #include "base/observer_list_threadsafe.h"
 #include "base/time/time.h"
@@ -17,6 +19,8 @@ namespace net {
 struct DnsConfig;
 class HistogramWatcher;
 class NetworkChangeNotifierFactory;
+struct NetworkInterface;
+typedef std::vector<NetworkInterface> NetworkInterfaceList;
 class URLRequest;
 
 #if defined(OS_LINUX)
@@ -37,6 +41,9 @@ class NET_EXPORT NetworkChangeNotifier {
   //
   // A Java counterpart will be generated for this enum.
   // GENERATED_JAVA_ENUM_PACKAGE: org.chromium.net
+  //
+  // New enum values should only be added to the end of the enum and no values
+  // should be modified or reused, as this is reported via UMA.
   enum ConnectionType {
     CONNECTION_UNKNOWN = 0,  // A connection exists, but its type is unknown.
                              // Also used as a default value.
@@ -257,6 +264,13 @@ class NET_EXPORT NetworkChangeNotifier {
   // IsConnectionCellular(GetConnectionType()) returns false even if the
   // current connection is cellular.
   static bool IsConnectionCellular(ConnectionType type);
+
+  // Gets the current connection type based on |interfaces|. Returns
+  // CONNECTION_NONE if there are no interfaces, CONNECTION_UNKNOWN if two
+  // interfaces have different connection types or the connection type of all
+  // interfaces if they have the same interface type.
+  static ConnectionType ConnectionTypeFromInterfaceList(
+      const NetworkInterfaceList& interfaces);
 
   // Like Create(), but for use in tests.  The mock object doesn't monitor any
   // events, it merely rebroadcasts notifications when requested.

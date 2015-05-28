@@ -1004,7 +1004,7 @@ def CMDrun(parser, args):
   cmd = tools.fix_python_path(cmd)
 
   outdir = run_isolated.make_temp_dir(
-      'isolate-%s' % datetime.date.today(),
+      u'isolate-%s' % datetime.date.today(),
       os.path.dirname(complete_state.root_dir))
   try:
     # TODO(maruel): Use run_isolated.run_tha_test().
@@ -1202,7 +1202,14 @@ def main(argv):
   dispatcher = subcommand.CommandDispatcher(__name__)
   parser = tools.OptionParserWithLogging(
         version=__version__, verbose=int(os.environ.get('ISOLATE_DEBUG', 0)))
-  return dispatcher.execute(parser, argv)
+  try:
+    return dispatcher.execute(parser, argv)
+  except isolated_format.MappingError as e:
+    print >> sys.stderr, 'Failed to find an input file: %s' % e
+    return 1
+  except ExecutionError as e:
+    print >> sys.stderr, 'Execution failure: %s' % e
+    return 1
 
 
 if __name__ == '__main__':

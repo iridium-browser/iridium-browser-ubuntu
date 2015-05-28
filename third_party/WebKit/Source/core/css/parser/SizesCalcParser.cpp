@@ -106,7 +106,7 @@ bool SizesCalcParser::calcToReversePolishNotation(CSSParserTokenRange range)
                 return false;
             break;
         case FunctionToken:
-            if (token.value() != "calc")
+            if (!token.valueEqualsIgnoringCase("calc"))
                 return false;
             // "calc(" is the same as "("
         case LeftParenthesisToken:
@@ -126,10 +126,13 @@ bool SizesCalcParser::calcToReversePolishNotation(CSSParserTokenRange range)
             // Pop the left parenthesis from the stack, but not onto the output queue.
             stack.removeLast();
             break;
-        case CommentToken:
         case WhitespaceToken:
         case EOFToken:
             break;
+        case CommentToken:
+            ASSERT_NOT_REACHED();
+        case CDOToken:
+        case CDCToken:
         case AtKeywordToken:
         case HashToken:
         case UrlToken:

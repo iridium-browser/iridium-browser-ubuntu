@@ -32,7 +32,7 @@ namespace content {
 
 class FrameSwapMessageQueue;
 class SynchronousCompositorClient;
-class SynchronousCompositorExternalBeginFrameSource;
+class SynchronousCompositorImpl;
 class SynchronousCompositorOutputSurface;
 class WebGraphicsContext3DCommandBufferImpl;
 
@@ -50,19 +50,20 @@ class SynchronousCompositorOutputSurface
   explicit SynchronousCompositorOutputSurface(
       int routing_id,
       scoped_refptr<FrameSwapMessageQueue> frame_swap_message_queue);
-  virtual ~SynchronousCompositorOutputSurface();
+  ~SynchronousCompositorOutputSurface() override;
+
+  void SetCompositor(SynchronousCompositorImpl* compositor);
 
   // OutputSurface.
-  virtual bool BindToClient(cc::OutputSurfaceClient* surface_client) override;
-  virtual void Reshape(const gfx::Size& size, float scale_factor) override;
-  virtual void SwapBuffers(cc::CompositorFrame* frame) override;
-
-  void SetBeginFrameSource(
-      SynchronousCompositorExternalBeginFrameSource* begin_frame_source);
+  bool BindToClient(cc::OutputSurfaceClient* surface_client) override;
+  void Reshape(const gfx::Size& size, float scale_factor) override;
+  void SwapBuffers(cc::CompositorFrame* frame) override;
+  void Invalidate() override;
 
   // Partial SynchronousCompositor API implementation.
   bool InitializeHwDraw(
-      scoped_refptr<cc::ContextProvider> onscreen_context_provider);
+      scoped_refptr<cc::ContextProvider> onscreen_context_provider,
+      scoped_refptr<cc::ContextProvider> worker_context_provider);
   void ReleaseHwDraw();
   scoped_ptr<cc::CompositorFrame> DemandDrawHw(
       gfx::Size surface_size,
@@ -92,6 +93,9 @@ class SynchronousCompositorOutputSurface
   const int routing_id_;
   bool registered_;
 
+  // Not owned.
+  SynchronousCompositorImpl* compositor_;
+
   gfx::Transform cached_hw_transform_;
   gfx::Rect cached_hw_viewport_;
   gfx::Rect cached_hw_clip_;
@@ -103,12 +107,9 @@ class SynchronousCompositorOutputSurface
 
   cc::ManagedMemoryPolicy memory_policy_;
 
-  cc::OutputSurfaceClient* output_surface_client_;
   scoped_ptr<cc::CompositorFrame> frame_holder_;
 
   scoped_refptr<FrameSwapMessageQueue> frame_swap_message_queue_;
-
-  SynchronousCompositorExternalBeginFrameSource* begin_frame_source_;
 
   DISALLOW_COPY_AND_ASSIGN(SynchronousCompositorOutputSurface);
 };

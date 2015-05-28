@@ -95,7 +95,7 @@ void OutputString(const std::string& output, TextDecoration dec) {
 
   DWORD written = 0;
   ::WriteFile(hstdout, output.c_str(), static_cast<DWORD>(output.size()),
-              &written, NULL);
+              &written, nullptr);
 
   if (is_console)
     ::SetConsoleTextAttribute(hstdout, default_attributes);
@@ -179,12 +179,12 @@ void PrintLongHelp(const std::string& text) {
 
     // Check for a comment.
     TextDecoration dec = DECORATION_NONE;
-    for (size_t char_i = 0; char_i < line.size(); char_i++) {
-      if (line[char_i] == '#') {
+    for (const auto& elem : line) {
+      if (elem == '#') {
         // Got a comment, draw dimmed.
         dec = DECORATION_DIM;
         break;
-      } else if (line[char_i] != ' ') {
+      } else if (elem != ' ') {
         break;
       }
     }

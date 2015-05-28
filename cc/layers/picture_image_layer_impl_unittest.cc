@@ -13,6 +13,7 @@
 #include "cc/test/fake_picture_pile_impl.h"
 #include "cc/test/impl_side_painting_settings.h"
 #include "cc/test/test_shared_bitmap_manager.h"
+#include "cc/test/test_task_graph_runner.h"
 #include "cc/trees/layer_tree_impl.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -37,7 +38,8 @@ class PictureImageLayerImplTest : public testing::Test {
       : proxy_(base::MessageLoopProxy::current()),
         host_impl_(ImplSidePaintingSettings(),
                    &proxy_,
-                   &shared_bitmap_manager_) {
+                   &shared_bitmap_manager_,
+                   &task_graph_runner_) {
     host_impl_.CreatePendingTree();
     host_impl_.InitializeRenderer(FakeOutputSurface::Create3d());
   }
@@ -51,9 +53,6 @@ class PictureImageLayerImplTest : public testing::Test {
         break;
       case PENDING_TREE:
         tree = host_impl_.pending_tree();
-        break;
-      case NUM_TREES:
-        NOTREACHED();
         break;
     }
     TestablePictureImageLayerImpl* layer =
@@ -80,13 +79,14 @@ class PictureImageLayerImplTest : public testing::Test {
         animating_transform_to_screen;
     layer->draw_properties().visible_content_rect = viewport_rect;
     bool resourceless_software_draw = false;
-    layer->UpdateTiles(Occlusion(), resourceless_software_draw);
+    layer->UpdateTiles(resourceless_software_draw);
   }
 
  protected:
   FakeImplProxy proxy_;
-  FakeLayerTreeHostImpl host_impl_;
   TestSharedBitmapManager shared_bitmap_manager_;
+  TestTaskGraphRunner task_graph_runner_;
+  FakeLayerTreeHostImpl host_impl_;
 };
 
 TEST_F(PictureImageLayerImplTest, CalculateContentsScale) {
@@ -149,7 +149,7 @@ TEST_F(PictureImageLayerImplTest, IgnoreIdealContentScale) {
   scoped_ptr<RenderPass> render_pass = RenderPass::Create();
   AppendQuadsData data;
   active_layer->WillDraw(DRAW_MODE_SOFTWARE, nullptr);
-  active_layer->AppendQuads(render_pass.get(), Occlusion(), &data);
+  active_layer->AppendQuads(render_pass.get(), &data);
   active_layer->DidDraw(nullptr);
 
   EXPECT_EQ(DrawQuad::TILED_CONTENT, render_pass->quad_list.front()->material);

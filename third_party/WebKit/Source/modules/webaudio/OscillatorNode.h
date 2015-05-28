@@ -25,9 +25,9 @@
 #ifndef OscillatorNode_h
 #define OscillatorNode_h
 
-#include "platform/audio/AudioBus.h"
 #include "modules/webaudio/AudioParam.h"
 #include "modules/webaudio/AudioScheduledSourceNode.h"
+#include "platform/audio/AudioBus.h"
 #include "wtf/OwnPtr.h"
 #include "wtf/PassRefPtr.h"
 #include "wtf/RefPtr.h"
@@ -40,8 +40,7 @@ class PeriodicWave;
 
 // OscillatorNode is an audio generator of periodic waveforms.
 
-class OscillatorNode final : public AudioScheduledSourceNode {
-    DEFINE_WRAPPERTYPEINFO();
+class OscillatorHandler final : public AudioScheduledSourceHandler {
 public:
     // The waveform type.
     // These must be defined as in the .idl file.
@@ -53,11 +52,10 @@ public:
         CUSTOM = 4
     };
 
-    static OscillatorNode* create(AudioContext*, float sampleRate);
+    OscillatorHandler(AudioNode&, float sampleRate);
+    virtual ~OscillatorHandler();
 
-    virtual ~OscillatorNode();
-
-    // AudioNode
+    // AudioHandler
     virtual void dispose() override;
     virtual void process(size_t framesToProcess) override;
 
@@ -70,11 +68,9 @@ public:
 
     void setPeriodicWave(PeriodicWave*);
 
-    virtual void trace(Visitor*) override;
+    DECLARE_VIRTUAL_TRACE();
 
 private:
-    OscillatorNode(AudioContext*, float sampleRate);
-
     bool setType(unsigned); // Returns true on success.
 
     // Returns true if there are sample-accurate timeline parameter changes.
@@ -105,6 +101,22 @@ private:
     AudioFloatArray m_detuneValues;
 
     Member<PeriodicWave> m_periodicWave;
+};
+
+class OscillatorNode final : public AudioScheduledSourceNode {
+    DEFINE_WRAPPERTYPEINFO();
+public:
+    static OscillatorNode* create(AudioContext*, float sampleRate);
+
+    String type() const;
+    void setType(const String&);
+    AudioParam* frequency();
+    AudioParam* detune();
+    void setPeriodicWave(PeriodicWave*);
+
+private:
+    OscillatorNode(AudioContext&, float sampleRate);
+    OscillatorHandler& oscillatorHandler() const;
 };
 
 } // namespace blink

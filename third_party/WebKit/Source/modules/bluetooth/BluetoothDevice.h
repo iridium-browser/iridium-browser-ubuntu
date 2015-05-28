@@ -7,12 +7,12 @@
 
 #include "bindings/core/v8/ScriptWrappable.h"
 #include "platform/heap/Heap.h"
+#include "public/platform/WebBluetoothDevice.h"
 #include "wtf/text/WTFString.h"
 
 namespace blink {
 
 class ScriptPromiseResolver;
-struct WebBluetoothDevice;
 
 // BluetoothDevice represents a physical bluetooth device in the DOM. See IDL.
 //
@@ -25,23 +25,32 @@ class BluetoothDevice final
     , public ScriptWrappable {
     DEFINE_WRAPPERTYPEINFO();
 public:
-    BluetoothDevice(const String& instanceId);
+    BluetoothDevice(const WebBluetoothDevice&);
 
     static BluetoothDevice* create(const WebBluetoothDevice&);
 
     // Interface required by CallbackPromiseAdapter:
     typedef WebBluetoothDevice WebType;
     static BluetoothDevice* take(ScriptPromiseResolver*, WebBluetoothDevice*);
-    static void dispose(blink::WebBluetoothDevice*);
+    static void dispose(WebBluetoothDevice*);
 
     // Interface required by Garbage Collection:
-    void trace(Visitor*) { }
+    DEFINE_INLINE_TRACE() { }
 
     // IDL exposed interface:
-    String instanceId() { return m_instanceId; }
+    String instanceID() { return m_webDevice.instanceID; }
+    String name() { return m_webDevice.name; }
+    unsigned deviceClass(bool& isNull);
+    String vendorIDSource();
+    unsigned vendorID(bool& isNull);
+    unsigned productID(bool& isNull);
+    unsigned productVersion(bool& isNull);
+    bool paired(bool& isNull);
+    bool connected(bool& isNull);
+    Vector<String> uuids(bool& isNull);
 
 private:
-    String m_instanceId;
+    WebBluetoothDevice m_webDevice;
 };
 
 } // namespace blink

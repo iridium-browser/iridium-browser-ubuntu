@@ -50,9 +50,9 @@ const char kAdbBrowsersList[] = "browsers";
 const char kAdbDeviceIdFormat[] = "device:%s";
 
 const char kAdbBrowserNameField[] = "adbBrowserName";
+const char kAdbBrowserUserField[] = "adbBrowserUser";
 const char kAdbBrowserVersionField[] = "adbBrowserVersion";
 const char kAdbBrowserChromeVersionField[] = "adbBrowserChromeVersion";
-const char kCompatibleVersion[] = "compatibleVersion";
 const char kAdbPagesList[] = "pages";
 
 const char kAdbScreenWidthField[] = "adbScreenWidth";
@@ -61,16 +61,6 @@ const char kAdbAttachedForeignField[]  = "adbAttachedForeign";
 
 const char kPortForwardingPorts[] = "ports";
 const char kPortForwardingBrowserId[] = "browserId";
-
-std::string SerializeBrowserId(
-    scoped_refptr<DevToolsAndroidBridge::RemoteBrowser> browser) {
-  return base::StringPrintf(
-      "browser:%s:%s:%s:%s",
-      browser->serial().c_str(), // Ensure uniqueness across devices.
-      browser->display_name().c_str(),  // Sort by display name.
-      browser->version().c_str(),  // Then by version.
-      browser->socket().c_str());  // Ensure uniqueness on the device.
-}
 
 // CancelableTimer ------------------------------------------------------------
 
@@ -142,14 +132,14 @@ class WorkerObserver
   }
 
   void NotifyOnIOThread() {
-    DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+    DCHECK_CURRENTLY_ON(BrowserThread::IO);
     BrowserThread::PostTask(
         BrowserThread::UI, FROM_HERE,
         base::Bind(&WorkerObserver::NotifyOnUIThread, this));
   }
 
   void NotifyOnUIThread() {
-    DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+    DCHECK_CURRENTLY_ON(BrowserThread::UI);
     if (callback_.is_null())
       return;
     callback_.Run();
@@ -279,9 +269,7 @@ class AdbTargetsUIHandler
   AdbTargetsUIHandler(const Callback& callback, Profile* profile);
   ~AdbTargetsUIHandler() override;
 
-  void Open(const std::string& browser_id,
-            const std::string& url,
-            const DevToolsTargetsUIHandler::TargetCallback&) override;
+  void Open(const std::string& browser_id, const std::string& url) override;
 
   scoped_refptr<content::DevToolsAgentHost> GetBrowserAgentHost(
       const std::string& browser_id) override;
@@ -315,25 +303,11 @@ AdbTargetsUIHandler::~AdbTargetsUIHandler() {
   android_bridge_->RemoveDeviceListListener(this);
 }
 
-static void CallOnTarget(
-    const DevToolsTargetsUIHandler::TargetCallback& callback,
-    DevToolsAndroidBridge* bridge,
-    scoped_refptr<DevToolsAndroidBridge::RemotePage> page) {
-  callback.Run(bridge && page.get() ? bridge->CreatePageTarget(page) : nullptr);
-}
-
-void AdbTargetsUIHandler::Open(
-    const std::string& browser_id,
-    const std::string& url,
-    const DevToolsTargetsUIHandler::TargetCallback& callback) {
+void AdbTargetsUIHandler::Open(const std::string& browser_id,
+                               const std::string& url) {
   RemoteBrowsers::iterator it = remote_browsers_.find(browser_id);
-  if (it == remote_browsers_.end())
-    return;
-
-  android_bridge_->OpenRemotePage(
-      it->second,
-      url,
-      base::Bind(&CallOnTarget, callback, android_bridge_));
+  if (it != remote_browsers_.end())
+    android_bridge_->OpenRemotePage(it->second, url);
 }
 
 scoped_refptr<content::DevToolsAgentHost>
@@ -372,25 +346,16 @@ void AdbTargetsUIHandler::DeviceListChanged(
       DevToolsAndroidBridge::RemoteBrowser* browser = bit->get();
       base::DictionaryValue* browser_data = new base::DictionaryValue();
       browser_data->SetString(kAdbBrowserNameField, browser->display_name());
+      browser_data->SetString(kAdbBrowserUserField, browser->user());
       browser_data->SetString(kAdbBrowserVersionField, browser->version());
       DevToolsAndroidBridge::RemoteBrowser::ParsedVersion parsed =
           browser->GetParsedVersion();
       browser_data->SetInteger(
           kAdbBrowserChromeVersionField,
           browser->IsChrome() && !parsed.empty() ? parsed[0] : 0);
-      std::string browser_id = SerializeBrowserId(browser);
+      std::string browser_id = browser->GetId();
       browser_data->SetString(kTargetIdField, browser_id);
       browser_data->SetString(kTargetSourceField, source_id());
-
-      base::Version remote_version;
-      remote_version = base::Version(browser->version());
-
-      chrome::VersionInfo version_info;
-      base::Version local_version(version_info.Version());
-
-      browser_data->SetBoolean(kCompatibleVersion,
-          (!remote_version.IsValid()) || (!local_version.IsValid()) ||
-          remote_version.components()[0] <= local_version.components()[0]);
 
       base::ListValue* page_list = new base::ListValue();
       remote_browsers_[browser_id] = browser;
@@ -459,9 +424,7 @@ DevToolsTargetImpl* DevToolsTargetsUIHandler::GetTarget(
 }
 
 void DevToolsTargetsUIHandler::Open(const std::string& browser_id,
-                                    const std::string& url,
-                                    const TargetCallback& callback) {
-  callback.Run(NULL);
+                                    const std::string& url) {
 }
 
 scoped_refptr<content::DevToolsAgentHost>
@@ -526,7 +489,7 @@ void PortForwardingStatusSerializer::PortStatusChanged(
     base::DictionaryValue* device_status_dict = new base::DictionaryValue();
     device_status_dict->Set(kPortForwardingPorts, port_status_dict);
     device_status_dict->SetString(kPortForwardingBrowserId,
-                                  SerializeBrowserId(sit->first));
+                                  sit->first->GetId());
 
     std::string device_id = base::StringPrintf(
         kAdbDeviceIdFormat,

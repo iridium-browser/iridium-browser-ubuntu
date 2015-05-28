@@ -2,11 +2,12 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef CHROME_BROWSER_CHROMEOS_VPN_VPN_SERVICE_H_
-#define CHROME_BROWSER_CHROMEOS_VPN_VPN_SERVICE_H_
+#ifndef EXTENSIONS_BROWSER_API_VPN_PROVIDER_VPN_SERVICE_H_
+#define EXTENSIONS_BROWSER_API_VPN_PROVIDER_VPN_SERVICE_H_
 
 #include <map>
 #include <string>
+#include <vector>
 
 #include "base/callback.h"
 #include "base/macros.h"
@@ -52,6 +53,7 @@ class VpnService : public KeyedService,
                    public extensions::ExtensionRegistryObserver {
  public:
   using SuccessCallback = base::Closure;
+  using StringCallback = base::Callback<void(const std::string& result)>;
   using FailureCallback =
       base::Callback<void(const std::string& error_name,
                           const std::string& error_message)>;
@@ -65,6 +67,15 @@ class VpnService : public KeyedService,
              NetworkProfileHandler* network_profile_handler,
              NetworkStateHandler* network_state_handler);
   ~VpnService() override;
+
+  void SendShowAddDialogToExtension(const std::string& extension_id);
+
+  void SendShowConfigureDialogToExtension(const std::string& extension_id,
+                                          const std::string& configuration_id);
+
+  void SendPlatformError(const std::string& extension_id,
+                         const std::string& configuration_id,
+                         const std::string& error_message);
 
   // NetworkConfigurationObserver:
   void OnConfigurationCreated(const std::string& service_path,
@@ -89,6 +100,10 @@ class VpnService : public KeyedService,
   void OnExtensionUninstalled(content::BrowserContext* browser_context,
                               const extensions::Extension* extension,
                               extensions::UninstallReason reason) override;
+  void OnExtensionUnloaded(
+      content::BrowserContext* browser_context,
+      const extensions::Extension* extension,
+      extensions::UnloadedExtensionInfo::Reason reason) override;
 
   // Creates a new VPN configuration with |configuration_name| as the name and
   // attaches it to the extension with id |extension_id|.
@@ -99,11 +114,11 @@ class VpnService : public KeyedService,
                            const SuccessCallback& success,
                            const FailureCallback& failure);
 
-  // Destroys the VPN configuration with the name |configuration_name| after
-  // verifying that it belongs to the extension with id |extension_id|.
+  // Destroys the VPN configuration with |configuration_id| after verifying that
+  // it belongs to the extension with id |extension_id|.
   // Calls |success| or |failure| based on the outcome.
   void DestroyConfiguration(const std::string& extension_id,
-                            const std::string& configuration_name,
+                            const std::string& configuration_id,
                             const SuccessCallback& success,
                             const FailureCallback& failure);
 
@@ -112,14 +127,14 @@ class VpnService : public KeyedService,
   // Calls |success| or |failure| based on the outcome.
   void SetParameters(const std::string& extension_id,
                      const base::DictionaryValue& parameters,
-                     const SuccessCallback& success,
+                     const StringCallback& success,
                      const FailureCallback& failure);
 
   // Sends an IP packet contained in |data| to the active VPN configuration
   // after verifying that it belongs to the extension with id |extension_id|.
   // Calls |success| or |failure| based on the outcome.
   void SendPacket(const std::string& extension_id,
-                  const std::string& data,
+                  const std::vector<char>& data,
                   const SuccessCallback& success,
                   const FailureCallback& failure);
 
@@ -131,6 +146,20 @@ class VpnService : public KeyedService,
       extensions::core_api::vpn_provider::VpnConnectionState state,
       const SuccessCallback& success,
       const FailureCallback& failure);
+
+  // Verifies if a configuration with name |configuration_name| exists for the
+  // extension with id |extension_id|.
+  bool VerifyConfigExistsForTesting(const std::string& extension_id,
+                                    const std::string& configuration_name);
+
+  // Verifies if the extension has a configuration that is connected.
+  bool VerifyConfigIsConnectedForTesting(const std::string& extension_id);
+
+  // Gets the unique key for the configuration |configuration_name| created by
+  // the extension with id |extension_id|.
+  // This method is made public for testing.
+  static std::string GetKey(const std::string& extension_id,
+                            const std::string& configuration_name);
 
  private:
   class VpnConfiguration;
@@ -186,6 +215,10 @@ class VpnService : public KeyedService,
                              const std::string& event_name,
                              scoped_ptr<base::ListValue> event_args);
 
+  // Destroy configurations belonging to the extension.
+  void DestroyConfigurationsForExtension(
+      const extensions::Extension* extension);
+
   // Set the active configuration.
   void SetActiveConfiguration(VpnConfiguration* configuration);
 
@@ -214,4 +247,4 @@ class VpnService : public KeyedService,
 
 }  // namespace chromeos
 
-#endif  // CHROME_BROWSER_CHROMEOS_VPN_VPN_SERVICE_H_
+#endif  // EXTENSIONS_BROWSER_API_VPN_PROVIDER_VPN_SERVICE_H_

@@ -33,9 +33,13 @@ found in the LICENSE file.
         background-color: white;
       }
       .button {
+        background-color: #f8f8f8;
+        border: 1px solid rgba(0, 0, 0, 0.5);
         border-left: none;
+        font-size: 14px;
         height: 17px;
         margin-left: 0;
+        margin-top: 1px;
       }
       .button :first-of-type {
         margin-right: 0;
@@ -51,6 +55,24 @@ found in the LICENSE file.
         width: 170px;
         z-index: 1;
       }
+      #spinner {
+        visibility: hidden;
+        width: 8px;
+        height: 8px;
+        left: 154px;
+        pointer-events: none;
+        position: absolute;
+        top: 4px;
+        z-index: 1;
+
+        border: 2px solid transparent;
+        border-bottom: 2px solid rgba(0, 0, 0, 0.5);
+        border-right: 2px solid rgba(0, 0, 0, 0.5);
+        border-radius: 50%;
+
+        animation: spin 1s linear infinite;
+      }
+      @keyframes spin { 100% { transform: rotate(360deg); } }
     </style>
 
     <div class="root">
@@ -61,6 +83,7 @@ found in the LICENSE file.
           on-blur="{{ filterBlur }}"
           on-focus="{{ filterFocus }}"
           on-mouseup="{{ filterMouseUp }}" />
+      <div id="spinner"></div>
       <div class="button" on-click="{{ findPrevious }}">&larr;</div>
       <div class="button" on-click="{{ findNext }}">&rarr;</div>
       <div id="hitCount">0 of 0</div>
@@ -89,7 +112,6 @@ found in the LICENSE file.
 
     filterFocus: function(e) {
       this.controller.reset();
-      this.filterTextChanged();
       this.$.filter.select();
     },
 
@@ -118,7 +140,12 @@ found in the LICENSE file.
 
     filterTextChanged: function() {
       this.controller.filterText = this.$.filter.value;
-      this.updateHitCountEl();
+      this.$.hitCount.textContent = '';
+      this.$.spinner.style.visibility = 'visible';
+      this.controller.updateFilterHits().then(function() {
+        this.$.spinner.style.visibility = 'hidden';
+        this.updateHitCountEl();
+      }.bind(this));
     },
 
     findNext: function() {

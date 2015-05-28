@@ -28,7 +28,6 @@ VideoReceiver::VideoReceiver(Clock* clock, EventFactory* event_factory)
     : clock_(clock),
       process_crit_sect_(CriticalSectionWrapper::CreateCriticalSection()),
       _receiveCritSect(CriticalSectionWrapper::CreateCriticalSection()),
-      _receiverInited(false),
       _timing(clock_),
       _receiver(&_timing, clock_, event_factory, true),
       _decodedFrameCallback(_timing, clock_),
@@ -46,7 +45,7 @@ VideoReceiver::VideoReceiver(Clock* clock, EventFactory* event_factory)
       _scheduleKeyRequest(false),
       max_nack_list_size_(0),
       pre_decode_image_callback_(NULL),
-      _codecDataBase(),
+      _codecDataBase(NULL),
       _receiveStatsTimer(1000, clock_),
       _retransmissionTimer(10, clock_),
       _keyRequestTimer(500, clock_) {
@@ -168,7 +167,7 @@ int64_t VideoReceiver::TimeUntilNextProcess() {
   return timeUntilNextProcess;
 }
 
-int32_t VideoReceiver::SetReceiveChannelParameters(uint32_t rtt) {
+int32_t VideoReceiver::SetReceiveChannelParameters(int64_t rtt) {
   CriticalSectionScoped receiveCs(_receiveCritSect);
   _receiver.UpdateRtt(rtt);
   return 0;
@@ -236,9 +235,12 @@ int32_t VideoReceiver::SetVideoProtection(VCMVideoProtection videoProtection,
     }
     case kProtectionNackSender:
     case kProtectionFEC:
-    case kProtectionPeriodicKeyFrames:
       // Ignore encoder modes.
       return VCM_OK;
+    case kProtectionNone:
+      // TODO(pbos): Implement like sender and remove enable parameter. Ignored
+      // for now.
+      break;
   }
   return VCM_OK;
 }
@@ -254,7 +256,6 @@ int32_t VideoReceiver::InitializeReceiver() {
     CriticalSectionScoped receive_cs(_receiveCritSect);
     _codecDataBase.ResetReceiver();
     _timing.Reset();
-    _receiverInited = true;
   }
 
   {
@@ -335,6 +336,10 @@ int VideoReceiver::RegisterRenderBufferSizeCallback(
   return VCM_OK;
 }
 
+void VideoReceiver::TriggerDecoderShutdown() {
+  _receiver.TriggerDecoderShutdown();
+}
+
 // Decode next frame, blocking.
 // Should be called as often as possible to get the most out of the decoder.
 int32_t VideoReceiver::Decode(uint16_t maxWaitTimeMs) {
@@ -342,12 +347,6 @@ int32_t VideoReceiver::Decode(uint16_t maxWaitTimeMs) {
   bool supports_render_scheduling;
   {
     CriticalSectionScoped cs(_receiveCritSect);
-    if (!_receiverInited) {
-      return VCM_UNINITIALIZED;
-    }
-    if (!_codecDataBase.DecoderRegistered()) {
-      return VCM_NO_CODEC_REGISTERED;
-    }
     supports_render_scheduling = _codecDataBase.SupportsRenderScheduling();
   }
 
@@ -365,7 +364,7 @@ int32_t VideoReceiver::Decode(uint16_t maxWaitTimeMs) {
 
     if (pre_decode_image_callback_) {
       EncodedImage encoded_image(frame->EncodedImage());
-      pre_decode_image_callback_->Encoded(encoded_image);
+      pre_decode_image_callback_->Encoded(encoded_image, NULL, NULL);
     }
 
 #ifdef DEBUG_DECODER_BIT_STREAM
@@ -467,6 +466,7 @@ int32_t VideoReceiver::Decode(const VCMEncodedFrame& frame) {
       case kKeyOnLoss: {
         request_key_frame = true;
         ret = VCM_OK;
+        break;
       }
       default:
         break;

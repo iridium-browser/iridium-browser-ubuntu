@@ -44,6 +44,7 @@ IPC_ENUM_TRAITS_MAX_VALUE(FrameMsg_UILoadMetricsReportType::Value,
 IPC_ENUM_TRAITS_MAX_VALUE(blink::WebContextMenuData::MediaType,
                           blink::WebContextMenuData::MediaTypeLast)
 IPC_ENUM_TRAITS_MAX_VALUE(ui::MenuSourceType, ui::MENU_SOURCE_TYPE_LAST)
+IPC_ENUM_TRAITS(content::SandboxFlags)  // Bitmask.
 
 IPC_STRUCT_TRAITS_BEGIN(content::ColorSuggestion)
   IPC_STRUCT_TRAITS_MEMBER(color)
@@ -212,88 +213,58 @@ IPC_STRUCT_TRAITS_BEGIN(content::CommonNavigationParams)
   IPC_STRUCT_TRAITS_MEMBER(allow_download)
   IPC_STRUCT_TRAITS_MEMBER(ui_timestamp)
   IPC_STRUCT_TRAITS_MEMBER(report_type)
+  IPC_STRUCT_TRAITS_MEMBER(base_url_for_data_url)
+  IPC_STRUCT_TRAITS_MEMBER(history_url_for_data_url)
 IPC_STRUCT_TRAITS_END()
 
-IPC_STRUCT_TRAITS_BEGIN(content::RequestNavigationParams)
+IPC_STRUCT_TRAITS_BEGIN(content::BeginNavigationParams)
+  IPC_STRUCT_TRAITS_MEMBER(method)
+  IPC_STRUCT_TRAITS_MEMBER(headers)
+  IPC_STRUCT_TRAITS_MEMBER(load_flags)
+  IPC_STRUCT_TRAITS_MEMBER(has_user_gesture)
+IPC_STRUCT_TRAITS_END()
+
+IPC_STRUCT_TRAITS_BEGIN(content::StartNavigationParams)
   IPC_STRUCT_TRAITS_MEMBER(is_post)
   IPC_STRUCT_TRAITS_MEMBER(extra_headers)
   IPC_STRUCT_TRAITS_MEMBER(browser_initiated_post_data)
+  IPC_STRUCT_TRAITS_MEMBER(should_replace_current_entry)
+  IPC_STRUCT_TRAITS_MEMBER(transferred_request_child_id)
+  IPC_STRUCT_TRAITS_MEMBER(transferred_request_request_id)
 IPC_STRUCT_TRAITS_END()
 
-IPC_STRUCT_TRAITS_BEGIN(content::CommitNavigationParams)
-  IPC_STRUCT_TRAITS_MEMBER(page_state)
+IPC_STRUCT_TRAITS_BEGIN(content::RequestNavigationParams)
   IPC_STRUCT_TRAITS_MEMBER(is_overriding_user_agent)
   IPC_STRUCT_TRAITS_MEMBER(browser_navigation_start)
+  IPC_STRUCT_TRAITS_MEMBER(redirects)
+  IPC_STRUCT_TRAITS_MEMBER(can_load_local_resources)
+  IPC_STRUCT_TRAITS_MEMBER(frame_to_navigate)
+  IPC_STRUCT_TRAITS_MEMBER(request_time)
+  IPC_STRUCT_TRAITS_MEMBER(page_state)
+  IPC_STRUCT_TRAITS_MEMBER(page_id)
+  IPC_STRUCT_TRAITS_MEMBER(pending_history_list_offset)
+  IPC_STRUCT_TRAITS_MEMBER(current_history_list_offset)
+  IPC_STRUCT_TRAITS_MEMBER(current_history_list_length)
+  IPC_STRUCT_TRAITS_MEMBER(should_clear_history_list)
 IPC_STRUCT_TRAITS_END()
 
 IPC_STRUCT_TRAITS_BEGIN(content::FrameReplicationState)
   IPC_STRUCT_TRAITS_MEMBER(origin)
+  IPC_STRUCT_TRAITS_MEMBER(sandbox_flags)
+  IPC_STRUCT_TRAITS_MEMBER(name)
 IPC_STRUCT_TRAITS_END()
 
-IPC_STRUCT_BEGIN(FrameMsg_Navigate_Params)
-  // TODO(clamy): investigate which parameters are also needed in PlzNavigate
-  // and move them to the appropriate NavigationParams struct.
+IPC_STRUCT_BEGIN(FrameMsg_NewFrame_WidgetParams)
+  // Gives the routing ID for the RenderWidget that will be attached to the
+  // new RenderFrame. If the RenderFrame does not need a RenderWidget, this
+  // is MSG_ROUTING_NONE and the other parameters are not read.
+  IPC_STRUCT_MEMBER(int, routing_id)
 
-  // These structs contain parameters shared by other navigation IPCs.
-  IPC_STRUCT_MEMBER(content::CommonNavigationParams, common_params)
-  IPC_STRUCT_MEMBER(content::RequestNavigationParams, request_params)
-  IPC_STRUCT_MEMBER(content::CommitNavigationParams, commit_params)
+  // Identifier for the output surface for the new RenderWidget.
+  IPC_STRUCT_MEMBER(int, surface_id)
 
-  // The page_id for this navigation, or -1 if it is a new navigation.  Back,
-  // Forward, and Reload navigations should have a valid page_id.  If the load
-  // succeeds, then this page_id will be reflected in the resultant
-  // FrameHostMsg_DidCommitProvisionalLoad message.
-  IPC_STRUCT_MEMBER(int32, page_id)
-
-  // For history navigations, this is the offset in the history list of the
-  // pending load. For non-history navigations, this will be ignored.
-  IPC_STRUCT_MEMBER(int, pending_history_list_offset)
-
-  // Informs the RenderView of where its current page contents reside in
-  // session history and the total size of the session history list.
-  IPC_STRUCT_MEMBER(int, current_history_list_offset)
-  IPC_STRUCT_MEMBER(int, current_history_list_length)
-
-  // Informs the RenderView the session history should be cleared. In that
-  // case, the RenderView needs to notify the browser that the clearing was
-  // succesful when the navigation commits.
-  IPC_STRUCT_MEMBER(bool, should_clear_history_list)
-
-  // Base URL for use in WebKit's SubstituteData.
-  // Is only used with data: URLs.
-  IPC_STRUCT_MEMBER(GURL, base_url_for_data_url)
-
-  // History URL for use in WebKit's SubstituteData.
-  // Is only used with data: URLs.
-  IPC_STRUCT_MEMBER(GURL, history_url_for_data_url)
-
-  // Any redirect URLs that occurred before |url|. Useful for cross-process
-  // navigations; defaults to empty.
-  IPC_STRUCT_MEMBER(std::vector<GURL>, redirects)
-
-  // Informs the RenderView the pending navigation should replace the current
-  // history entry when it commits. This is used for cross-process redirects so
-  // the transferred navigation can recover the navigation state.
-  IPC_STRUCT_MEMBER(bool, should_replace_current_entry)
-
-  // The time the request was created. This is used by the old performance
-  // infrastructure to set up DocumentState associated with the RenderView.
-  // TODO(ppi): make it go away.
-  IPC_STRUCT_MEMBER(base::Time, request_time)
-
-  // The following two members identify a previous request that has been
-  // created before this navigation is being transferred to a new render view.
-  // This serves the purpose of recycling the old request.
-  // Unless this refers to a transferred navigation, these values are -1 and -1.
-  IPC_STRUCT_MEMBER(int, transferred_request_child_id)
-  IPC_STRUCT_MEMBER(int, transferred_request_request_id)
-
-  // Whether or not this url should be allowed to access local file://
-  // resources.
-  IPC_STRUCT_MEMBER(bool, can_load_local_resources)
-
-  // If not empty, which frame to navigate.
-  IPC_STRUCT_MEMBER(std::string, frame_to_navigate)
+  // Tells the new RenderWidget whether it is initially hidden.
+  IPC_STRUCT_MEMBER(bool, hidden)
 IPC_STRUCT_END()
 
 IPC_STRUCT_BEGIN(FrameHostMsg_OpenURL_Params)
@@ -304,26 +275,27 @@ IPC_STRUCT_BEGIN(FrameHostMsg_OpenURL_Params)
   IPC_STRUCT_MEMBER(bool, user_gesture)
 IPC_STRUCT_END()
 
-// PlzNavigate
-IPC_STRUCT_BEGIN(FrameHostMsg_BeginNavigation_Params)
-  // TODO(clamy): See if it is possible to define a common struct between this
-  // IPC and ResourceMsg_Request_Params.
+IPC_STRUCT_BEGIN(FrameMsg_TextTrackSettings_Params)
+  // Background color of the text track.
+  IPC_STRUCT_MEMBER(std::string, text_track_background_color)
 
-  // The request method: GET, POST, etc.
-  IPC_STRUCT_MEMBER(std::string, method)
+  // Font family of the text track text.
+  IPC_STRUCT_MEMBER(std::string, text_track_font_family)
 
-  // Additional HTTP request headers.
-  IPC_STRUCT_MEMBER(std::string, headers)
+  // Font style of the text track text.
+  IPC_STRUCT_MEMBER(std::string, text_track_font_style)
 
-  // net::URLRequest load flags (net::LOAD_NORMAL) by default).
-  IPC_STRUCT_MEMBER(int, load_flags)
+  // Font variant of the text track text.
+  IPC_STRUCT_MEMBER(std::string, text_track_font_variant)
 
-  // Optional resource request body (may be null).
-  IPC_STRUCT_MEMBER(scoped_refptr<content::ResourceRequestBody>,
-                    request_body)
+  // Color of the text track text.
+  IPC_STRUCT_MEMBER(std::string, text_track_text_color)
 
-  // True if the request was user initiated.
-  IPC_STRUCT_MEMBER(bool, has_user_gesture)
+  // Text shadow (edge style) of the text track text.
+  IPC_STRUCT_MEMBER(std::string, text_track_text_shadow)
+
+  // Size of the text track text.
+  IPC_STRUCT_MEMBER(std::string, text_track_text_size)
 IPC_STRUCT_END()
 
 #if defined(OS_MACOSX) || defined(OS_ANDROID)
@@ -382,15 +354,23 @@ IPC_MESSAGE_ROUTED2(FrameMsg_CustomContextMenuAction,
 // Requests that the RenderFrame or RenderFrameProxy sets its opener to null.
 IPC_MESSAGE_ROUTED0(FrameMsg_DisownOpener)
 
+// Requests that the RenderFrame send back a response after waiting for the
+// commit, activation and frame swap of the current DOM tree in blink.
+IPC_MESSAGE_ROUTED1(FrameMsg_VisualStateRequest, uint64 /* id */)
+
 // Instructs the renderer to create a new RenderFrame object with |routing_id|.
 // The new frame should be created as a child of the object identified by
 // |parent_routing_id| or as top level if that is MSG_ROUTING_NONE.
 // If a valid |proxy_routing_id| is provided, the new frame will be configured
-// to replace the proxy on commit.
-IPC_MESSAGE_CONTROL3(FrameMsg_NewFrame,
+// to replace the proxy on commit.  When the new frame has a parent,
+// |replication_state| holds properties replicated from the process rendering
+// the parent frame, such as the new frame's sandbox flags.
+IPC_MESSAGE_CONTROL5(FrameMsg_NewFrame,
                      int /* routing_id */,
                      int /* parent_routing_id */,
-                     int /* proxy_routing_id */)
+                     int /* proxy_routing_id */,
+                     content::FrameReplicationState /* replication_state */,
+                     FrameMsg_NewFrame_WidgetParams /* widget_params */)
 
 // Instructs the renderer to create a new RenderFrameProxy object with
 // |routing_id|. The new proxy should be created as a child of the object
@@ -404,7 +384,10 @@ IPC_MESSAGE_CONTROL4(FrameMsg_NewFrameProxy,
 
 // Tells the renderer to perform the specified navigation, interrupting any
 // existing navigation.
-IPC_MESSAGE_ROUTED1(FrameMsg_Navigate, FrameMsg_Navigate_Params)
+IPC_MESSAGE_ROUTED3(FrameMsg_Navigate,
+                    content::CommonNavigationParams, /* common_params */
+                    content::StartNavigationParams,  /* start_params */
+                    content::RequestNavigationParams /* request_params */)
 
 // Instructs the renderer to invoke the frame's beforeunload event handler.
 // Expects the result to be returned via FrameHostMsg_BeforeUnload_ACK.
@@ -446,6 +429,14 @@ IPC_MESSAGE_ROUTED3(FrameMsg_JavaScriptExecuteRequest,
                     base::string16,  /* javascript */
                     int,  /* ID */
                     bool  /* if true, a reply is requested */)
+
+// Same as FrameMsg_JavaScriptExecuteRequest above except the script is
+// run in the isolated world specified by the fourth parameter.
+IPC_MESSAGE_ROUTED4(FrameMsg_JavaScriptExecuteRequestInIsolatedWorld,
+                    base::string16, /* javascript */
+                    int, /* ID */
+                    bool, /* if true, a reply is requested */
+                    int /* world_id */)
 
 // ONLY FOR TESTS: Same as above but adds a fake UserGestureindicator around
 // execution. (crbug.com/408426)
@@ -510,6 +501,21 @@ IPC_MESSAGE_ROUTED1(FrameMsg_AddStyleSheetByURL, std::string)
 IPC_MESSAGE_ROUTED1(FrameMsg_SetAccessibilityMode,
                     AccessibilityMode)
 
+// Dispatch a load event in the iframe element containing this frame.
+IPC_MESSAGE_ROUTED0(FrameMsg_DispatchLoad)
+
+// Notifies the frame that its parent has changed the frame's sandbox flags.
+IPC_MESSAGE_ROUTED1(FrameMsg_DidUpdateSandboxFlags, content::SandboxFlags)
+
+// Update a proxy's window.name property.  Used when the frame's name is
+// changed in another process.
+IPC_MESSAGE_ROUTED1(FrameMsg_DidUpdateName, std::string /* name */)
+
+// Send to the RenderFrame to set text track style settings.
+// Sent for top-level frames.
+IPC_MESSAGE_ROUTED1(FrameMsg_SetTextTrackSettings,
+                    FrameMsg_TextTrackSettings_Params /* params */)
+
 #if defined(OS_ANDROID)
 
 // External popup menus.
@@ -526,20 +532,14 @@ IPC_MESSAGE_ROUTED1(FrameMsg_SelectPopupMenuItem,
 #endif
 
 // PlzNavigate
-// Tells the renderer that a navigation has been requested.
-IPC_MESSAGE_ROUTED2(FrameMsg_RequestNavigation,
-                    content::CommonNavigationParams, /* common_params */
-                    content::RequestNavigationParams /* request_params */)
-
-// PlzNavigate
 // Tells the renderer that a navigation is ready to commit.  The renderer should
 // request |stream_url| to get access to the stream containing the body of the
 // response.
 IPC_MESSAGE_ROUTED4(FrameMsg_CommitNavigation,
-                    content::ResourceResponseHead, /* response */
-                    GURL, /* stream_url */
+                    content::ResourceResponseHead,   /* response */
+                    GURL,                            /* stream_url */
                     content::CommonNavigationParams, /* common_params */
-                    content::CommitNavigationParams /* commit_params */)
+                    content::RequestNavigationParams /* request_params */)
 
 #if defined(ENABLE_PLUGINS)
 // Notifies the renderer of updates to the Plugin Power Saver origin whitelist.
@@ -562,14 +562,21 @@ IPC_MESSAGE_ROUTED4(FrameHostMsg_AddMessageToConsole,
 //
 // Each of these messages will have a corresponding FrameHostMsg_Detach message
 // sent when the frame is detached from the DOM.
-IPC_SYNC_MESSAGE_CONTROL2_1(FrameHostMsg_CreateChildFrame,
+IPC_SYNC_MESSAGE_CONTROL3_1(FrameHostMsg_CreateChildFrame,
                             int32 /* parent_routing_id */,
                             std::string /* frame_name */,
+                            content::SandboxFlags /* sandbox flags */,
                             int32 /* new_routing_id */)
 
 // Sent by the renderer to the parent RenderFrameHost when a child frame is
 // detached from the DOM.
 IPC_MESSAGE_ROUTED0(FrameHostMsg_Detach)
+
+// Indicates the renderer process is gone.  This actually is sent by the
+// browser process to itself, but keeps the interface cleaner.
+IPC_MESSAGE_ROUTED2(FrameHostMsg_RenderProcessGone,
+                    int, /* this really is base::TerminationStatus */
+                    int /* exit_code */)
 
 // Sent by the renderer when the frame becomes focused.
 IPC_MESSAGE_ROUTED0(FrameHostMsg_FrameFocused)
@@ -612,6 +619,9 @@ IPC_MESSAGE_ROUTED1(FrameHostMsg_DidStartLoading,
 // Sent when the renderer is done loading a page.
 IPC_MESSAGE_ROUTED0(FrameHostMsg_DidStopLoading)
 
+// Sent when the frame changes its window.name.
+IPC_MESSAGE_ROUTED1(FrameHostMsg_DidChangeName, std::string /* name */)
+
 // Sent when the renderer changed the progress of a load.
 IPC_MESSAGE_ROUTED1(FrameHostMsg_DidChangeLoadProgress,
                     double /* load_progress */)
@@ -643,6 +653,12 @@ IPC_MESSAGE_ROUTED0(FrameHostMsg_DidDisownOpener)
 // Notifies the browser that a page id was assigned.
 IPC_MESSAGE_ROUTED1(FrameHostMsg_DidAssignPageId,
                     int32 /* page_id */)
+
+// Notifies the browser that sandbox flags have changed for a subframe of this
+// frame.
+IPC_MESSAGE_ROUTED2(FrameHostMsg_DidChangeSandboxFlags,
+                    int32 /* subframe_routing_id */,
+                    content::SandboxFlags /* updated_flags */)
 
 // Changes the title for the page in the UI when the page is navigated or the
 // title changes. Sent for top-level frames.
@@ -824,13 +840,26 @@ IPC_MESSAGE_CONTROL1(FrameHostMsg_AddNavigationTransitionData,
 
 // PlzNavigate
 // Tells the browser to perform a navigation.
-IPC_MESSAGE_ROUTED2(FrameHostMsg_BeginNavigation,
-                    FrameHostMsg_BeginNavigation_Params,
-                    content::CommonNavigationParams)
+IPC_MESSAGE_ROUTED3(FrameHostMsg_BeginNavigation,
+                    content::CommonNavigationParams,
+                    content::BeginNavigationParams,
+                    scoped_refptr<content::ResourceRequestBody>)
 
 // Sent once a paint happens after the first non empty layout. In other words
 // after the frame has painted something.
 IPC_MESSAGE_ROUTED0(FrameHostMsg_DidFirstVisuallyNonEmptyPaint)
+
+// Sent as a response to FrameMsg_VisualStateRequest.
+// The message is delivered using RenderWidget::QueueMessage.
+IPC_MESSAGE_ROUTED1(FrameHostMsg_VisualStateResponse, uint64 /* id */)
+
+// Puts the browser into "tab fullscreen" mode for the sending renderer.
+// See the comment in chrome/browser/ui/browser.h for more details.
+IPC_MESSAGE_ROUTED1(FrameHostMsg_ToggleFullscreen, bool /* enter_fullscreen */)
+
+// Dispatch a load event for this frame in the iframe element of an
+// out-of-process parent frame.
+IPC_MESSAGE_ROUTED0(FrameHostMsg_DispatchLoad)
 
 #if defined(OS_MACOSX) || defined(OS_ANDROID)
 

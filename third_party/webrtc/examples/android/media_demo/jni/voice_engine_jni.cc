@@ -16,6 +16,7 @@
 #include <map>
 #include <string>
 
+#include "webrtc/base/arraysize.h"
 #include "webrtc/examples/android/media_demo/jni/jni_helpers.h"
 #include "webrtc/modules/utility/interface/helpers_android.h"
 #include "webrtc/test/channel_transport/include/channel_transport.h"
@@ -164,7 +165,7 @@ void SetVoeDeviceObjects(JavaVM* vm) {
   webrtc::AttachThreadScoped ats(g_vm);
   JNIEnv* jni = ats.env();
   g_class_reference_holder = new ClassReferenceHolder(
-      jni, g_classes, ARRAYSIZE(g_classes));
+      jni, g_classes, arraysize(g_classes));
 }
 
 void ClearVoeDeviceObjects() {
@@ -326,7 +327,7 @@ JOWW(jobject, VoiceEngine_getCodec)(JNIEnv* jni, jobject j_voe, jint index) {
   jmethodID j_codec_ctor = GetMethodID(jni, j_codec_class, "<init>", "(J)V");
   jobject j_codec =
       jni->NewObject(j_codec_class, j_codec_ctor, jlongFromPointer(codec));
-  CHECK_EXCEPTION(jni, "error during NewObject");
+  CHECK_JNI_EXCEPTION(jni, "error during NewObject");
   return j_codec;
 }
 

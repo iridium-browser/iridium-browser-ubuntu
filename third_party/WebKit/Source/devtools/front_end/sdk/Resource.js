@@ -68,15 +68,16 @@ WebInspector.Resource.Events = {
  * @param {?string} content
  * @param {string} mimeType
  * @param {boolean} contentEncoded
+ * @param {?string=} charset
  * @return {?string}
  */
-WebInspector.Resource.contentAsDataURL = function(content, mimeType, contentEncoded)
+WebInspector.Resource.contentAsDataURL = function(content, mimeType, contentEncoded, charset)
 {
     const maxDataUrlSize = 1024 * 1024;
     if (content === null || content.length > maxDataUrlSize)
         return null;
 
-    return "data:" + mimeType + (contentEncoded ? ";base64," : ",") + content;
+    return "data:" + mimeType + (charset ? ";charset=" + charset : "") + (contentEncoded ? ";base64" : "") + "," + content;
 }
 
 /**
@@ -302,7 +303,7 @@ WebInspector.Resource.prototype = {
     {
         /**
          * @param {?Protocol.Error} error
-         * @param {!Array.<!PageAgent.SearchMatch>} searchMatches
+         * @param {!Array.<!DebuggerAgent.SearchMatch>} searchMatches
          */
         function callbackWrapper(error, searchMatches)
         {

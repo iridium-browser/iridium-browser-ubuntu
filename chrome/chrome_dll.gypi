@@ -78,18 +78,18 @@
             'enable_wexit_time_destructors': 1,
           },
           'sources': [
+            '../base/win/dllmain.cc',
             'app/chrome_command_ids.h',
             'app/chrome_dll_resource.h',
             'app/chrome_main.cc',
             'app/chrome_main_delegate.cc',
             'app/chrome_main_delegate.h',
-            'app/chrome_main_mac.mm',
             'app/chrome_main_mac.h',
+            'app/chrome_main_mac.mm',
             'app/close_handle_hook_win.cc',
             'app/close_handle_hook_win.h',
             'app/delay_load_hook_win.cc',
             'app/delay_load_hook_win.h',
-            '../base/win/dllmain.cc',
           ],
           'dependencies': [
             '<@(chromium_browser_dependencies)',
@@ -256,6 +256,11 @@
                 '../content/content.gyp:content_app_browser',
               ],
             }],
+            ['chrome_multiple_dll==0 and enable_plugins==1', {
+              'dependencies': [
+                '../pdf/pdf.gyp:pdf',
+              ],
+            }],
             ['cld_version==1', {
               'dependencies': [
                 '<(DEPTH)/third_party/cld/cld.gyp:cld',
@@ -273,17 +278,26 @@
               'xcode_settings': { 'OTHER_LDFLAGS': [ '-Wl,-ObjC' ], },
             }],
             ['OS=="mac"', {
+              'dependencies': [
+                '../components/components.gyp:crash_component',
+                '../components/components.gyp:policy',
+              ],
+              'sources': [
+                'app/chrome_crash_reporter_client.cc',
+                'app/chrome_crash_reporter_client.h',
+                'app/chrome_crash_reporter_client_mac.mm',
+              ],
               'xcode_settings': {
                 # Define the order of symbols within the framework.  This
                 # sets -order_file.
                 'ORDER_FILE': 'app/framework.order',
               },
-              'dependencies': [
-                '../pdf/pdf.gyp:pdf',
-              ],
               'include_dirs': [
                 '<(grit_out_dir)',
               ],
+            }],
+            # This step currently fails when using LTO. TODO(pcc): Re-enable.
+            ['OS=="mac" and use_lto==0', {
               'postbuilds': [
                 {
                   # This step causes an error to be raised if the .order file
@@ -300,25 +314,6 @@
                   ],
                 },
               ],
-              'conditions': [
-                ['mac_breakpad_compiled_in==1', {
-                  'dependencies': [
-                    '../breakpad/breakpad.gyp:breakpad',
-                    '../components/components.gyp:crash_component',
-                    '../components/components.gyp:policy',
-                  ],
-                  'sources': [
-                    'app/chrome_crash_reporter_client.cc',
-                    'app/chrome_crash_reporter_client.h',
-                    'app/chrome_crash_reporter_client_mac.mm',
-                  ],
-                }, {  # else: mac_breakpad_compiled_in!=1
-                  # No Breakpad, put in the stubs.
-                  'dependencies': [
-                    '../components/components.gyp:breakpad_stubs',
-                  ],
-                }],  # mac_breakpad_compiled_in
-              ],  # conditions
             }],  # OS=="mac"
           ],  # conditions
         },  # target chrome_main_dll
@@ -371,6 +366,11 @@
                   },
                 }],
               ]
+            }],
+            ['enable_plugins==1', {
+              'dependencies': [
+                '../pdf/pdf.gyp:pdf',
+              ],
             }],
           ],
         },  # target chrome_child_dll

@@ -13,6 +13,7 @@
 
 class Browser;
 @class BrowserActionsController;
+@class MenuController;
 class ToolbarActionViewController;
 class ToolbarActionViewDelegateBridge;
 
@@ -31,6 +32,13 @@ extern NSString* const kBrowserActionButtonDragEndNotification;
 
   // The bridge between the view controller and this object.
   scoped_ptr<ToolbarActionViewDelegateBridge> viewControllerDelegate_;
+
+  // The context menu controller.
+  base::scoped_nsobject<MenuController> contextMenuController_;
+
+  // A substitute context menu to use in testing. We need this because normally
+  // menu code is blocking, making it difficult to test.
+  NSMenu* testContextMenu_;
 
   // The controller for the browser actions bar that owns this button. Weak.
   BrowserActionsController* browserActionsController_;
@@ -77,6 +85,11 @@ extern NSString* const kBrowserActionButtonDragEndNotification;
 
 @property(readonly, nonatomic) BOOL isBeingDragged;
 
+@end
+
+@interface BrowserActionButton(TestingAPI)
+// Sets a context menu to use for testing purposes.
+- (void)setTestContextMenu:(NSMenu*)testContextMenu;
 @end
 
 @interface BrowserActionCell : ImageButtonCell {

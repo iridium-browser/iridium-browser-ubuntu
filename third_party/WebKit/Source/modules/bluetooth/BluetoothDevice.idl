@@ -5,10 +5,13 @@
 // https://webbluetoothcg.github.io/web-bluetooth/#idl-def-BluetoothDevice
 
 // Implement BluetoothDevice interface: http://crbug.com/421668
-// enum VendorIdSource {
-//     "bluetooth",
-//     "usb"
-// };
+
+enum VendorIDSource {
+    "bluetooth",
+    "usb"
+};
+
+typedef DOMString UUID;
 
 [
     GarbageCollected,
@@ -19,16 +22,16 @@
 // : ServiceEventHandlers 
 {
 // Implement BluetoothDevice interface: http://crbug.com/421668
-    readonly    attribute DOMString       instanceId;
-//    readonly    attribute DOMString?      name;
-//    readonly    attribute long?           deviceClass;
-//    readonly    attribute VendorIdSource? vendorIdSource;
-//    readonly    attribute long?           vendorId;
-//    readonly    attribute long?           productId;
-//    readonly    attribute long?           productVersion;
-//    readonly    attribute boolean?        paired;
-//    readonly    attribute boolean?        connected;
-//    readonly    attribute sequence<UUID>? uuids;
+    readonly    attribute DOMString       instanceID;
+    readonly    attribute DOMString?      name;
+    readonly    attribute unsigned long?  deviceClass;
+    readonly    attribute VendorIDSource? vendorIDSource;
+    readonly    attribute unsigned long?  vendorID;
+    readonly    attribute unsigned long?  productID;
+    readonly    attribute unsigned long?  productVersion;
+    readonly    attribute boolean?        paired;
+    readonly    attribute boolean?        connected;
+    readonly    attribute sequence<UUID>? uuids;
 //    Promise<void>                         connect ();
 //    Promise<void>                         disconnect ();
 //    Promise<BluetoothGATTService>         getService (BluetoothServiceUuid service);

@@ -30,11 +30,13 @@
 #include "config.h"
 #include "core/fetch/ResourceLoader.h"
 
+#include "core/fetch/CSSStyleSheetResource.h"
 #include "core/fetch/Resource.h"
 #include "core/fetch/ResourceLoaderHost.h"
 #include "core/fetch/ResourcePtr.h"
 #include "platform/Logging.h"
 #include "platform/SharedBuffer.h"
+#include "platform/ThreadedDataReceiver.h"
 #include "platform/exported/WrappedResourceRequest.h"
 #include "platform/exported/WrappedResourceResponse.h"
 #include "platform/network/ResourceError.h"
@@ -72,7 +74,7 @@ ResourceLoader::~ResourceLoader()
     ASSERT(m_state == Terminated);
 }
 
-void ResourceLoader::trace(Visitor* visitor)
+DEFINE_TRACE(ResourceLoader)
 {
     visitor->trace(m_host);
     visitor->trace(m_resource);
@@ -171,15 +173,15 @@ void ResourceLoader::setDefersLoading(bool defers)
     }
 }
 
-void ResourceLoader::attachThreadedDataReceiver(PassOwnPtr<blink::WebThreadedDataReceiver> threadedDataReceiver)
+void ResourceLoader::attachThreadedDataReceiver(PassRefPtrWillBeRawPtr<ThreadedDataReceiver> threadedDataReceiver)
 {
     if (m_loader) {
         // The implementor of the WebURLLoader assumes ownership of the
         // threaded data receiver if it signals that it got successfully
         // attached.
-        blink::WebThreadedDataReceiver* rawThreadedDataReceiver = threadedDataReceiver.leakPtr();
-        if (!m_loader->attachThreadedDataReceiver(rawThreadedDataReceiver))
-            delete rawThreadedDataReceiver;
+        WebThreadedDataReceiver* webDataReceiver = new WebThreadedDataReceiver(threadedDataReceiver);
+        if (!m_loader->attachThreadedDataReceiver(webDataReceiver))
+            delete webDataReceiver;
     }
 }
 
@@ -276,6 +278,7 @@ void ResourceLoader::willSendRequest(blink::WebURLLoader*, blink::WebURLRequest&
     ASSERT(!newRequest.isNull());
     const ResourceResponse& redirectResponse(passedRedirectResponse.toResourceResponse());
     ASSERT(!redirectResponse.isNull());
+    newRequest.setFollowedRedirect(true);
     if (!m_host->canAccessRedirect(m_resource, newRequest, redirectResponse, m_options)) {
         cancel(ResourceError::cancelledDueToAccessCheckError(newRequest.url()));
         return;
@@ -353,7 +356,7 @@ void ResourceLoader::didReceiveResponse(blink::WebURLLoader*, const blink::WebUR
                 resource = m_resource->resourceToRevalidate();
             else
                 m_resource->setResponse(resourceResponse);
-            if (!m_host->canAccessResource(resource, m_options.securityOrigin.get(), response.url())) {
+            if (!m_host->canAccessResource(resource, m_options.securityOrigin.get(), response.url(), ResourceLoaderHost::ShouldLogAccessControlErrors)) {
                 m_host->didReceiveResponse(m_resource, resourceResponse);
                 cancel(ResourceError::cancelledDueToAccessCheckError(KURL(response.url())));
                 return;

@@ -106,6 +106,9 @@ struct NET_EXPORT SSLConfig {
   // disable TLS_ECDH_ECDSA_WITH_RC4_128_SHA, specify 0xC002.
   std::vector<uint16> disabled_cipher_suites;
 
+  // Enables deprecated cipher suites. Currently, RC4 is deprecated.
+  bool enable_deprecated_cipher_suites;
+
   bool channel_id_enabled;   // True if TLS channel ID extension is enabled.
   bool false_start_enabled;  // True if we'll use TLS False Start.
   // True if the Certificate Transparency signed_certificate_timestamp
@@ -159,6 +162,16 @@ struct NET_EXPORT SSLConfig {
   NextProtoVector next_protos;
 
   scoped_refptr<X509Certificate> client_cert;
+
+  // Information about how to proceed with fastradio padding.
+  // |fastradio_padding_enabled| determines if the feature is enabled globally.
+  // |fastradio_padding_eligible| determines if the endpoint associated with
+  // this config should use it.
+  // |fastradio_padding_eligible| can be true when |fastradio_padding_enabled|
+  // is false: in this case, fastradio padding would not be enabled, but
+  // metrics can be collected for experiments.
+  bool fastradio_padding_enabled;
+  bool fastradio_padding_eligible;
 };
 
 }  // namespace net

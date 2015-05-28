@@ -28,7 +28,7 @@ TEST(SolidColorLayerImplTest, VerifyTilingCompleteAndNoOverlap) {
 
   FakeImplProxy proxy;
   TestSharedBitmapManager shared_bitmap_manager;
-  FakeLayerTreeHostImpl host_impl(&proxy, &shared_bitmap_manager);
+  FakeLayerTreeHostImpl host_impl(&proxy, &shared_bitmap_manager, nullptr);
   scoped_ptr<SolidColorLayerImpl> layer =
       SolidColorLayerImpl::Create(host_impl.active_tree(), 1);
   layer->draw_properties().visible_content_rect = visible_content_rect;
@@ -38,7 +38,7 @@ TEST(SolidColorLayerImplTest, VerifyTilingCompleteAndNoOverlap) {
   layer->draw_properties().render_target = layer.get();
 
   AppendQuadsData data;
-  layer->AppendQuads(render_pass.get(), Occlusion(), &data);
+  layer->AppendQuads(render_pass.get(), &data);
 
   LayerTestCommon::VerifyQuadsExactlyCoverRect(render_pass->quad_list,
                                                visible_content_rect);
@@ -54,7 +54,7 @@ TEST(SolidColorLayerImplTest, VerifyCorrectBackgroundColorInQuad) {
 
   FakeImplProxy proxy;
   TestSharedBitmapManager shared_bitmap_manager;
-  FakeLayerTreeHostImpl host_impl(&proxy, &shared_bitmap_manager);
+  FakeLayerTreeHostImpl host_impl(&proxy, &shared_bitmap_manager, nullptr);
   scoped_ptr<SolidColorLayerImpl> layer =
       SolidColorLayerImpl::Create(host_impl.active_tree(), 1);
   layer->draw_properties().visible_content_rect = visible_content_rect;
@@ -65,7 +65,7 @@ TEST(SolidColorLayerImplTest, VerifyCorrectBackgroundColorInQuad) {
   layer->draw_properties().render_target = layer.get();
 
   AppendQuadsData data;
-  layer->AppendQuads(render_pass.get(), Occlusion(), &data);
+  layer->AppendQuads(render_pass.get(), &data);
 
   ASSERT_EQ(render_pass->quad_list.size(), 1U);
   EXPECT_EQ(
@@ -83,7 +83,7 @@ TEST(SolidColorLayerImplTest, VerifyCorrectOpacityInQuad) {
 
   FakeImplProxy proxy;
   TestSharedBitmapManager shared_bitmap_manager;
-  FakeLayerTreeHostImpl host_impl(&proxy, &shared_bitmap_manager);
+  FakeLayerTreeHostImpl host_impl(&proxy, &shared_bitmap_manager, nullptr);
   scoped_ptr<SolidColorLayerImpl> layer =
       SolidColorLayerImpl::Create(host_impl.active_tree(), 1);
   layer->draw_properties().visible_content_rect = visible_content_rect;
@@ -94,7 +94,7 @@ TEST(SolidColorLayerImplTest, VerifyCorrectOpacityInQuad) {
   layer->draw_properties().render_target = layer.get();
 
   AppendQuadsData data;
-  layer->AppendQuads(render_pass.get(), Occlusion(), &data);
+  layer->AppendQuads(render_pass.get(), &data);
 
   ASSERT_EQ(render_pass->quad_list.size(), 1U);
   EXPECT_EQ(opacity,
@@ -112,7 +112,7 @@ TEST(SolidColorLayerImplTest, VerifyCorrectBlendModeInQuad) {
 
   FakeImplProxy proxy;
   TestSharedBitmapManager shared_bitmap_manager;
-  FakeLayerTreeHostImpl host_impl(&proxy, &shared_bitmap_manager);
+  FakeLayerTreeHostImpl host_impl(&proxy, &shared_bitmap_manager, nullptr);
   scoped_ptr<SolidColorLayerImpl> layer =
       SolidColorLayerImpl::Create(host_impl.active_tree(), 1);
   layer->SetBounds(layer_size);
@@ -120,7 +120,7 @@ TEST(SolidColorLayerImplTest, VerifyCorrectBlendModeInQuad) {
   layer->draw_properties().blend_mode = blend_mode;
 
   AppendQuadsData data;
-  layer->AppendQuads(render_pass.get(), Occlusion(), &data);
+  layer->AppendQuads(render_pass.get(), &data);
 
   ASSERT_EQ(render_pass->quad_list.size(), 1U);
   EXPECT_EQ(blend_mode,
@@ -166,7 +166,7 @@ TEST(SolidColorLayerImplTest, VerifyOpaqueRect) {
     scoped_ptr<RenderPass> render_pass = RenderPass::Create();
 
     AppendQuadsData data;
-    layer_impl->AppendQuads(render_pass.get(), Occlusion(), &data);
+    layer_impl->AppendQuads(render_pass.get(), &data);
 
     ASSERT_EQ(render_pass->quad_list.size(), 1U);
     EXPECT_EQ(visible_content_rect.ToString(),
@@ -192,7 +192,7 @@ TEST(SolidColorLayerImplTest, VerifyOpaqueRect) {
     scoped_ptr<RenderPass> render_pass = RenderPass::Create();
 
     AppendQuadsData data;
-    layer_impl->AppendQuads(render_pass.get(), Occlusion(), &data);
+    layer_impl->AppendQuads(render_pass.get(), &data);
 
     ASSERT_EQ(render_pass->quad_list.size(), 1U);
     EXPECT_EQ(gfx::Rect().ToString(),

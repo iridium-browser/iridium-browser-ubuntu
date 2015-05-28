@@ -6,9 +6,9 @@
 
 #include <algorithm>
 
-#include "base/debug/trace_event.h"
-#include "base/debug/trace_event_argument.h"
 #include "base/strings/stringprintf.h"
+#include "base/trace_event/trace_event.h"
+#include "base/trace_event/trace_event_argument.h"
 #include "cc/debug/traced_value.h"
 #include "cc/resources/raster_buffer.h"
 #include "cc/resources/raster_source.h"
@@ -128,7 +128,8 @@ void BitmapTileTaskWorkerPool::ScheduleTasks(TileTaskQueue* queue) {
 
   for (TaskSet task_set = 0; task_set < kNumberOfTaskSets; ++task_set) {
     InsertNodeForTask(&graph_, new_task_set_finished_tasks[task_set].get(),
-                      kTaskSetFinishedTaskPriority, task_count[task_set]);
+                      kTaskSetFinishedTaskPriorityBase + task_set,
+                      task_count[task_set]);
   }
 
   ScheduleTasksOnOriginThread(this, &graph_);
@@ -160,6 +161,10 @@ void BitmapTileTaskWorkerPool::CheckForCompletedTasks() {
   completed_tasks_.clear();
 }
 
+ResourceFormat BitmapTileTaskWorkerPool::GetResourceFormat() {
+  return resource_provider_->best_texture_format();
+}
+
 scoped_ptr<RasterBuffer> BitmapTileTaskWorkerPool::AcquireBufferForRaster(
     const Resource* resource) {
   return make_scoped_ptr<RasterBuffer>(
@@ -186,10 +191,10 @@ void BitmapTileTaskWorkerPool::OnTaskSetFinished(TaskSet task_set) {
   client_->DidFinishRunningTileTasks(task_set);
 }
 
-scoped_refptr<base::debug::ConvertableToTraceFormat>
+scoped_refptr<base::trace_event::ConvertableToTraceFormat>
 BitmapTileTaskWorkerPool::StateAsValue() const {
-  scoped_refptr<base::debug::TracedValue> state =
-      new base::debug::TracedValue();
+  scoped_refptr<base::trace_event::TracedValue> state =
+      new base::trace_event::TracedValue();
 
   state->BeginArray("tasks_pending");
   for (TaskSet task_set = 0; task_set < kNumberOfTaskSets; ++task_set)

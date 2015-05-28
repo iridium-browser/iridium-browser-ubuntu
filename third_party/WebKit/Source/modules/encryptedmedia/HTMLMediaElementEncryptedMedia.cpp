@@ -17,6 +17,7 @@
 #include "core/html/MediaKeyError.h"
 #include "core/html/MediaKeyEvent.h"
 #include "modules/encryptedmedia/ContentDecryptionModuleResultPromise.h"
+#include "modules/encryptedmedia/EncryptedMediaUtils.h"
 #include "modules/encryptedmedia/MediaEncryptedEvent.h"
 #include "modules/encryptedmedia/MediaKeys.h"
 #include "platform/ContentDecryptionModuleResult.h"
@@ -54,7 +55,7 @@ public:
     static ScriptPromise create(ScriptState*, HTMLMediaElement&, MediaKeys*);
     virtual ~SetMediaKeysHandler();
 
-    virtual void trace(Visitor*) override;
+    DECLARE_VIRTUAL_TRACE();
 
 private:
     SetMediaKeysHandler(ScriptState*, HTMLMediaElement&, MediaKeys*);
@@ -105,9 +106,14 @@ public:
 
     virtual void completeWithError(blink::WebContentDecryptionModuleException code, unsigned long systemCode, const blink::WebString& message) override
     {
-        // The error string is in the format of: OriginalMessage (systemCode)
+        // Non-zero |systemCode| is appended to the |message|. If the |message|
+        // is empty, we'll report "Rejected with system code (systemCode)".
         String errorString = message;
-        errorString.append(" (" + String::number(systemCode) + ")");
+        if (systemCode != 0) {
+            if (errorString.isEmpty())
+                errorString.append("Rejected with system code");
+            errorString.append(" (" + String::number(systemCode) + ")");
+        }
         (*m_failureCallback)(WebCdmExceptionToExceptionCode(code), errorString);
     }
 
@@ -239,7 +245,7 @@ void SetMediaKeysHandler::reportSetFailed(ExceptionCode code, const String& erro
     reject(DOMException::create(code, errorMessage));
 }
 
-void SetMediaKeysHandler::trace(Visitor* visitor)
+DEFINE_TRACE(SetMediaKeysHandler)
 {
     visitor->trace(m_element);
     visitor->trace(m_newMediaKeys);
@@ -248,6 +254,7 @@ void SetMediaKeysHandler::trace(Visitor* visitor)
 
 HTMLMediaElementEncryptedMedia::HTMLMediaElementEncryptedMedia()
     : m_emeMode(EmeModeNotSelected)
+    , m_isWaitingForKey(false)
 {
 }
 
@@ -306,10 +313,10 @@ ScriptPromise HTMLMediaElementEncryptedMedia::setMediaKeys(ScriptState* scriptSt
 }
 
 // Create a MediaEncryptedEvent for WD EME.
-static PassRefPtrWillBeRawPtr<Event> createEncryptedEvent(const String& initDataType, const unsigned char* initData, unsigned initDataLength)
+static PassRefPtrWillBeRawPtr<Event> createEncryptedEvent(WebEncryptedMediaInitDataType initDataType, const unsigned char* initData, unsigned initDataLength)
 {
     MediaEncryptedEventInit initializer;
-    initializer.setInitDataType(initDataType);
+    initializer.setInitDataType(EncryptedMediaUtils::convertFromInitDataType(initDataType));
     initializer.setInitData(DOMArrayBuffer::create(initData, initDataLength));
     initializer.setBubbles(false);
     initializer.setCancelable(false);
@@ -509,14 +516,21 @@ void HTMLMediaElementEncryptedMedia::keyMessage(HTMLMediaElement& element, const
     element.scheduleEvent(event.release());
 }
 
-void HTMLMediaElementEncryptedMedia::encrypted(HTMLMediaElement& element, const String& initDataType, const unsigned char* initData, unsigned initDataLength)
+void HTMLMediaElementEncryptedMedia::encrypted(HTMLMediaElement& element, WebEncryptedMediaInitDataType initDataType, const unsigned char* initData, unsigned initDataLength)
 {
-    WTF_LOG(Media, "HTMLMediaElementEncryptedMedia::encrypted: initDataType=%s", initDataType.utf8().data());
+    WTF_LOG(Media, "HTMLMediaElementEncryptedMedia::encrypted");
 
     if (RuntimeEnabledFeatures::encryptedMediaEnabled()) {
         // Send event for WD EME.
-        // FIXME: Check origin before providing initData. http://crbug.com/418233.
-        RefPtrWillBeRawPtr<Event> event = createEncryptedEvent(initDataType, initData, initDataLength);
+        RefPtrWillBeRawPtr<Event> event;
+        if (element.isMediaDataCORSSameOrigin(element.executionContext()->securityOrigin())) {
+            event = createEncryptedEvent(initDataType, initData, initDataLength);
+        } else {
+            // Current page is not allowed to see content from the media file,
+            // so don't return the initData. However, they still get an event.
+            event = createEncryptedEvent(WebEncryptedMediaInitDataType::Unknown, nullptr, 0);
+        }
+
         event->setTarget(&element);
         element.scheduleEvent(event.release());
     }
@@ -529,20 +543,42 @@ void HTMLMediaElementEncryptedMedia::encrypted(HTMLMediaElement& element, const 
     }
 }
 
-void HTMLMediaElementEncryptedMedia::playerDestroyed(HTMLMediaElement& element)
+void HTMLMediaElementEncryptedMedia::didBlockPlaybackWaitingForKey(HTMLMediaElement& element)
 {
-#if ENABLE(OILPAN)
-    // FIXME: Oilpan: remove this once the media player is on the heap. crbug.com/378229
-    if (element.isFinalizing())
-        return;
-#endif
+    WTF_LOG(Media, "HTMLMediaElementEncryptedMedia::didBlockPlaybackWaitingForKey");
 
+    // From https://w3c.github.io/encrypted-media/#queue-waitingforkey:
+    // It should only be called when the HTMLMediaElement object is potentially
+    // playing and its readyState is equal to HAVE_FUTURE_DATA or greater.
+    // FIXME: Is this really required?
+
+    // 1. Let the media element be the specified HTMLMediaElement object.
     HTMLMediaElementEncryptedMedia& thisElement = HTMLMediaElementEncryptedMedia::from(element);
-    if (!thisElement.m_mediaKeys)
-        return;
 
-    ASSERT(thisElement.m_emeMode == EmeModeUnprefixed);
-    thisElement.m_mediaKeys.clear();
+    // 2. If the media element's waiting for key value is false, queue a task
+    //    to fire a simple event named waitingforkey at the media element.
+    if (!thisElement.m_isWaitingForKey) {
+        RefPtrWillBeRawPtr<Event> event = Event::create(EventTypeNames::waitingforkey);
+        event->setTarget(&element);
+        element.scheduleEvent(event.release());
+    }
+
+    // 3. Set the media element's waiting for key value to true.
+    thisElement.m_isWaitingForKey = true;
+
+    // 4. Suspend playback.
+    //    (Already done on the Chromium side by the decryptors.)
+}
+
+void HTMLMediaElementEncryptedMedia::didResumePlaybackBlockedForKey(HTMLMediaElement& element)
+{
+    WTF_LOG(Media, "HTMLMediaElementEncryptedMedia::didResumePlaybackBlockedForKey");
+
+    // Logic is on the Chromium side to attempt to resume playback when a new
+    // key is available. However, |m_isWaitingForKey| needs to be cleared so
+    // that a later waitingForKey() call can generate the event.
+    HTMLMediaElementEncryptedMedia& thisElement = HTMLMediaElementEncryptedMedia::from(element);
+    thisElement.m_isWaitingForKey = false;
 }
 
 WebContentDecryptionModule* HTMLMediaElementEncryptedMedia::contentDecryptionModule(HTMLMediaElement& element)
@@ -551,7 +587,7 @@ WebContentDecryptionModule* HTMLMediaElementEncryptedMedia::contentDecryptionMod
     return thisElement.contentDecryptionModule();
 }
 
-void HTMLMediaElementEncryptedMedia::trace(Visitor* visitor)
+DEFINE_TRACE(HTMLMediaElementEncryptedMedia)
 {
     visitor->trace(m_mediaKeys);
     WillBeHeapSupplement<HTMLMediaElement>::trace(visitor);

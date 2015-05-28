@@ -45,17 +45,25 @@ class ManagePasswordsBubbleView : public ManagePasswordsBubble,
 
   content::WebContents* web_contents() const;
 
+#if defined(UNIT_TEST)
   const View* initially_focused_view() const {
     return initially_focused_view_;
   }
 
+  static void set_auto_signin_toast_timeout(int seconds) {
+    auto_signin_toast_timeout_ = seconds;
+  }
+#endif
+
  private:
-  class AskUserToSubmitURLView;
   class AccountChooserView;
+  class AutoSigninView;
   class BlacklistedView;
   class ConfirmNeverView;
   class ManageView;
+  class ManageAccountsView;
   class PendingView;
+  class SaveAccountView;
   class SaveConfirmationView;
   class WebContentMouseHandler;
 
@@ -67,8 +75,10 @@ class ManagePasswordsBubbleView : public ManagePasswordsBubble,
   // ManagedFullScreenBubbleDelegateView:
   views::View* GetInitiallyFocusedView() override;
   void Init() override;
-  void WindowClosing() override;
   void Close() override;
+
+  // WidgetObserver:
+  void OnWidgetClosing(views::Widget* widget) override;
 
   // Refreshes the bubble's state: called to display a confirmation screen after
   // a user selects "Never for this site", for instance.
@@ -96,6 +106,9 @@ class ManagePasswordsBubbleView : public ManagePasswordsBubble,
   // shown twice at the same time. The instance is owned by the Bubble and will
   // be deleted when the bubble closes.
   static ManagePasswordsBubbleView* manage_passwords_bubble_;
+
+  // The timeout in seconds for the auto sign-in toast.
+  static int auto_signin_toast_timeout_;
 
   ManagePasswordsIconView* anchor_view_;
 

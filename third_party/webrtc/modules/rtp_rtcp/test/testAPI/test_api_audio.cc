@@ -25,10 +25,10 @@ using namespace webrtc;
 
 class VerifyingAudioReceiver : public NullRtpData {
  public:
-  virtual int32_t OnReceivedPayloadData(
+  int32_t OnReceivedPayloadData(
       const uint8_t* payloadData,
       const size_t payloadSize,
-      const webrtc::WebRtcRTPHeader* rtpHeader) OVERRIDE {
+      const webrtc::WebRtcRTPHeader* rtpHeader) override {
     if (rtpHeader->header.payloadType == 98 ||
         rtpHeader->header.payloadType == 99) {
       EXPECT_EQ(4u, payloadSize);
@@ -61,13 +61,12 @@ class VerifyingAudioReceiver : public NullRtpData {
 
 class RTPCallback : public NullRtpFeedback {
  public:
-  virtual int32_t OnInitializeDecoder(
-      const int32_t id,
-      const int8_t payloadType,
-      const char payloadName[RTP_PAYLOAD_NAME_SIZE],
-      const int frequency,
-      const uint8_t channels,
-      const uint32_t rate) OVERRIDE {
+  int32_t OnInitializeDecoder(const int32_t id,
+                              const int8_t payloadType,
+                              const char payloadName[RTP_PAYLOAD_NAME_SIZE],
+                              const int frequency,
+                              const uint8_t channels,
+                              const uint32_t rate) override {
     if (payloadType == 96) {
       EXPECT_EQ(test_rate, rate) <<
           "The rate should be 64K for this payloadType";
@@ -88,7 +87,7 @@ class RtpRtcpAudioTest : public ::testing::Test {
   }
   ~RtpRtcpAudioTest() {}
 
-  virtual void SetUp() OVERRIDE {
+  void SetUp() override {
     audioFeedback = new NullRtpAudioFeedback();
     data_receiver1 = new VerifyingAudioReceiver();
     data_receiver2 = new VerifyingAudioReceiver();
@@ -133,7 +132,7 @@ class RtpRtcpAudioTest : public ::testing::Test {
                               rtp_receiver1_.get(), receive_statistics1_.get());
   }
 
-  virtual void TearDown() OVERRIDE {
+  void TearDown() override {
     delete module1;
     delete module2;
     delete transport1;
@@ -147,12 +146,12 @@ class RtpRtcpAudioTest : public ::testing::Test {
   int test_id;
   RtpRtcp* module1;
   RtpRtcp* module2;
-  scoped_ptr<ReceiveStatistics> receive_statistics1_;
-  scoped_ptr<ReceiveStatistics> receive_statistics2_;
-  scoped_ptr<RtpReceiver> rtp_receiver1_;
-  scoped_ptr<RtpReceiver> rtp_receiver2_;
-  scoped_ptr<RTPPayloadRegistry> rtp_payload_registry1_;
-  scoped_ptr<RTPPayloadRegistry> rtp_payload_registry2_;
+  rtc::scoped_ptr<ReceiveStatistics> receive_statistics1_;
+  rtc::scoped_ptr<ReceiveStatistics> receive_statistics2_;
+  rtc::scoped_ptr<RtpReceiver> rtp_receiver1_;
+  rtc::scoped_ptr<RtpReceiver> rtp_receiver2_;
+  rtc::scoped_ptr<RTPPayloadRegistry> rtp_payload_registry1_;
+  rtc::scoped_ptr<RTPPayloadRegistry> rtp_payload_registry2_;
   VerifyingAudioReceiver* data_receiver1;
   VerifyingAudioReceiver* data_receiver2;
   LoopBackTransport* transport1;
@@ -203,7 +202,6 @@ TEST_F(RtpRtcpAudioTest, Basic) {
       voice_codec.plfreq,
       voice_codec.channels,
       (voice_codec.rate < 0) ? 0 : voice_codec.rate));
-  printf("4\n");
 
   const uint8_t test[5] = "test";
   EXPECT_EQ(0, module1->SendOutgoingData(webrtc::kAudioFrameSpeech, 96,

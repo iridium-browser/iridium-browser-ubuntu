@@ -11,6 +11,7 @@
 namespace blink {
 
 DictionaryTest::DictionaryTest()
+    : m_requiredBooleanMember(false)
 {
 }
 
@@ -38,6 +39,8 @@ void DictionaryTest::set(const InternalDictionary& testingDictionary)
         m_booleanMember = testingDictionary.booleanMember();
     if (testingDictionary.hasDoubleMember())
         m_doubleMember = testingDictionary.doubleMember();
+    if (testingDictionary.hasUnrestrictedDoubleMember())
+        m_unrestrictedDoubleMember = testingDictionary.unrestrictedDoubleMember();
     m_stringMember = testingDictionary.stringMember();
     m_stringMemberWithDefault = testingDictionary.stringMemberWithDefault();
     m_byteStringMember = testingDictionary.byteStringMember();
@@ -49,6 +52,8 @@ void DictionaryTest::set(const InternalDictionary& testingDictionary)
     m_enumMember = testingDictionary.enumMember();
     m_enumMemberWithDefault = testingDictionary.enumMemberWithDefault();
     m_enumOrNullMember = testingDictionary.enumOrNullMember();
+    if (testingDictionary.hasEnumArrayMember())
+        m_enumArrayMember = testingDictionary.enumArrayMember();
     if (testingDictionary.hasElementMember())
         m_elementMember = testingDictionary.elementMember();
     if (testingDictionary.hasElementOrNullMember())
@@ -77,6 +82,8 @@ void DictionaryTest::get(InternalDictionary& result)
         result.setBooleanMember(m_booleanMember.get());
     if (m_doubleMember)
         result.setDoubleMember(m_doubleMember.get());
+    if (m_unrestrictedDoubleMember)
+        result.setUnrestrictedDoubleMember(m_unrestrictedDoubleMember.get());
     result.setStringMember(m_stringMember);
     result.setStringMemberWithDefault(m_stringMemberWithDefault);
     result.setByteStringMember(m_byteStringMember);
@@ -88,6 +95,8 @@ void DictionaryTest::get(InternalDictionary& result)
     result.setEnumMember(m_enumMember);
     result.setEnumMemberWithDefault(m_enumMemberWithDefault);
     result.setEnumOrNullMember(m_enumOrNullMember);
+    if (m_enumArrayMember)
+        result.setEnumArrayMember(m_enumArrayMember.get());
     if (m_elementMember)
         result.setElementMember(m_elementMember);
     if (m_elementOrNullMember)
@@ -101,10 +110,12 @@ void DictionaryTest::get(InternalDictionary& result)
 
 void DictionaryTest::setDerived(const InternalDictionaryDerived& derived)
 {
+    ASSERT(derived.hasRequiredBooleanMember());
     set(derived);
     if (derived.hasDerivedStringMember())
         m_derivedStringMember = derived.derivedStringMember();
     m_derivedStringMemberWithDefault = derived.derivedStringMemberWithDefault();
+    m_requiredBooleanMember = derived.requiredBooleanMember();
 }
 
 void DictionaryTest::getDerived(InternalDictionaryDerived& result)
@@ -112,6 +123,7 @@ void DictionaryTest::getDerived(InternalDictionaryDerived& result)
     get(result);
     result.setDerivedStringMember(m_derivedStringMember);
     result.setDerivedStringMemberWithDefault(m_derivedStringMemberWithDefault);
+    result.setRequiredBooleanMember(m_requiredBooleanMember);
 }
 
 void DictionaryTest::reset()
@@ -124,6 +136,7 @@ void DictionaryTest::reset()
     m_longOrNullMemberWithDefault = nullptr;
     m_booleanMember = nullptr;
     m_doubleMember = nullptr;
+    m_unrestrictedDoubleMember = nullptr;
     m_stringMember = String();
     m_stringMemberWithDefault = String("Should not be returned");
     m_stringSequenceMember = nullptr;
@@ -131,6 +144,7 @@ void DictionaryTest::reset()
     m_enumMember = String();
     m_enumMemberWithDefault = String();
     m_enumOrNullMember = String();
+    m_enumArrayMember = nullptr;
     m_elementMember = nullptr;
     m_elementOrNullMember = nullptr;
     m_objectMember = ScriptValue();
@@ -139,9 +153,10 @@ void DictionaryTest::reset()
     m_eventTargetOrNullMember = nullptr;
     m_derivedStringMember = String();
     m_derivedStringMemberWithDefault = String();
+    m_requiredBooleanMember = false;
 }
 
-void DictionaryTest::trace(Visitor* visitor)
+DEFINE_TRACE(DictionaryTest)
 {
     visitor->trace(m_elementMember);
     visitor->trace(m_elementOrNullMember);

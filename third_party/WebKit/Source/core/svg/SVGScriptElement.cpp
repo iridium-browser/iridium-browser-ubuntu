@@ -40,10 +40,6 @@ inline SVGScriptElement::SVGScriptElement(Document& document, bool wasInsertedBy
 {
 }
 
-SVGScriptElement::~SVGScriptElement()
-{
-}
-
 PassRefPtrWillBeRawPtr<SVGScriptElement> SVGScriptElement::create(Document& document, bool insertedByParser)
 {
     return adoptRefWillBeNoop(new SVGScriptElement(document, insertedByParser, false));
@@ -54,7 +50,7 @@ void SVGScriptElement::parseAttribute(const QualifiedName& name, const AtomicStr
     if (name == HTMLNames::onerrorAttr)
         setAttributeEventListener(EventTypeNames::error, createAttributeEventListener(this, name, value, eventParameterName()));
     else
-        parseAttributeNew(name, value);
+        SVGElement::parseAttribute(name, value);
 }
 
 void SVGScriptElement::svgAttributeChanged(const QualifiedName& attrName)
@@ -177,7 +173,7 @@ bool SVGScriptElement::isAnimatableAttribute(const QualifiedName& name) const
 }
 #endif
 
-void SVGScriptElement::trace(Visitor* visitor)
+DEFINE_TRACE(SVGScriptElement)
 {
     visitor->trace(m_loader);
     SVGElement::trace(visitor);

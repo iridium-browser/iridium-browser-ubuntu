@@ -238,7 +238,7 @@
             '../base/third_party/dynamic_annotations/dynamic_annotations.gyp:dynamic_annotations_win64',
           ],
           'sources': [
-            '<@(hmac_win64_related_sources)',
+            '<@(nacl_win64_sources)',
           ],
           'defines': [
            'CRYPTO_IMPLEMENTATION',
@@ -297,5 +297,22 @@
           'sources': [],
         }
     ]}],
+    ['test_isolation_mode != "noop"', {
+      'targets': [
+        {
+          'target_name': 'crypto_unittests_run',
+          'type': 'none',
+          'dependencies': [
+            'crypto_unittests',
+          ],
+          'includes': [
+            '../build/isolate.gypi',
+                      ],
+          'sources': [
+            'crypto_unittests.isolate',
+          ],
+        },
+      ],
+    }],
   ],
 }

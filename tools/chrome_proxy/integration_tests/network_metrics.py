@@ -13,7 +13,6 @@ from metrics import Metric
 from telemetry.page import page_test
 # All network metrics are Chrome only for now.
 from telemetry.core.backends.chrome_inspector import inspector_network
-from telemetry.timeline import recording_options
 from telemetry.value import scalar
 
 
@@ -26,11 +25,18 @@ class HTTPResponse(object):
   def __init__(self, event):
     self._response = (
         inspector_network.InspectorNetworkResponseData.FromTimelineEvent(event))
+    self._remote_port = None
+    if 'response' in event.args and 'remotePort' in event.args['response']:
+      self._remote_port = event.args['response']['remotePort']
     self._content_length = None
 
   @property
   def response(self):
     return self._response
+
+  @property
+  def remote_port(self):
+    return self._remote_port
 
   @property
   def url_signature(self):
@@ -92,9 +98,10 @@ class HTTPResponse(object):
     try:
       cl = self.GetContentLengthFromBody()
     except Exception, e:
-      resp = self.response
       logging.warning('Fail to get content length for %s from body: %s',
-                      resp.url[:100], e)
+                      self.response.url[:100], e)
+    if cl == 0:
+      resp = self.response
       cl_header = resp.GetHeader('Content-Length')
       if cl_header:
         cl = int(cl_header)
@@ -131,9 +138,7 @@ class NetworkMetric(Metric):
 
   def Start(self, page, tab):
     self._events = None
-    opts = recording_options.TimelineRecordingOptions()
-    opts.record_network = True
-    tab.StartTimelineRecording(opts)
+    tab.StartTimelineRecording()
 
   def Stop(self, page, tab):
     assert self._events is None
@@ -166,7 +171,7 @@ class NetworkMetric(Metric):
         ocl = resp.original_content_length
         if ocl < cl:
           logging.warning('original content length (%d) is less than content '
-                        'lenght(%d) for resource %s', ocl, cl, resource)
+                          'length (%d) for resource %s', ocl, cl, resource)
         if self.add_result_for_resource:
           results.AddValue(scalar.ScalarValue(
               results.current_page,

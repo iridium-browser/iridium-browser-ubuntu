@@ -60,6 +60,25 @@ class ArgumentListResponseValue
   const char* title_;
 };
 
+class ErrorWithArgumentsResponseValue : public ArgumentListResponseValue {
+ public:
+  ErrorWithArgumentsResponseValue(const std::string& function_name,
+                                  const char* title,
+                                  ExtensionFunction* function,
+                                  scoped_ptr<base::ListValue> result,
+                                  const std::string& error)
+      : ArgumentListResponseValue(function_name,
+                                  title,
+                                  function,
+                                  result.Pass()) {
+    function->SetError(error);
+  }
+
+  ~ErrorWithArgumentsResponseValue() override {}
+
+  bool Apply() override { return false; }
+};
+
 class ErrorResponseValue : public ExtensionFunction::ResponseValueObject {
  public:
   ErrorResponseValue(ExtensionFunction* function, const std::string& error) {
@@ -211,6 +230,7 @@ class UIThreadExtensionFunction::RenderHostTracker
 ExtensionFunction::ExtensionFunction()
     : request_id_(-1),
       profile_id_(NULL),
+      name_(""),
       has_callback_(false),
       include_incognito_(false),
       user_gesture_(false),
@@ -331,6 +351,13 @@ ExtensionFunction::ResponseValue ExtensionFunction::Error(
       this, ErrorUtils::FormatErrorMessage(format, s1, s2, s3)));
 }
 
+ExtensionFunction::ResponseValue ExtensionFunction::ErrorWithArguments(
+    scoped_ptr<base::ListValue> args,
+    const std::string& error) {
+  return ResponseValue(new ErrorWithArgumentsResponseValue(
+      name(), "ErrorWithArguments", this, args.Pass(), error));
+}
+
 ExtensionFunction::ResponseValue ExtensionFunction::BadMessage() {
   return ResponseValue(new BadMessageResponseValue(this));
 }
@@ -377,7 +404,7 @@ void ExtensionFunction::SendResponseImpl(bool success) {
   if (!results_)
     results_.reset(new base::ListValue());
 
-  response_callback_.Run(type, *results_, GetError());
+  response_callback_.Run(type, *results_, GetError(), histogram_value());
 }
 
 void ExtensionFunction::OnRespondingLater(ResponseValue value) {
@@ -429,6 +456,11 @@ content::WebContents* UIThreadExtensionFunction::GetAssociatedWebContents() {
     web_contents = dispatcher()->delegate()->GetAssociatedWebContents();
 
   return web_contents;
+}
+
+content::WebContents* UIThreadExtensionFunction::GetSenderWebContents() {
+  return render_view_host_ ?
+      content::WebContents::FromRenderViewHost(render_view_host_) : nullptr;
 }
 
 void UIThreadExtensionFunction::SendResponse(bool success) {

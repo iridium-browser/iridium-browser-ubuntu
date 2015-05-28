@@ -48,7 +48,7 @@ class SYNC_EXPORT_PRIVATE Syncer {
   // sync.  The |nudge_tracker| contains state that describes why the client is
   // out of sync and what must be done to bring it back into sync.
   virtual bool NormalSyncShare(ModelTypeSet request_types,
-                               const sessions::NudgeTracker& nudge_tracker,
+                               sessions::NudgeTracker* nudge_tracker,
                                sessions::SyncSession* session);
 
   // Performs an initial download for the |request_types|.  It is assumed that
@@ -70,7 +70,7 @@ class SYNC_EXPORT_PRIVATE Syncer {
 
  private:
   bool DownloadAndApplyUpdates(
-      ModelTypeSet request_types,
+      ModelTypeSet* request_types,
       sessions::SyncSession* session,
       GetUpdatesProcessor* get_updates_processor,
       bool create_mobile_bookmarks_folder);
@@ -79,10 +79,10 @@ class SYNC_EXPORT_PRIVATE Syncer {
   // number of unsynced and ready to commit items reaches zero or an error is
   // encountered.  A request to exit early will be treated as an error and will
   // abort any blocking operations.
-  SyncerError BuildAndPostCommits(
-      ModelTypeSet request_types,
-      sessions::SyncSession* session,
-      CommitProcessor* commit_processor);
+  SyncerError BuildAndPostCommits(ModelTypeSet request_types,
+                                  sessions::NudgeTracker* nudge_tracker,
+                                  sessions::SyncSession* session,
+                                  CommitProcessor* commit_processor);
 
   void HandleCycleBegin(sessions::SyncSession* session);
   bool HandleCycleEnd(

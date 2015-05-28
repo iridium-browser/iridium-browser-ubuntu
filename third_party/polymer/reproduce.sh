@@ -14,14 +14,29 @@ set -e
 cd "$(dirname "$0")"
 
 rm -rf components components-chromium
+rm -rf ../web-animations-js/sources
 
 bower install
+
+rm -rf components/web-animations-js/{test,node_modules}
+# TODO(jlklein): Remove when
+# https://github.com/web-animations/web-animations-next/pull/289 is released
+# and the version of web-animations-js is bumped in bower.json.
+rm components/web-animations-js/.travis-setup.sh
+
+mv components/web-animations-js ../web-animations-js/sources
+cp ../web-animations-js/sources/COPYING ../web-animations-js/LICENSE
 
 # These components are deprecated or needed only for demos.
 rm -rf components/{core-component-page,core-field,font-roboto,webcomponentsjs}
 
 # Make checkperms.py happy.
 find components/{core-list,core-resizable} -type f -exec chmod -x {} \;
+
+# Remove carriage returns to make CQ happy.
+find components -type f \( -name \*.html -o -name \*.css -o -name \*.js\
+  -o -name \*.md -o -name \*.sh -o -name \*.json -o -name \*.gitignore \)\
+  -print0 | xargs -0 sed -i -e $'s/\r$//g'
 
 # TODO(dzhioev): remove when
 # https://code.google.com/p/grit-i18n/issues/detail?id=30 is fixed

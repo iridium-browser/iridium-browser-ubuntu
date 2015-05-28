@@ -97,7 +97,7 @@ GetLoggedInProfileInfoList() {
 } // namespace
 
 bool FileManagerPrivateLogoutUserForReauthenticationFunction::RunSync() {
-  user_manager::User* user =
+  const user_manager::User* user =
       chromeos::ProfileHelper::Get()->GetUserByProfile(GetProfile());
   if (user) {
     user_manager::UserManager::Get()->SaveUserOAuthStatus(
@@ -129,7 +129,7 @@ bool FileManagerPrivateGetPreferencesFunction::RunSync() {
 
   drive::EventLogger* logger = file_manager::util::GetLogger(GetProfile());
   if (logger)
-    logger->Log(logging::LOG_INFO, "%s succeeded.", name().c_str());
+    logger->Log(logging::LOG_INFO, "%s succeeded.", name());
   return true;
 }
 
@@ -150,7 +150,7 @@ bool FileManagerPrivateSetPreferencesFunction::RunSync() {
 
   drive::EventLogger* logger = file_manager::util::GetLogger(GetProfile());
   if (logger)
-    logger->Log(logging::LOG_INFO, "%s succeeded.", name().c_str());
+    logger->Log(logging::LOG_INFO, "%s succeeded.", name());
   return true;
 }
 
@@ -344,7 +344,7 @@ bool FileManagerPrivateRequestWebStoreAccessTokenFunction::RunAsync() {
 }
 
 void FileManagerPrivateRequestWebStoreAccessTokenFunction::OnAccessTokenFetched(
-    google_apis::GDataErrorCode code,
+    google_apis::DriveApiErrorCode code,
     const std::string& access_token) {
   drive::EventLogger* logger = file_manager::util::GetLogger(GetProfile());
 
@@ -358,8 +358,8 @@ void FileManagerPrivateRequestWebStoreAccessTokenFunction::OnAccessTokenFetched(
   } else {
     if (logger) {
       logger->Log(logging::LOG_ERROR,
-                  "CWS OAuth token fetch failed. (GDataErrorCode: %s)",
-                  google_apis::GDataErrorCodeToString(code).c_str());
+                  "CWS OAuth token fetch failed. (DriveApiErrorCode: %s)",
+                  google_apis::DriveApiErrorCodeToString(code).c_str());
     }
     SetResult(base::Value::CreateNullValue());
     SendResponse(false);
@@ -367,11 +367,6 @@ void FileManagerPrivateRequestWebStoreAccessTokenFunction::OnAccessTokenFetched(
 }
 
 bool FileManagerPrivateGetProfilesFunction::RunSync() {
-#if defined(USE_ATHENA)
-  // TODO(oshima): Figure out what to do.
-  return false;
-#endif
-
   const std::vector<linked_ptr<api::file_manager_private::ProfileInfo> >&
       profiles = GetLoggedInProfileInfoList();
 
@@ -390,50 +385,6 @@ bool FileManagerPrivateGetProfilesFunction::RunSync() {
       profiles,
       current_profile_id,
       display_profile_id.empty() ? current_profile_id : display_profile_id);
-  return true;
-}
-
-bool FileManagerPrivateVisitDesktopFunction::RunSync() {
-  using api::file_manager_private::VisitDesktop::Params;
-  const scoped_ptr<Params> params(Params::Create(*args_));
-  const std::vector<linked_ptr<api::file_manager_private::ProfileInfo> >&
-      profiles = GetLoggedInProfileInfoList();
-
-  chrome::MultiUserWindowManager* const window_manager =
-      chrome::MultiUserWindowManager::GetInstance();
-  DCHECK(window_manager);
-
-  // Check if the target user is logged-in or not.
-  bool logged_in = false;
-  for (size_t i = 0; i < profiles.size(); ++i) {
-    if (profiles[i]->profile_id == params->profile_id) {
-      logged_in = true;
-      break;
-    }
-  }
-  if (!logged_in) {
-    SetError("The user is not logged-in now.");
-    return false;
-  }
-
-  // Look for the current app window.
-  AppWindow* const app_window = GetCurrentAppWindow(this);
-  if (!app_window) {
-    SetError("Target window is not found.");
-    return false;
-  }
-
-  // Move the window to the user's desktop.
-  window_manager->ShowWindowForUser(app_window->GetNativeWindow(),
-                                    params->profile_id);
-
-  // Check the result.
-  if (!window_manager->IsWindowOnDesktopOfUser(app_window->GetNativeWindow(),
-                                               params->profile_id)) {
-    SetError("The window cannot visit the desktop.");
-    return false;
-  }
-
   return true;
 }
 
@@ -507,6 +458,17 @@ void FileManagerPrivateGetMimeTypeFunction::OnGetMimeType(
     const std::string& mimeType) {
   SetResult(new base::StringValue(mimeType));
   SendResponse(true);
+}
+
+ExtensionFunction::ResponseAction
+FileManagerPrivateIsPiexLoaderEnabledFunction::Run() {
+#if defined(OFFICIAL_BUILD)
+  return RespondNow(OneArgument(
+      new base::FundamentalValue(true)));
+#else
+  return RespondNow(OneArgument(
+      new base::FundamentalValue(false)));
+#endif
 }
 
 }  // namespace extensions

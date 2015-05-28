@@ -32,6 +32,7 @@
 #ifndef FrameLoader_h
 #define FrameLoader_h
 
+#include "core/CoreExport.h"
 #include "core/dom/IconURL.h"
 #include "core/dom/SandboxFlags.h"
 #include "core/dom/SecurityContext.h"
@@ -40,19 +41,16 @@
 #include "core/loader/FrameLoaderStateMachine.h"
 #include "core/loader/FrameLoaderTypes.h"
 #include "core/loader/HistoryItem.h"
-#include "core/loader/MixedContentChecker.h"
 #include "core/loader/NavigationPolicy.h"
 #include "platform/Timer.h"
 #include "platform/heap/Handle.h"
 #include "platform/network/ResourceRequest.h"
 #include "wtf/Forward.h"
 #include "wtf/HashSet.h"
-#include "wtf/OwnPtr.h"
 
 namespace blink {
 
 class DocumentLoader;
-class FetchContext;
 class Frame;
 class FrameLoaderClient;
 class ProgressTracker;
@@ -64,7 +62,7 @@ struct FrameLoadRequest;
 
 bool isBackForwardLoadType(FrameLoadType);
 
-class FrameLoader final {
+class CORE_EXPORT FrameLoader final {
     WTF_MAKE_NONCOPYABLE(FrameLoader);
     DISALLOW_ALLOCATION();
 public:
@@ -86,12 +84,9 @@ public:
 
     static void reportLocalLoadFailed(LocalFrame*, const String& url);
 
-    // FIXME: These are all functions which stop loads. We have too many.
     // Warning: stopAllLoaders can and will detach the LocalFrame out from under you. All callers need to either protect the LocalFrame
     // or guarantee they won't in any way access the LocalFrame after stopAllLoaders returns.
     void stopAllLoaders();
-    void stopLoading();
-    bool closeURL();
 
     // FIXME: clear() is trying to do too many things. We should break it down into smaller functions.
     void clear();
@@ -111,8 +106,6 @@ public:
     DocumentLoader* documentLoader() const { return m_documentLoader.get(); }
     DocumentLoader* policyDocumentLoader() const { return m_policyDocumentLoader.get(); }
     DocumentLoader* provisionalDocumentLoader() const { return m_provisionalDocumentLoader.get(); }
-    FrameState state() const { return m_state; }
-    FetchContext& fetchContext() const { return *m_fetchContext; }
 
     void receivedMainResourceError(DocumentLoader*, const ResourceError&);
 
@@ -123,8 +116,6 @@ public:
 
     FrameLoadType loadType() const;
     void setLoadType(FrameLoadType loadType) { m_loadType = loadType; }
-
-    void checkLoadComplete();
 
     FrameLoaderClient* client() const;
 
@@ -150,6 +141,9 @@ public:
 
     bool shouldEnforceStrictMixedContentChecking() const;
 
+    SecurityContext::InsecureRequestsPolicy insecureRequestsPolicy() const;
+    SecurityContext::InsecureNavigationsSet* insecureNavigationsToUpgrade() const;
+
     Frame* opener();
     void setOpener(LocalFrame*);
 
@@ -170,6 +164,7 @@ public:
     bool allAncestorsAreComplete() const; // including this
 
     bool shouldClose();
+    void dispatchUnloadEvent();
 
     bool allowPlugins(ReasonForCallingAllowPlugins);
 
@@ -181,13 +176,9 @@ public:
 
     void restoreScrollPositionAndViewState();
 
-    void trace(Visitor*);
-
-    bool checkLoadCompleteForThisFrame();
+    DECLARE_TRACE();
 
 private:
-    bool allChildrenAreComplete() const; // immediate children, not all descendants
-
     void checkTimerFired(Timer<FrameLoader>*);
     void didAccessInitialDocumentTimerFired(Timer<FrameLoader>*);
 
@@ -221,7 +212,6 @@ private:
 
     OwnPtrWillBeMember<ProgressTracker> m_progressTracker;
 
-    FrameState m_state;
     FrameLoadType m_loadType;
 
     // Document loaders for the three phases of frame loading. Note that while
@@ -231,7 +221,6 @@ private:
     RefPtr<DocumentLoader> m_documentLoader;
     RefPtr<DocumentLoader> m_provisionalDocumentLoader;
     RefPtr<DocumentLoader> m_policyDocumentLoader;
-    OwnPtrWillBeMember<FetchContext> m_fetchContext;
 
     RefPtrWillBeMember<HistoryItem> m_currentItem;
     RefPtrWillBeMember<HistoryItem> m_provisionalItem;
@@ -250,7 +239,7 @@ private:
 
         bool isValid() { return m_item; }
 
-        void trace(Visitor* visitor)
+        DEFINE_INLINE_TRACE()
         {
             visitor->trace(m_item);
         }

@@ -35,30 +35,28 @@ class DeviceEventRouter : public VolumeManagerObserver,
   // |so that the tasks are executed by RunLoop::RunUntilIdle.
   explicit DeviceEventRouter(base::TimeDelta overriding_time_delta);
 
-  virtual ~DeviceEventRouter();
+  ~DeviceEventRouter() override;
 
   // Turns the startup flag on, and then turns it off after few seconds.
   void Startup();
 
   // VolumeManagerObserver overrides.
-  virtual void OnDiskAdded(const chromeos::disks::DiskMountManager::Disk& disk,
-                           bool mounting) override;
-  virtual void OnDiskRemoved(
+  void OnDiskAdded(const chromeos::disks::DiskMountManager::Disk& disk,
+                   bool mounting) override;
+  void OnDiskRemoved(
       const chromeos::disks::DiskMountManager::Disk& disk) override;
-  virtual void OnDeviceAdded(const std::string& device_path) override;
-  virtual void OnDeviceRemoved(const std::string& device_path) override;
-  virtual void OnVolumeMounted(chromeos::MountError error_code,
-                               const VolumeInfo& volume_info) override;
-  virtual void OnVolumeUnmounted(chromeos::MountError error_code,
-                                 const VolumeInfo& volume_info) override;
-  virtual void OnFormatStarted(const std::string& device_path,
-                               bool success) override;
-  virtual void OnFormatCompleted(const std::string& device_path,
-                                 bool success) override;
+  void OnDeviceAdded(const std::string& device_path) override;
+  void OnDeviceRemoved(const std::string& device_path) override;
+  void OnVolumeMounted(chromeos::MountError error_code,
+                       const Volume& volume) override;
+  void OnVolumeUnmounted(chromeos::MountError error_code,
+                         const Volume& volume) override;
+  void OnFormatStarted(const std::string& device_path, bool success) override;
+  void OnFormatCompleted(const std::string& device_path, bool success) override;
 
   // PowerManagerClient::Observer overrides.
-  virtual void SuspendImminent() override;
-  virtual void SuspendDone(const base::TimeDelta& sleep_duration) override;
+  void SuspendImminent() override;
+  void SuspendDone(const base::TimeDelta& sleep_duration) override;
 
   bool is_resuming() const { return is_resuming_; }
   bool is_starting_up() const { return is_starting_up_; }
@@ -97,11 +95,6 @@ class DeviceEventRouter : public VolumeManagerObserver,
 
   // Thread checker.
   base::ThreadChecker thread_checker_;
-
-  // Last event time for UMA.
-  // TODO(hirono): Remove the temporarily UMA.  crbug.com/433734
-  base::Time last_hard_unplugged_;
-  base::Time last_suspend_done_;
 
   // Note: This should remain the last member so it'll be destroyed and
   // invalidate the weak pointers before any other members are destroyed.

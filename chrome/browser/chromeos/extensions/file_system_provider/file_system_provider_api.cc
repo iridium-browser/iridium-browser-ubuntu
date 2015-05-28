@@ -7,9 +7,9 @@
 #include <string>
 #include <vector>
 
-#include "base/debug/trace_event.h"
 #include "base/memory/linked_ptr.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/trace_event/trace_event.h"
 #include "base/values.h"
 #include "chrome/browser/chromeos/file_system_provider/provided_file_system_interface.h"
 #include "chrome/browser/chromeos/file_system_provider/request_manager.h"
@@ -20,11 +20,13 @@
 #include "storage/browser/fileapi/watcher_manager.h"
 
 using chromeos::file_system_provider::MountOptions;
+using chromeos::file_system_provider::OpenedFiles;
 using chromeos::file_system_provider::ProvidedFileSystemInfo;
 using chromeos::file_system_provider::ProvidedFileSystemInterface;
 using chromeos::file_system_provider::ProvidedFileSystemObserver;
 using chromeos::file_system_provider::RequestValue;
 using chromeos::file_system_provider::Service;
+using chromeos::file_system_provider::Watchers;
 
 namespace extensions {
 namespace {
@@ -66,6 +68,51 @@ scoped_ptr<ProvidedFileSystemObserver::Changes> ParseChanges(
     results->push_back(ParseChange(*change));
   }
   return results;
+}
+
+// Fills the IDL's FileSystemInfo with FSP's ProvidedFileSystemInfo and
+// Watchers.
+void FillFileSystemInfo(const ProvidedFileSystemInfo& file_system_info,
+                        const Watchers& watchers,
+                        const OpenedFiles& opened_files,
+                        api::file_system_provider::FileSystemInfo* output) {
+  using api::file_system_provider::Watcher;
+  using api::file_system_provider::OpenedFile;
+
+  output->file_system_id = file_system_info.file_system_id();
+  output->display_name = file_system_info.display_name();
+  output->writable = file_system_info.writable();
+  output->opened_files_limit = file_system_info.opened_files_limit();
+
+  std::vector<linked_ptr<Watcher>> watcher_items;
+  for (const auto& watcher : watchers) {
+    const linked_ptr<Watcher> watcher_item(new Watcher);
+    watcher_item->entry_path = watcher.second.entry_path.value();
+    watcher_item->recursive = watcher.second.recursive;
+    if (!watcher.second.last_tag.empty())
+      watcher_item->last_tag.reset(new std::string(watcher.second.last_tag));
+    watcher_items.push_back(watcher_item);
+  }
+  output->watchers = watcher_items;
+
+  std::vector<linked_ptr<OpenedFile>> opened_file_items;
+  for (const auto& opened_file : opened_files) {
+    const linked_ptr<OpenedFile> opened_file_item(new OpenedFile);
+    opened_file_item->open_request_id = opened_file.first;
+    opened_file_item->file_path = opened_file.second.file_path.value();
+    switch (opened_file.second.mode) {
+      case chromeos::file_system_provider::OPEN_FILE_MODE_READ:
+        opened_file_item->mode =
+            extensions::api::file_system_provider::OPEN_FILE_MODE_READ;
+        break;
+      case chromeos::file_system_provider::OPEN_FILE_MODE_WRITE:
+        opened_file_item->mode =
+            extensions::api::file_system_provider::OPEN_FILE_MODE_WRITE;
+        break;
+    }
+    opened_file_items.push_back(opened_file_item);
+  }
+  output->opened_files = opened_file_items;
 }
 
 }  // namespace
@@ -137,7 +184,6 @@ bool FileSystemProviderUnmountFunction::RunSync() {
 
 bool FileSystemProviderGetAllFunction::RunSync() {
   using api::file_system_provider::FileSystemInfo;
-  using api::file_system_provider::Watcher;
   Service* const service = Service::Get(GetProfile());
   DCHECK(service);
 
@@ -148,9 +194,6 @@ bool FileSystemProviderGetAllFunction::RunSync() {
   for (const auto& file_system_info : file_systems) {
     if (file_system_info.extension_id() == extension_id()) {
       const linked_ptr<FileSystemInfo> item(new FileSystemInfo);
-      item->file_system_id = file_system_info.file_system_id();
-      item->display_name = file_system_info.display_name();
-      item->writable = file_system_info.writable();
 
       chromeos::file_system_provider::ProvidedFileSystemInterface* const
           file_system =
@@ -158,27 +201,40 @@ bool FileSystemProviderGetAllFunction::RunSync() {
                                              file_system_info.file_system_id());
       DCHECK(file_system);
 
-      std::vector<linked_ptr<Watcher>> watcher_items;
-      chromeos::file_system_provider::Watchers* const watchers =
-          file_system->GetWatchers();
-      DCHECK(watchers);
-
-      for (const auto& watcher : *watchers) {
-        const linked_ptr<Watcher> watcher_item(new Watcher);
-        watcher_item->entry_path = watcher.second.entry_path.value();
-        watcher_item->recursive = watcher.second.recursive;
-        if (!watcher.second.last_tag.empty())
-          watcher_item->last_tag.reset(
-              new std::string(watcher.second.last_tag));
-        watcher_items.push_back(watcher_item);
-      }
-
-      item->watchers = watcher_items;
+      FillFileSystemInfo(file_system_info, *file_system->GetWatchers(),
+                         file_system->GetOpenedFiles(), item.get());
       items.push_back(item);
     }
   }
 
   SetResultList(api::file_system_provider::GetAll::Results::Create(items));
+  return true;
+}
+
+bool FileSystemProviderGetFunction::RunSync() {
+  using api::file_system_provider::Get::Params;
+  scoped_ptr<Params> params(Params::Create(*args_));
+  EXTENSION_FUNCTION_VALIDATE(params);
+
+  using api::file_system_provider::FileSystemInfo;
+  Service* const service = Service::Get(GetProfile());
+  DCHECK(service);
+
+  chromeos::file_system_provider::ProvidedFileSystemInterface* const
+      file_system = service->GetProvidedFileSystem(extension_id(),
+                                                   params->file_system_id);
+
+  if (!file_system) {
+    SetError(FileErrorToString(base::File::FILE_ERROR_NOT_FOUND));
+    return false;
+  }
+
+  FileSystemInfo file_system_info;
+  FillFileSystemInfo(file_system->GetFileSystemInfo(),
+                     *file_system->GetWatchers(), file_system->GetOpenedFiles(),
+                     &file_system_info);
+  SetResultList(
+      api::file_system_provider::Get::Results::Create(file_system_info));
   return true;
 }
 

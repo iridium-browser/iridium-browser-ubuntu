@@ -1,11 +1,8 @@
-#!/usr/bin/python
 # Copyright (c) 2012 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
 """Test the gslib module."""
-
-# pylint: disable=bad-continuation
 
 from __future__ import print_function
 
@@ -15,16 +12,11 @@ import errno
 import mox
 import os
 
-import fixup_path
-fixup_path.FixupPath()
-
 from chromite.lib import cros_test_lib
 
 from chromite.lib.paygen import gslib
 from chromite.lib.paygen import utils
 
-
-# pylint: disable=R0904
 
 # Typical output for a GS failure that is not our fault, and we should retry.
 GS_RETRY_FAILURE = ('GSResponseError: status=403, code=InvalidAccessKeyId,'
@@ -58,11 +50,13 @@ class TestGsLib(cros_test_lib.MoxTestCase):
 
     class RetryTestException(gslib.GSLibError):
       """Testing gslib.GSLibError exception for Retrying cases."""
+
       def __init__(self):
         super(RetryTestException, self).__init__(GS_RETRY_FAILURE)
 
     class DoneTestException(gslib.GSLibError):
       """Testing gslib.GSLibError exception for Done cases."""
+
       def __init__(self):
         super(DoneTestException, self).__init__(GS_DONE_FAILURE)
 
@@ -136,13 +130,13 @@ class TestGsLib(cros_test_lib.MoxTestCase):
     utils.RunCommand(cmd, redirect_stdout=True, redirect_stderr=True,
                      return_result=True, error_ok=True).AndReturn(3)
     # Run 4.
-    utils.RunCommand(cmd, redirect_stdout=True, redirect_stderr=True,
-                     return_result=True
-                     ).AndRaise(utils.CommandFailedException())
+    utils.RunCommand(
+        cmd, redirect_stdout=True, redirect_stderr=True,
+        return_result=True).AndRaise(utils.CommandFailedException())
     # Run 5.
-    utils.RunCommand(cmd, redirect_stdout=True, redirect_stderr=True,
-                     return_result=True
-                     ).AndRaise(OSError(errno.ENOENT, 'errmsg'))
+    utils.RunCommand(
+        cmd, redirect_stdout=True, redirect_stderr=True,
+        return_result=True).AndRaise(OSError(errno.ENOENT, 'errmsg'))
     self.mox.ReplayAll()
 
     # Run the test verification.
@@ -251,7 +245,7 @@ class TestGsLib(cros_test_lib.MoxTestCase):
 
   def testCreateWithContents(self):
     gs_path = 'gs://chromeos-releases-test/create-with-contents-test'
-    contents = "Stuff with Rocks In"
+    contents = 'Stuff with Rocks In'
 
     self.mox.StubOutWithMock(gslib, 'Copy')
 
@@ -261,7 +255,6 @@ class TestGsLib(cros_test_lib.MoxTestCase):
     gslib.CreateWithContents(gs_path, contents)
     self.mox.VerifyAll()
 
-
   def testCat(self):
     self.mox.StubOutWithMock(utils, 'RunCommand')
     path = 'gs://bucket/some/gs/path'
@@ -270,8 +263,7 @@ class TestGsLib(cros_test_lib.MoxTestCase):
     cmd = [self.gsutil, 'cat', path]
     result = cros_test_lib.EasyAttr(error='', output='TheContent')
     utils.RunCommand(cmd, redirect_stdout=True, redirect_stderr=True,
-                     return_result=True
-                     ).AndReturn(result)
+                     return_result=True).AndReturn(result)
     self.mox.ReplayAll()
 
     # Run the test verification.
@@ -285,9 +277,9 @@ class TestGsLib(cros_test_lib.MoxTestCase):
 
     # Set up the test replay script.
     cmd = [self.gsutil, 'cat', path]
-    utils.RunCommand(cmd, redirect_stdout=True, redirect_stderr=True,
-                     return_result=True
-                     ).AndRaise(utils.CommandFailedException())
+    utils.RunCommand(
+        cmd, redirect_stdout=True, redirect_stderr=True,
+        return_result=True).AndRaise(utils.CommandFailedException())
     self.mox.ReplayAll()
 
     # Run the test verification.
@@ -302,8 +294,7 @@ class TestGsLib(cros_test_lib.MoxTestCase):
     cmd = [self.gsutil, 'stat', path]
     result = cros_test_lib.EasyAttr(error='', output='')
     utils.RunCommand(cmd, redirect_stdout=True, redirect_stderr=True,
-                     return_result=True
-                     ).AndReturn(result)
+                     return_result=True).AndReturn(result)
     self.mox.ReplayAll()
 
     # Run the test verification.
@@ -316,9 +307,9 @@ class TestGsLib(cros_test_lib.MoxTestCase):
 
     # Set up the test replay script.
     cmd = [self.gsutil, 'stat', path]
-    utils.RunCommand(cmd, redirect_stdout=True, redirect_stderr=True,
-                     return_result=True
-                     ).AndRaise(utils.CommandFailedException())
+    utils.RunCommand(
+        cmd, redirect_stdout=True, redirect_stderr=True,
+        return_result=True).AndRaise(utils.CommandFailedException())
     self.mox.ReplayAll()
 
     # Run the test verification.
@@ -375,9 +366,10 @@ class TestGsLib(cros_test_lib.MoxTestCase):
 
     # Set up the test replay script.
     cmd = [self.gsutil, 'rm', '%s/*' % self.bucket_uri]
-    utils.RunCommand(cmd, redirect_stdout=True, redirect_stderr=True,
-                     error_ok=True, return_result=True
-                    ).AndRaise(utils.CommandFailedException(GS_DONE_FAILURE))
+    utils.RunCommand(
+        cmd, redirect_stdout=True, redirect_stderr=True, error_ok=True,
+        return_result=True).AndRaise(
+            utils.CommandFailedException(GS_DONE_FAILURE))
     self.mox.ReplayAll()
 
     # Run the test verification.
@@ -398,9 +390,10 @@ class TestGsLib(cros_test_lib.MoxTestCase):
                         'header: x-goog-stored-content-length: %d' % size,
                         'header: Content-Type: application/octet-stream'])
 
-    utils.RunCommand(cmd, redirect_stdout=True, redirect_stderr=True,
-                     return_result=True
-                     ).AndReturn(cros_test_lib.EasyAttr(output=output))
+    utils.RunCommand(
+        cmd, redirect_stdout=True, redirect_stderr=True,
+        return_result=True).AndReturn(
+            cros_test_lib.EasyAttr(output=output))
     self.mox.ReplayAll()
 
     # Run the test verification.
@@ -415,9 +408,9 @@ class TestGsLib(cros_test_lib.MoxTestCase):
     # Set up the test replay script.
     cmd = [self.gsutil, 'ls', '-l', gs_uri]
     output = '\n'.join([
-      '        96  2012-05-17T14:00:33  gs://bucket/chromeos.bin.md5',
-      'TOTAL: 1 objects, 96 bytes (96.0 B)',
-      ])
+        '        96  2012-05-17T14:00:33  gs://bucket/chromeos.bin.md5',
+        'TOTAL: 1 objects, 96 bytes (96.0 B)',
+    ])
     cmd_result = cros_test_lib.EasyAttr(output=output)
 
     utils.RunCommand(cmd, redirect_stdout=True, redirect_stderr=True,
@@ -437,8 +430,8 @@ class TestGsLib(cros_test_lib.MoxTestCase):
     # Run 1, versioning not enabled in bucket, one line of output.
     cmd = ['gsutil', '-d', 'cat', gs_uri]
     cmd_result = cros_test_lib.EasyAttr(output=cmd_output,
-                                       error=cmd_error,
-                                       cmdstr=' '.join(cmd))
+                                        error=cmd_error,
+                                        cmdstr=' '.join(cmd))
     cmd[0] = mox.IsA(str)
     utils.RunCommand(cmd, redirect_stdout=True, redirect_stderr=True,
                      return_result=True).AndReturn(cmd_result)
@@ -482,19 +475,20 @@ class TestGsLib(cros_test_lib.MoxTestCase):
   def testListFiles(self):
     self.mox.StubOutWithMock(utils, 'RunCommand')
     files = [
-      '%s/some/path' % self.bucket_uri,
-      '%s/some/file/path' % self.bucket_uri,
-      ]
+        '%s/some/path' % self.bucket_uri,
+        '%s/some/file/path' % self.bucket_uri,
+    ]
     directories = [
-      '%s/some/dir/' % self.bucket_uri,
-      '%s/some/dir/path/' % self.bucket_uri,
-      ]
+        '%s/some/dir/' % self.bucket_uri,
+        '%s/some/dir/path/' % self.bucket_uri,
+    ]
 
     gs_uri = '%s/**' % self.bucket_uri
     cmd = [self.gsutil, 'ls', gs_uri]
 
     # Prepare cmd_result for a good run.
-    output = '\n'.join(files + directories + ['']) # Fake a trailing empty line.
+    # Fake a trailing empty line.
+    output = '\n'.join(files + directories + [''])
     cmd_result_ok = cros_test_lib.EasyAttr(output=output, returncode=0)
 
     # Prepare exception for a run that finds nothing.
@@ -534,19 +528,20 @@ class TestGsLib(cros_test_lib.MoxTestCase):
   def testListDirs(self):
     self.mox.StubOutWithMock(utils, 'RunCommand')
     files = [
-      '%s/some/path' % self.bucket_uri,
-      '%s/some/file/path' % self.bucket_uri,
-      ]
+        '%s/some/path' % self.bucket_uri,
+        '%s/some/file/path' % self.bucket_uri,
+    ]
     directories = [
-      '%s/some/dir/' % self.bucket_uri,
-      '%s/some/dir/path/' % self.bucket_uri,
-      ]
+        '%s/some/dir/' % self.bucket_uri,
+        '%s/some/dir/path/' % self.bucket_uri,
+    ]
 
     gs_uri = '%s/**' % self.bucket_uri
     cmd = [self.gsutil, 'ls', gs_uri]
 
     # Prepare cmd_result for a good run.
-    output = '\n'.join(files + directories + ['']) # Fake a trailing empty line.
+    # Fake a trailing empty line.
+    output = '\n'.join(files + directories + [''])
     cmd_result = cros_test_lib.EasyAttr(output=output, returncode=0)
 
     # Set up the test replay script.
@@ -610,26 +605,27 @@ class TestGsLib(cros_test_lib.MoxTestCase):
     md5_sum = 'b026324c6904b2a9cb4b88d6d61c81d1'
     md5_sum_64 = base64.b64encode(base64.b16decode(md5_sum, casefold=True))
     output = '\n'.join([
-      '%s:' % gs_uri,
-      '        Creation time:          Tue, 04 Mar 2014 19:55:26 GMT',
-      '        Content-Language:       en',
-      '        Content-Length:         2',
-      '        Content-Type:           application/octet-stream',
-      '        Hash (crc32c):          %s' % crc32c_64,
-      '        Hash (md5):             %s' % md5_sum_64,
-      '        ETag:                   CMi938jU+bwCEAE=',
-      '        Generation:             1393962926989000',
-      '        Metageneration:         1',
-      '        ACL:                    ACCESS DENIED. Note: you need OWNER '
-      'permission',
-      '                                on the object to read its ACL.',
-      ])
+        '%s:' % gs_uri,
+        '        Creation time:          Tue, 04 Mar 2014 19:55:26 GMT',
+        '        Content-Language:       en',
+        '        Content-Length:         2',
+        '        Content-Type:           application/octet-stream',
+        '        Hash (crc32c):          %s' % crc32c_64,
+        '        Hash (md5):             %s' % md5_sum_64,
+        '        ETag:                   CMi938jU+bwCEAE=',
+        '        Generation:             1393962926989000',
+        '        Metageneration:         1',
+        '        ACL:                    ACCESS DENIED. Note: you need OWNER '
+        'permission',
+        '                                on the object to read its ACL.',
+    ])
 
     # Set up the test replay script.
     cmd = [self.gsutil, 'ls', '-L', gs_uri]
-    utils.RunCommand(cmd, redirect_stdout=True, redirect_stderr=True,
-                     error_ok=True, return_result=True
-                     ).AndReturn(cros_test_lib.EasyAttr(output=output))
+    utils.RunCommand(
+        cmd, redirect_stdout=True, redirect_stderr=True, error_ok=True,
+        return_result=True).AndReturn(
+            cros_test_lib.EasyAttr(output=output))
     self.mox.ReplayAll()
 
     # Run the test verification.
@@ -645,32 +641,33 @@ class TestGsLib(cros_test_lib.MoxTestCase):
     md5_sum = 'b026324c6904b2a9cb4b88d6d61c81d1'
     md5_sum_64 = base64.b64encode(base64.b16decode(md5_sum, casefold=True))
     output = '\n'.join([
-      '%s:' % gs_uri,
-      '        Creation time:          Tue, 04 Mar 2014 19:55:26 GMT',
-      '        Content-Language:       en',
-      '        Content-Length:         2',
-      '        Content-Type:           application/octet-stream',
-      '        Hash (crc32c):          %s' % crc32c_64,
-      '        Hash (md5):             %s' % md5_sum_64,
-      '        ETag:                   CMi938jU+bwCEAE=',
-      '        Generation:             1393962926989000',
-      '        Metageneration:         1',
-      '        ACL:            [',
-      '  {',
-      '    "entity": "project-owners-134157665460",',
-      '    "projectTeam": {',
-      '      "projectNumber": "134157665460",',
-      '      "team": "owners"',
-      '    },',
-      '    "role": "OWNER"',
-      '  }',
-      ']',
-      ])
+        '%s:' % gs_uri,
+        '        Creation time:          Tue, 04 Mar 2014 19:55:26 GMT',
+        '        Content-Language:       en',
+        '        Content-Length:         2',
+        '        Content-Type:           application/octet-stream',
+        '        Hash (crc32c):          %s' % crc32c_64,
+        '        Hash (md5):             %s' % md5_sum_64,
+        '        ETag:                   CMi938jU+bwCEAE=',
+        '        Generation:             1393962926989000',
+        '        Metageneration:         1',
+        '        ACL:            [',
+        '  {',
+        '    "entity": "project-owners-134157665460",',
+        '    "projectTeam": {',
+        '      "projectNumber": "134157665460",',
+        '      "team": "owners"',
+        '    },',
+        '    "role": "OWNER"',
+        '  }',
+        ']',
+    ])
     # Set up the test replay script.
     cmd = [self.gsutil, 'ls', '-L', gs_uri]
-    utils.RunCommand(cmd, redirect_stdout=True, redirect_stderr=True,
-                     error_ok=True, return_result=True
-                     ).AndReturn(cros_test_lib.EasyAttr(output=output))
+    utils.RunCommand(
+        cmd, redirect_stdout=True, redirect_stderr=True, error_ok=True,
+        return_result=True).AndReturn(
+            cros_test_lib.EasyAttr(output=output))
     self.mox.ReplayAll()
 
     # Run the test verification.
@@ -700,9 +697,10 @@ class TestGsLib(cros_test_lib.MoxTestCase):
 
     # Set up the test replay script. (Multiple times because of retry logic)
     cmd = [self.gsutil, 'setacl', acl_file, gs_uri]
-    utils.RunCommand(cmd, redirect_stdout=True, redirect_stderr=True,
-                     return_result=True
-                     ).MultipleTimes().AndRaise(utils.CommandFailedException())
+    utils.RunCommand(
+        cmd, redirect_stdout=True, redirect_stderr=True,
+        return_result=True).MultipleTimes().AndRaise(
+            utils.CommandFailedException())
     self.mox.ReplayAll()
 
     # Run the test verification.
@@ -731,7 +729,6 @@ class TestGsLibAccess(cros_test_lib.MoxTempDirTestCase):
     5) Recalculate MD5 sum for local file.
     6) Verify that MD5 values are the same.
     """
-    # pylint: disable=E1101
     gs_md5 = gslib.MD5Sum(self.small_gs_path)
     local_path = os.path.join(self.tempdir, 'md5-check-file')
     gslib.Copy(self.small_gs_path, local_path)
@@ -740,7 +737,6 @@ class TestGsLibAccess(cros_test_lib.MoxTempDirTestCase):
 
   @cros_test_lib.NetworkTest()
   def testExistsLazy(self):
-    # pylint: disable=E1101
     self.assertTrue(gslib.ExistsLazy(self.small_gs_path))
 
     bogus_gs_path = 'gs://chromeos-releases/wert/sdgi/sadg/sdgi'
@@ -748,7 +744,6 @@ class TestGsLibAccess(cros_test_lib.MoxTempDirTestCase):
 
   @cros_test_lib.NetworkTest()
   def testExists(self):
-    # pylint: disable=E1101
     self.assertTrue(gslib.Exists(self.small_gs_path))
 
     bogus_gs_path = 'gs://chromeos-releases/wert/sdgi/sadg/sdgi'
@@ -807,7 +802,3 @@ class TestGsLibAccess(cros_test_lib.MoxTempDirTestCase):
     gs_path = 'gs://lokijuhygtfrdesxcv/awsedrftgyhujikol'
     gs_md5 = gslib.MD5Sum(gs_path)
     self.assertTrue(gs_md5 is None)
-
-
-if __name__ == '__main__':
-  cros_test_lib.main()

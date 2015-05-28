@@ -59,6 +59,9 @@ cr.define('options', function() {
     initializePage: function() {
       Page.prototype.initializePage.call(this);
 
+      $('auto-signin-block').hidden =
+          !loadTimeData.getBoolean('enableCredentialManagerAPI');
+
       $('password-manager-confirm').onclick = function() {
         PageManager.closeOverlay();
       };
@@ -177,7 +180,7 @@ cr.define('options', function() {
               entry[1].toLowerCase().indexOf(query.toLowerCase()) >= 0) {
             // Keep the original index so we can delete correctly. See also
             // deleteItemAtIndex() in password_manager_list.js that uses this.
-            entry[3] = index;
+            entry[4] = index;
             return true;
           }
           return false;
@@ -211,7 +214,7 @@ cr.define('options', function() {
         // index in the model, but each entry stores its original index, so
         // we can find the item using a linear search.
         for (var i = 0; i < model.length; ++i) {
-          if (model.item(i)[3] == index) {
+          if (model.item(i)[4] == index) {
             index = i;
             break;
           }

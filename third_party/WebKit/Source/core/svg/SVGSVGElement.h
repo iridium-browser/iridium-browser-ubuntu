@@ -45,7 +45,7 @@ class SVGSVGElement final : public SVGGraphicsElement,
                             public SVGFitToViewBox,
                             public SVGZoomAndPan {
     DEFINE_WRAPPERTYPEINFO();
-    WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(SVGSVGElement);
+    WILL_BE_USING_GARBAGE_COLLECTED_MIXIN_NESTED(SVGSVGElement, SVGGraphicsElement);
 public:
     DECLARE_NODE_FACTORY(SVGSVGElement);
 
@@ -110,6 +110,7 @@ public:
     AffineTransform viewBoxToViewTransform(float viewWidth, float viewHeight) const;
 
     void setupInitialView(const String& fragmentIdentifier, Element* anchorNode);
+    bool zoomAndPanEnabled() const;
 
     bool hasIntrinsicWidth() const;
     bool hasIntrinsicHeight() const;
@@ -119,7 +120,7 @@ public:
     SVGAnimatedLength* width() const { return m_width.get(); }
     SVGAnimatedLength* height() const { return m_height.get(); }
 
-    virtual void trace(Visitor*) override;
+    DECLARE_VIRTUAL_TRACE();
 
 private:
     explicit SVGSVGElement(Document&);
@@ -127,10 +128,11 @@ private:
 
     virtual void parseAttribute(const QualifiedName&, const AtomicString&) override;
     virtual bool isPresentationAttribute(const QualifiedName&) const override;
+    virtual bool isPresentationAttributeWithSVGDOM(const QualifiedName&) const override;
     virtual void collectStyleForPresentationAttribute(const QualifiedName&, const AtomicString&, MutableStylePropertySet*) override;
 
-    virtual bool rendererIsNeeded(const RenderStyle&) override;
-    virtual RenderObject* createRenderer(RenderStyle*) override;
+    virtual bool layoutObjectIsNeeded(const ComputedStyle&) override;
+    virtual LayoutObject* createLayoutObject(const ComputedStyle&) override;
 
     virtual InsertionNotificationRequest insertedInto(ContainerNode*) override;
     virtual void removedFrom(ContainerNode*) override;

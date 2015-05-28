@@ -7,12 +7,13 @@
 #include <vector>
 
 #include "base/values.h"
+#include "content/public/common/url_constants.h"
 #include "content/public/renderer/render_view.h"
 #include "extensions/common/error_utils.h"
-#include "extensions/common/extension.h"
 #include "extensions/common/extension_messages.h"
 #include "extensions/common/manifest_constants.h"
 #include "extensions/common/permissions/permissions_data.h"
+#include "extensions/renderer/injection_host.h"
 #include "extensions/renderer/script_context.h"
 #include "third_party/WebKit/public/platform/WebString.h"
 #include "third_party/WebKit/public/web/WebDocument.h"
@@ -29,6 +30,8 @@ ProgrammaticScriptInjector::ProgrammaticScriptInjector(
       render_view_(content::RenderView::FromWebView(web_frame->view())),
       results_(new base::ListValue()),
       finished_(false) {
+  effective_url_ = ScriptContext::GetEffectiveDocumentURL(
+      web_frame, url_, params.match_about_blank);
 }
 
 ProgrammaticScriptInjector::~ProgrammaticScriptInjector() {
@@ -66,10 +69,14 @@ bool ProgrammaticScriptInjector::ShouldInjectCss(
 }
 
 PermissionsData::AccessType ProgrammaticScriptInjector::CanExecuteOnFrame(
-    const Extension* extension,
+    const InjectionHost* injection_host,
     blink::WebFrame* frame,
     int tab_id,
     const GURL& top_url) const {
+  // It doesn't make sense to inject a script into a remote frame or a frame
+  // with a null document.
+  if (frame->isWebRemoteFrame() || frame->document().isNull())
+    return PermissionsData::ACCESS_DENIED;
   GURL effective_document_url = ScriptContext::GetEffectiveDocumentURL(
       frame, frame->document().url(), params_->match_about_blank);
   if (params_->is_web_view) {
@@ -82,13 +89,10 @@ PermissionsData::AccessType ProgrammaticScriptInjector::CanExecuteOnFrame(
                ? PermissionsData::ACCESS_ALLOWED
                : PermissionsData::ACCESS_DENIED;
   }
+  DCHECK_EQ(injection_host->id().type(), HostID::EXTENSIONS);
 
-  return extension->permissions_data()->GetPageAccess(extension,
-                                                      effective_document_url,
-                                                      top_url,
-                                                      tab_id,
-                                                      -1,  // no process ID.
-                                                      NULL /* ignore error */);
+  return injection_host->CanExecuteOnFrame(
+      effective_document_url, top_url, tab_id, true /* is_declarative */);
 }
 
 std::vector<blink::WebScriptSource> ProgrammaticScriptInjector::GetJsSources(
@@ -110,9 +114,13 @@ std::vector<std::string> ProgrammaticScriptInjector::GetCssSources(
   return std::vector<std::string>(1, params_->code);
 }
 
+void ProgrammaticScriptInjector::GetRunInfo(
+    ScriptsRunInfo* scripts_run_info,
+    UserScript::RunLocation run_location) const {
+}
+
 void ProgrammaticScriptInjector::OnInjectionComplete(
     scoped_ptr<base::ListValue> execution_results,
-    ScriptsRunInfo* scripts_run_info,
     UserScript::RunLocation run_location) {
   results_ = execution_results.Pass();
   Finish(std::string());
@@ -122,8 +130,14 @@ void ProgrammaticScriptInjector::OnWillNotInject(InjectFailureReason reason) {
   std::string error;
   switch (reason) {
     case NOT_ALLOWED:
-      error = ErrorUtils::FormatErrorMessage(manifest_errors::kCannotAccessPage,
-                                             url_.spec());
+      if (url_.SchemeIs(url::kAboutScheme)) {
+        error = ErrorUtils::FormatErrorMessage(
+            manifest_errors::kCannotAccessAboutUrl, url_.spec(),
+            effective_url_.GetOrigin().spec());
+      } else {
+        error = ErrorUtils::FormatErrorMessage(
+            manifest_errors::kCannotAccessPage, url_.spec());
+      }
       break;
     case EXTENSION_REMOVED:  // no special error here.
     case WONT_INJECT:

@@ -50,6 +50,7 @@ class RawTransportChannel : public TransportChannelImpl,
   virtual int SendPacket(const char *data, size_t len,
                          const rtc::PacketOptions& options, int flags);
   virtual int SetOption(rtc::Socket::Option opt, int value);
+  virtual bool GetOption(rtc::Socket::Option opt, int* value);
   virtual int GetError();
 
   // Implements TransportChannelImpl.
@@ -113,8 +114,13 @@ class RawTransportChannel : public TransportChannelImpl,
     return false;
   }
 
-  // Find out which DTLS-SRTP cipher was negotiated
+  // Find out which DTLS-SRTP cipher was negotiated.
   virtual bool GetSrtpCipher(std::string* cipher) {
+    return false;
+  }
+
+  // Find out which DTLS cipher was negotiated.
+  virtual bool GetSslCipher(std::string* cipher) {
     return false;
   }
 

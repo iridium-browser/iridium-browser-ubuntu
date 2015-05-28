@@ -137,10 +137,8 @@ void URLFetcherCore::Stop() {
 
 void URLFetcherCore::SetUploadData(const std::string& upload_content_type,
                                    const std::string& upload_content) {
+  AssertHasNoUploadData();
   DCHECK(!is_chunked_upload_);
-  DCHECK(!upload_content_set_);
-  DCHECK(upload_content_.empty());
-  DCHECK(upload_file_path_.empty());
   DCHECK(upload_content_type_.empty());
 
   // Empty |upload_content_type| is allowed iff the |upload_content| is empty.
@@ -157,10 +155,8 @@ void URLFetcherCore::SetUploadFilePath(
     uint64 range_offset,
     uint64 range_length,
     scoped_refptr<base::TaskRunner> file_task_runner) {
+  AssertHasNoUploadData();
   DCHECK(!is_chunked_upload_);
-  DCHECK(!upload_content_set_);
-  DCHECK(upload_content_.empty());
-  DCHECK(upload_file_path_.empty());
   DCHECK_EQ(upload_range_offset_, 0ULL);
   DCHECK_EQ(upload_range_length_, 0ULL);
   DCHECK(upload_content_type_.empty());
@@ -174,10 +170,23 @@ void URLFetcherCore::SetUploadFilePath(
   upload_content_set_ = true;
 }
 
+void URLFetcherCore::SetUploadStreamFactory(
+    const std::string& upload_content_type,
+    const URLFetcher::CreateUploadStreamCallback& factory) {
+  AssertHasNoUploadData();
+  DCHECK(!is_chunked_upload_);
+  DCHECK(upload_content_type_.empty());
+
+  upload_content_type_ = upload_content_type;
+  upload_stream_factory_ = factory;
+  upload_content_set_ = true;
+}
+
 void URLFetcherCore::SetChunkedUpload(const std::string& content_type) {
-  DCHECK(is_chunked_upload_ ||
-         (upload_content_type_.empty() &&
-          upload_content_.empty()));
+  if (!is_chunked_upload_) {
+    AssertHasNoUploadData();
+    DCHECK(upload_content_type_.empty());
+  }
 
   // Empty |content_type| is not allowed here, because it is impossible
   // to ensure non-empty upload content as it is not yet supplied.
@@ -544,6 +553,10 @@ void URLFetcherCore::StartOnIOThread() {
 }
 
 void URLFetcherCore::StartURLRequest() {
+  // TODO(pkasting): Remove ScopedTracker below once crbug.com/456327 is fixed.
+  tracked_objects::ScopedTracker tracking_profile1(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "456327 URLFetcherCore::StartURLRequest1"));
   DCHECK(network_task_runner_->BelongsToCurrentThread());
 
   if (was_cancelled_) {
@@ -558,10 +571,14 @@ void URLFetcherCore::StartURLRequest() {
   g_registry.Get().AddURLFetcherCore(this);
   current_response_bytes_ = 0;
   request_ = request_context_getter_->GetURLRequestContext()->CreateRequest(
-      original_url_, DEFAULT_PRIORITY, this, NULL);
+      original_url_, DEFAULT_PRIORITY, this);
   request_->set_stack_trace(stack_trace_);
   int flags = request_->load_flags() | load_flags_;
 
+  // TODO(pkasting): Remove ScopedTracker below once crbug.com/456327 is fixed.
+  tracked_objects::ScopedTracker tracking_profile2(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "456327 URLFetcherCore::StartURLRequest2"));
   if (is_chunked_upload_)
     request_->EnableChunkedUpload();
   request_->SetLoadFlags(flags);
@@ -574,13 +591,17 @@ void URLFetcherCore::StartURLRequest() {
                           url_request_create_data_callback_.Run());
   }
 
+  // TODO(pkasting): Remove ScopedTracker below once crbug.com/456327 is fixed.
+  tracked_objects::ScopedTracker tracking_profile3(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "456327 URLFetcherCore::StartURLRequest3"));
   switch (request_type_) {
     case URLFetcher::GET:
       break;
 
     case URLFetcher::POST:
     case URLFetcher::PUT:
-    case URLFetcher::PATCH:
+    case URLFetcher::PATCH: {
       // Upload content must be set.
       DCHECK(is_chunked_upload_ || upload_content_set_);
 
@@ -605,6 +626,10 @@ void URLFetcherCore::StartURLRequest() {
                                         base::Time()));
         request_->set_upload(
             ElementsUploadDataStream::CreateWithReader(reader.Pass(), 0));
+      } else if (!upload_stream_factory_.is_null()) {
+        scoped_ptr<UploadDataStream> stream = upload_stream_factory_.Run();
+        DCHECK(stream);
+        request_->set_upload(stream.Pass());
       }
 
       current_upload_bytes_ = -1;
@@ -618,6 +643,7 @@ void URLFetcherCore::StartURLRequest() {
           this,
           &URLFetcherCore::InformDelegateUploadProgress);
       break;
+    }
 
     case URLFetcher::HEAD:
       request_->set_method("HEAD");
@@ -631,6 +657,10 @@ void URLFetcherCore::StartURLRequest() {
       NOTREACHED();
   }
 
+  // TODO(pkasting): Remove ScopedTracker below once crbug.com/456327 is fixed.
+  tracked_objects::ScopedTracker tracking_profile4(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "456327 URLFetcherCore::StartURLRequest4"));
   if (!extra_request_headers_.IsEmpty())
     request_->SetExtraRequestHeaders(extra_request_headers_);
 
@@ -656,7 +686,7 @@ void URLFetcherCore::StartURLRequestWhenAppropriate() {
 
   DCHECK(request_context_getter_.get());
 
-  int64 delay = INT64_C(0);
+  int64 delay = 0;
   if (!original_url_throttler_entry_.get()) {
     URLRequestThrottlerManager* manager =
         request_context_getter_->GetURLRequestContext()->throttler_manager();
@@ -670,7 +700,7 @@ void URLFetcherCore::StartURLRequestWhenAppropriate() {
         GetBackoffReleaseTime());
   }
 
-  if (delay == INT64_C(0)) {
+  if (delay == 0) {
     StartURLRequest();
   } else {
     base::ThreadTaskRunnerHandle::Get()->PostDelayedTask(
@@ -955,6 +985,13 @@ void URLFetcherCore::InformDelegateDownloadProgressInDelegateThread(
   DCHECK(delegate_task_runner_->BelongsToCurrentThread());
   if (delegate_)
     delegate_->OnURLFetchDownloadProgress(fetcher_, current, total);
+}
+
+void URLFetcherCore::AssertHasNoUploadData() const {
+  DCHECK(!upload_content_set_);
+  DCHECK(upload_content_.empty());
+  DCHECK(upload_file_path_.empty());
+  DCHECK(upload_stream_factory_.is_null());
 }
 
 }  // namespace net

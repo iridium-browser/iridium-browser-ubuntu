@@ -13,10 +13,8 @@
 #include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
-#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/history/chrome_history_client.h"
 #include "chrome/browser/history/chrome_history_client_factory.h"
-#include "chrome/browser/history/history_backend.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/test/base/testing_browser_process.h"
@@ -24,9 +22,12 @@
 #include "chrome/test/base/testing_profile_manager.h"
 #include "components/bookmarks/browser/bookmark_model.h"
 #include "components/bookmarks/test/bookmark_test_helpers.h"
-#include "components/history/core/android/android_time.h"
+#include "components/history/core/browser/android/android_time.h"
+#include "components/history/core/browser/history_backend.h"
 #include "components/history/core/browser/history_constants.h"
+#include "components/history/core/browser/history_database_params.h"
 #include "components/history/core/browser/keyword_search_term.h"
+#include "components/history/core/test/test_history_database.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/test/test_browser_thread.h"
 #include "content/public/test/test_utils.h"
@@ -36,6 +37,8 @@
 using base::Time;
 using base::TimeDelta;
 using base::UTF8ToUTF16;
+using bookmarks::BookmarkModel;
+using bookmarks::BookmarkNode;
 using content::BrowserThread;
 
 namespace history {
@@ -84,14 +87,16 @@ class AndroidProviderBackendDelegate : public HistoryBackend::Delegate {
   void NotifyURLsModified(const history::URLRows& rows) override {
     modified_details_.reset(new history::URLRows(rows));
   }
-  void BroadcastNotifications(
-      int type,
-      scoped_ptr<HistoryDetails> details) override {
-    DCHECK_EQ(type, chrome::NOTIFICATION_HISTORY_URLS_DELETED);
-    scoped_ptr<URLsDeletedDetails> urls_deleted_details(
-        static_cast<URLsDeletedDetails*>(details.release()));
-    deleted_details_.reset(new history::URLRows(urls_deleted_details->rows));
+  void NotifyURLsDeleted(bool all_history,
+                         bool expired,
+                         const URLRows& deleted_rows,
+                         const std::set<GURL>& favicon_urls) override {
+    deleted_details_.reset(new history::URLRows(deleted_rows));
   }
+  void NotifyKeywordSearchTermUpdated(const URLRow& row,
+                                      KeywordID keyword_id,
+                                      const base::string16& term) override {}
+  void NotifyKeywordSearchTermDeleted(URLID url_id) override {}
   void DBLoaded() override {}
 
   history::URLRows* deleted_details() const { return deleted_details_.get(); }
@@ -160,12 +165,10 @@ class AndroidProviderBackendTest : public testing::Test {
  public:
   AndroidProviderBackendTest()
       : thumbnail_db_(NULL),
-        profile_manager_(
-          TestingBrowserProcess::GetGlobal()),
+        profile_manager_(TestingBrowserProcess::GetGlobal()),
         bookmark_model_(NULL),
         ui_thread_(BrowserThread::UI, &message_loop_),
-        file_thread_(BrowserThread::FILE, &message_loop_) {
-  }
+        file_thread_(BrowserThread::FILE, &message_loop_) {}
   ~AndroidProviderBackendTest() override {}
 
  protected:
@@ -239,7 +242,7 @@ class AndroidProviderBackendTest : public testing::Test {
 
   AndroidProviderBackendNotifier notifier_;
   scoped_refptr<HistoryBackend> history_backend_;
-  HistoryDatabase history_db_;
+  TestHistoryDatabase history_db_;
   ThumbnailDatabase thumbnail_db_;
   base::ScopedTempDir temp_dir_;
   base::FilePath android_cache_db_name_;
@@ -251,7 +254,7 @@ class AndroidProviderBackendTest : public testing::Test {
   base::MessageLoopForUI message_loop_;
   content::TestBrowserThread ui_thread_;
   content::TestBrowserThread file_thread_;
-  ChromeHistoryClient* history_client_;
+  history::HistoryClient* history_client_;
 
   DISALLOW_COPY_AND_ASSIGN(AndroidProviderBackendTest);
 };
@@ -286,9 +289,10 @@ TEST_F(AndroidProviderBackendTest, UpdateTables) {
   // HistoryBackend will shutdown after that.
   {
   scoped_refptr<HistoryBackend> history_backend;
-  history_backend = new HistoryBackend(
-      temp_dir_.path(), new AndroidProviderBackendDelegate(), history_client_);
-  history_backend->Init(std::string(), false);
+  history_backend =
+      new HistoryBackend(new AndroidProviderBackendDelegate(), history_client_);
+  history_backend->Init(std::string(), false,
+                        TestHistoryDatabaseParamsForPath(temp_dir_.path()));
   history_backend->AddVisits(url1, visits1, history::SOURCE_SYNCED);
   history_backend->AddVisits(url2, visits2, history::SOURCE_SYNCED);
   URLRow url_row;
@@ -423,9 +427,10 @@ TEST_F(AndroidProviderBackendTest, QueryHistoryAndBookmarks) {
   // HistoryBackend will shutdown after that.
   {
   scoped_refptr<HistoryBackend> history_backend;
-  history_backend = new HistoryBackend(
-      temp_dir_.path(), new AndroidProviderBackendDelegate(), history_client_);
-  history_backend->Init(std::string(), false);
+  history_backend =
+      new HistoryBackend(new AndroidProviderBackendDelegate(), history_client_);
+  history_backend->Init(std::string(), false,
+                        TestHistoryDatabaseParamsForPath(temp_dir_.path()));
   history_backend->AddVisits(url1, visits1, history::SOURCE_SYNCED);
   history_backend->AddVisits(url2, visits2, history::SOURCE_SYNCED);
 
@@ -1859,9 +1864,10 @@ TEST_F(AndroidProviderBackendTest, QueryWithoutThumbnailDB) {
   // HistoryBackend will shutdown after that.
   {
   scoped_refptr<HistoryBackend> history_backend;
-  history_backend = new HistoryBackend(
-      temp_dir_.path(), new AndroidProviderBackendDelegate(), history_client_);
-  history_backend->Init(std::string(), false);
+  history_backend =
+      new HistoryBackend(new AndroidProviderBackendDelegate(), history_client_);
+  history_backend->Init(std::string(), false,
+                        TestHistoryDatabaseParamsForPath(temp_dir_.path()));
   history_backend->AddVisits(url1, visits1, history::SOURCE_SYNCED);
   history_backend->AddVisits(url2, visits2, history::SOURCE_SYNCED);
   URLRow url_row;
@@ -2025,7 +2031,7 @@ TEST_F(AndroidProviderBackendTest, DeleteWithoutThumbnailDB) {
   row2.set_favicon(base::RefCountedBytes::TakeVector(&data));
 
   {
-    HistoryDatabase history_db;
+    TestHistoryDatabase history_db;
     ThumbnailDatabase thumbnail_db(NULL);
     ASSERT_EQ(sql::INIT_OK, history_db.Init(history_db_name_));
     ASSERT_EQ(sql::INIT_OK, thumbnail_db.Init(thumbnail_db_name_));
@@ -2102,7 +2108,7 @@ TEST_F(AndroidProviderBackendTest, UpdateFaviconWithoutThumbnail) {
   row1.set_title(UTF8ToUTF16("cnn"));
 
   {
-    HistoryDatabase history_db;
+    TestHistoryDatabase history_db;
     ThumbnailDatabase thumbnail_db(NULL);
     ASSERT_EQ(sql::INIT_OK, history_db.Init(history_db_name_));
     ASSERT_EQ(sql::INIT_OK, thumbnail_db.Init(thumbnail_db_name_));

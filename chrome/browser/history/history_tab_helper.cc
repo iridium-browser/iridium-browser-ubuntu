@@ -6,13 +6,14 @@
 
 #include <utility>
 
-#include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/prerender/prerender_contents.h"
 #include "chrome/browser/prerender/prerender_manager.h"
 #include "chrome/browser/prerender/prerender_manager_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/render_messages.h"
+#include "components/history/content/browser/history_context_helper.h"
+#include "components/history/core/browser/history_service.h"
 #include "content/public/browser/navigation_details.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/web_contents.h"
@@ -39,13 +40,13 @@ HistoryTabHelper::~HistoryTabHelper() {
 
 void HistoryTabHelper::UpdateHistoryForNavigation(
     const history::HistoryAddPageArgs& add_page_args) {
-  HistoryService* hs = GetHistoryService();
+  history::HistoryService* hs = GetHistoryService();
   if (hs)
     GetHistoryService()->AddPage(add_page_args);
 }
 
 void HistoryTabHelper::UpdateHistoryPageTitle(const NavigationEntry& entry) {
-  HistoryService* hs = GetHistoryService();
+  history::HistoryService* hs = GetHistoryService();
   if (hs)
     hs->SetPageTitle(entry.GetVirtualURL(),
                      entry.GetTitleForDisplay(std::string()));
@@ -59,8 +60,8 @@ HistoryTabHelper::CreateHistoryAddPageArgs(
     int nav_entry_id,
     const content::FrameNavigateParams& params) {
   history::HistoryAddPageArgs add_page_args(
-      params.url, timestamp, web_contents(), nav_entry_id,
-      params.referrer.url, params.redirects, params.transition,
+      params.url, timestamp, history::ContextIDForWebContents(web_contents()),
+      nav_entry_id, params.referrer.url, params.redirects, params.transition,
       history::SOURCE_BROWSED, did_replace_entry);
   if (ui::PageTransitionIsMainFrame(params.transition) &&
       virtual_url != params.url) {
@@ -136,14 +137,14 @@ void HistoryTabHelper::TitleWasSet(NavigationEntry* entry, bool explicit_set) {
   }
 }
 
-HistoryService* HistoryTabHelper::GetHistoryService() {
+history::HistoryService* HistoryTabHelper::GetHistoryService() {
   Profile* profile =
       Profile::FromBrowserContext(web_contents()->GetBrowserContext());
   if (profile->IsOffTheRecord())
     return NULL;
 
-  return HistoryServiceFactory::GetForProfile(profile,
-                                              Profile::IMPLICIT_ACCESS);
+  return HistoryServiceFactory::GetForProfile(
+      profile, ServiceAccessType::IMPLICIT_ACCESS);
 }
 
 void HistoryTabHelper::WebContentsDestroyed() {
@@ -153,14 +154,15 @@ void HistoryTabHelper::WebContentsDestroyed() {
   if (profile->IsOffTheRecord())
     return;
 
-  HistoryService* hs =
-      HistoryServiceFactory::GetForProfile(profile, Profile::IMPLICIT_ACCESS);
+  history::HistoryService* hs = HistoryServiceFactory::GetForProfile(
+      profile, ServiceAccessType::IMPLICIT_ACCESS);
   if (hs) {
     NavigationEntry* entry = tab->GetController().GetLastCommittedEntry();
+    history::ContextID context_id = history::ContextIDForWebContents(tab);
     if (entry) {
-      hs->UpdateWithPageEndTime(tab, entry->GetUniqueID(), tab->GetURL(),
+      hs->UpdateWithPageEndTime(context_id, entry->GetUniqueID(), tab->GetURL(),
                                 base::Time::Now());
     }
-    hs->ClearCachedDataForContextID(tab);
+    hs->ClearCachedDataForContextID(context_id);
   }
 }

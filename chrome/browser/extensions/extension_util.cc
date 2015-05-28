@@ -42,6 +42,10 @@ namespace {
 const char kExtensionAllowedOnAllUrlsPrefName[] =
     "extension_can_script_all_urls";
 
+// The entry into the prefs for when a user has explicitly set the "extension
+// allowed on all urls" pref.
+const char kHasSetScriptOnAllUrlsPrefName[] = "has_set_script_all_urls";
+
 // Returns true if |extension| should always be enabled in incognito mode.
 bool IsWhitelistedForIncognito(const Extension* extension) {
   return FeatureProvider::GetBehaviorFeature(
@@ -68,6 +72,40 @@ std::string ReloadExtensionIfEnabled(const std::string& extension_id,
   CHECK(service);
   service->ReloadExtension(id);
   return id;
+}
+
+// Sets the preference for scripting on all urls to |allowed|, optionally
+// updating the extension's active permissions (based on |update_permissions|).
+void SetAllowedScriptingOnAllUrlsHelper(
+    content::BrowserContext* context,
+    const std::string& extension_id,
+    bool allowed,
+    bool update_permissions) {
+  // TODO(devlin): Right now, we always need to have a value for this pref.
+  // Once the scripts-require-action feature launches, we can change the set
+  // to be null if false.
+  ExtensionPrefs::Get(context)->UpdateExtensionPref(
+      extension_id,
+      kExtensionAllowedOnAllUrlsPrefName,
+      new base::FundamentalValue(allowed));
+
+  if (update_permissions) {
+    const Extension* extension =
+        ExtensionRegistry::Get(context)->enabled_extensions().GetByID(
+            extension_id);
+    if (extension) {
+      PermissionsUpdater updater(context);
+      if (allowed)
+        updater.GrantWithheldImpliedAllHosts(extension);
+      else
+        updater.WithholdImpliedAllHosts(extension);
+
+      // If this was an update to permissions, we also need to sync the change.
+      ExtensionSyncService* sync_service = ExtensionSyncService::Get(context);
+      if (sync_service)  // sync_service can be null in unittests.
+        sync_service->SyncExtensionChangeIfNeeded(*extension);
+    }
+  }
 }
 
 }  // namespace
@@ -176,46 +214,42 @@ void SetAllowFileAccess(const std::string& extension_id,
 bool AllowedScriptingOnAllUrls(const std::string& extension_id,
                                content::BrowserContext* context) {
   bool allowed = false;
-  return ExtensionPrefs::Get(context)->ReadPrefAsBoolean(
-             extension_id,
-             kExtensionAllowedOnAllUrlsPrefName,
-             &allowed) &&
-         allowed;
+  ExtensionPrefs* prefs = ExtensionPrefs::Get(context);
+  if (!prefs->ReadPrefAsBoolean(extension_id,
+                                kExtensionAllowedOnAllUrlsPrefName,
+                                &allowed)) {
+    // If there is no value present, we make one, defaulting it to the value of
+    // the 'scripts require action' flag. If the flag is on, then the extension
+    // does not have permission to script on all urls by default.
+    allowed = DefaultAllowedScriptingOnAllUrls();
+    SetAllowedScriptingOnAllUrlsHelper(context, extension_id, allowed, false);
+  }
+  return allowed;
 }
 
 void SetAllowedScriptingOnAllUrls(const std::string& extension_id,
                                   content::BrowserContext* context,
                                   bool allowed) {
-  if (allowed == AllowedScriptingOnAllUrls(extension_id, context))
-    return;  // Nothing to do here.
-
-  ExtensionPrefs::Get(context)->UpdateExtensionPref(
-      extension_id,
-      kExtensionAllowedOnAllUrlsPrefName,
-      allowed ? new base::FundamentalValue(true) : NULL);
-
-  const Extension* extension =
-      ExtensionRegistry::Get(context)->enabled_extensions().GetByID(
-          extension_id);
-  if (extension) {
-    PermissionsUpdater updater(context);
-    if (allowed)
-      updater.GrantWithheldImpliedAllHosts(extension);
-    else
-      updater.WithholdImpliedAllHosts(extension);
+  if (allowed != AllowedScriptingOnAllUrls(extension_id, context)) {
+    SetAllowedScriptingOnAllUrlsHelper(context, extension_id, allowed, true);
+    ExtensionPrefs::Get(context)->UpdateExtensionPref(
+        extension_id,
+        kHasSetScriptOnAllUrlsPrefName,
+        new base::FundamentalValue(true));
   }
 }
 
-bool ScriptsMayRequireActionForExtension(const Extension* extension) {
-  // An extension requires user action to execute scripts iff the switch to do
-  // so is enabled, the extension shows up in chrome:extensions (so the user can
-  // grant withheld permissions), the extension is not part of chrome or
-  // corporate policy, and also not on the scripting whitelist.
-  return FeatureSwitch::scripts_require_action()->IsEnabled() &&
-      extension->ShouldDisplayInExtensionSettings() &&
-      !Manifest::IsPolicyLocation(extension->location()) &&
-      !Manifest::IsComponentLocation(extension->location()) &&
-      !PermissionsData::CanExecuteScriptEverywhere(extension);
+bool HasSetAllowedScriptingOnAllUrls(const std::string& extension_id,
+                                     content::BrowserContext* context) {
+  bool did_set = false;
+  return ExtensionPrefs::Get(context)->ReadPrefAsBoolean(
+      extension_id,
+      kHasSetScriptOnAllUrlsPrefName,
+      &did_set) && did_set;
+}
+
+bool DefaultAllowedScriptingOnAllUrls() {
+  return !FeatureSwitch::scripts_require_action()->IsEnabled();
 }
 
 bool IsAppLaunchable(const std::string& extension_id,
@@ -275,13 +309,13 @@ bool IsExtensionIdle(const std::string& extension_id,
     if (host)
       return false;
 
-    content::SiteInstance* site_instance =
+    scoped_refptr<content::SiteInstance> site_instance =
         process_manager->GetSiteInstanceForURL(
             Extension::GetBaseURLFromExtensionId(id));
     if (site_instance && site_instance->HasProcess())
       return false;
 
-    if (!process_manager->GetRenderViewHostsForExtension(id).empty())
+    if (!process_manager->GetRenderFrameHostsForExtension(id).empty())
       return false;
   }
   return true;
@@ -349,9 +383,13 @@ const gfx::ImageSkia& GetDefaultExtensionIcon() {
       IDR_EXTENSION_DEFAULT_ICON);
 }
 
-bool IsStreamlinedHostedAppsEnabled() {
+bool IsNewBookmarkAppsEnabled() {
   return base::CommandLine::ForCurrentProcess()->HasSwitch(
       switches::kEnableNewBookmarkApps);
+}
+
+bool IsExtensionSupervised(const Extension* extension, Profile* profile) {
+  return extension->was_installed_by_custodian() && profile->IsSupervised();
 }
 
 }  // namespace util

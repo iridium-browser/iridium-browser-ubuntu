@@ -19,14 +19,12 @@ class RectF;
 
 namespace password_manager {
 
-class PasswordManagerClient;
 class PasswordManagerDriver;
 
 // This class is responsible for filling password forms.
 class PasswordAutofillManager : public autofill::AutofillPopupDelegate {
  public:
-  PasswordAutofillManager(PasswordManagerClient* password_manager_client,
-                          PasswordManagerDriver* password_manager_driver,
+  PasswordAutofillManager(PasswordManagerDriver* password_manager_driver,
                           autofill::AutofillClient* autofill_client);
   virtual ~PasswordAutofillManager();
 
@@ -77,10 +75,9 @@ class PasswordAutofillManager : public autofill::AutofillPopupDelegate {
   // If |current_username| matches a username for one of the login mappings in
   // |fill_data|, returns true and assigns the password to |out_password|.
   // Otherwise, returns false and leaves |out_password| untouched.
-  bool GetPasswordForUsername(
-      const base::string16& current_username,
-      const autofill::PasswordFormFillData& fill_data,
-      base::string16* out_password);
+  bool GetPasswordForUsername(const base::string16& current_username,
+                              const autofill::PasswordFormFillData& fill_data,
+                              base::string16* out_password);
 
   // Finds login information for a |node| that was previously filled.
   bool FindLoginInfo(int key, autofill::PasswordFormFillData* found_password);
@@ -91,9 +88,6 @@ class PasswordAutofillManager : public autofill::AutofillPopupDelegate {
   // When the autofill popup should be shown, |form_data_key_| identifies the
   // right password info in |login_to_password_info_|.
   int form_data_key_;
-
-  // Provides embedder-level operations on passwords. Must outlive |this|.
-  PasswordManagerClient* const password_manager_client_;  // weak
 
   // The driver that owns |this|.
   PasswordManagerDriver* password_manager_driver_;

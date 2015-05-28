@@ -89,6 +89,13 @@ FixItHint FixItRemovalForVirtual(const SourceManager& manager,
   return FixItHint::CreateRemoval(range);
 }
 
+bool IsPodOrTemplateType(const CXXRecordDecl& record) {
+  return record.isPOD() ||
+         record.getDescribedClassTemplate() ||
+         record.getTemplateSpecializationKind() ||
+         record.isDependentType();
+}
+
 }  // namespace
 
 FindBadConstructsConsumer::FindBadConstructsConsumer(CompilerInstance& instance,
@@ -136,23 +143,38 @@ bool FindBadConstructsConsumer::VisitDecl(clang::Decl* decl) {
 
 void FindBadConstructsConsumer::CheckChromeClass(SourceLocation record_location,
                                                  CXXRecordDecl* record) {
+  // By default, the clang checker doesn't check some types (templates, etc).
+  // That was only a mistake; once Chromium code passes these checks, we should
+  // remove the "check-templates" option and remove this code.
+  // See crbug.com/441916
+  if (!options_.check_templates && IsPodOrTemplateType(*record))
+    return;
+
   bool implementation_file = InImplementationFile(record_location);
 
   if (!implementation_file) {
     // Only check for "heavy" constructors/destructors in header files;
     // within implementation files, there is no performance cost.
-    CheckCtorDtorWeight(record_location, record);
+
+    // If this is a POD or a class template or a type dependent on a
+    // templated class, assume there's no ctor/dtor/virtual method
+    // optimization that we should do.
+    if (!IsPodOrTemplateType(*record))
+      CheckCtorDtorWeight(record_location, record);
   }
 
   bool warn_on_inline_bodies = !implementation_file;
-
   // Check that all virtual methods are annotated with override or final.
-  CheckVirtualMethods(record_location, record, warn_on_inline_bodies);
+  // Note this could also apply to templates, but for some reason Clang
+  // does not always see the "override", so we get false positives.
+  // See http://llvm.org/bugs/show_bug.cgi?id=18440 and
+  //     http://llvm.org/bugs/show_bug.cgi?id=21942
+  if (!IsPodOrTemplateType(*record))
+    CheckVirtualMethods(record_location, record, warn_on_inline_bodies);
 
   CheckRefCountedDtors(record_location, record);
 
-  if (options_.check_weak_ptr_factory_order)
-    CheckWeakPtrFactoryMembers(record_location, record);
+  CheckWeakPtrFactoryMembers(record_location, record);
 }
 
 void FindBadConstructsConsumer::CheckChromeEnum(SourceLocation enum_location,
@@ -261,6 +283,9 @@ void FindBadConstructsConsumer::CheckCtorDtorWeight(
       for (CXXRecordDecl::ctor_iterator it = record->ctor_begin();
            it != record->ctor_end();
            ++it) {
+        // The current check is buggy. An implicit copy constructor does not
+        // have an inline body, so this check never fires for classes with a
+        // user-declared out-of-line constructor.
         if (it->hasInlineBody()) {
           if (it->isCopyConstructor() &&
               !record->hasUserDeclaredCopyConstructor()) {
@@ -271,6 +296,16 @@ void FindBadConstructsConsumer::CheckCtorDtorWeight(
             emitWarning(it->getInnerLocStart(),
                         "Complex constructor has an inlined body.");
           }
+        } else if (it->isInlined() && !it->isInlineSpecified() &&
+                   !it->isDeleted() && (!it->isCopyOrMoveConstructor() ||
+                                        it->isExplicitlyDefaulted())) {
+          // isInlined() is a more reliable check than hasInlineBody(), but
+          // unfortunately, it results in warnings for implicit copy/move
+          // constructors in the previously mentioned situation. To preserve
+          // compatibility with existing Chromium code, only warn if it's an
+          // explicitly defaulted copy or move constructor.
+          emitWarning(it->getInnerLocStart(),
+                      "Complex constructor has an inlined body.");
         }
       }
     }
@@ -284,7 +319,8 @@ void FindBadConstructsConsumer::CheckCtorDtorWeight(
                   "Complex class/struct needs an explicit out-of-line "
                   "destructor.");
     } else if (CXXDestructorDecl* dtor = record->getDestructor()) {
-      if (dtor->hasInlineBody()) {
+      if (dtor->isInlined() && !dtor->isInlineSpecified() &&
+          !dtor->isDeleted()) {
         emitWarning(dtor->getInnerLocStart(),
                     "Complex destructor has an inline body.");
       }
@@ -309,8 +345,7 @@ bool FindBadConstructsConsumer::IsMethodInBannedOrTestingNamespace(
         // magic to try to make sure SetUp()/TearDown() aren't capitalized
         // incorrectly, but having the plugin enforce override is also nice.
         (InTestingNamespace(overridden) &&
-         (!options_.strict_virtual_specifiers ||
-          !IsGtestTestFixture(overridden->getParent())))) {
+         !IsGtestTestFixture(overridden->getParent()))) {
       return true;
     }
   }
@@ -371,20 +406,13 @@ void FindBadConstructsConsumer::CheckVirtualSpecifiers(
   OverrideAttr* override_attr = method->getAttr<OverrideAttr>();
   FinalAttr* final_attr = method->getAttr<FinalAttr>();
 
-  if (method->isPure() && !options_.strict_virtual_specifiers)
-    return;
-
   if (IsMethodInBannedOrTestingNamespace(method))
-    return;
-
-  if (isa<CXXDestructorDecl>(method) && !options_.strict_virtual_specifiers)
     return;
 
   SourceManager& manager = instance().getSourceManager();
 
   // Complain if a method is annotated virtual && (override || final).
-  if (has_virtual && (override_attr || final_attr) &&
-      options_.strict_virtual_specifiers) {
+  if (has_virtual && (override_attr || final_attr)) {
     diagnostic().Report(method->getLocStart(),
                         diag_redundant_virtual_specifier_)
         << "'virtual'"
@@ -414,14 +442,14 @@ void FindBadConstructsConsumer::CheckVirtualSpecifiers(
     }
   }
 
-  if (final_attr && override_attr && options_.strict_virtual_specifiers) {
+  if (final_attr && override_attr) {
     diagnostic().Report(override_attr->getLocation(),
                         diag_redundant_virtual_specifier_)
         << override_attr << final_attr
         << FixItHint::CreateRemoval(override_attr->getRange());
   }
 
-  if (final_attr && !is_override && options_.strict_virtual_specifiers) {
+  if (final_attr && !is_override) {
     diagnostic().Report(method->getLocStart(),
                         diag_base_method_virtual_and_final_)
         << FixItRemovalForVirtual(manager, method)

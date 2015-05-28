@@ -47,14 +47,6 @@ public:
      */
     const SkMatrix& getLocalMatrix() const { return fLocalMatrix; }
 
-    /**
-     *  Returns true if the local matrix is not an identity matrix.
-     *
-     *  FIXME: This can be incorrect for a Shader with its own local matrix
-     *  that is also wrapped via CreateLocalMatrixShader.
-     */
-    bool hasLocalMatrix() const { return !fLocalMatrix.isIdentity(); }
-
     enum TileMode {
         /** replicate the edge color if the shader draws outside of its
          *  original bounds
@@ -73,8 +65,10 @@ public:
         /** only draw within the original domain, return 0 everywhere else */
         kDecal_TileMode,
 #endif
+    };
 
-        kTileModeCount
+    enum {
+        kTileModeCount = kMirror_TileMode + 1
     };
 
     // override these in your subclass
@@ -482,7 +476,7 @@ public:
     SK_DEFINE_FLATTENABLE_TYPE(SkShader)
 
 protected:
-    virtual void flatten(SkWriteBuffer&) const SK_OVERRIDE;
+    void flatten(SkWriteBuffer&) const override;
 
     bool computeTotalInverse(const ContextRec&, SkMatrix* totalInverse) const;
 

@@ -45,9 +45,6 @@ class HpackEncoderPeer {
   HpackHeaderTablePeer table_peer() {
     return HpackHeaderTablePeer(table());
   }
-  bool allow_huffman_compression() {
-    return encoder_->allow_huffman_compression_;
-  }
   void set_allow_huffman_compression(bool allow) {
     encoder_->allow_huffman_compression_ = allow;
   }
@@ -63,7 +60,7 @@ class HpackEncoderPeer {
   static void CookieToCrumbs(StringPiece cookie,
                              std::vector<StringPiece>* out) {
     Representations tmp;
-    HpackEncoder::CookieToCrumbs(make_pair("", cookie), &tmp);
+    HpackEncoder::CookieToCrumbs(std::make_pair("", cookie), &tmp);
 
     out->clear();
     for (size_t i = 0; i != tmp.size(); ++i) {
@@ -73,7 +70,8 @@ class HpackEncoderPeer {
   static void DecomposeRepresentation(StringPiece value,
                                       std::vector<StringPiece>* out) {
     Representations tmp;
-    HpackEncoder::DecomposeRepresentation(make_pair("foobar", value), &tmp);
+    HpackEncoder::DecomposeRepresentation(std::make_pair("foobar", value),
+                                          &tmp);
 
     out->clear();
     for (size_t i = 0; i != tmp.size(); ++i) {
@@ -152,9 +150,6 @@ class HpackEncoderTest : public ::testing::Test {
     expected_.TakeString(&expected_out);
     EXPECT_TRUE(encoder_.EncodeHeaderSet(header_set, &actual_out));
     EXPECT_EQ(expected_out, actual_out);
-  }
-  size_t IndexOf(HpackEntry* entry) {
-    return peer_.table()->IndexOf(entry);
   }
   size_t IndexOf(const HpackEntry* entry) {
     return peer_.table()->IndexOf(entry);

@@ -12,11 +12,11 @@
 #include "chrome/browser/download/download_crx_util.h"
 #include "chrome/browser/download/download_extensions.h"
 #include "chrome/browser/download/download_prefs.h"
-#include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/grit/generated_resources.h"
+#include "components/history/core/browser/history_service.h"
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/download_interrupt_reasons.h"
@@ -210,7 +210,11 @@ DownloadTargetDeterminer::Result
       target_directory = download_prefs_->DownloadPath();
     }
     virtual_path_ = target_directory.Append(generated_filename);
+#if defined(OS_ANDROID)
+    conflict_action_ = DownloadPathReservationTracker::PROMPT;
+#else
     conflict_action_ = DownloadPathReservationTracker::UNIQUIFY;
+#endif
     should_notify_extensions_ = true;
   } else {
     virtual_path_ = download_->GetForcedFilePath();
@@ -457,7 +461,8 @@ void IsHandledBySafePlugin(content::ResourceContext* resource_context,
   bool is_handled_safely =
       plugin_found &&
       (plugin_info.type == WebPluginInfo::PLUGIN_TYPE_PEPPER_IN_PROCESS ||
-       plugin_info.type == WebPluginInfo::PLUGIN_TYPE_PEPPER_OUT_OF_PROCESS);
+       plugin_info.type == WebPluginInfo::PLUGIN_TYPE_PEPPER_OUT_OF_PROCESS ||
+       plugin_info.type == WebPluginInfo::PLUGIN_TYPE_BROWSER_PLUGIN);
   BrowserThread::PostTask(
       BrowserThread::UI, FROM_HERE, base::Bind(callback, is_handled_safely));
 }
@@ -591,8 +596,9 @@ DownloadTargetDeterminer::Result
     if (!IsDangerousFile(VISITED_REFERRER)) {
       // HistoryServiceFactory redirects incognito profiles to on-record
       // profiles.  There's no history for on-record profiles in unit_tests.
-      HistoryService* history_service = HistoryServiceFactory::GetForProfile(
-          GetProfile(), Profile::EXPLICIT_ACCESS);
+      history::HistoryService* history_service =
+          HistoryServiceFactory::GetForProfile(
+              GetProfile(), ServiceAccessType::EXPLICIT_ACCESS);
 
       if (history_service && download_->GetReferrerUrl().is_valid()) {
         history_service->GetVisibleVisitCountToHost(

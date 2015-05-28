@@ -28,7 +28,12 @@
 #include "WebCommon.h"
 #include <stdint.h>
 
+#ifdef INSIDE_BLINK
+#include "wtf/Functional.h"
+#endif
+
 namespace blink {
+class WebTraceLocation;
 
 // Always an integer value.
 typedef uintptr_t PlatformThreadId;
@@ -39,7 +44,15 @@ typedef uintptr_t PlatformThreadId;
 // run.
 class BLINK_PLATFORM_EXPORT WebThread {
 public:
-    class Task {
+    // An IdleTask is passed a deadline in CLOCK_MONOTONIC seconds and is
+    // expected to complete before this deadline.
+    class IdleTask {
+    public:
+        virtual ~IdleTask() { }
+        virtual void run(double deadlineSeconds) = 0;
+    };
+
+    class BLINK_PLATFORM_EXPORT Task {
     public:
         virtual ~Task() { }
         virtual void run() = 0;
@@ -55,8 +68,8 @@ public:
     // postTask() and postDelayedTask() take ownership of the passed Task
     // object. It is safe to invoke postTask() and postDelayedTask() from any
     // thread.
-    virtual void postTask(Task*) = 0;
-    virtual void postDelayedTask(Task*, long long delayMs) = 0;
+    virtual void postTask(const WebTraceLocation&, Task*) = 0;
+    virtual void postDelayedTask(const WebTraceLocation&, Task*, long long delayMs) = 0;
 
     virtual bool isCurrentThread() const = 0;
     virtual PlatformThreadId threadId() const { return 0; }
@@ -74,6 +87,12 @@ public:
     virtual void exitRunLoop() = 0;
 
     virtual ~WebThread() { }
+
+#ifdef INSIDE_BLINK
+    // Helpers for posting bound functions as tasks.
+    void postTask(const WebTraceLocation&, PassOwnPtr<Function<void()>>);
+    void postDelayedTask(const WebTraceLocation&, PassOwnPtr<Function<void()>>, long long delayMs);
+#endif
 };
 
 } // namespace blink

@@ -38,7 +38,7 @@ class ScopedSleeperProcess {
 
   ~ScopedSleeperProcess() {
     if (process_.IsValid()) {
-      process_.Terminate(-1);
+      process_.Terminate(-1, false);
       int exit_code = 0;
       EXPECT_TRUE(process_.WaitForExit(&exit_code));
     }
@@ -50,15 +50,14 @@ class ScopedSleeperProcess {
     base::CommandLine cmd_line(base::GetMultiProcessTestChildBaseCommandLine());
     base::LaunchOptions options;
     options.start_hidden = true;
-    process_ = base::Process(
-        base::SpawnMultiProcessTestChild("Sleeper", cmd_line, options));
+    process_ = base::SpawnMultiProcessTestChild("Sleeper", cmd_line, options);
     ASSERT_TRUE(process_.IsValid());
   }
 
   void Kill(int exit_code, bool wait) {
     ASSERT_TRUE(process_.IsValid());
     ASSERT_FALSE(is_killed_);
-    process_.Terminate(exit_code);
+    process_.Terminate(exit_code, false);
     int seen_exit_code = 0;
     EXPECT_TRUE(process_.WaitForExit(&seen_exit_code));
     EXPECT_EQ(exit_code, seen_exit_code);
@@ -78,10 +77,7 @@ class ExitCodeWatcherTest : public testing::Test {
 
   static const int kExitCode = 0xCAFEBABE;
 
-  ExitCodeWatcherTest() :
-      cmd_line_(base::CommandLine::NO_PROGRAM),
-      process_(base::kNullProcessHandle) {
-  }
+  ExitCodeWatcherTest() : cmd_line_(base::CommandLine::NO_PROGRAM) {}
 
   virtual void SetUp() override {
     Super::SetUp();
@@ -89,20 +85,8 @@ class ExitCodeWatcherTest : public testing::Test {
     override_manager_.OverrideRegistry(HKEY_CURRENT_USER);
   }
 
-  virtual void TearDown() override {
-    if (process_ != base::kNullProcessHandle) {
-      base::CloseProcessHandle(process_);
-      process_ = base::kNullProcessHandle;
-    }
-
-    Super::TearDown();
-  }
-
   base::Process OpenSelfWithAccess(uint32 access) {
-    HANDLE self = nullptr;
-    EXPECT_TRUE(base::OpenProcessHandleWithAccess(base::GetCurrentProcId(),
-                                                  access, &self));
-    return base::Process(self);
+    return base::Process::OpenWithAccess(base::GetCurrentProcId(), access);
   }
 
   void VerifyWroteExitCode(base::ProcessId proc_id, int exit_code) {
@@ -125,7 +109,6 @@ class ExitCodeWatcherTest : public testing::Test {
 
  protected:
   base::CommandLine cmd_line_;
-  base::ProcessHandle process_;
   registry_util::RegistryOverrideManager override_manager_;
 };
 
@@ -173,7 +156,7 @@ TEST_F(ExitCodeWatcherTest, ExitCodeWatcherOnExitedProcess) {
   EXPECT_TRUE(watcher.Initialize(sleeper.process().Duplicate()));
 
   // Verify that the watcher wrote a sentinel for the process.
-  VerifyWroteExitCode(sleeper.process().pid(), STILL_ACTIVE);
+  VerifyWroteExitCode(sleeper.process().Pid(), STILL_ACTIVE);
 
   // Kill the sleeper, and make sure it's exited before we continue.
   ASSERT_NO_FATAL_FAILURE(sleeper.Kill(kExitCode, true));
@@ -181,7 +164,7 @@ TEST_F(ExitCodeWatcherTest, ExitCodeWatcherOnExitedProcess) {
   watcher.WaitForExit();
   EXPECT_EQ(kExitCode, watcher.exit_code());
 
-  VerifyWroteExitCode(sleeper.process().pid(), kExitCode);
+  VerifyWroteExitCode(sleeper.process().Pid(), kExitCode);
 }
 
 }  // namespace browser_watcher

@@ -36,10 +36,11 @@ bool ChaCha20Poly1305Decrypter::IsSupported() {
   return false;
 }
 
-void ChaCha20Poly1305Decrypter::FillAeadParams(StringPiece nonce,
-                                               StringPiece associated_data,
-                                               size_t auth_tag_size,
-                                               AeadParams* aead_params) const {
+void ChaCha20Poly1305Decrypter::FillAeadParams(
+    StringPiece nonce,
+    const StringPiece& associated_data,
+    size_t auth_tag_size,
+    AeadParams* aead_params) const {
   NOTIMPLEMENTED();
 }
 
@@ -48,9 +49,9 @@ void ChaCha20Poly1305Decrypter::FillAeadParams(StringPiece nonce,
 ChaCha20Poly1305Decrypter::ChaCha20Poly1305Decrypter()
     : AeadBaseDecrypter(CKM_NSS_CHACHA20_POLY1305, PK11_Decrypt, kKeySize,
                         kAuthTagSize, kNoncePrefixSize) {
-  COMPILE_ASSERT(kKeySize <= kMaxKeySize, key_size_too_big);
-  COMPILE_ASSERT(kNoncePrefixSize <= kMaxNoncePrefixSize,
-                 nonce_prefix_size_too_big);
+  static_assert(kKeySize <= kMaxKeySize, "key size too big");
+  static_assert(kNoncePrefixSize <= kMaxNoncePrefixSize,
+                "nonce prefix size too big");
 }
 
 ChaCha20Poly1305Decrypter::~ChaCha20Poly1305Decrypter() {}
@@ -60,10 +61,11 @@ bool ChaCha20Poly1305Decrypter::IsSupported() {
   return true;
 }
 
-void ChaCha20Poly1305Decrypter::FillAeadParams(StringPiece nonce,
-                                               StringPiece associated_data,
-                                               size_t auth_tag_size,
-                                               AeadParams* aead_params) const {
+void ChaCha20Poly1305Decrypter::FillAeadParams(
+    StringPiece nonce,
+    const StringPiece& associated_data,
+    size_t auth_tag_size,
+    AeadParams* aead_params) const {
   aead_params->len = sizeof(aead_params->data.nss_aead_params);
   CK_NSS_AEAD_PARAMS* nss_aead_params = &aead_params->data.nss_aead_params;
   nss_aead_params->pIv =

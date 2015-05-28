@@ -51,8 +51,8 @@
 #include "content/public/common/user_agent.h"
 #include "jni/ContentViewCore_jni.h"
 #include "third_party/WebKit/public/web/WebInputEvent.h"
-#include "ui/base/android/view_android.h"
-#include "ui/base/android/window_android.h"
+#include "ui/android/view_android.h"
+#include "ui/android/window_android.h"
 #include "ui/gfx/android/java_bitmap.h"
 #include "ui/gfx/geometry/size_conversions.h"
 #include "ui/gfx/geometry/size_f.h"
@@ -171,7 +171,7 @@ class ContentViewCoreImpl::ContentViewUserData
       : content_view_core_(content_view_core) {
   }
 
-  virtual ~ContentViewUserData() {
+  ~ContentViewUserData() override {
     // TODO(joth): When chrome has finished removing the TabContents class (see
     // crbug.com/107201) consider inverting relationship, so ContentViewCore
     // would own WebContents. That effectively implies making the WebContents
@@ -214,7 +214,7 @@ ContentViewCoreImpl::ContentViewCoreImpl(
     JNIEnv* env,
     jobject obj,
     WebContents* web_contents,
-    ui::ViewAndroid* view_android,
+    jobject view_android,
     ui::WindowAndroid* window_android,
     jobject java_bridge_retained_object_set)
     : WebContentsObserver(web_contents),
@@ -222,13 +222,12 @@ ContentViewCoreImpl::ContentViewCoreImpl(
       web_contents_(static_cast<WebContentsImpl*>(web_contents)),
       root_layer_(cc::SolidColorLayer::Create()),
       dpi_scale_(GetPrimaryDisplayDeviceScaleFactor()),
-      view_android_(view_android),
+      view_android_(new ui::ViewAndroid(view_android, window_android)),
       window_android_(window_android),
       device_orientation_(0),
       accessibility_enabled_(false) {
   CHECK(web_contents) <<
       "A ContentViewCoreImpl should be created with a valid WebContents.";
-  DCHECK(view_android_);
   DCHECK(window_android_);
 
   root_layer_->SetBackgroundColor(GetBackgroundColor(env, obj));
@@ -256,6 +255,8 @@ ContentViewCoreImpl::ContentViewCoreImpl(
 }
 
 ContentViewCoreImpl::~ContentViewCoreImpl() {
+  root_layer_->RemoveFromParent();
+
   JNIEnv* env = base::android::AttachCurrentThread();
   ScopedJavaLocalRef<jobject> j_obj = java_ref_.get(env);
   java_ref_.reset();
@@ -379,7 +380,8 @@ void ContentViewCoreImpl::UpdateFrameInfo(
     const gfx::SizeF& content_size,
     const gfx::SizeF& viewport_size,
     const gfx::Vector2dF& controls_offset,
-    const gfx::Vector2dF& content_offset) {
+    const gfx::Vector2dF& content_offset,
+    bool is_mobile_optimized_hint) {
   JNIEnv* env = AttachCurrentThread();
   ScopedJavaLocalRef<jobject> obj = java_ref_.get(env);
   if (obj.is_null())
@@ -400,7 +402,8 @@ void ContentViewCoreImpl::UpdateFrameInfo(
       viewport_size.width(),
       viewport_size.height(),
       controls_offset.y(),
-      content_offset.y());
+      content_offset.y(),
+      is_mobile_optimized_hint);
 }
 
 void ContentViewCoreImpl::SetTitle(const base::string16& title) {
@@ -636,7 +639,7 @@ void ContentViewCoreImpl::GetScaledContentBitmap(
     gfx::Rect src_subrect,
     ReadbackRequestCallback& result_callback) {
   RenderWidgetHostViewAndroid* view = GetRenderWidgetHostViewAndroid();
-  if (!view) {
+  if (!view || color_type == kUnknown_SkColorType) {
     result_callback.Run(SkBitmap(), READBACK_FAILED);
     return;
   }
@@ -801,7 +804,7 @@ void ContentViewCoreImpl::SelectBetweenCoordinates(const gfx::PointF& base,
 }
 
 ui::ViewAndroid* ContentViewCoreImpl::GetViewAndroid() const {
-  return view_android_;
+  return view_android_.get();
 }
 
 ui::WindowAndroid* ContentViewCoreImpl::GetWindowAndroid() const {
@@ -1233,6 +1236,34 @@ void ContentViewCoreImpl::SetAccessibilityEnabled(JNIEnv* env, jobject obj,
   SetAccessibilityEnabledInternal(enabled);
 }
 
+void ContentViewCoreImpl::SetTextTrackSettings(JNIEnv* env,
+                                               jobject obj,
+                                               jstring textTrackBackgroundColor,
+                                               jstring textTrackFontFamily,
+                                               jstring textTrackFontStyle,
+                                               jstring textTrackFontVariant,
+                                               jstring textTrackTextColor,
+                                               jstring textTrackTextShadow,
+                                               jstring textTrackTextSize) {
+  FrameMsg_TextTrackSettings_Params params;
+  params.text_track_background_color = ConvertJavaStringToUTF8(
+      env, textTrackBackgroundColor);
+  params.text_track_font_family = ConvertJavaStringToUTF8(
+      env, textTrackFontFamily);
+  params.text_track_font_style = ConvertJavaStringToUTF8(
+      env, textTrackFontStyle);
+  params.text_track_font_variant = ConvertJavaStringToUTF8(
+      env, textTrackFontVariant);
+  params.text_track_text_color = ConvertJavaStringToUTF8(
+      env, textTrackTextColor);
+  params.text_track_text_shadow = ConvertJavaStringToUTF8(
+      env, textTrackTextShadow);
+  params.text_track_text_size = ConvertJavaStringToUTF8(
+      env, textTrackTextSize);
+
+  web_contents_->GetMainFrame()->SetTextTrackSettings(params);
+}
+
 bool ContentViewCoreImpl::IsFullscreenRequiredForOrientationLock() const {
   JNIEnv* env = AttachCurrentThread();
   ScopedJavaLocalRef<jobject> obj = java_ref_.get(env);
@@ -1303,6 +1334,12 @@ void ContentViewCoreImpl::SetBackgroundOpaque(JNIEnv* env, jobject jobj,
   }
 }
 
+void ContentViewCoreImpl::SetDrawsContent(JNIEnv* env,
+                                          jobject jobj,
+                                          jboolean draws) {
+  GetLayer()->SetHideLayerAndSubtree(!draws);
+}
+
 void ContentViewCoreImpl::RequestTextSurroundingSelection(
     int max_length,
     const base::Callback<
@@ -1355,17 +1392,30 @@ void ContentViewCoreImpl::WebContentsDestroyed() {
 // This is called for each ContentView.
 jlong Init(JNIEnv* env,
            jobject obj,
-           jlong native_web_contents,
-           jlong view_android,
+           jobject web_contents,
+           jobject view_android,
            jlong window_android,
            jobject retained_objects_set) {
   ContentViewCoreImpl* view = new ContentViewCoreImpl(
-      env, obj,
-      reinterpret_cast<WebContents*>(native_web_contents),
-      reinterpret_cast<ui::ViewAndroid*>(view_android),
+      env, obj, WebContents::FromJavaWebContents(web_contents), view_android,
       reinterpret_cast<ui::WindowAndroid*>(window_android),
       retained_objects_set);
   return reinterpret_cast<intptr_t>(view);
+}
+
+static jobject FromWebContentsAndroid(
+    JNIEnv* env,
+    jclass clazz,
+    jobject jweb_contents) {
+  WebContents* web_contents = WebContents::FromJavaWebContents(jweb_contents);
+  if (!web_contents)
+    return NULL;
+
+  ContentViewCore* view = ContentViewCore::FromWebContents(web_contents);
+  if (!view)
+    return NULL;
+
+  return view->GetJavaObject().Release();
 }
 
 bool RegisterContentViewCore(JNIEnv* env) {

@@ -5,6 +5,8 @@
 #include "components/gcm_driver/gcm_client_impl.h"
 
 #include "base/command_line.h"
+#include "base/files/file_path.h"
+#include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop/message_loop.h"
@@ -44,6 +46,8 @@ enum LastEvent {
 
 const uint64 kDeviceAndroidId = 54321;
 const uint64 kDeviceSecurityToken = 12345;
+const uint64 kDeviceAndroidId2 = 11111;
+const uint64 kDeviceSecurityToken2 = 2222;
 const int64 kSettingsCheckinInterval = 16 * 60 * 60;
 const char kAppId[] = "app_id";
 const char kSender[] = "project_id";
@@ -286,6 +290,9 @@ class GCMClientImplTest : public testing::Test,
   void OnDisconnected() override {}
 
   GCMClientImpl* gcm_client() const { return gcm_client_.get(); }
+  GCMClientImpl::State gcm_client_state() const {
+    return gcm_client_->state_;
+  }
   FakeMCSClient* mcs_client() const {
     return reinterpret_cast<FakeMCSClient*>(gcm_client_->mcs_client_.get());
   }
@@ -329,6 +336,10 @@ class GCMClientImplTest : public testing::Test,
 
   const GServicesSettings& gservices_settings() const {
     return gcm_client_->gservices_settings_;
+  }
+
+  const base::FilePath& temp_directory_path() const {
+    return temp_directory_.path();
   }
 
   int64 CurrentTime();
@@ -511,7 +522,7 @@ void GCMClientImplTest::InitializeGCMClient() {
 
 void GCMClientImplTest::StartGCMClient() {
   // Start loading and check-in.
-  gcm_client_->Start();
+  gcm_client_->Start(GCMClient::IMMEDIATE_START);
 
   PumpLoopUntilIdle();
 }
@@ -600,12 +611,30 @@ TEST_F(GCMClientImplTest, LoadingCompleted) {
   EXPECT_TRUE(device_checkin_info().account_tokens.empty());
 }
 
-TEST_F(GCMClientImplTest, CheckOut) {
-  EXPECT_TRUE(mcs_client());
-  EXPECT_TRUE(connection_factory());
-  gcm_client()->CheckOut();
-  EXPECT_FALSE(mcs_client());
-  EXPECT_FALSE(connection_factory());
+TEST_F(GCMClientImplTest, LoadingBusted) {
+  // Close the GCM store.
+  gcm_client()->Stop();
+  PumpLoopUntilIdle();
+
+  // Mess up the store.
+  base::FilePath store_file_path =
+      temp_directory_path().Append(FILE_PATH_LITERAL("CURRENT"));
+  ASSERT_TRUE(base::AppendToFile(store_file_path, "A", 1));
+
+  // Restart GCM client. The store should be reset and the loading should
+  // complete successfully.
+  reset_last_event();
+  BuildGCMClient(base::TimeDelta());
+  InitializeGCMClient();
+  StartGCMClient();
+  CompleteCheckin(kDeviceAndroidId2,
+                  kDeviceSecurityToken2,
+                  std::string(),
+                  std::map<std::string, std::string>());
+
+  EXPECT_EQ(LOADING_COMPLETED, last_event());
+  EXPECT_EQ(kDeviceAndroidId2, mcs_client()->last_android_id());
+  EXPECT_EQ(kDeviceSecurityToken2, mcs_client()->last_security_token());
 }
 
 TEST_F(GCMClientImplTest, RegisterApp) {
@@ -1045,41 +1074,101 @@ void GCMClientImplStartAndStopTest::DefaultCompleteCheckin() {
 }
 
 TEST_F(GCMClientImplStartAndStopTest, StartStopAndRestart) {
-  // Start the GCM and wait until it is ready.
-  gcm_client()->Start();
+  // GCMClientImpl should be in INITIALIZED state at first.
+  EXPECT_EQ(GCMClientImpl::INITIALIZED, gcm_client_state());
+
+  // Delay start the GCM.
+  gcm_client()->Start(GCMClient::DELAYED_START);
   PumpLoopUntilIdle();
+  EXPECT_EQ(GCMClientImpl::LOADED, gcm_client_state());
 
   // Stop the GCM.
   gcm_client()->Stop();
   PumpLoopUntilIdle();
+  EXPECT_EQ(GCMClientImpl::INITIALIZED, gcm_client_state());
 
-  // Restart the GCM.
-  gcm_client()->Start();
+  // Restart the GCM without delay.
+  gcm_client()->Start(GCMClient::IMMEDIATE_START);
   PumpLoopUntilIdle();
+  EXPECT_EQ(GCMClientImpl::INITIAL_DEVICE_CHECKIN, gcm_client_state());
 }
 
 TEST_F(GCMClientImplStartAndStopTest, StartAndStopImmediately) {
-  // Start the GCM and then stop it immediately.
-  gcm_client()->Start();
-  gcm_client()->Stop();
+  // GCMClientImpl should be in INITIALIZED state at first.
+  EXPECT_EQ(GCMClientImpl::INITIALIZED, gcm_client_state());
 
+  // Delay start the GCM and then stop it immediately.
+  gcm_client()->Start(GCMClient::DELAYED_START);
+  gcm_client()->Stop();
   PumpLoopUntilIdle();
+  EXPECT_EQ(GCMClientImpl::INITIALIZED, gcm_client_state());
+
+  // Start the GCM and then stop it immediately.
+  gcm_client()->Start(GCMClient::IMMEDIATE_START);
+  gcm_client()->Stop();
+  PumpLoopUntilIdle();
+  EXPECT_EQ(GCMClientImpl::INITIALIZED, gcm_client_state());
 }
 
 TEST_F(GCMClientImplStartAndStopTest, StartStopAndRestartImmediately) {
-  // Start the GCM and then stop and restart it immediately.
-  gcm_client()->Start();
-  gcm_client()->Stop();
-  gcm_client()->Start();
+  // GCMClientImpl should be in INITIALIZED state at first.
+  EXPECT_EQ(GCMClientImpl::INITIALIZED, gcm_client_state());
 
+  // Delay start the GCM and then stop and restart it immediately.
+  gcm_client()->Start(GCMClient::DELAYED_START);
+  gcm_client()->Stop();
+  gcm_client()->Start(GCMClient::DELAYED_START);
   PumpLoopUntilIdle();
+  EXPECT_EQ(GCMClientImpl::LOADED, gcm_client_state());
+
+  // Start the GCM and then stop and restart it immediately.
+  gcm_client()->Start(GCMClient::IMMEDIATE_START);
+  gcm_client()->Stop();
+  gcm_client()->Start(GCMClient::IMMEDIATE_START);
+  PumpLoopUntilIdle();
+  EXPECT_EQ(GCMClientImpl::INITIAL_DEVICE_CHECKIN, gcm_client_state());
+}
+
+TEST_F(GCMClientImplStartAndStopTest, DelayStart) {
+  // GCMClientImpl should be in INITIALIZED state at first.
+  EXPECT_EQ(GCMClientImpl::INITIALIZED, gcm_client_state());
+
+  // Delay start the GCM.
+  gcm_client()->Start(GCMClient::DELAYED_START);
+  PumpLoopUntilIdle();
+  EXPECT_EQ(GCMClientImpl::LOADED, gcm_client_state());
+
+  // Start the GCM immediately and complete the checkin.
+  gcm_client()->Start(GCMClient::IMMEDIATE_START);
+  PumpLoopUntilIdle();
+  EXPECT_EQ(GCMClientImpl::INITIAL_DEVICE_CHECKIN, gcm_client_state());
+  DefaultCompleteCheckin();
+  EXPECT_EQ(GCMClientImpl::READY, gcm_client_state());
+
+  // Registration.
+  std::vector<std::string> senders;
+  senders.push_back("sender");
+  gcm_client()->Register(kAppId, senders);
+  CompleteRegistration("reg_id");
+  EXPECT_EQ(GCMClientImpl::READY, gcm_client_state());
+
+  // Stop the GCM.
+  gcm_client()->Stop();
+  PumpLoopUntilIdle();
+  EXPECT_EQ(GCMClientImpl::INITIALIZED, gcm_client_state());
+
+  // Delay start the GCM. GCM is indeed started without delay because the
+  // registration record has been found.
+  gcm_client()->Start(GCMClient::DELAYED_START);
+  PumpLoopUntilIdle();
+  EXPECT_EQ(GCMClientImpl::READY, gcm_client_state());
 }
 
 // Test for known account mappings and last token fetching time being passed
 // to OnGCMReady.
 TEST_F(GCMClientImplStartAndStopTest, OnGCMReadyAccountsAndTokenFetchingTime) {
   // Start the GCM and wait until it is ready.
-  gcm_client()->Start();
+  gcm_client()->Start(GCMClient::IMMEDIATE_START);
   PumpLoopUntilIdle();
   DefaultCompleteCheckin();
 
@@ -1098,7 +1187,7 @@ TEST_F(GCMClientImplStartAndStopTest, OnGCMReadyAccountsAndTokenFetchingTime) {
   PumpLoopUntilIdle();
 
   // Restart the GCM.
-  gcm_client()->Start();
+  gcm_client()->Start(GCMClient::IMMEDIATE_START);
   PumpLoopUntilIdle();
 
   EXPECT_EQ(LOADING_COMPLETED, last_event());

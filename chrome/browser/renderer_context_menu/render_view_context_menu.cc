@@ -31,6 +31,8 @@
 #include "chrome/browser/download/download_stats.h"
 #include "chrome/browser/extensions/devtools_util.h"
 #include "chrome/browser/extensions/extension_service.h"
+#include "chrome/browser/net/spdyproxy/data_reduction_proxy_chrome_settings.h"
+#include "chrome/browser/net/spdyproxy/data_reduction_proxy_chrome_settings_factory.h"
 #include "chrome/browser/plugins/chrome_plugin_service_filter.h"
 #include "chrome/browser/prefs/incognito_mode_prefs.h"
 #include "chrome/browser/profiles/profile.h"
@@ -103,7 +105,7 @@
 
 #if defined(ENABLE_PRINTING)
 #include "chrome/browser/printing/print_view_manager_common.h"
-#include "chrome/common/print_messages.h"
+#include "components/printing/common/print_messages.h"
 
 #if defined(ENABLE_PRINT_PREVIEW)
 #include "chrome/browser/printing/print_preview_context_menu_observer.h"
@@ -148,69 +150,74 @@ const struct UmaEnumCommandIdPair {
   int enum_id;
   int control_id;
 } kUmaEnumToControlId[] = {
-      /*
-        enum id for 0, 1 are detected using
-        RenderViewContextMenu::IsContentCustomCommandId and
-        ContextMenuMatcher::IsExtensionsCustomCommandId
-      */
-      {2, IDC_CONTENT_CONTEXT_PROTOCOL_HANDLER_FIRST},
-      {3, IDC_CONTENT_CONTEXT_OPENLINKNEWTAB},
-      {4, IDC_CONTENT_CONTEXT_OPENLINKNEWWINDOW},
-      {5, IDC_CONTENT_CONTEXT_OPENLINKOFFTHERECORD},
-      {6, IDC_CONTENT_CONTEXT_SAVELINKAS},
-      {7, IDC_CONTENT_CONTEXT_SAVEAVAS},
-      {8, IDC_CONTENT_CONTEXT_SAVEIMAGEAS},
-      {9, IDC_CONTENT_CONTEXT_COPYLINKLOCATION},
-      {10, IDC_CONTENT_CONTEXT_COPYIMAGELOCATION},
-      {11, IDC_CONTENT_CONTEXT_COPYAVLOCATION},
-      {12, IDC_CONTENT_CONTEXT_COPYIMAGE},
-      {13, IDC_CONTENT_CONTEXT_OPENIMAGENEWTAB},
-      {14, IDC_CONTENT_CONTEXT_OPENAVNEWTAB},
-      {15, IDC_CONTENT_CONTEXT_PLAYPAUSE},
-      {16, IDC_CONTENT_CONTEXT_MUTE},
-      {17, IDC_CONTENT_CONTEXT_LOOP},
-      {18, IDC_CONTENT_CONTEXT_CONTROLS},
-      {19, IDC_CONTENT_CONTEXT_ROTATECW},
-      {20, IDC_CONTENT_CONTEXT_ROTATECCW},
-      {21, IDC_BACK},
-      {22, IDC_FORWARD},
-      {23, IDC_SAVE_PAGE},
-      {24, IDC_RELOAD},
-      {25, IDC_CONTENT_CONTEXT_RELOAD_PACKAGED_APP},
-      {26, IDC_CONTENT_CONTEXT_RESTART_PACKAGED_APP},
-      {27, IDC_PRINT},
-      {28, IDC_VIEW_SOURCE},
-      {29, IDC_CONTENT_CONTEXT_INSPECTELEMENT},
-      {30, IDC_CONTENT_CONTEXT_INSPECTBACKGROUNDPAGE},
-      {31, IDC_CONTENT_CONTEXT_VIEWPAGEINFO},
-      {32, IDC_CONTENT_CONTEXT_TRANSLATE},
-      {33, IDC_CONTENT_CONTEXT_RELOADFRAME},
-      {34, IDC_CONTENT_CONTEXT_VIEWFRAMESOURCE},
-      {35, IDC_CONTENT_CONTEXT_VIEWFRAMEINFO},
-      {36, IDC_CONTENT_CONTEXT_UNDO},
-      {37, IDC_CONTENT_CONTEXT_REDO},
-      {38, IDC_CONTENT_CONTEXT_CUT},
-      {39, IDC_CONTENT_CONTEXT_COPY},
-      {40, IDC_CONTENT_CONTEXT_PASTE},
-      {41, IDC_CONTENT_CONTEXT_PASTE_AND_MATCH_STYLE},
-      {42, IDC_CONTENT_CONTEXT_DELETE},
-      {43, IDC_CONTENT_CONTEXT_SELECTALL},
-      {44, IDC_CONTENT_CONTEXT_SEARCHWEBFOR},
-      {45, IDC_CONTENT_CONTEXT_GOTOURL},
-      {46, IDC_CONTENT_CONTEXT_LANGUAGE_SETTINGS},
-      {47, IDC_CONTENT_CONTEXT_PROTOCOL_HANDLER_SETTINGS},
-      {48, IDC_CONTENT_CONTEXT_ADDSEARCHENGINE},
-      {52, IDC_CONTENT_CONTEXT_OPENLINKWITH},
-      {53, IDC_CHECK_SPELLING_WHILE_TYPING},
-      {54, IDC_SPELLCHECK_MENU},
-      {55, IDC_CONTENT_CONTEXT_SPELLING_TOGGLE},
-      {56, IDC_SPELLCHECK_LANGUAGES_FIRST},
-      {57, IDC_CONTENT_CONTEXT_SEARCHWEBFORIMAGE},
-      {58, IDC_SPELLCHECK_SUGGESTION_0},
-      {59, IDC_SPELLCHECK_ADD_TO_DICTIONARY},
-      {60, IDC_SPELLPANEL_TOGGLE},
-      // Add new items here and use |enum_id| from the next line.
-      {61, 0},  // Must be the last. Increment |enum_id| when new IDC was added.
+    /*
+      enum id for 0, 1 are detected using
+      RenderViewContextMenu::IsContentCustomCommandId and
+      ContextMenuMatcher::IsExtensionsCustomCommandId
+    */
+    {2, IDC_CONTENT_CONTEXT_PROTOCOL_HANDLER_FIRST},
+    {3, IDC_CONTENT_CONTEXT_OPENLINKNEWTAB},
+    {4, IDC_CONTENT_CONTEXT_OPENLINKNEWWINDOW},
+    {5, IDC_CONTENT_CONTEXT_OPENLINKOFFTHERECORD},
+    {6, IDC_CONTENT_CONTEXT_SAVELINKAS},
+    {7, IDC_CONTENT_CONTEXT_SAVEAVAS},
+    {8, IDC_CONTENT_CONTEXT_SAVEIMAGEAS},
+    {9, IDC_CONTENT_CONTEXT_COPYLINKLOCATION},
+    {10, IDC_CONTENT_CONTEXT_COPYIMAGELOCATION},
+    {11, IDC_CONTENT_CONTEXT_COPYAVLOCATION},
+    {12, IDC_CONTENT_CONTEXT_COPYIMAGE},
+    {13, IDC_CONTENT_CONTEXT_OPENIMAGENEWTAB},
+    {14, IDC_CONTENT_CONTEXT_OPENAVNEWTAB},
+    {15, IDC_CONTENT_CONTEXT_PLAYPAUSE},
+    {16, IDC_CONTENT_CONTEXT_MUTE},
+    {17, IDC_CONTENT_CONTEXT_LOOP},
+    {18, IDC_CONTENT_CONTEXT_CONTROLS},
+    {19, IDC_CONTENT_CONTEXT_ROTATECW},
+    {20, IDC_CONTENT_CONTEXT_ROTATECCW},
+    {21, IDC_BACK},
+    {22, IDC_FORWARD},
+    {23, IDC_SAVE_PAGE},
+    {24, IDC_RELOAD},
+    {25, IDC_CONTENT_CONTEXT_RELOAD_PACKAGED_APP},
+    {26, IDC_CONTENT_CONTEXT_RESTART_PACKAGED_APP},
+    {27, IDC_PRINT},
+    {28, IDC_VIEW_SOURCE},
+    {29, IDC_CONTENT_CONTEXT_INSPECTELEMENT},
+    {30, IDC_CONTENT_CONTEXT_INSPECTBACKGROUNDPAGE},
+    {31, IDC_CONTENT_CONTEXT_VIEWPAGEINFO},
+    {32, IDC_CONTENT_CONTEXT_TRANSLATE},
+    {33, IDC_CONTENT_CONTEXT_RELOADFRAME},
+    {34, IDC_CONTENT_CONTEXT_VIEWFRAMESOURCE},
+    {35, IDC_CONTENT_CONTEXT_VIEWFRAMEINFO},
+    {36, IDC_CONTENT_CONTEXT_UNDO},
+    {37, IDC_CONTENT_CONTEXT_REDO},
+    {38, IDC_CONTENT_CONTEXT_CUT},
+    {39, IDC_CONTENT_CONTEXT_COPY},
+    {40, IDC_CONTENT_CONTEXT_PASTE},
+    {41, IDC_CONTENT_CONTEXT_PASTE_AND_MATCH_STYLE},
+    {42, IDC_CONTENT_CONTEXT_DELETE},
+    {43, IDC_CONTENT_CONTEXT_SELECTALL},
+    {44, IDC_CONTENT_CONTEXT_SEARCHWEBFOR},
+    {45, IDC_CONTENT_CONTEXT_GOTOURL},
+    {46, IDC_CONTENT_CONTEXT_LANGUAGE_SETTINGS},
+    {47, IDC_CONTENT_CONTEXT_PROTOCOL_HANDLER_SETTINGS},
+    {48, IDC_CONTENT_CONTEXT_ADDSEARCHENGINE},
+    {52, IDC_CONTENT_CONTEXT_OPENLINKWITH},
+    {53, IDC_CHECK_SPELLING_WHILE_TYPING},
+    {54, IDC_SPELLCHECK_MENU},
+    {55, IDC_CONTENT_CONTEXT_SPELLING_TOGGLE},
+    {56, IDC_SPELLCHECK_LANGUAGES_FIRST},
+    {57, IDC_CONTENT_CONTEXT_SEARCHWEBFORIMAGE},
+    {58, IDC_SPELLCHECK_SUGGESTION_0},
+    {59, IDC_SPELLCHECK_ADD_TO_DICTIONARY},
+    {60, IDC_SPELLPANEL_TOGGLE},
+    {61, IDC_CONTENT_CONTEXT_OPEN_ORIGINAL_IMAGE_NEW_TAB},
+    {62, IDC_WRITING_DIRECTION_MENU},
+    {63, IDC_WRITING_DIRECTION_DEFAULT},
+    {64, IDC_WRITING_DIRECTION_LTR},
+    {65, IDC_WRITING_DIRECTION_RTL},
+    // Add new items here and use |enum_id| from the next line.
+    {66, 0},  // Must be the last. Increment |enum_id| when new IDC was added.
 };
 
 // Collapses large ranges of ids before looking for UMA enum.
@@ -301,6 +308,25 @@ bool g_custom_id_ranges_initialized = false;
 const int kSpellcheckRadioGroup = 1;
 
 }  // namespace
+
+// static
+gfx::Vector2d RenderViewContextMenu::GetOffset(
+    RenderFrameHost* render_frame_host) {
+  gfx::Vector2d offset;
+#if defined(ENABLE_EXTENSIONS)
+  WebContents* web_contents =
+      WebContents::FromRenderFrameHost(render_frame_host);
+  WebContents* top_level_web_contents =
+      extensions::GuestViewBase::GetTopLevelWebContents(web_contents);
+  if (web_contents && top_level_web_contents &&
+      web_contents != top_level_web_contents) {
+    gfx::Rect bounds = web_contents->GetContainerBounds();
+    gfx::Rect top_level_bounds = top_level_web_contents->GetContainerBounds();
+    offset = bounds.origin() - top_level_bounds.origin();
+  }
+#endif  // defined(ENABLE_EXTENSIONS)
+  return offset;
+}
 
 // static
 bool RenderViewContextMenu::IsDevToolsURL(const GURL& url) {
@@ -626,8 +652,7 @@ void RenderViewContextMenu::AppendPrintPreviewItems() {
 
 const Extension* RenderViewContextMenu::GetExtension() const {
   return extensions::ProcessManager::Get(browser_context_)
-      ->GetExtensionForRenderViewHost(
-          source_web_contents_->GetRenderViewHost());
+      ->GetExtensionForWebContents(source_web_contents_);
 }
 
 void RenderViewContextMenu::AppendDeveloperItems() {
@@ -692,8 +717,17 @@ void RenderViewContextMenu::AppendImageItems() {
                                   IDS_CONTENT_CONTEXT_COPYIMAGELOCATION);
   menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_COPYIMAGE,
                                   IDS_CONTENT_CONTEXT_COPYIMAGE);
-  menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_OPENIMAGENEWTAB,
-                                  IDS_CONTENT_CONTEXT_OPENIMAGENEWTAB);
+  DataReductionProxyChromeSettings* settings =
+      DataReductionProxyChromeSettingsFactory::GetForBrowserContext(
+          browser_context_);
+  if (settings && settings->CanUseDataReductionProxy(params_.src_url)) {
+    menu_model_.AddItemWithStringId(
+        IDC_CONTENT_CONTEXT_OPEN_ORIGINAL_IMAGE_NEW_TAB,
+        IDS_CONTENT_CONTEXT_OPEN_ORIGINAL_IMAGE_NEW_TAB);
+  } else {
+    menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_OPENIMAGENEWTAB,
+                                    IDS_CONTENT_CONTEXT_OPENIMAGENEWTAB);
+  }
 }
 
 void RenderViewContextMenu::AppendSearchWebForImageItems() {
@@ -762,7 +796,8 @@ void RenderViewContextMenu::AppendMediaItems() {
 }
 
 void RenderViewContextMenu::AppendPluginItems() {
-  if (params_.page_url == params_.src_url) {
+  if (params_.page_url == params_.src_url ||
+      extensions::GuestViewBase::IsGuest(source_web_contents_)) {
     // Full page plugin, so show page menu items.
     if (params_.link_url.is_empty() && params_.selection_text.empty())
       AppendPageItems();
@@ -894,11 +929,14 @@ void RenderViewContextMenu::AppendEditableItems() {
   if (use_spellcheck_and_search)
     AppendSpellingSuggestionsSubMenu();
 
-  menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_UNDO,
-                                  IDS_CONTENT_CONTEXT_UNDO);
-  menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_REDO,
-                                  IDS_CONTENT_CONTEXT_REDO);
-  menu_model_.AddSeparator(ui::NORMAL_SEPARATOR);
+  if (!IsDevToolsURL(params_.page_url)) {
+    menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_UNDO,
+                                    IDS_CONTENT_CONTEXT_UNDO);
+    menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_REDO,
+                                    IDS_CONTENT_CONTEXT_REDO);
+    menu_model_.AddSeparator(ui::NORMAL_SEPARATOR);
+  }
+
   menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_CUT,
                                   IDS_CONTENT_CONTEXT_CUT);
   menu_model_.AddItemWithStringId(IDC_CONTENT_CONTEXT_COPY,
@@ -1008,25 +1046,25 @@ bool RenderViewContextMenu::IsCommandIdEnabled(int id) const {
       IncognitoModePrefs::GetAvailability(prefs);
   switch (id) {
     case IDC_BACK:
-      return source_web_contents_->GetController().CanGoBack();
+      return embedder_web_contents_->GetController().CanGoBack();
 
     case IDC_FORWARD:
-      return source_web_contents_->GetController().CanGoForward();
+      return embedder_web_contents_->GetController().CanGoForward();
 
     case IDC_RELOAD: {
       CoreTabHelper* core_tab_helper =
-          CoreTabHelper::FromWebContents(source_web_contents_);
+          CoreTabHelper::FromWebContents(embedder_web_contents_);
       if (!core_tab_helper)
         return false;
 
       CoreTabHelperDelegate* core_delegate = core_tab_helper->delegate();
       return !core_delegate ||
-             core_delegate->CanReloadContents(source_web_contents_);
+             core_delegate->CanReloadContents(embedder_web_contents_);
     }
 
     case IDC_VIEW_SOURCE:
     case IDC_CONTENT_CONTEXT_VIEWFRAMESOURCE:
-      return source_web_contents_->GetController().CanViewSource();
+      return embedder_web_contents_->GetController().CanViewSource();
 
     case IDC_CONTENT_CONTEXT_INSPECTELEMENT:
     case IDC_CONTENT_CONTEXT_INSPECTBACKGROUNDPAGE:
@@ -1035,16 +1073,16 @@ bool RenderViewContextMenu::IsCommandIdEnabled(int id) const {
       return IsDevCommandEnabled(id);
 
     case IDC_CONTENT_CONTEXT_VIEWPAGEINFO:
-      if (source_web_contents_->GetController().GetVisibleEntry() == NULL)
+      if (embedder_web_contents_->GetController().GetVisibleEntry() == NULL)
         return false;
       // Disabled if no browser is associated (e.g. desktop notifications).
-      if (chrome::FindBrowserWithWebContents(source_web_contents_) == NULL)
+      if (chrome::FindBrowserWithWebContents(embedder_web_contents_) == NULL)
         return false;
       return true;
 
     case IDC_CONTENT_CONTEXT_TRANSLATE: {
       ChromeTranslateClient* chrome_translate_client =
-          ChromeTranslateClient::FromWebContents(source_web_contents_);
+          ChromeTranslateClient::FromWebContents(embedder_web_contents_);
       if (!chrome_translate_client)
         return false;
       std::string original_lang =
@@ -1059,13 +1097,13 @@ bool RenderViewContextMenu::IsCommandIdEnabled(int id) const {
       return ((params_.edit_flags & WebContextMenuData::CanTranslate) != 0) &&
              !original_lang.empty() &&  // Did we receive the page language yet?
              !chrome_translate_client->GetLanguageState().IsPageTranslated() &&
-             !source_web_contents_->GetInterstitialPage() &&
+             !embedder_web_contents_->GetInterstitialPage() &&
              // There are some application locales which can't be used as a
              // target language for translation.
              translate::TranslateDownloadManager::IsSupportedLanguage(
                  target_lang) &&
              // Disable on the Instant Extended NTP.
-             !chrome::IsInstantNTP(source_web_contents_);
+             !chrome::IsInstantNTP(embedder_web_contents_);
     }
 
     case IDC_CONTENT_CONTEXT_OPENLINKNEWTAB:
@@ -1098,6 +1136,7 @@ bool RenderViewContextMenu::IsCommandIdEnabled(int id) const {
 
     // The images shown in the most visited thumbnails can't be opened or
     // searched for conventionally.
+    case IDC_CONTENT_CONTEXT_OPEN_ORIGINAL_IMAGE_NEW_TAB:
     case IDC_CONTENT_CONTEXT_OPENIMAGENEWTAB:
     case IDC_CONTENT_CONTEXT_SEARCHWEBFORIMAGE:
       return params_.src_url.is_valid() &&
@@ -1160,13 +1199,13 @@ bool RenderViewContextMenu::IsCommandIdEnabled(int id) const {
 
     case IDC_SAVE_PAGE: {
       CoreTabHelper* core_tab_helper =
-          CoreTabHelper::FromWebContents(source_web_contents_);
+          CoreTabHelper::FromWebContents(embedder_web_contents_);
       if (!core_tab_helper)
         return false;
 
       CoreTabHelperDelegate* core_delegate = core_tab_helper->delegate();
       if (core_delegate &&
-          !core_delegate->CanSaveContents(source_web_contents_))
+          !core_delegate->CanSaveContents(embedder_web_contents_))
         return false;
 
       PrefService* local_state = g_browser_process->local_state();
@@ -1178,7 +1217,7 @@ bool RenderViewContextMenu::IsCommandIdEnabled(int id) const {
       // We save the last committed entry (which the user is looking at), as
       // opposed to any pending URL that hasn't committed yet.
       NavigationEntry* entry =
-          source_web_contents_->GetController().GetLastCommittedEntry();
+          embedder_web_contents_->GetController().GetLastCommittedEntry();
       return content::IsSavableURL(entry ? entry->GetURL() : GURL());
     }
 
@@ -1374,7 +1413,17 @@ void RenderViewContextMenu::ExecuteCommand(int id, int event_flags) {
         RecordDownloadSource(DOWNLOAD_INITIATED_BY_CONTEXT_MENU);
         const GURL& url = params_.src_url;
         content::Referrer referrer = CreateSaveAsReferrer(url, params_);
-        source_web_contents_->SaveFrame(url, referrer);
+
+        std::string headers;
+        DataReductionProxyChromeSettings* settings =
+            DataReductionProxyChromeSettingsFactory::GetForBrowserContext(
+                browser_context_);
+        if (params_.media_type == WebContextMenuData::MediaTypeImage &&
+            settings && settings->CanUseDataReductionProxy(params_.src_url)) {
+          headers = data_reduction_proxy::kDataReductionPassThroughHeader;
+        }
+
+        source_web_contents_->SaveFrameWithHeaders(url, referrer, headers);
       }
       break;
     }
@@ -1394,6 +1443,13 @@ void RenderViewContextMenu::ExecuteCommand(int id, int event_flags) {
 
     case IDC_CONTENT_CONTEXT_SEARCHWEBFORIMAGE:
       GetImageThumbnailForSearch();
+      break;
+
+    case IDC_CONTENT_CONTEXT_OPEN_ORIGINAL_IMAGE_NEW_TAB:
+      OpenURLWithExtraHeaders(
+          params_.src_url, GetDocumentURL(params_), NEW_BACKGROUND_TAB,
+          ui::PAGE_TRANSITION_LINK,
+          data_reduction_proxy::kDataReductionPassThroughHeader);
       break;
 
     case IDC_CONTENT_CONTEXT_OPENIMAGENEWTAB:
@@ -1464,19 +1520,19 @@ void RenderViewContextMenu::ExecuteCommand(int id, int event_flags) {
       break;
 
     case IDC_BACK:
-      source_web_contents_->GetController().GoBack();
+      embedder_web_contents_->GetController().GoBack();
       break;
 
     case IDC_FORWARD:
-      source_web_contents_->GetController().GoForward();
+      embedder_web_contents_->GetController().GoForward();
       break;
 
     case IDC_SAVE_PAGE:
-      source_web_contents_->OnSavePage();
+      embedder_web_contents_->OnSavePage();
       break;
 
     case IDC_RELOAD:
-      source_web_contents_->GetController().Reload(true);
+      embedder_web_contents_->GetController().Reload(true);
       break;
 
     case IDC_CONTENT_CONTEXT_RELOAD_PACKAGED_APP: {
@@ -1519,7 +1575,7 @@ void RenderViewContextMenu::ExecuteCommand(int id, int event_flags) {
     }
 
     case IDC_VIEW_SOURCE:
-      source_web_contents_->ViewSource();
+      embedder_web_contents_->ViewSource();
       break;
 
     case IDC_CONTENT_CONTEXT_INSPECTELEMENT:
@@ -1537,15 +1593,16 @@ void RenderViewContextMenu::ExecuteCommand(int id, int event_flags) {
     }
 
     case IDC_CONTENT_CONTEXT_VIEWPAGEINFO: {
-      NavigationController* controller = &source_web_contents_->GetController();
+      NavigationController* controller =
+          &embedder_web_contents_->GetController();
       // Important to use GetVisibleEntry to match what's showing in the
       // omnibox.  This may return null.
       NavigationEntry* nav_entry = controller->GetVisibleEntry();
       if (!nav_entry)
         return;
       Browser* browser =
-          chrome::FindBrowserWithWebContents(source_web_contents_);
-      chrome::ShowWebsiteSettings(browser, source_web_contents_,
+          chrome::FindBrowserWithWebContents(embedder_web_contents_);
+      chrome::ShowWebsiteSettings(browser, embedder_web_contents_,
                                   nav_entry->GetURL(), nav_entry->GetSSL());
       break;
     }
@@ -1554,7 +1611,7 @@ void RenderViewContextMenu::ExecuteCommand(int id, int event_flags) {
       // A translation might have been triggered by the time the menu got
       // selected, do nothing in that case.
       ChromeTranslateClient* chrome_translate_client =
-          ChromeTranslateClient::FromWebContents(source_web_contents_);
+          ChromeTranslateClient::FromWebContents(embedder_web_contents_);
       if (!chrome_translate_client ||
           chrome_translate_client->GetLanguageState().IsPageTranslated() ||
           chrome_translate_client->GetLanguageState().translation_pending()) {
@@ -1724,11 +1781,8 @@ void RenderViewContextMenu::NotifyURLOpened(
 bool RenderViewContextMenu::IsDevCommandEnabled(int id) const {
   if (id == IDC_CONTENT_CONTEXT_INSPECTELEMENT ||
       id == IDC_CONTENT_CONTEXT_INSPECTBACKGROUNDPAGE) {
-    const base::CommandLine* command_line =
-        base::CommandLine::ForCurrentProcess();
     if (!GetPrefs(browser_context_)
-             ->GetBoolean(prefs::kWebKitJavascriptEnabled) ||
-        command_line->HasSwitch(switches::kDisableJavaScript))
+             ->GetBoolean(prefs::kWebKitJavascriptEnabled))
       return false;
 
     // Don't enable the web inspector if the developer tools are disabled via

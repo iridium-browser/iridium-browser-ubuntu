@@ -4,9 +4,9 @@
 
 #include "ui/compositor/layer_animator.h"
 
-#include "base/debug/trace_event.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/trace_event/trace_event.h"
 #include "cc/animation/animation_id_provider.h"
 #include "cc/output/begin_frame_args.h"
 #include "ui/compositor/compositor.h"
@@ -759,10 +759,7 @@ bool LayerAnimator::StartSequenceImmediately(LayerAnimationSequence* sequence) {
       return false;
   }
 
-  // All clear, actually start the sequence. Note: base::TimeTicks::Now has
-  // a resolution that can be as bad as 15ms. If this causes glitches in the
-  // animations, this can be switched to HighResNow() (animation uses Now()
-  // internally).
+  // All clear, actually start the sequence.
   // All LayerAnimators share the same LayerAnimatorCollection. Use the
   // last_tick_time() from there to ensure animations started during the same
   // event complete at the same time.
@@ -804,7 +801,7 @@ void LayerAnimator::GetTargetValue(
 
 void LayerAnimator::OnScheduled(LayerAnimationSequence* sequence) {
   if (observers_.might_have_observers()) {
-    ObserverListBase<LayerAnimationObserver>::Iterator it(observers_);
+    ObserverListBase<LayerAnimationObserver>::Iterator it(&observers_);
     LayerAnimationObserver* obs;
     while ((obs = it.GetNext()) != NULL) {
       sequence->AddObserver(obs);

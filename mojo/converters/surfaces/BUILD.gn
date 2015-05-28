@@ -18,6 +18,7 @@ component("surfaces") {
 
   public_deps = [
     "//mojo/converters/geometry",
+    "//mojo/converters/transform",
     "//ui/gfx",
   ]
 
@@ -28,9 +29,9 @@ component("surfaces") {
     "//gpu",
     "//ui/gfx/geometry",
     "//mojo/environment:chromium",
-    "//mojo/public/c/system:for_component",
-    "//mojo/services/surfaces/public/interfaces:surface_id",
-    "//mojo/services/surfaces/public/interfaces",
     "//skia",
+    "//third_party/mojo/src/mojo/public/c/system:for_component",
+    "//third_party/mojo_services/src/surfaces/public/interfaces:surface_id",
+    "//third_party/mojo_services/src/surfaces/public/interfaces",
   ]
 }

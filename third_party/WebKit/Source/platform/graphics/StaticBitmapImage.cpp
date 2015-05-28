@@ -7,7 +7,7 @@
 
 #include "platform/graphics/GraphicsContext.h"
 #include "platform/graphics/ImageObserver.h"
-#include "platform/graphics/skia/NativeImageSkia.h"
+#include "third_party/skia/include/core/SkCanvas.h"
 #include "third_party/skia/include/core/SkImage.h"
 #include "third_party/skia/include/core/SkPaint.h"
 #include "third_party/skia/include/core/SkShader.h"
@@ -36,7 +36,7 @@ bool StaticBitmapImage::currentFrameKnownToBeOpaque()
     return m_image->isOpaque();
 }
 
-void StaticBitmapImage::draw(GraphicsContext* ctx, const FloatRect& dstRect, const FloatRect& srcRect, CompositeOperator compositeOp, WebBlendMode blendMode)
+void StaticBitmapImage::draw(GraphicsContext* ctx, const FloatRect& dstRect, const FloatRect& srcRect, SkXfermode::Mode compositeOp, RespectImageOrientationEnum)
 {
     FloatRect normDstRect = adjustForNegativeSize(dstRect);
     FloatRect normSrcRect = adjustForNegativeSize(srcRect);
@@ -49,15 +49,16 @@ void StaticBitmapImage::draw(GraphicsContext* ctx, const FloatRect& dstRect, con
     ASSERT(normSrcRect.width() <= m_image->width() && normSrcRect.height() <= m_image->height());
 
     {
+        SkCanvas* canvas = ctx->canvas();
+
         SkPaint paint;
-        OwnPtr<GraphicsContext::AutoCanvasRestorer> restorer = ctx->preparePaintForDrawRectToRect(&paint, srcRect, dstRect, compositeOp, blendMode, !currentFrameKnownToBeOpaque());
+        int initialSaveCount = ctx->preparePaintForDrawRectToRect(&paint, srcRect, dstRect, compositeOp, !currentFrameKnownToBeOpaque());
 
         SkRect srcSkRect = WebCoreFloatRectToSKRect(normSrcRect);
         SkRect dstSkRect = WebCoreFloatRectToSKRect(normDstRect);
 
-        SkCanvas* canvas = ctx->canvas();
-
         canvas->drawImageRect(m_image.get(), &srcSkRect, dstSkRect, &paint);
+        canvas->restoreToCount(initialSaveCount);
     }
 
     if (ImageObserver* observer = imageObserver())

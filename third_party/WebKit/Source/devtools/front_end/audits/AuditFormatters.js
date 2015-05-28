@@ -76,7 +76,7 @@ WebInspector.AuditFormatters.Registry = {
      */
     url: function(url, displayText)
     {
-        return WebInspector.createExternalAnchor(url, displayText);
+        return WebInspector.linkifyURLAsNode(url, displayText, undefined, true);
     },
 
     /**
@@ -87,7 +87,7 @@ WebInspector.AuditFormatters.Registry = {
     resourceLink: function(url, line)
     {
         // FIXME: use WebInspector.Linkifier
-        return WebInspector.linkifyResourceAsNode(url, line, "console-message-url webkit-html-resource-link");
+        return WebInspector.linkifyResourceAsNode(url, line, "resource-url webkit-html-resource-link");
     }
 };
 

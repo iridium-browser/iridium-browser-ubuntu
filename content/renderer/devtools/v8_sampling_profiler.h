@@ -5,30 +5,37 @@
 #ifndef CONTENT_RENDERER_DEVTOOLS_V8_SAMPLING_PROFILER_H_
 #define CONTENT_RENDERER_DEVTOOLS_V8_SAMPLING_PROFILER_H_
 
-#include "base/debug/trace_event_impl.h"
 #include "base/synchronization/waitable_event.h"
+#include "base/trace_event/trace_event_impl.h"
 #include "content/common/content_export.h"
 
 namespace content {
 
+class Sampler;
+class V8SamplingThread;
+
 // The class monitors enablement of V8 CPU profiler and
 // spawns a sampling thread when needed.
 class CONTENT_EXPORT V8SamplingProfiler final
-    : public base::debug::TraceLog::EnabledStateObserver {
+    : public base::trace_event::TraceLog::EnabledStateObserver {
  public:
-  V8SamplingProfiler();
+  explicit V8SamplingProfiler(bool underTest = false);
   ~V8SamplingProfiler();
 
   // Implementation of TraceLog::EnabledStateObserver
   void OnTraceLogEnabled() override;
   void OnTraceLogDisabled() override;
 
-  void EnableSamplingEventForTesting();
+  void EnableSamplingEventForTesting(int code_added_events, int sample_events);
   void WaitSamplingEventForTesting();
 
  private:
+  void StartSamplingThread();
+
   scoped_ptr<base::WaitableEvent> waitable_event_for_testing_;
-  scoped_ptr<class V8SamplingThread> sampling_thread_;
+  scoped_ptr<V8SamplingThread> sampling_thread_;
+  scoped_ptr<Sampler> render_thread_sampler_;
+  scoped_refptr<base::MessageLoopProxy> message_loop_proxy_;
 
   DISALLOW_COPY_AND_ASSIGN(V8SamplingProfiler);
 };

@@ -7,12 +7,16 @@
 #include <string>
 
 #include "base/bind.h"
+#include "content/public/child/v8_value_converter.h"
 #include "content/public/renderer/render_view.h"
-#include "content/public/renderer/v8_value_converter.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_messages.h"
+#include "extensions/common/guest_view/guest_view_constants.h"
 #include "extensions/renderer/guest_view/extensions_guest_view_container.h"
 #include "extensions/renderer/script_context.h"
+#include "third_party/WebKit/public/web/WebFrame.h"
+#include "third_party/WebKit/public/web/WebScopedUserGesture.h"
+#include "third_party/WebKit/public/web/WebView.h"
 #include "v8/include/v8.h"
 
 using content::V8ValueConverter;
@@ -28,9 +32,21 @@ GuestViewInternalCustomBindings::GuestViewInternalCustomBindings(
   RouteFunction("DetachGuest",
                 base::Bind(&GuestViewInternalCustomBindings::DetachGuest,
                            base::Unretained(this)));
+  RouteFunction("GetContentWindow",
+                base::Bind(&GuestViewInternalCustomBindings::GetContentWindow,
+                           base::Unretained(this)));
   RouteFunction(
       "RegisterDestructionCallback",
       base::Bind(&GuestViewInternalCustomBindings::RegisterDestructionCallback,
+                 base::Unretained(this)));
+  RouteFunction(
+      "RegisterElementResizeCallback",
+      base::Bind(
+          &GuestViewInternalCustomBindings::RegisterElementResizeCallback,
+          base::Unretained(this)));
+  RouteFunction(
+      "RunWithGesture",
+      base::Bind(&GuestViewInternalCustomBindings::RunWithGesture,
                  base::Unretained(this)));
 }
 
@@ -68,6 +84,10 @@ void GuestViewInternalCustomBindings::AttachGuest(
     params.reset(
         static_cast<base::DictionaryValue*>(params_as_value.release()));
   }
+
+  // Add flag to |params| to indicate that the element size is specified in
+  // logical units.
+  params->SetBoolean(guestview::kElementSizeIsLogical, true);
 
   linked_ptr<ExtensionsGuestViewContainer::Request> request(
       new ExtensionsGuestViewContainer::AttachRequest(
@@ -112,6 +132,31 @@ void GuestViewInternalCustomBindings::DetachGuest(
   args.GetReturnValue().Set(v8::Boolean::New(context()->isolate(), true));
 }
 
+void GuestViewInternalCustomBindings::GetContentWindow(
+    const v8::FunctionCallbackInfo<v8::Value>& args) {
+  // Default to returning null.
+  args.GetReturnValue().SetNull();
+
+  if (args.Length() != 1)
+    return;
+
+  // The routing ID for the RenderView.
+  if (!args[0]->IsInt32())
+    return;
+
+  int view_id = args[0]->Int32Value();
+  if (view_id == MSG_ROUTING_NONE)
+    return;
+
+  content::RenderView* view = content::RenderView::FromRoutingID(view_id);
+  if (!view)
+    return;
+
+  blink::WebFrame* frame = view->GetWebView()->mainFrame();
+  v8::Local<v8::Value> window = frame->mainWorldScriptContext()->Global();
+  args.GetReturnValue().Set(window);
+}
+
 void GuestViewInternalCustomBindings::RegisterDestructionCallback(
     const v8::FunctionCallbackInfo<v8::Value>& args) {
   // There are two parameters.
@@ -133,6 +178,39 @@ void GuestViewInternalCustomBindings::RegisterDestructionCallback(
                                                     args.GetIsolate());
 
   args.GetReturnValue().Set(v8::Boolean::New(context()->isolate(), true));
+}
+
+void GuestViewInternalCustomBindings::RegisterElementResizeCallback(
+    const v8::FunctionCallbackInfo<v8::Value>& args) {
+  // There are two parameters.
+  CHECK(args.Length() == 2);
+  // Element Instance ID.
+  CHECK(args[0]->IsInt32());
+  // Callback function.
+  CHECK(args[1]->IsFunction());
+
+  int element_instance_id = args[0]->Int32Value();
+  // An element instance ID uniquely identifies a ExtensionsGuestViewContainer
+  // within a RenderView.
+  ExtensionsGuestViewContainer* guest_view_container =
+      ExtensionsGuestViewContainer::FromID(element_instance_id);
+  if (!guest_view_container)
+    return;
+
+  guest_view_container->RegisterElementResizeCallback(
+      args[1].As<v8::Function>(), args.GetIsolate());
+
+  args.GetReturnValue().Set(v8::Boolean::New(context()->isolate(), true));
+}
+
+void GuestViewInternalCustomBindings::RunWithGesture(
+    const v8::FunctionCallbackInfo<v8::Value>& args) {
+  // Gesture is required to request fullscreen.
+  blink::WebScopedUserGesture user_gesture;
+  CHECK_EQ(args.Length(), 1);
+  CHECK(args[0]->IsFunction());
+  v8::Handle<v8::Value> no_args;
+  context()->CallFunction(v8::Handle<v8::Function>::Cast(args[0]), 0, &no_args);
 }
 
 }  // namespace extensions

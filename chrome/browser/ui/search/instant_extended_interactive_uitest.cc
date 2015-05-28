@@ -21,9 +21,7 @@
 #include "chrome/browser/extensions/extension_browsertest.h"
 #include "chrome/browser/extensions/extension_service.h"
 #include "chrome/browser/favicon/favicon_tab_helper.h"
-#include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
-#include "chrome/browser/history/top_sites.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/search/instant_service.h"
 #include "chrome/browser/search/instant_service_factory.h"
@@ -50,7 +48,9 @@
 #include "components/bookmarks/browser/bookmark_utils.h"
 #include "components/bookmarks/test/bookmark_test_helpers.h"
 #include "components/history/core/browser/history_db_task.h"
+#include "components/history/core/browser/history_service.h"
 #include "components/history/core/browser/history_types.h"
+#include "components/history/core/browser/top_sites.h"
 #include "components/history/core/common/thumbnail_score.h"
 #include "components/omnibox/autocomplete_match.h"
 #include "components/omnibox/autocomplete_provider.h"
@@ -201,8 +201,8 @@ class InstantExtendedTest : public InProcessBrowserTest,
     if (!template_url)
       return false;
 
-    HistoryService* history = HistoryServiceFactory::GetForProfile(
-        browser()->profile(), Profile::EXPLICIT_ACCESS);
+    history::HistoryService* history = HistoryServiceFactory::GetForProfile(
+        browser()->profile(), ServiceAccessType::EXPLICIT_ACCESS);
     GURL search(template_url->url_ref().ReplaceSearchTerms(
         TemplateURLRef::SearchTermsArgs(term),
         TemplateURLServiceFactory::GetForProfile(
@@ -216,8 +216,8 @@ class InstantExtendedTest : public InProcessBrowserTest,
   }
 
   void BlockUntilHistoryProcessesPendingRequests() {
-    HistoryService* history = HistoryServiceFactory::GetForProfile(
-        browser()->profile(), Profile::EXPLICIT_ACCESS);
+    history::HistoryService* history = HistoryServiceFactory::GetForProfile(
+        browser()->profile(), ServiceAccessType::EXPLICIT_ACCESS);
     DCHECK(history);
     DCHECK(base::MessageLoop::current());
 

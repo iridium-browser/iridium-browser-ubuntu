@@ -17,7 +17,6 @@ class RenderViewHost;
 class SiteInstance;
 class WebContents;
 struct Referrer;
-struct WebPreferences;
 
 // This interface allows embedders of content/ to write tests that depend on a
 // test version of WebContents.  This interface can be retrieved from any
@@ -62,6 +61,8 @@ class WebContentsTester {
 
   // Gets the pending RenderFrameHost, if any, for the main frame. For the
   // current RenderFrameHost of the main frame, use WebContents::GetMainFrame().
+  // PlzNavigate: When browser side navigation is enabled it returns the
+  // speculative RenderFrameHost for the main frame if one exists.
   virtual RenderFrameHost* GetPendingMainFrame() const = 0;
 
   // Creates a pending navigation to the given URL with the default parameters
@@ -88,9 +89,6 @@ class WebContentsTester {
       const GURL& url,
       const Referrer& referrer,
       ui::PageTransition transition) = 0;
-
-  // Promote ComputeWebkitPrefs to public.
-  virtual WebPreferences TestComputeWebkitPrefs() = 0;
 };
 
 }  // namespace content

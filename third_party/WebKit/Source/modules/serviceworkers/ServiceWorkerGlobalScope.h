@@ -39,14 +39,15 @@
 
 namespace blink {
 
-class CacheStorage;
 class Dictionary;
 class Request;
 class ScriptPromise;
 class ScriptState;
 class ServiceWorkerClients;
+class ServiceWorkerRegistration;
 class ServiceWorkerThread;
 class WaitUntilObserver;
+class WebServiceWorkerRegistration;
 class WorkerThreadStartupData;
 
 typedef RequestOrUSVString RequestInfo;
@@ -54,7 +55,7 @@ typedef RequestOrUSVString RequestInfo;
 class ServiceWorkerGlobalScope final : public WorkerGlobalScope {
     DEFINE_WRAPPERTYPEINFO();
 public:
-    static PassRefPtrWillBeRawPtr<ServiceWorkerGlobalScope> create(ServiceWorkerThread*, PassOwnPtrWillBeRawPtr<WorkerThreadStartupData>);
+    static PassRefPtrWillBeRawPtr<ServiceWorkerGlobalScope> create(ServiceWorkerThread*, PassOwnPtr<WorkerThreadStartupData>);
 
     virtual ~ServiceWorkerGlobalScope();
     virtual bool isServiceWorkerGlobalScope() const override { return true; }
@@ -64,14 +65,15 @@ public:
 
     // ServiceWorkerGlobalScope.idl
     ServiceWorkerClients* clients();
-
-    CacheStorage* caches(ExecutionContext*);
+    ServiceWorkerRegistration* registration();
 
     ScriptPromise fetch(ScriptState*, const RequestInfo&, const Dictionary&, ExceptionState&);
 
     void close(ExceptionState&);
 
     ScriptPromise skipWaiting(ScriptState*);
+
+    void setRegistration(WebServiceWorkerRegistration*);
 
     // EventTarget
     virtual bool addEventListener(const AtomicString& eventType, PassRefPtr<EventListener>, bool useCapture = false) override;
@@ -86,20 +88,25 @@ public:
     DEFINE_ATTRIBUTE_EVENT_LISTENER(message);
     DEFINE_ATTRIBUTE_EVENT_LISTENER(sync);
 
-    virtual void trace(Visitor*) override;
+    DECLARE_VIRTUAL_TRACE();
 
 private:
     class SkipWaitingCallback;
 
     ServiceWorkerGlobalScope(const KURL&, const String& userAgent, ServiceWorkerThread*, double timeOrigin, const SecurityOrigin*, PassOwnPtrWillBeRawPtr<WorkerClients>);
-    virtual void importScripts(const Vector<String>& urls, ExceptionState&) override;
-    virtual void logExceptionToConsole(const String& errorMessage, int scriptId, const String& sourceURL, int lineNumber, int columnNumber, PassRefPtrWillBeRawPtr<ScriptCallStack>) override;
+    void importScripts(const Vector<String>& urls, ExceptionState&) override;
+    PassOwnPtr<CachedMetadataHandler> createWorkerScriptCachedMetadataHandler(const KURL& scriptURL, const Vector<char>* metaData) override;
+    void logExceptionToConsole(const String& errorMessage, int scriptId, const String& sourceURL, int lineNumber, int columnNumber, PassRefPtrWillBeRawPtr<ScriptCallStack>) override;
+    void scriptLoaded(size_t scriptSize, size_t cachedMetadataSize) override;
 
     PersistentWillBeMember<ServiceWorkerClients> m_clients;
-    PersistentWillBeMember<CacheStorage> m_caches;
+    PersistentWillBeMember<ServiceWorkerRegistration> m_registration;
     bool m_didEvaluateScript;
     bool m_hadErrorInTopLevelEventHandler;
     unsigned m_eventNestingLevel;
+    size_t m_scriptCount;
+    size_t m_scriptTotalSize;
+    size_t m_scriptCachedMetadataTotalSize;
 };
 
 } // namespace blink

@@ -230,4 +230,15 @@ void WebScrollbarThemeClientImpl::setElasticOverscroll(float elasticOverscroll)
     return m_scrollbar->setElasticOverscroll(elasticOverscroll);
 }
 
+DisplayItemClient WebScrollbarThemeClientImpl::displayItemClient() const
+{
+    ASSERT_NOT_REACHED();
+    return toDisplayItemClient(this);
+}
+
+String WebScrollbarThemeClientImpl::debugName() const
+{
+    return "WebScrollbarThemeClientImpl";
+}
+
 } // namespace blink

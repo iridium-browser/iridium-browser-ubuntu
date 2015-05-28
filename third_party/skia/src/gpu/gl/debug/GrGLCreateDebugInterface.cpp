@@ -796,7 +796,7 @@ public:
         fWrapped.reset(interface);
     }
 
-    virtual void abandon() const SK_OVERRIDE {
+    void abandon() const override {
         GrDebugGL::abandon();
     }
 

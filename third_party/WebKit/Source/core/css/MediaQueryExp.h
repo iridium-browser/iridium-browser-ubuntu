@@ -77,7 +77,7 @@ struct MediaQueryExpValue {
 };
 
 class MediaQueryExp  : public NoBaseWillBeGarbageCollectedFinalized<MediaQueryExp> {
-    WTF_MAKE_FAST_ALLOCATED_WILL_BE_REMOVED;
+    WTF_MAKE_FAST_ALLOCATED_WILL_BE_REMOVED(MediaQueryExp);
 public:
     static PassOwnPtrWillBeRawPtr<MediaQueryExp> createIfValid(const String& mediaFeature, CSSParserValueList*);
     ~MediaQueryExp();
@@ -96,7 +96,7 @@ public:
 
     MediaQueryExp(const MediaQueryExp& other);
 
-    void trace(Visitor* visitor) { }
+    DEFINE_INLINE_TRACE() { }
 
 private:
     MediaQueryExp(const String&, const MediaQueryExpValue&);

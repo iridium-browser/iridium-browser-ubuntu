@@ -32,7 +32,7 @@ class CONTENT_EXPORT WebContentsAndroid
   static bool Register(JNIEnv* env);
 
   explicit WebContentsAndroid(WebContents* web_contents);
-  virtual ~WebContentsAndroid();
+  ~WebContentsAndroid() override;
 
   WebContents* web_contents() const { return web_contents_; }
 
@@ -50,6 +50,8 @@ class CONTENT_EXPORT WebContentsAndroid
   void Stop(JNIEnv* env, jobject obj);
   jint GetBackgroundColor(JNIEnv* env, jobject obj);
   base::android::ScopedJavaLocalRef<jstring> GetURL(JNIEnv* env, jobject) const;
+  base::android::ScopedJavaLocalRef<jstring> GetLastCommittedURL(JNIEnv* env,
+                                                                 jobject) const;
   jboolean IsIncognito(JNIEnv* env, jobject obj);
 
   void ResumeResponseDeferredAtStart(JNIEnv* env, jobject obj);
@@ -103,6 +105,16 @@ class CONTENT_EXPORT WebContentsAndroid
                           jobject obj,
                           jstring script,
                           jobject callback);
+
+  void AddMessageToDevToolsConsole(JNIEnv* env,
+                                   jobject jobj,
+                                   jint level,
+                                   jstring message);
+
+  jboolean HasAccessedInitialDocument(JNIEnv* env, jobject jobj);
+
+  jint GetThemeColor(JNIEnv* env, jobject obj);
+
  private:
   RenderWidgetHostViewAndroid* GetRenderWidgetHostViewAndroid();
 

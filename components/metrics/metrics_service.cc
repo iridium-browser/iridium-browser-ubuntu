@@ -76,13 +76,10 @@
 // states, based on the State enum specified in the state_ member.  Those states
 // are:
 //
-//  INITIALIZED,                   // Constructor was called.
-//  INIT_TASK_SCHEDULED,           // Waiting for deferred init tasks to finish.
-//  INIT_TASK_DONE,                // Waiting for timer to send initial log.
-//  SENDING_INITIAL_STABILITY_LOG, // Initial stability log being sent.
-//  SENDING_INITIAL_METRICS_LOG,   // Initial metrics log being sent.
-//  SENDING_OLD_LOGS,              // Sending unsent logs from previous session.
-//  SENDING_CURRENT_LOGS,          // Sending ongoing logs as they acrue.
+//  INITIALIZED,          // Constructor was called.
+//  INIT_TASK_SCHEDULED,  // Waiting for deferred init tasks to finish.
+//  INIT_TASK_DONE,       // Waiting for timer to send initial log.
+//  SENDING_LOGS,         // Sending logs and creating new ones when we run out.
 //
 // In more detail, we have:
 //
@@ -102,53 +99,17 @@
 // created.  This callback typically arrives back less than one second after
 // the deferred init task is dispatched.
 //
-//    SENDING_INITIAL_STABILITY_LOG,  // Initial stability log being sent.
-// During initialization, if a crash occurred during the previous session, an
-// initial stability log will be generated and registered with the log manager.
-// This state will be entered if a stability log was prepared during metrics
-// service initialization (in InitializeMetricsRecordingState()) and is waiting
-// to be transmitted when it's time to send up the first log (per the reporting
-// scheduler).  If there is no initial stability log (e.g. there was no previous
-// crash), then this state will be skipped and the state will advance to
-// SENDING_INITIAL_METRICS_LOG.
+//    SENDING_LOGS,  // Sending logs an creating new ones when we run out.
+// Logs from previous sessions have been loaded, and initial logs have been
+// created (an optional stability log and the first metrics log).  We will
+// send all of these logs, and when run out, we will start cutting new logs
+// to send.  We will also cut a new log if we expect a shutdown.
 //
-//    SENDING_INITIAL_METRICS_LOG,  // Initial metrics log being sent.
-// This state is entered after the initial metrics log has been composed, and
-// prepared for transmission.  This happens after SENDING_INITIAL_STABILITY_LOG
-// if there was an initial stability log (see above).  It is also the case that
-// any previously unsent logs have been loaded into instance variables for
-// possible transmission.
+// The progression through the above states is simple, and sequential.
+// States proceed from INITIAL to SENDING_LOGS, and remain in the latter until
+// shutdown.
 //
-//    SENDING_OLD_LOGS,       // Sending unsent logs from previous session.
-// This state indicates that the initial log for this session has been
-// successfully sent and it is now time to send any logs that were
-// saved from previous sessions.  All such logs will be transmitted before
-// exiting this state, and proceeding with ongoing logs from the current session
-// (see next state).
-//
-//    SENDING_CURRENT_LOGS,   // Sending standard current logs as they accrue.
-// Current logs are being accumulated.  Typically every 20 minutes a log is
-// closed and finalized for transmission, at the same time as a new log is
-// started.
-//
-// The progression through the above states is simple, and sequential, in the
-// most common use cases.  States proceed from INITIAL to SENDING_CURRENT_LOGS,
-// and remain in the latter until shutdown.
-//
-// The one unusual case is when the user asks that we stop logging.  When that
-// happens, any staged (transmission in progress) log is persisted, and any log
-// that is currently accumulating is also finalized and persisted.  We then
-// regress back to the SEND_OLD_LOGS state in case the user enables log
-// recording again during this session.  This way anything we have persisted
-// will be sent automatically if/when we progress back to SENDING_CURRENT_LOG
-// state.
-//
-// Another similar case is on mobile, when the application is backgrounded and
-// then foregrounded again. Backgrounding created new "old" stored logs, so the
-// state drops back from SENDING_CURRENT_LOGS to SENDING_OLD_LOGS so those logs
-// will be sent.
-//
-// Also note that whenever we successfully send an old log, we mirror the list
+// Also note that whenever we successfully send a log, we mirror the list
 // of logs into the PrefService. This ensures that IF we crash, we won't start
 // up and retransmit our old logs again.
 //
@@ -227,12 +188,6 @@ const size_t kUploadLogAvoidRetransmitSize = 100 * 1024;
 // Interval, in minutes, between state saves.
 const int kSaveStateIntervalMinutes = 5;
 
-// The metrics server's URL.
-const char kServerUrl[] = "https://clients4.google.com/uma/v2";
-
-// The MIME type for the uploaded metrics data.
-const char kMimeType[] = "application/vnd.chrome.uma";
-
 enum ResponseStatus {
   UNKNOWN_FAILURE,
   SUCCESS,
@@ -254,11 +209,7 @@ ResponseStatus ResponseCodeToStatus(int response_code) {
   }
 }
 
-bool NewInitialMetricsTimingEnabled() {
-  return base::FieldTrialList::FindFullName("UMAInitialMetricsTiming") ==
-      "Enabled";
-}
-
+#if defined(OS_ANDROID) || defined(OS_IOS)
 void MarkAppCleanShutdownAndCommit(CleanExitBeacon* clean_exit_beacon,
                                    PrefService* local_state) {
   clean_exit_beacon->WriteBeaconValue(true);
@@ -267,6 +218,7 @@ void MarkAppCleanShutdownAndCommit(CleanExitBeacon* clean_exit_beacon,
   // Start writing right away (write happens on a different thread).
   local_state->CommitPendingWrite();
 }
+#endif  // defined(OS_ANDROID) || defined(OS_IOS)
 
 }  // namespace
 
@@ -324,7 +276,6 @@ MetricsService::MetricsService(MetricsStateManager* state_manager,
       reporting_active_(false),
       test_mode_active_(false),
       state_(INITIALIZED),
-      has_initial_stability_log_(false),
       log_upload_in_progress_(false),
       idle_since_last_transmission_(false),
       session_id_(-1),
@@ -348,9 +299,16 @@ MetricsService::~MetricsService() {
 void MetricsService::InitializeMetricsRecordingState() {
   InitializeMetricsState();
 
-  base::Closure callback = base::Bind(&MetricsService::StartScheduledUpload,
-                                      self_ptr_factory_.GetWeakPtr());
-  scheduler_.reset(new MetricsReportingScheduler(callback));
+  base::Closure upload_callback =
+      base::Bind(&MetricsService::StartScheduledUpload,
+                 self_ptr_factory_.GetWeakPtr());
+  scheduler_.reset(
+      new MetricsReportingScheduler(
+          upload_callback,
+          // MetricsServiceClient outlives MetricsService, and
+          // MetricsReportingScheduler is tied to the lifetime of |this|.
+          base::Bind(&MetricsServiceClient::GetStandardUploadInterval,
+                     base::Unretained(client_))));
 }
 
 void MetricsService::Start() {
@@ -432,6 +390,8 @@ void MetricsService::DisableRecording() {
     return;
   recording_active_ = false;
 
+  client_->OnRecordingDisabled();
+
   base::RemoveActionCallback(action_callback_);
 
   for (size_t i = 0; i < metrics_providers_.size(); ++i)
@@ -507,7 +467,7 @@ void MetricsService::OnAppEnterBackground() {
   // killed, so this has to be treated similar to a shutdown, closing and
   // persisting all logs. Unlinke a shutdown, the state is primed to be ready
   // to continue logging and uploading if the process does return.
-  if (recording_active() && state_ >= SENDING_INITIAL_STABILITY_LOG) {
+  if (recording_active() && state_ >= SENDING_LOGS) {
     PushPendingLogsToPersistentStorage();
     // Persisting logs closes the current log, so start recording a new log
     // immediately to capture any background work that might be done before the
@@ -592,6 +552,7 @@ void MetricsService::InitializeMetricsState() {
     clean_exit_beacon_.WriteBeaconValue(true);
   }
 
+  bool has_initial_stability_log = false;
   if (!clean_exit_beacon_.exited_cleanly() || ProvidersHaveStabilityMetrics()) {
     // TODO(rtenneti): On windows, consider saving/getting execution_phase from
     // the registry.
@@ -604,7 +565,7 @@ void MetricsService::InitializeMetricsState() {
     // explicitly requests it, prepare an initial stability log -
     // provided UMA is enabled.
     if (state_manager_->IsMetricsReportingEnabled())
-      PrepareInitialStabilityLog();
+      has_initial_stability_log = PrepareInitialStabilityLog();
   }
 
   // If no initial stability log was generated and there was a version upgrade,
@@ -613,7 +574,7 @@ void MetricsService::InitializeMetricsState() {
   // number of different edge cases, such as if the last version crashed before
   // it could save off a system profile or if UMA reporting is disabled (which
   // normally results in stats being accumulated).
-  if (!has_initial_stability_log_ && version_changed)
+  if (!has_initial_stability_log && version_changed)
     ClearSavedStabilityMetrics();
 
   // Update session ID.
@@ -780,16 +741,11 @@ void MetricsService::CloseCurrentLog() {
 }
 
 void MetricsService::PushPendingLogsToPersistentStorage() {
-  if (state_ < SENDING_INITIAL_STABILITY_LOG)
+  if (state_ < SENDING_LOGS)
     return;  // We didn't and still don't have time to get plugin list etc.
 
   CloseCurrentLog();
   log_manager_.PersistUnsentLogs();
-
-  // If there was a staged and/or current log, then there is now at least one
-  // log waiting to be uploaded.
-  if (log_manager_.has_unsent_logs())
-    state_ = SENDING_OLD_LOGS;
 }
 
 //------------------------------------------------------------------------------
@@ -804,12 +760,13 @@ void MetricsService::StartSchedulerIfNecessary() {
   // creation of the initial log, which must be done in order for any logs to be
   // persisted on shutdown or backgrounding.
   if (recording_active() &&
-      (reporting_active() || state_ < SENDING_INITIAL_STABILITY_LOG)) {
+      (reporting_active() || state_ < SENDING_LOGS)) {
     scheduler_->Start();
   }
 }
 
 void MetricsService::StartScheduledUpload() {
+  DCHECK(state_ >= INIT_TASK_DONE);
   // If we're getting no notifications, then the log won't have much in it, and
   // it's possible the computer is about to go to sleep, so don't upload and
   // stop the scheduler.
@@ -820,30 +777,18 @@ void MetricsService::StartScheduledUpload() {
   // recording are turned off instead of letting it fire and then aborting.
   if (idle_since_last_transmission_ ||
       !recording_active() ||
-      (!reporting_active() && state_ >= SENDING_INITIAL_STABILITY_LOG)) {
+      (!reporting_active() && state_ >= SENDING_LOGS)) {
     scheduler_->Stop();
     scheduler_->UploadCancelled();
     return;
   }
 
-  // If the callback was to upload an old log, but there no longer is one,
-  // just report success back to the scheduler to begin the ongoing log
-  // callbacks.
-  // TODO(stuartmorgan): Consider removing the distinction between
-  // SENDING_OLD_LOGS and SENDING_CURRENT_LOGS to simplify the state machine
-  // now that the log upload flow is the same for both modes.
-  if (state_ == SENDING_OLD_LOGS && !log_manager_.has_unsent_logs()) {
-    state_ = SENDING_CURRENT_LOGS;
-    scheduler_->UploadFinished(true /* healthy */, false /* no unsent logs */);
-    return;
-  }
   // If there are unsent logs, send the next one. If not, start the asynchronous
   // process of finalizing the current log for upload.
-  if (state_ == SENDING_OLD_LOGS) {
-    DCHECK(log_manager_.has_unsent_logs());
-    log_manager_.StageNextLogForUpload();
-    SendStagedLog();
+  if (state_ == SENDING_LOGS && log_manager_.has_unsent_logs()) {
+    SendNextLog();
   } else {
+    // There are no logs left to send, so start creating a new one.
     client_->CollectFinalMetrics(
         base::Bind(&MetricsService::OnFinalLogInfoCollectionDone,
                    self_ptr_factory_.GetWeakPtr()));
@@ -865,77 +810,33 @@ void MetricsService::OnFinalLogInfoCollectionDone() {
     return;
   }
 
-  StageNewLog();
+  if (state_ == INIT_TASK_DONE) {
+    PrepareInitialMetricsLog();
+  } else {
+    DCHECK_EQ(SENDING_LOGS, state_);
+    CloseCurrentLog();
+    OpenNewLog();
+  }
+  SendNextLog();
+}
 
-  // If logs shouldn't be uploaded, stop here. It's important that this check
-  // be after StageNewLog(), otherwise the previous logs will never be loaded,
-  // and thus the open log won't be persisted.
-  // TODO(stuartmorgan): This is unnecessarily complicated; restructure loading
-  // of previous logs to not require running part of the upload logic.
-  // http://crbug.com/157337
+void MetricsService::SendNextLog() {
+  DCHECK_EQ(SENDING_LOGS, state_);
   if (!reporting_active()) {
     scheduler_->Stop();
     scheduler_->UploadCancelled();
     return;
   }
-
-  SendStagedLog();
-}
-
-void MetricsService::StageNewLog() {
-  if (log_manager_.has_staged_log())
+  if (!log_manager_.has_unsent_logs()) {
+    // Should only get here if serializing the log failed somehow.
+    // Just tell the scheduler it was uploaded and wait for the next log
+    // interval.
+    scheduler_->UploadFinished(true, log_manager_.has_unsent_logs());
     return;
-
-  switch (state_) {
-    case INITIALIZED:
-    case INIT_TASK_SCHEDULED:  // We should be further along by now.
-      NOTREACHED();
-      return;
-
-    case INIT_TASK_DONE:
-      if (NewInitialMetricsTimingEnabled()) {
-        PrepareInitialMetricsLog();
-        // Stage the first log, which could be a stability log (either one
-        // for created in this session or from a previous session) or the
-        // initial metrics log that was just created.
-        log_manager_.StageNextLogForUpload();
-        if (has_initial_stability_log_) {
-          // The initial stability log was just staged.
-          has_initial_stability_log_ = false;
-          state_ = SENDING_INITIAL_STABILITY_LOG;
-        } else {
-          state_ = SENDING_INITIAL_METRICS_LOG;
-        }
-      } else {
-        if (has_initial_stability_log_) {
-          // There's an initial stability log, ready to send.
-          log_manager_.StageNextLogForUpload();
-          has_initial_stability_log_ = false;
-          state_ = SENDING_INITIAL_STABILITY_LOG;
-        } else {
-          PrepareInitialMetricsLog();
-          log_manager_.StageNextLogForUpload();
-          state_ = SENDING_INITIAL_METRICS_LOG;
-        }
-      }
-      break;
-
-    case SENDING_OLD_LOGS:
-      NOTREACHED();  // Shouldn't be staging a new log during old log sending.
-      return;
-
-    case SENDING_CURRENT_LOGS:
-      CloseCurrentLog();
-      OpenNewLog();
-      log_manager_.StageNextLogForUpload();
-      break;
-
-    default:
-      NOTREACHED();
-      return;
   }
-
-  DCHECK(log_manager_.has_staged_log());
+  if (!log_manager_.has_staged_log())
+    log_manager_.StageNextLogForUpload();
+  SendStagedLog();
 }
 
 bool MetricsService::ProvidersHaveStabilityMetrics() {
@@ -948,7 +849,7 @@ bool MetricsService::ProvidersHaveStabilityMetrics() {
   return false;
 }
 
-void MetricsService::PrepareInitialStabilityLog() {
+bool MetricsService::PrepareInitialStabilityLog() {
   DCHECK_EQ(INITIALIZED, state_);
 
   scoped_ptr<MetricsLog> initial_stability_log(
@@ -958,7 +859,7 @@ void MetricsService::PrepareInitialStabilityLog() {
   // log describes stats from the _previous_ session.
 
   if (!initial_stability_log->LoadSavedEnvironmentFromPrefs())
-    return;
+    return false;
 
   log_manager_.PauseCurrentLog();
   log_manager_.BeginLoggingWithLog(initial_stability_log.Pass());
@@ -979,11 +880,11 @@ void MetricsService::PrepareInitialStabilityLog() {
   // that they're not lost in case of a crash before upload time.
   log_manager_.PersistUnsentLogs();
 
-  has_initial_stability_log_ = true;
+  return true;
 }
 
 void MetricsService::PrepareInitialMetricsLog() {
-  DCHECK(state_ == INIT_TASK_DONE || state_ == SENDING_INITIAL_STABILITY_LOG);
+  DCHECK_EQ(INIT_TASK_DONE, state_);
 
   RecordCurrentEnvironment(initial_metrics_log_.get());
   base::TimeDelta incremental_uptime;
@@ -1009,6 +910,8 @@ void MetricsService::PrepareInitialMetricsLog() {
   // Store unsent logs, including the initial log that was just saved, so
   // that they're not lost in case of a crash before upload time.
   log_manager_.PersistUnsentLogs();
+
+  state_ = SENDING_LOGS;
 }
 
 void MetricsService::SendStagedLog() {
@@ -1021,7 +924,6 @@ void MetricsService::SendStagedLog() {
 
   if (!log_uploader_) {
     log_uploader_ = client_->CreateUploader(
-        kServerUrl, kMimeType,
         base::Bind(&MetricsService::OnLogUploadComplete,
                    self_ptr_factory_.GetWeakPtr()));
   }
@@ -1044,6 +946,7 @@ void MetricsService::SendStagedLog() {
 
 
 void MetricsService::OnLogUploadComplete(int response_code) {
+  DCHECK_EQ(SENDING_LOGS, state_);
   DCHECK(log_upload_in_progress_);
   log_upload_in_progress_ = false;
 
@@ -1051,8 +954,6 @@ void MetricsService::OnLogUploadComplete(int response_code) {
   UMA_HISTOGRAM_ENUMERATION("UMA.UploadResponseStatus.Protobuf",
                             ResponseCodeToStatus(response_code),
                             NUM_RESPONSE_STATUSES);
-
-  bool suppress_reschedule = false;
 
   bool upload_succeeded = response_code == 200;
 
@@ -1076,53 +977,10 @@ void MetricsService::OnLogUploadComplete(int response_code) {
     log_manager_.PersistUnsentLogs();
   }
 
-  if (!log_manager_.has_staged_log()) {
-    switch (state_) {
-      case SENDING_INITIAL_STABILITY_LOG:
-        if (NewInitialMetricsTimingEnabled()) {
-          // The initial metrics log is already in the queue of unsent logs.
-          state_ = SENDING_OLD_LOGS;
-        } else {
-          PrepareInitialMetricsLog();
-          log_manager_.StageNextLogForUpload();
-          SendStagedLog();
-          state_ = SENDING_INITIAL_METRICS_LOG;
-          suppress_reschedule = true;
-        }
-        break;
-
-      case SENDING_INITIAL_METRICS_LOG:
-        state_ = log_manager_.has_unsent_logs() ? SENDING_OLD_LOGS
-                                                : SENDING_CURRENT_LOGS;
-        break;
-
-      case SENDING_OLD_LOGS:
-        if (!log_manager_.has_unsent_logs())
-          state_ = SENDING_CURRENT_LOGS;
-        break;
-
-      case SENDING_CURRENT_LOGS:
-        break;
-
-      default:
-        NOTREACHED();
-        break;
-    }
-
-    if (log_manager_.has_unsent_logs())
-      DCHECK_LT(state_, SENDING_CURRENT_LOGS);
-  }
-
   // Error 400 indicates a problem with the log, not with the server, so
   // don't consider that a sign that the server is in trouble.
   bool server_is_healthy = upload_succeeded || response_code == 400;
-  // Don't notify the scheduler that the upload is finished if we've only just
-  // sent the initial stability log, but not yet the initial metrics log (treat
-  // the two as a single unit of work as far as the scheduler is concerned).
-  if (!suppress_reschedule) {
-    scheduler_->UploadFinished(server_is_healthy,
-                               log_manager_.has_unsent_logs());
-  }
+  scheduler_->UploadFinished(server_is_healthy, log_manager_.has_unsent_logs());
 
   if (server_is_healthy)
     client_->OnLogUploadComplete();
@@ -1232,9 +1090,6 @@ void MetricsService::RecordCurrentStabilityHistograms() {
 }
 
 void MetricsService::LogCleanShutdown() {
-  // Redundant hack to write pref ASAP.
-  MarkAppCleanShutdownAndCommit(&clean_exit_beacon_, local_state_);
-
   // Redundant setting to assure that we always reset this value at shutdown
   // (and that we don't use some alternate path, and not call LogCleanShutdown).
   clean_shutdown_status_ = CLEANLY_SHUTDOWN;

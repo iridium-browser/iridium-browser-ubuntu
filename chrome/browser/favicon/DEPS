@@ -12,6 +12,7 @@ include_rules = [
   "+chrome/browser/profiles/incognito_helpers.h",
   "+chrome/browser/search/search.h",
   "+components/favicon/core",
+  "+net/base/registry_controlled_domains/registry_controlled_domain.h",
   "+third_party/skia/include/core/SkBitmap.h",
 
   # TODO(caitkp): Bring this list to zero.
@@ -20,7 +21,6 @@ include_rules = [
   # and please do not introduce more #includes of these files.
   "!chrome/browser/bookmarks/bookmark_model_factory.h",
   "!chrome/browser/history/history_backend.h",
-  "!chrome/browser/history/history_details.h",
   "!chrome/browser/history/history_service.h",
   "!chrome/browser/history/history_service_factory.h",
   "!chrome/browser/history/select_favicon_frames.h",
@@ -30,3 +30,10 @@ include_rules = [
   # Do not add to the list of temporarily-allowed dependencies above,
   # and please do not introduce more #includes of these files.
 ]
+
+specific_include_rules = {
+  # Browser tests, by definition, need access to the browser objects.
+  '.*_browsertest\.cc': [
+    "+chrome/browser",
+  ]
+}

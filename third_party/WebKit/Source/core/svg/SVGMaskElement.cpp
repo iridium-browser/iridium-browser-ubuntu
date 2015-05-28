@@ -25,17 +25,17 @@
 
 #include "core/svg/SVGMaskElement.h"
 
-#include "core/rendering/svg/RenderSVGResourceMasker.h"
+#include "core/layout/svg/LayoutSVGResourceMasker.h"
 
 namespace blink {
 
 inline SVGMaskElement::SVGMaskElement(Document& document)
     : SVGElement(SVGNames::maskTag, document)
     , SVGTests(this)
-    , m_x(SVGAnimatedLength::create(this, SVGNames::xAttr, SVGLength::create(LengthModeWidth), AllowNegativeLengths))
-    , m_y(SVGAnimatedLength::create(this, SVGNames::yAttr, SVGLength::create(LengthModeHeight), AllowNegativeLengths))
-    , m_width(SVGAnimatedLength::create(this, SVGNames::widthAttr, SVGLength::create(LengthModeWidth), ForbidNegativeLengths))
-    , m_height(SVGAnimatedLength::create(this, SVGNames::heightAttr, SVGLength::create(LengthModeHeight), ForbidNegativeLengths))
+    , m_x(SVGAnimatedLength::create(this, SVGNames::xAttr, SVGLength::create(SVGLengthMode::Width), AllowNegativeLengths))
+    , m_y(SVGAnimatedLength::create(this, SVGNames::yAttr, SVGLength::create(SVGLengthMode::Height), AllowNegativeLengths))
+    , m_width(SVGAnimatedLength::create(this, SVGNames::widthAttr, SVGLength::create(SVGLengthMode::Width), ForbidNegativeLengths))
+    , m_height(SVGAnimatedLength::create(this, SVGNames::heightAttr, SVGLength::create(SVGLengthMode::Height), ForbidNegativeLengths))
     , m_maskUnits(SVGAnimatedEnumeration<SVGUnitTypes::SVGUnitType>::create(this, SVGNames::maskUnitsAttr, SVGUnitTypes::SVG_UNIT_TYPE_OBJECTBOUNDINGBOX))
     , m_maskContentUnits(SVGAnimatedEnumeration<SVGUnitTypes::SVGUnitType>::create(this, SVGNames::maskContentUnitsAttr, SVGUnitTypes::SVG_UNIT_TYPE_USERSPACEONUSE))
 {
@@ -55,7 +55,7 @@ inline SVGMaskElement::SVGMaskElement(Document& document)
     addToPropertyMap(m_maskContentUnits);
 }
 
-void SVGMaskElement::trace(Visitor* visitor)
+DEFINE_TRACE(SVGMaskElement)
 {
     visitor->trace(m_x);
     visitor->trace(m_y);
@@ -84,9 +84,35 @@ bool SVGMaskElement::isSupportedAttribute(const QualifiedName& attrName)
     return supportedAttributes.contains<SVGAttributeHashTranslator>(attrName);
 }
 
-void SVGMaskElement::parseAttribute(const QualifiedName& name, const AtomicString& value)
+bool SVGMaskElement::isPresentationAttribute(const QualifiedName& attrName) const
 {
-    parseAttributeNew(name, value);
+    if (attrName == SVGNames::xAttr || attrName == SVGNames::yAttr
+        || attrName == SVGNames::widthAttr || attrName == SVGNames::heightAttr)
+        return true;
+    return SVGElement::isPresentationAttribute(attrName);
+}
+
+bool SVGMaskElement::isPresentationAttributeWithSVGDOM(const QualifiedName& attrName) const
+{
+    if (attrName == SVGNames::xAttr || attrName == SVGNames::yAttr
+        || attrName == SVGNames::widthAttr || attrName == SVGNames::heightAttr)
+        return true;
+    return SVGElement::isPresentationAttributeWithSVGDOM(attrName);
+}
+
+void SVGMaskElement::collectStyleForPresentationAttribute(const QualifiedName& name, const AtomicString& value, MutableStylePropertySet* style)
+{
+    RefPtrWillBeRawPtr<SVGAnimatedPropertyBase> property = propertyFromAttribute(name);
+    if (property == m_x)
+        addSVGLengthPropertyToPresentationAttributeStyle(style, CSSPropertyX, *m_x->currentValue());
+    else if (property == m_y)
+        addSVGLengthPropertyToPresentationAttributeStyle(style, CSSPropertyY, *m_y->currentValue());
+    else if (property == m_width)
+        addSVGLengthPropertyToPresentationAttributeStyle(style, CSSPropertyWidth, *m_width->currentValue());
+    else if (property == m_height)
+        addSVGLengthPropertyToPresentationAttributeStyle(style, CSSPropertyHeight, *m_height->currentValue());
+    else
+        SVGElement::collectStyleForPresentationAttribute(name, value, style);
 }
 
 void SVGMaskElement::svgAttributeChanged(const QualifiedName& attrName)
@@ -101,10 +127,14 @@ void SVGMaskElement::svgAttributeChanged(const QualifiedName& attrName)
     if (attrName == SVGNames::xAttr
         || attrName == SVGNames::yAttr
         || attrName == SVGNames::widthAttr
-        || attrName == SVGNames::heightAttr)
+        || attrName == SVGNames::heightAttr) {
+        invalidateSVGPresentationAttributeStyle();
+        setNeedsStyleRecalc(LocalStyleChange,
+            StyleChangeReasonForTracing::fromAttribute(attrName));
         updateRelativeLengthsInformation();
+    }
 
-    RenderSVGResourceContainer* renderer = toRenderSVGResourceContainer(this->renderer());
+    LayoutSVGResourceContainer* renderer = toLayoutSVGResourceContainer(this->layoutObject());
     if (renderer)
         renderer->invalidateCacheAndMarkForLayout();
 }
@@ -116,13 +146,13 @@ void SVGMaskElement::childrenChanged(const ChildrenChange& change)
     if (change.byParser)
         return;
 
-    if (RenderObject* object = renderer())
-        object->setNeedsLayoutAndFullPaintInvalidation();
+    if (LayoutObject* object = layoutObject())
+        object->setNeedsLayoutAndFullPaintInvalidation(LayoutInvalidationReason::ChildChanged);
 }
 
-RenderObject* SVGMaskElement::createRenderer(RenderStyle*)
+LayoutObject* SVGMaskElement::createLayoutObject(const ComputedStyle&)
 {
-    return new RenderSVGResourceMasker(this);
+    return new LayoutSVGResourceMasker(this);
 }
 
 bool SVGMaskElement::selfHasRelativeLengths() const

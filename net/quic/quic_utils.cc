@@ -42,23 +42,36 @@ uint64 QuicUtils::FNV1a_64_Hash(const char* data, int len) {
 
 // static
 uint128 QuicUtils::FNV1a_128_Hash(const char* data, int len) {
-  // The following two constants are defined as part of the hash algorithm.
+  return FNV1a_128_Hash_Two(data, len, nullptr, 0);
+}
+
+// static
+uint128 QuicUtils::FNV1a_128_Hash_Two(const char* data1,
+                                      int len1,
+                                      const char* data2,
+                                      int len2) {
+  // The two constants are defined as part of the hash algorithm.
   // see http://www.isthe.com/chongo/tech/comp/fnv/
-  // 309485009821345068724781371
-  const uint128 kPrime(16777216, 315);
   // 144066263297769815596495629667062367629
   const uint128 kOffset(GG_UINT64_C(7809847782465536322),
                         GG_UINT64_C(7113472399480571277));
 
+  uint128 hash = IncrementalHash(kOffset, data1, len1);
+  if (data2 == nullptr) {
+    return hash;
+  }
+  return IncrementalHash(hash, data2, len2);
+}
+
+// static
+uint128 QuicUtils::IncrementalHash(uint128 hash, const char* data, size_t len) {
+  // 309485009821345068724781371
+  const uint128 kPrime(16777216, 315);
   const uint8* octets = reinterpret_cast<const uint8*>(data);
-
-  uint128 hash = kOffset;
-
-  for (int i = 0; i < len; ++i) {
+  for (size_t i = 0; i < len; ++i) {
     hash  = hash ^ uint128(0, octets[i]);
     hash = hash * kPrime;
   }
-
   return hash;
 }
 
@@ -107,15 +120,6 @@ bool QuicUtils::FindMutualTag(const QuicTagVector& our_tags_vector,
   }
 
   return false;
-}
-
-// static
-void QuicUtils::SerializeUint128(uint128 v, uint8* out) {
-  const uint64 lo = Uint128Low64(v);
-  const uint64 hi = Uint128High64(v);
-  // This assumes that the system is little-endian.
-  memcpy(out, &lo, sizeof(lo));
-  memcpy(out + sizeof(lo), &hi, sizeof(hi));
 }
 
 // static
@@ -169,7 +173,6 @@ const char* QuicUtils::ErrorToString(QuicErrorCode error) {
     RETURN_STRING_LITERAL(QUIC_INVALID_BLOCKED_DATA);
     RETURN_STRING_LITERAL(QUIC_INVALID_STOP_WAITING_DATA);
     RETURN_STRING_LITERAL(QUIC_INVALID_ACK_DATA);
-    RETURN_STRING_LITERAL(QUIC_INVALID_CONGESTION_FEEDBACK_DATA);
     RETURN_STRING_LITERAL(QUIC_INVALID_VERSION_NEGOTIATION_PACKET);
     RETURN_STRING_LITERAL(QUIC_INVALID_PUBLIC_RST_PACKET);
     RETURN_STRING_LITERAL(QUIC_DECRYPTION_FAILURE);
@@ -222,6 +225,8 @@ const char* QuicUtils::ErrorToString(QuicErrorCode error) {
     RETURN_STRING_LITERAL(QUIC_VERSION_NEGOTIATION_MISMATCH);
     RETURN_STRING_LITERAL(QUIC_TOO_MANY_OUTSTANDING_SENT_PACKETS);
     RETURN_STRING_LITERAL(QUIC_TOO_MANY_OUTSTANDING_RECEIVED_PACKETS);
+    RETURN_STRING_LITERAL(QUIC_CONNECTION_CANCELLED);
+    RETURN_STRING_LITERAL(QUIC_BAD_PACKET_LOSS_RATE);
     RETURN_STRING_LITERAL(QUIC_LAST_ERROR);
     // Intentionally have no default case, so we'll break the build
     // if we add errors and don't put them here.
@@ -331,11 +336,6 @@ string QuicUtils::StringToHexASCIIDump(StringPiece in_buffer) {
     s += '\n';
   }
   return s;
-}
-
-// static
-QuicPriority QuicUtils::LowestPriority() {
-  return QuicWriteBlockedList::kLowestPriority;
 }
 
 // static

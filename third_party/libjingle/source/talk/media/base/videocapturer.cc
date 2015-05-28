@@ -1,37 +1,37 @@
-// libjingle
-// Copyright 2010 Google Inc.
-//
-// Redistribution and use in source and binary forms, with or without
-// modification, are permitted provided that the following conditions are met:
-//
-//  1. Redistributions of source code must retain the above copyright notice,
-//     this list of conditions and the following disclaimer.
-//  2. Redistributions in binary form must reproduce the above copyright notice,
-//     this list of conditions and the following disclaimer in the documentation
-//     and/or other materials provided with the distribution.
-//  3. The name of the author may not be used to endorse or promote products
-//     derived from this software without specific prior written permission.
-//
-// THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR IMPLIED
-// WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
-// MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO
-// EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
-// SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
-// PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
-// OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
-// WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
-// OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
-// ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
-//
+/*
+ * libjingle
+ * Copyright 2010 Google Inc.
+ *
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are met:
+ *
+ *  1. Redistributions of source code must retain the above copyright notice,
+ *     this list of conditions and the following disclaimer.
+ *  2. Redistributions in binary form must reproduce the above copyright notice,
+ *     this list of conditions and the following disclaimer in the documentation
+ *     and/or other materials provided with the distribution.
+ *  3. The name of the author may not be used to endorse or promote products
+ *     derived from this software without specific prior written permission.
+ *
+ * THIS SOFTWARE IS PROVIDED BY THE AUTHOR ``AS IS'' AND ANY EXPRESS OR IMPLIED
+ * WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF
+ * MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO
+ * EVENT SHALL THE AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL,
+ * SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO,
+ * PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS;
+ * OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY,
+ * WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR
+ * OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF
+ * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
+ */
+
 // Implementation file of class VideoCapturer.
 
 #include "talk/media/base/videocapturer.h"
 
 #include <algorithm>
 
-#if !defined(DISABLE_YUV)
 #include "libyuv/scale_argb.h"
-#endif
 #include "talk/media/base/videoframefactory.h"
 #include "talk/media/base/videoprocessor.h"
 #include "webrtc/base/common.h"
@@ -96,6 +96,11 @@ bool CapturedFrame::GetDataSize(uint32* size) const {
   return true;
 }
 
+webrtc::VideoRotation CapturedFrame::GetRotation() const {
+  ASSERT(rotation == 0 || rotation == 90 || rotation == 180 || rotation == 270);
+  return static_cast<webrtc::VideoRotation>(rotation);
+}
+
 /////////////////////////////////////////////////////////////////////
 // Implementation of class VideoCapturer
 /////////////////////////////////////////////////////////////////////
@@ -103,7 +108,8 @@ VideoCapturer::VideoCapturer()
     : thread_(rtc::Thread::Current()),
       adapt_frame_drops_data_(kMaxAccumulatorSize),
       effect_frame_drops_data_(kMaxAccumulatorSize),
-      frame_time_data_(kMaxAccumulatorSize) {
+      frame_time_data_(kMaxAccumulatorSize),
+      apply_rotation_(true) {
   Construct();
 }
 
@@ -111,7 +117,8 @@ VideoCapturer::VideoCapturer(rtc::Thread* thread)
     : thread_(thread),
       adapt_frame_drops_data_(kMaxAccumulatorSize),
       effect_frame_drops_data_(kMaxAccumulatorSize),
-      frame_time_data_(kMaxAccumulatorSize) {
+      frame_time_data_(kMaxAccumulatorSize),
+      apply_rotation_(true) {
   Construct();
 }
 
@@ -247,6 +254,16 @@ bool VideoCapturer::MuteToBlackThenPause(bool muted) {
   return Pause(false);
 }
 
+// Note that the last caller decides whether rotation should be applied if there
+// are multiple send streams using the same camera.
+bool VideoCapturer::SetApplyRotation(bool enable) {
+  apply_rotation_ = enable;
+  if (frame_factory_) {
+    frame_factory_->SetApplyRotation(apply_rotation_);
+  }
+  return true;
+}
+
 void VideoCapturer::SetSupportedFormats(
     const std::vector<VideoFormat>& formats) {
   supported_formats_ = formats;
@@ -333,6 +350,13 @@ std::string VideoCapturer::ToString(const CapturedFrame* captured_frame) const {
   return ss.str();
 }
 
+void VideoCapturer::set_frame_factory(VideoFrameFactory* frame_factory) {
+  frame_factory_.reset(frame_factory);
+  if (frame_factory) {
+    frame_factory->SetApplyRotation(apply_rotation_);
+  }
+}
+
 void VideoCapturer::GetStats(VariableInfo<int>* adapt_drops_stats,
                              VariableInfo<int>* effect_drops_stats,
                              VariableInfo<double>* frame_time_stats,
@@ -361,7 +385,6 @@ void VideoCapturer::OnFrameCaptured(VideoCapturer*,
   if (SignalVideoFrame.is_empty()) {
     return;
   }
-#if !defined(DISABLE_YUV)
 
   // Use a temporary buffer to scale
   rtc::scoped_ptr<uint8[]> scale_buffer;
@@ -481,7 +504,6 @@ void VideoCapturer::OnFrameCaptured(VideoCapturer*,
     modified_frame->data_size = modified_frame_size;
     modified_frame->data = temp_buffer_data;
   }
-#endif  // !DISABLE_YUV
 
   // Size to crop captured frame to.  This adjusts the captured frames
   // aspect ratio to match the final view aspect ratio, considering pixel
@@ -550,7 +572,7 @@ void VideoCapturer::OnFrameCaptured(VideoCapturer*,
     ++effect_frame_drops_;
     return;
   }
-  if (muted_ || (enable_video_adapter_ && video_adapter_.IsBlackOutput())) {
+  if (muted_) {
     // TODO(pthatcher): Use frame_factory_->CreateBlackFrame() instead.
     adapted_frame->SetToBlack();
   }

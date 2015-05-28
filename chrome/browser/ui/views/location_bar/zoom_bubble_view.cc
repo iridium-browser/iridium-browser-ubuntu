@@ -7,7 +7,6 @@
 #include "base/i18n/rtl.h"
 #include "base/strings/stringprintf.h"
 #include "chrome/browser/chrome_notification_types.h"
-#include "chrome/browser/chrome_page_zoom.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
@@ -17,6 +16,7 @@
 #include "chrome/browser/ui/views/location_bar/zoom_view.h"
 #include "chrome/common/extensions/api/extension_action/action_info.h"
 #include "chrome/grit/generated_resources.h"
+#include "components/ui/zoom/page_zoom.h"
 #include "components/ui/zoom/zoom_controller.h"
 #include "content/public/browser/notification_source.h"
 #include "extensions/browser/extension_zoom_request_client.h"
@@ -39,7 +39,8 @@ ZoomBubbleView* ZoomBubbleView::zoom_bubble_ = NULL;
 void ZoomBubbleView::ShowBubble(content::WebContents* web_contents,
                                 bool auto_close) {
   Browser* browser = chrome::FindBrowserWithWebContents(web_contents);
-  DCHECK(browser && browser->window() && browser->fullscreen_controller());
+  DCHECK(browser && browser->window() &&
+         browser->exclusive_access_manager()->fullscreen_controller());
 
   BrowserView* browser_view = BrowserView::GetBrowserViewForBrowser(browser);
   bool is_fullscreen = browser_view->IsFullscreen();
@@ -66,11 +67,8 @@ void ZoomBubbleView::ShowBubble(content::WebContents* web_contents,
   // bubble must be closed and a new one created.
   CloseBubble();
 
-  zoom_bubble_ = new ZoomBubbleView(anchor_view,
-                                    web_contents,
-                                    auto_close,
-                                    browser_view->immersive_mode_controller(),
-                                    browser->fullscreen_controller());
+  zoom_bubble_ = new ZoomBubbleView(anchor_view, web_contents, auto_close,
+                                    browser_view->immersive_mode_controller());
 
   // If the zoom change was initiated by an extension, capture the relevent
   // information from it.
@@ -118,8 +116,7 @@ ZoomBubbleView::ZoomBubbleView(
     views::View* anchor_view,
     content::WebContents* web_contents,
     bool auto_close,
-    ImmersiveModeController* immersive_mode_controller,
-    FullscreenController* fullscreen_controller)
+    ImmersiveModeController* immersive_mode_controller)
     : ManagedFullScreenBubbleDelegateView(anchor_view, web_contents),
       image_button_(NULL),
       label_(NULL),
@@ -235,7 +232,7 @@ void ZoomBubbleView::ButtonPressed(views::Button* sender,
                                          extension_info_.id.c_str())),
         ui::PAGE_TRANSITION_FROM_API);
   } else {
-    chrome_page_zoom::Zoom(web_contents_, content::PAGE_ZOOM_RESET);
+    ui_zoom::PageZoom::Zoom(web_contents_, content::PAGE_ZOOM_RESET);
   }
 }
 

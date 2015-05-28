@@ -13,6 +13,7 @@
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/common/chrome_switches.h"
+#include "components/user_manager/user_manager.h"
 #include "content/public/browser/notification_service.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/browser/process_manager.h"
@@ -40,11 +41,17 @@ bool ChromeProcessManagerDelegate::IsBackgroundPageAllowed(
     content::BrowserContext* context) const {
   Profile* profile = static_cast<Profile*>(context);
 
-  // Disallow if the current session is a Guest mode session but the current
-  // browser context is *not* off-the-record. Such context is artificial and
-  // background page shouldn't be created in it.
+  bool is_normal_session = !profile->IsGuestSession();
+#if defined(OS_CHROMEOS)
+  is_normal_session = is_normal_session &&
+                      user_manager::UserManager::Get()->IsUserLoggedIn();
+#endif
+
+  // Disallow if the current session is a Guest mode session or login screen but
+  // the current browser context is *not* off-the-record. Such context is
+  // artificial and background page shouldn't be created in it.
   // http://crbug.com/329498
-  return !(profile->IsGuestSession() && !profile->IsOffTheRecord());
+  return is_normal_session || profile->IsOffTheRecord();
 }
 
 bool ChromeProcessManagerDelegate::DeferCreatingStartupBackgroundHosts(
@@ -106,7 +113,7 @@ void ChromeProcessManagerDelegate::OnBrowserWindowReady(Browser* browser) {
   // a related incognito profile or other regular profiles.
   ProcessManager* manager = ProcessManager::Get(profile);
   DCHECK(manager);
-  DCHECK_EQ(profile, manager->GetBrowserContext());
+  DCHECK_EQ(profile, manager->browser_context());
   manager->MaybeCreateStartupBackgroundHosts();
 
   // For incognito profiles also inform the original profile's process manager
@@ -117,7 +124,7 @@ void ChromeProcessManagerDelegate::OnBrowserWindowReady(Browser* browser) {
     Profile* original_profile = profile->GetOriginalProfile();
     ProcessManager* original_manager = ProcessManager::Get(original_profile);
     DCHECK(original_manager);
-    DCHECK_EQ(original_profile, original_manager->GetBrowserContext());
+    DCHECK_EQ(original_profile, original_manager->browser_context());
     original_manager->MaybeCreateStartupBackgroundHosts();
   }
 }

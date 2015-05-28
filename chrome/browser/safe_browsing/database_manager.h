@@ -27,10 +27,6 @@
 class SafeBrowsingService;
 class SafeBrowsingDatabase;
 
-namespace base {
-class Thread;
-}
-
 namespace net {
 class URLRequestContext;
 class URLRequestContextGetter;
@@ -79,14 +75,13 @@ class SafeBrowsingDatabaseManager
     std::vector<SBPrefix> prefix_hits;
     std::vector<SBFullHashResult> cache_hits;
 
-    // Vends weak pointers for TimeoutCallback().  If the response is
-    // received before the timeout fires, factory is destructed and
-    // the timeout won't be fired.
+    // Vends weak pointers for async callbacks on the IO thread, such as
+    // timeout checks and replies from checks performed on the SB task runner.
     // TODO(lzheng): We should consider to use this time out check
-    // for browsing too (instead of implementin in
+    // for browsing too (instead of implementing in
     // safe_browsing_resource_handler.cc).
     scoped_ptr<base::WeakPtrFactory<
-        SafeBrowsingDatabaseManager> > timeout_factory_;
+        SafeBrowsingDatabaseManager> > weak_ptr_factory_;
 
    private:
     DISALLOW_COPY_AND_ASSIGN(SafeBrowsingCheck);
@@ -149,28 +144,33 @@ class SafeBrowsingDatabaseManager
   // the hash prefix only (so there may be false positives).
   virtual bool CheckSideEffectFreeWhitelistUrl(const GURL& url);
 
-  // Check if the |url| matches any of the full-length hashes from the
-  // client-side phishing detection whitelist.  Returns true if there was a
-  // match and false otherwise.  To make sure we are conservative we will return
-  // true if an error occurs. This method is expected to be called on the IO
-  // thread.
+  // Check if the |url| matches any of the full-length hashes from the client-
+  // side phishing detection whitelist.  Returns true if there was a match and
+  // false otherwise.  To make sure we are conservative we will return true if
+  // an error occurs.  This method must be called on the IO thread.
   virtual bool MatchCsdWhitelistUrl(const GURL& url);
 
   // Check if the given IP address (either IPv4 or IPv6) matches the malware
   // IP blacklist.
   virtual bool MatchMalwareIP(const std::string& ip_address);
 
-  // Check if the |url| matches any of the full-length hashes from the
-  // download whitelist.  Returns true if there was a match and false otherwise.
-  // To make sure we are conservative we will return true if an error occurs.
-  // This method is expected to be called on the IO thread.
+  // Check if the |url| matches any of the full-length hashes from the download
+  // whitelist.  Returns true if there was a match and false otherwise. To make
+  // sure we are conservative we will return true if an error occurs.  This
+  // method must be called on the IO thread.
   virtual bool MatchDownloadWhitelistUrl(const GURL& url);
 
   // Check if |str| matches any of the full-length hashes from the download
-  // whitelist.  Returns true if there was a match and false otherwise.
-  // To make sure we are conservative we will return true if an error occurs.
-  // This method is expected to be called on the IO thread.
+  // whitelist.  Returns true if there was a match and false otherwise. To make
+  // sure we are conservative we will return true if an error occurs.  This
+  // method must be called on the IO thread.
   virtual bool MatchDownloadWhitelistString(const std::string& str);
+
+  // Check if the |url| matches any of the full-length hashes from the off-
+  // domain inclusion whitelist. Returns true if there was a match and false
+  // otherwise. To make sure we are conservative, we will return true if an
+  // error occurs.  This method must be called on the IO thread.
+  virtual bool MatchInclusionWhitelistUrl(const GURL& url);
 
   // Check if the CSD malware IP matching kill switch is turned on.
   virtual bool IsMalwareKillSwitchOn();
@@ -189,12 +189,12 @@ class SafeBrowsingDatabaseManager
                             const base::TimeDelta& cache_lifetime);
 
   // Called to initialize objects that are used on the io_thread.  This may be
-  // called multiple times during the life of the DatabaseManager. Should be
+  // called multiple times during the life of the DatabaseManager. Must be
   // called on IO thread.
   void StartOnIOThread();
 
   // Called to stop or shutdown operations on the io_thread. This may be called
-  // multiple times during the life of the DatabaseManager. Should be called
+  // multiple times during the life of the DatabaseManager. Must be called
   // on IO thread. If shutdown is true, the manager is disabled permanently.
   void StopOnIOThread(bool shutdown);
 
@@ -212,6 +212,8 @@ class SafeBrowsingDatabaseManager
   friend class SafeBrowsingDatabaseManagerTest;
   FRIEND_TEST_ALL_PREFIXES(SafeBrowsingDatabaseManagerTest,
                            GetUrlSeverestThreatType);
+  FRIEND_TEST_ALL_PREFIXES(SafeBrowsingDatabaseManagerTest,
+                           ServiceStopWithPendingChecks);
 
   typedef std::set<SafeBrowsingCheck*> CurrentChecks;
   typedef std::vector<SafeBrowsingCheck*> GetHashRequestors;
@@ -313,18 +315,21 @@ class SafeBrowsingDatabaseManager
                       const std::vector<SBFullHashResult>& full_hashes);
 
   // Invoked by CheckDownloadUrl. It checks the download URL on
-  // safe_browsing_thread_.
-  void CheckDownloadUrlOnSBThread(SafeBrowsingCheck* check);
+  // |safe_browsing_task_runner_|.
+  std::vector<SBPrefix> CheckDownloadUrlOnSBThread(
+      const std::vector<SBPrefix>& prefixes);
 
   // The callback function when a safebrowsing check is timed out. Client will
   // be notified that the safebrowsing check is SAFE when this happens.
   void TimeoutCallback(SafeBrowsingCheck* check);
 
   // Calls the Client's callback on IO thread after CheckDownloadUrl finishes.
-  void CheckDownloadUrlDone(SafeBrowsingCheck* check);
+  void OnAsyncCheckDone(SafeBrowsingCheck* check,
+                        const std::vector<SBPrefix>& prefix_hits);
 
-  // Checks all extension ID hashes on safe_browsing_thread_.
-  void CheckExtensionIDsOnSBThread(SafeBrowsingCheck* check);
+  // Checks all extension ID hashes on |safe_browsing_task_runner_|.
+  std::vector<SBPrefix> CheckExtensionIDsOnSBThread(
+      const std::vector<SBPrefix>& prefixes);
 
   // Helper function that calls safe browsing client and cleans up |checks_|.
   void SafeBrowsingCheckDone(SafeBrowsingCheck* check);
@@ -332,8 +337,9 @@ class SafeBrowsingDatabaseManager
   // Helper function to set |check| with default values and start a safe
   // browsing check with timeout of |timeout|. |task| will be called on
   // success, otherwise TimeoutCallback will be called.
-  void StartSafeBrowsingCheck(SafeBrowsingCheck* check,
-                              const base::Closure& task);
+  void StartSafeBrowsingCheck(
+      SafeBrowsingCheck* check,
+      const base::Callback<std::vector<SBPrefix>(void)>& task);
 
   // SafeBrowsingProtocolManageDelegate override
   void ResetDatabase() override;
@@ -387,12 +393,8 @@ class SafeBrowsingDatabaseManager
   // Indicate if the unwanted software blacklist should be enabled.
   bool enable_unwanted_software_blacklist_;
 
-  // The SafeBrowsing thread that runs database operations.
-  //
-  // Note: Functions that run on this thread should run synchronously and return
-  // to the IO thread, not post additional tasks back to this thread, lest we
-  // cause a race condition at shutdown time that leads to a database leak.
-  scoped_ptr<base::Thread> safe_browsing_thread_;
+  // The sequenced task runner for running safe browsing database operations.
+  scoped_refptr<base::SequencedTaskRunner> safe_browsing_task_runner_;
 
   // Indicates if we're currently in an update cycle.
   bool update_in_progress_;

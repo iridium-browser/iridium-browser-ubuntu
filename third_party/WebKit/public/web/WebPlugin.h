@@ -33,6 +33,7 @@
 #define WebPlugin_h
 
 #include "../platform/WebCanvas.h"
+#include "../platform/WebFocusType.h"
 #include "../platform/WebString.h"
 #include "../platform/WebURL.h"
 #include "WebDragOperation.h"
@@ -86,14 +87,18 @@ public:
 
     virtual bool canProcessDrag() const { return false; }
 
+    // TODO(schenney): Make this pure virtual when chromium changes land
+    virtual void layoutPluginIfNeeded() { }
     virtual void paint(WebCanvas*, const WebRect&) = 0;
 
     // Coordinates are relative to the containing window.
     virtual void updateGeometry(
-        const WebRect& frameRect, const WebRect& clipRect,
-        const WebVector<WebRect>& cutOutsRects, bool isVisible) = 0;
+        const WebRect& windowRect, const WebRect& clipRect,
+        const WebRect& unobscuredRect, const WebVector<WebRect>& cutOutsRects,
+        bool isVisible) = 0;
 
-    virtual void updateFocus(bool) = 0;
+    virtual void updateFocus(bool focused, WebFocusType) = 0;
+
     virtual void updateVisibility(bool) = 0;
 
     virtual bool acceptsInputEvents() = 0;

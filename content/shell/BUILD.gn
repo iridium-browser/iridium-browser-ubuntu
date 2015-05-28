@@ -59,8 +59,12 @@ static_library("content_shell_lib") {
     "browser/layout_test/layout_test_javascript_dialog_manager.h",
     "browser/layout_test/layout_test_message_filter.cc",
     "browser/layout_test/layout_test_message_filter.h",
+    "browser/layout_test/layout_test_navigator_connect_service_factory.cc",
+    "browser/layout_test/layout_test_navigator_connect_service_factory.h",
     "browser/layout_test/layout_test_notification_manager.cc",
     "browser/layout_test/layout_test_notification_manager.h",
+    "browser/layout_test/layout_test_permission_manager.cc",
+    "browser/layout_test/layout_test_permission_manager.h",
     "browser/layout_test/layout_test_push_messaging_service.cc",
     "browser/layout_test/layout_test_push_messaging_service.h",
     "browser/layout_test/layout_test_resource_dispatcher_host_delegate.cc",
@@ -85,10 +89,10 @@ static_library("content_shell_lib") {
     "browser/shell_browser_main_parts_mac.mm",
     "browser/shell_content_browser_client.cc",
     "browser/shell_content_browser_client.h",
-    "browser/shell_devtools_manager_delegate.cc",
-    "browser/shell_devtools_manager_delegate.h",
     "browser/shell_devtools_frontend.cc",
     "browser/shell_devtools_frontend.h",
+    "browser/shell_devtools_manager_delegate.cc",
+    "browser/shell_devtools_manager_delegate.h",
     "browser/shell_download_manager_delegate.cc",
     "browser/shell_download_manager_delegate.h",
     "browser/shell_javascript_dialog.h",
@@ -96,16 +100,18 @@ static_library("content_shell_lib") {
     "browser/shell_javascript_dialog_manager.cc",
     "browser/shell_javascript_dialog_manager.h",
     "browser/shell_javascript_dialog_win.cc",
-    "browser/shell_mojo_test_utils_android.cc",
-    "browser/shell_mojo_test_utils_android.h",
     "browser/shell_login_dialog.cc",
     "browser/shell_login_dialog.h",
     "browser/shell_login_dialog_mac.mm",
     "browser/shell_mac.mm",
+    "browser/shell_mojo_test_utils_android.cc",
+    "browser/shell_mojo_test_utils_android.h",
     "browser/shell_net_log.cc",
     "browser/shell_net_log.h",
     "browser/shell_network_delegate.cc",
     "browser/shell_network_delegate.h",
+    "browser/shell_permission_manager.cc",
+    "browser/shell_permission_manager.h",
     "browser/shell_platform_data_aura.cc",
     "browser/shell_platform_data_aura.h",
     "browser/shell_plugin_service_filter.cc",
@@ -118,9 +124,9 @@ static_library("content_shell_lib") {
     "browser/shell_speech_recognition_manager_delegate.h",
     "browser/shell_url_request_context_getter.cc",
     "browser/shell_url_request_context_getter.h",
+    "browser/shell_web_contents_view_delegate.h",
     "browser/shell_web_contents_view_delegate_android.cc",
     "browser/shell_web_contents_view_delegate_creator.h",
-    "browser/shell_web_contents_view_delegate.h",
     "browser/shell_web_contents_view_delegate_mac.mm",
     "browser/shell_web_contents_view_delegate_win.cc",
     "browser/webkit_test_controller.cc",
@@ -208,9 +214,9 @@ static_library("content_shell_lib") {
     "renderer/test_runner/text_input_controller.h",
     "renderer/test_runner/web_ax_object_proxy.cc",
     "renderer/test_runner/web_ax_object_proxy.h",
+    "renderer/test_runner/web_content_settings.cc",
+    "renderer/test_runner/web_content_settings.h",
     "renderer/test_runner/web_frame_test_proxy.h",
-    "renderer/test_runner/web_permissions.cc",
-    "renderer/test_runner/web_permissions.h",
     "renderer/test_runner/web_task.cc",
     "renderer/test_runner/web_task.h",
     "renderer/test_runner/web_test_delegate.h",
@@ -220,6 +226,9 @@ static_library("content_shell_lib") {
     "renderer/test_runner/web_test_proxy.h",
     "renderer/test_runner/web_test_runner.h",
   ]
+
+  # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
+  configs += [ "//build/config/compiler:no_size_t_to_int_warning" ]
 
   defines = [ "CONTENT_SHELL_VERSION=\"$content_shell_version\"" ]
 
@@ -255,10 +264,12 @@ static_library("content_shell_lib") {
     "//skia",
     "//storage/browser",
     "//third_party/WebKit/public:blink",
+    "//third_party/WebKit/public:image_resources",
     "//third_party/WebKit/public:resources",
     "//third_party/WebKit/public:test_support",
     "//third_party/icu",
     "//ui/base",
+    "//ui/base/ime",
     "//ui/events:events_base",
     "//ui/gfx",
     "//ui/gfx/geometry",
@@ -275,9 +286,10 @@ static_library("content_shell_lib") {
 
   if (is_win) {
     #'LinkIncremental': '<(msvs_large_module_debug_link_mode)',  TODO(GYP)
-
-    # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
-    cflags = [ "/wd4267" ]
+    sources += [
+      "common/v8_breakpad_support_win.cc",
+      "common/v8_breakpad_support_win.h",
+    ]
   }
 
   if (is_linux) {
@@ -299,7 +311,7 @@ static_library("content_shell_lib") {
     #deps -= [ "copy_test_netscape_plugin" ]  TODO(GYP)
   }
 
-  if (is_posix && !is_mac && (!is_android || !is_android_webview_build)) {
+  if (is_posix && !is_mac) {
     deps += [ "//components/crash/browser" ]
   }
 
@@ -393,9 +405,9 @@ if (use_x11) {
   copy("copy_x11_fonts") {
     visibility = [ ":*" ]
     sources = [
-      "renderer/test_runner/resources/fonts/fonts.conf",
       "//third_party/gardiner_mod/GardinerModBug.ttf",
       "//third_party/gardiner_mod/GardinerModCat.ttf",
+      "renderer/test_runner/resources/fonts/fonts.conf",
     ]
     outputs = [
       "$root_out_dir/{{source_file_part}}",
@@ -406,8 +418,8 @@ if (is_android) {
   copy("copy_android_fonts") {
     visibility = [ ":*" ]
     sources = [
-      "renderer/test_runner/resources/fonts/android_main_fonts.xml",
       "renderer/test_runner/resources/fonts/android_fallback_fonts.xml",
+      "renderer/test_runner/resources/fonts/android_main_fonts.xml",
     ]
     outputs = [
       "$root_out_dir/{{source_file_part}}",
@@ -445,6 +457,7 @@ group("resources") {
 
 repack("pak") {
   sources = [
+    "$root_gen_dir/blink/public/resources/blink_image_resources_100_percent.pak",
     "$root_gen_dir/blink/public/resources/blink_resources.pak",
     "$root_gen_dir/content/app/resources/content_resources_100_percent.pak",
     "$root_gen_dir/content/app/strings/content_strings_en-US.pak",
@@ -465,6 +478,7 @@ repack("pak") {
     "//content/app/strings",
     "//content/browser/tracing:resources",
     "//net:net_resources",
+    "//third_party/WebKit/public:image_resources",
     "//third_party/WebKit/public:resources",
     "//ui/resources",
     "//ui/strings",
@@ -487,7 +501,6 @@ if (!is_android && !is_mac) {
     #  - RC file.
     #  - 'LinkIncremental': '<(msvs_large_module_debug_link_mode)',
     sources = [
-      "../app/startup_helper_win.cc",
       "app/shell_main.cc",
     ]
 
@@ -509,12 +522,15 @@ if (!is_android && !is_mac) {
       # TODO(GYP) lots of stuff from GYP file here.
     }
 
-    if (is_android && !is_android_webview_build) {
+    if (is_android) {
       # Some tests rely on this tool. It might be nicer if these tests relied on
       # image diff rather than having content shell depend on it.
       datadeps = [
         "//tools/imagediff($host_toolchain)",
       ]
     }
+  }
+} else {
+  group("content_shell") {
   }
 }

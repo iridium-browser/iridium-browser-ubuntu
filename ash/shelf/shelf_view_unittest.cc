@@ -40,6 +40,7 @@
 #include "ui/compositor/layer.h"
 #include "ui/events/event.h"
 #include "ui/events/event_constants.h"
+#include "ui/events/event_utils.h"
 #include "ui/events/test/event_generator.h"
 #include "ui/views/view_model.h"
 #include "ui/views/widget/widget.h"
@@ -422,9 +423,9 @@ class ShelfViewTest : public AshTestBase {
                                      int button_index) {
     ShelfButtonHost* button_host = shelf_view_;
     ShelfButton* button = test_api_->GetButton(button_index);
-    ui::MouseEvent click_event(ui::ET_MOUSE_PRESSED,
-                               gfx::Point(),
-                               button->GetBoundsInScreen().origin(), 0, 0);
+    ui::MouseEvent click_event(ui::ET_MOUSE_PRESSED, gfx::Point(),
+                               button->GetBoundsInScreen().origin(),
+                               ui::EventTimeForNow(), 0, 0);
     button_host->PointerPressedOnButton(button, pointer, click_event);
     return button;
   }
@@ -434,11 +435,9 @@ class ShelfViewTest : public AshTestBase {
     ShelfButtonHost* button_host = shelf_view_;
     ShelfButton* button =
         SimulateButtonPressed(ShelfButtonHost::MOUSE, button_index);
-    ui::MouseEvent release_event(ui::ET_MOUSE_RELEASED,
-                                 gfx::Point(),
+    ui::MouseEvent release_event(ui::ET_MOUSE_RELEASED, gfx::Point(),
                                  button->GetBoundsInScreen().origin(),
-                                 0,
-                                 0);
+                                 ui::EventTimeForNow(), 0, 0);
     test_api_->ButtonPressed(button, release_event);
     button_host->PointerReleasedOnButton(button, ShelfButtonHost::MOUSE, false);
   }
@@ -448,10 +447,9 @@ class ShelfViewTest : public AshTestBase {
     ShelfButtonHost* button_host = shelf_view_;
     ShelfButton* button =
         SimulateButtonPressed(ShelfButtonHost::MOUSE, button_index);
-    ui::MouseEvent release_event(ui::ET_MOUSE_RELEASED,
-                                 gfx::Point(),
+    ui::MouseEvent release_event(ui::ET_MOUSE_RELEASED, gfx::Point(),
                                  button->GetBoundsInScreen().origin(),
-                                 ui::EF_IS_DOUBLE_CLICK,
+                                 ui::EventTimeForNow(), ui::EF_IS_DOUBLE_CLICK,
                                  0);
     test_api_->ButtonPressed(button, release_event);
     button_host->PointerReleasedOnButton(button, ShelfButtonHost::MOUSE, false);
@@ -465,10 +463,10 @@ class ShelfViewTest : public AshTestBase {
 
     // Drag.
     views::View* destination = test_api_->GetButton(destination_index);
-    ui::MouseEvent drag_event(ui::ET_MOUSE_DRAGGED,
-                              gfx::Point(destination->x() - button->x(),
+    ui::MouseEvent drag_event(
+        ui::ET_MOUSE_DRAGGED, gfx::Point(destination->x() - button->x(),
                                          destination->y() - button->y()),
-                              destination->GetBoundsInScreen().origin(), 0, 0);
+        destination->GetBoundsInScreen().origin(), ui::EventTimeForNow(), 0, 0);
     button_host->PointerDraggedOnButton(button, pointer, drag_event);
     return button;
   }
@@ -860,6 +858,62 @@ TEST_F(ShelfViewTest, PlatformAppHidesExcessPanels) {
   EXPECT_FALSE(GetButtonByID(platform_app)->visible());
 }
 
+// Making sure that no buttons on the shelf will ever overlap after adding many
+// of them.
+TEST_F(ShelfViewTest, AssertNoButtonsOverlap) {
+  std::vector<ShelfID> button_ids;
+  // Add app icons until the overflow button is visible.
+  while (!test_api_->IsOverflowButtonVisible()) {
+    ShelfID id = AddPlatformApp();
+    button_ids.push_back(id);
+  }
+  ASSERT_LT(button_ids.size(), 10000U);
+  ASSERT_GT(button_ids.size(), 2U);
+
+  // Remove 2 icons to make more room for panel icons, the overflow button
+  // should go away.
+  for (int i = 0; i < 2; ++i) {
+    ShelfID id = button_ids.back();
+    RemoveByID(id);
+    button_ids.pop_back();
+  }
+  EXPECT_FALSE(test_api_->IsOverflowButtonVisible());
+  EXPECT_TRUE(GetButtonByID(button_ids.back())->visible());
+
+  // Add 20 panel icons, and expect to have overflow.
+  for (int i = 0; i < 20; ++i) {
+    ShelfID id = AddPanel();
+    button_ids.push_back(id);
+  }
+  ASSERT_LT(button_ids.size(), 10000U);
+  EXPECT_TRUE(test_api_->IsOverflowButtonVisible());
+
+  // Test that any two successive visible icons never overlap in all shelf
+  // alignment types.
+  const ShelfAlignment kAlignments[] = {
+      SHELF_ALIGNMENT_LEFT,
+      SHELF_ALIGNMENT_RIGHT,
+      SHELF_ALIGNMENT_TOP,
+      SHELF_ALIGNMENT_BOTTOM
+  };
+
+  for (ShelfAlignment alignment : kAlignments) {
+    EXPECT_TRUE(shelf_view_->shelf_layout_manager()->SetAlignment(alignment));
+    // For every 2 successive visible icons, expect that their bounds don't
+    // intersect.
+    for (int i = 1; i < test_api_->GetButtonCount() - 1; ++i) {
+      if (!(test_api_->GetButton(i)->visible() &&
+            test_api_->GetButton(i + 1)->visible())) {
+        continue;
+      }
+
+      const gfx::Rect& bounds1 = test_api_->GetBoundsByIndex(i);
+      const gfx::Rect& bounds2 = test_api_->GetBoundsByIndex(i + 1);
+      EXPECT_FALSE(bounds1.Intersects(bounds2));
+    }
+  }
+}
+
 // Adds button until overflow then removes first added one. Verifies that
 // the last added one changes from invisible to visible and overflow
 // chevron is gone.
@@ -1111,28 +1165,27 @@ TEST_F(ShelfViewTest, ClickAndMoveSlightly) {
   gfx::Point press_location_in_screen =
       button->GetBoundsInScreen().origin() + press_offset;
 
-  ui::MouseEvent click_event(ui::ET_MOUSE_PRESSED,
-                             press_location,
-                             press_location_in_screen,
+  ui::MouseEvent click_event(ui::ET_MOUSE_PRESSED, press_location,
+                             press_location_in_screen, ui::EventTimeForNow(),
                              ui::EF_LEFT_MOUSE_BUTTON, 0);
   button->OnMousePressed(click_event);
 
-  ui::MouseEvent drag_event1(ui::ET_MOUSE_DRAGGED,
-                             press_location + gfx::Vector2d(0, 1),
-                             press_location_in_screen + gfx::Vector2d(0, 1),
-                             ui::EF_LEFT_MOUSE_BUTTON, 0);
+  ui::MouseEvent drag_event1(
+      ui::ET_MOUSE_DRAGGED, press_location + gfx::Vector2d(0, 1),
+      press_location_in_screen + gfx::Vector2d(0, 1), ui::EventTimeForNow(),
+      ui::EF_LEFT_MOUSE_BUTTON, 0);
   button->OnMouseDragged(drag_event1);
 
-  ui::MouseEvent drag_event2(ui::ET_MOUSE_DRAGGED,
-                             press_location + gfx::Vector2d(-1, 0),
-                             press_location_in_screen + gfx::Vector2d(-1, 0),
-                             ui::EF_LEFT_MOUSE_BUTTON, 0);
+  ui::MouseEvent drag_event2(
+      ui::ET_MOUSE_DRAGGED, press_location + gfx::Vector2d(-1, 0),
+      press_location_in_screen + gfx::Vector2d(-1, 0), ui::EventTimeForNow(),
+      ui::EF_LEFT_MOUSE_BUTTON, 0);
   button->OnMouseDragged(drag_event2);
 
-  ui::MouseEvent release_event(ui::ET_MOUSE_RELEASED,
-                               press_location + gfx::Vector2d(-1, 0),
-                               press_location_in_screen + gfx::Vector2d(-1, 0),
-                               ui::EF_LEFT_MOUSE_BUTTON, 0);
+  ui::MouseEvent release_event(
+      ui::ET_MOUSE_RELEASED, press_location + gfx::Vector2d(-1, 0),
+      press_location_in_screen + gfx::Vector2d(-1, 0), ui::EventTimeForNow(),
+      ui::EF_LEFT_MOUSE_BUTTON, 0);
   button->OnMouseReleased(release_event);
 
   EXPECT_TRUE(selection_tracker->WasSelected());
@@ -1666,7 +1719,7 @@ TEST_F(ShelfViewTest, CheckDragAndDropFromOverflowBubbleToShelf) {
 }
 
 // Tests that the AppListButton renders as active in response to touches.
-TEST_F(ShelfViewTest, DISABLED_AppListButtonTouchFeedback) {
+TEST_F(ShelfViewTest, AppListButtonTouchFeedback) {
   AppListButton* app_list_button =
       static_cast<AppListButton*>(shelf_view_->GetAppListButtonView());
   EXPECT_FALSE(app_list_button->draw_background_as_active());
@@ -1675,18 +1728,16 @@ TEST_F(ShelfViewTest, DISABLED_AppListButtonTouchFeedback) {
   generator.set_current_location(app_list_button->
       GetBoundsInScreen().CenterPoint());
   generator.PressTouch();
-  RunAllPendingInMessageLoop();
   EXPECT_TRUE(app_list_button->draw_background_as_active());
 
   generator.ReleaseTouch();
-  RunAllPendingInMessageLoop();
   EXPECT_FALSE(app_list_button->draw_background_as_active());
   EXPECT_TRUE(Shell::GetInstance()->GetAppListTargetVisibility());
 }
 
 // Tests that a touch that slides out of the bounds of the AppListButton leads
 // to the end of rendering an active state.
-TEST_F(ShelfViewTest, DISABLED_AppListButtonTouchFeedbackCancellation) {
+TEST_F(ShelfViewTest, AppListButtonTouchFeedbackCancellation) {
   AppListButton* app_list_button =
       static_cast<AppListButton*>(shelf_view_->GetAppListButtonView());
   EXPECT_FALSE(app_list_button->draw_background_as_active());
@@ -1695,19 +1746,16 @@ TEST_F(ShelfViewTest, DISABLED_AppListButtonTouchFeedbackCancellation) {
   generator.set_current_location(app_list_button->
       GetBoundsInScreen().CenterPoint());
   generator.PressTouch();
-  RunAllPendingInMessageLoop();
   EXPECT_TRUE(app_list_button->draw_background_as_active());
 
   gfx::Point moved_point(app_list_button->GetBoundsInScreen().right() + 1,
                          app_list_button->
                              GetBoundsInScreen().CenterPoint().y());
   generator.MoveTouch(moved_point);
-  RunAllPendingInMessageLoop();
   EXPECT_FALSE(app_list_button->draw_background_as_active());
 
   generator.set_current_location(moved_point);
   generator.ReleaseTouch();
-  RunAllPendingInMessageLoop();
   EXPECT_FALSE(app_list_button->draw_background_as_active());
   EXPECT_FALSE(Shell::GetInstance()->GetAppListTargetVisibility());
 }

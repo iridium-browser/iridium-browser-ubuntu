@@ -65,6 +65,10 @@ PassRefPtrWillBeRawPtr<DOMException> ServiceWorkerError::take(ScriptPromiseResol
         return createException(NotFoundError, "The specified Service Worker resource was not found.", webError->message);
     case WebServiceWorkerError::ErrorTypeSecurity:
         return createException(SecurityError, "The Service Worker security policy prevented an action.", webError->message);
+    case WebServiceWorkerError::ErrorTypeState:
+        return createException(InvalidStateError, "The Service Worker state was not valid.", webError->message);
+    case WebServiceWorkerError::ErrorTypeTimeout:
+        return createException(AbortError, "The Service Worker operation timed out.", webError->message);
     case WebServiceWorkerError::ErrorTypeUnknown:
         return createException(UnknownError, "An unknown error occurred within Service Worker.", webError->message);
     }

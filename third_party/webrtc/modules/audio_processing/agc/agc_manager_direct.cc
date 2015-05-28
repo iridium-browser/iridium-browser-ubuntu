@@ -20,7 +20,6 @@
 #include "webrtc/modules/audio_processing/agc/gain_map_internal.h"
 #include "webrtc/modules/audio_processing/gain_control_impl.h"
 #include "webrtc/modules/interface/module_common_types.h"
-#include "webrtc/system_wrappers/interface/compile_assert.h"
 #include "webrtc/system_wrappers/interface/logging.h"
 
 namespace webrtc {
@@ -47,7 +46,7 @@ const int kMinCompressionGain = 2;
 const float kCompressionGainStep = 0.05f;
 
 const int kMaxMicLevel = 255;
-COMPILE_ASSERT(kGainMapSize > kMaxMicLevel, gain_map_too_small);
+static_assert(kGainMapSize > kMaxMicLevel, "gain map too small");
 const int kMinMicLevel = 12;
 const int kMinInitMicLevel = 85;
 

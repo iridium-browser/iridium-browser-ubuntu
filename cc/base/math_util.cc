@@ -8,7 +8,7 @@
 #include <cmath>
 #include <limits>
 
-#include "base/debug/trace_event_argument.h"
+#include "base/trace_event/trace_event_argument.h"
 #include "base/values.h"
 #include "ui/gfx/geometry/quad_f.h"
 #include "ui/gfx/geometry/rect.h"
@@ -733,59 +733,85 @@ scoped_ptr<base::Value> MathUtil::AsValue(const gfx::PointF& pt) {
   return res.Pass();
 }
 
-void MathUtil::AddToTracedValue(const gfx::Size& s,
-                                base::debug::TracedValue* res) {
+void MathUtil::AddToTracedValue(const char* name,
+                                const gfx::Size& s,
+                                base::trace_event::TracedValue* res) {
+  res->BeginDictionary(name);
   res->SetDouble("width", s.width());
   res->SetDouble("height", s.height());
+  res->EndDictionary();
 }
 
-void MathUtil::AddToTracedValue(const gfx::SizeF& s,
-                                base::debug::TracedValue* res) {
+void MathUtil::AddToTracedValue(const char* name,
+                                const gfx::SizeF& s,
+                                base::trace_event::TracedValue* res) {
+  res->BeginDictionary(name);
   res->SetDouble("width", s.width());
   res->SetDouble("height", s.height());
+  res->EndDictionary();
 }
 
-void MathUtil::AddToTracedValue(const gfx::Rect& r,
-                                base::debug::TracedValue* res) {
+void MathUtil::AddToTracedValue(const char* name,
+                                const gfx::Rect& r,
+                                base::trace_event::TracedValue* res) {
+  res->BeginArray(name);
   res->AppendInteger(r.x());
   res->AppendInteger(r.y());
   res->AppendInteger(r.width());
   res->AppendInteger(r.height());
+  res->EndArray();
 }
 
-void MathUtil::AddToTracedValue(const gfx::PointF& pt,
-                                base::debug::TracedValue* res) {
+void MathUtil::AddToTracedValue(const char* name,
+                                const gfx::PointF& pt,
+                                base::trace_event::TracedValue* res) {
+  res->BeginArray(name);
   res->AppendDouble(pt.x());
   res->AppendDouble(pt.y());
+  res->EndArray();
 }
 
-void MathUtil::AddToTracedValue(const gfx::Point3F& pt,
-                                base::debug::TracedValue* res) {
+void MathUtil::AddToTracedValue(const char* name,
+                                const gfx::Point3F& pt,
+                                base::trace_event::TracedValue* res) {
+  res->BeginArray(name);
   res->AppendDouble(pt.x());
   res->AppendDouble(pt.y());
   res->AppendDouble(pt.z());
+  res->EndArray();
 }
 
-void MathUtil::AddToTracedValue(const gfx::Vector2d& v,
-                                base::debug::TracedValue* res) {
+void MathUtil::AddToTracedValue(const char* name,
+                                const gfx::Vector2d& v,
+                                base::trace_event::TracedValue* res) {
+  res->BeginArray(name);
   res->AppendInteger(v.x());
   res->AppendInteger(v.y());
+  res->EndArray();
 }
 
-void MathUtil::AddToTracedValue(const gfx::Vector2dF& v,
-                                base::debug::TracedValue* res) {
+void MathUtil::AddToTracedValue(const char* name,
+                                const gfx::Vector2dF& v,
+                                base::trace_event::TracedValue* res) {
+  res->BeginArray(name);
   res->AppendDouble(v.x());
   res->AppendDouble(v.y());
+  res->EndArray();
 }
 
-void MathUtil::AddToTracedValue(const gfx::ScrollOffset& v,
-                                base::debug::TracedValue* res) {
+void MathUtil::AddToTracedValue(const char* name,
+                                const gfx::ScrollOffset& v,
+                                base::trace_event::TracedValue* res) {
+  res->BeginArray(name);
   res->AppendDouble(v.x());
   res->AppendDouble(v.y());
+  res->EndArray();
 }
 
-void MathUtil::AddToTracedValue(const gfx::QuadF& q,
-                                base::debug::TracedValue* res) {
+void MathUtil::AddToTracedValue(const char* name,
+                                const gfx::QuadF& q,
+                                base::trace_event::TracedValue* res) {
+  res->BeginArray(name);
   res->AppendDouble(q.p1().x());
   res->AppendDouble(q.p1().y());
   res->AppendDouble(q.p2().x());
@@ -794,33 +820,43 @@ void MathUtil::AddToTracedValue(const gfx::QuadF& q,
   res->AppendDouble(q.p3().y());
   res->AppendDouble(q.p4().x());
   res->AppendDouble(q.p4().y());
+  res->EndArray();
 }
 
-void MathUtil::AddToTracedValue(const gfx::RectF& rect,
-                                base::debug::TracedValue* res) {
+void MathUtil::AddToTracedValue(const char* name,
+                                const gfx::RectF& rect,
+                                base::trace_event::TracedValue* res) {
+  res->BeginArray(name);
   res->AppendDouble(rect.x());
   res->AppendDouble(rect.y());
   res->AppendDouble(rect.width());
   res->AppendDouble(rect.height());
+  res->EndArray();
 }
 
-void MathUtil::AddToTracedValue(const gfx::Transform& transform,
-                                base::debug::TracedValue* res) {
+void MathUtil::AddToTracedValue(const char* name,
+                                const gfx::Transform& transform,
+                                base::trace_event::TracedValue* res) {
+  res->BeginArray(name);
   const SkMatrix44& m = transform.matrix();
   for (int row = 0; row < 4; ++row) {
     for (int col = 0; col < 4; ++col)
       res->AppendDouble(m.getDouble(row, col));
   }
+  res->EndArray();
 }
 
-void MathUtil::AddToTracedValue(const gfx::BoxF& box,
-                                base::debug::TracedValue* res) {
+void MathUtil::AddToTracedValue(const char* name,
+                                const gfx::BoxF& box,
+                                base::trace_event::TracedValue* res) {
+  res->BeginArray(name);
   res->AppendInteger(box.x());
   res->AppendInteger(box.y());
   res->AppendInteger(box.z());
   res->AppendInteger(box.width());
   res->AppendInteger(box.height());
   res->AppendInteger(box.depth());
+  res->EndArray();
 }
 
 double MathUtil::AsDoubleSafely(double value) {

@@ -50,9 +50,9 @@
 #include "core/html/HTMLFormElement.h"
 #include "core/html/HTMLHeadElement.h"
 #include "core/html/HTMLLinkElement.h"
+#include "core/layout/LayoutObject.h"
+#include "core/layout/LayoutView.h"
 #include "core/loader/DocumentLoader.h"
-#include "core/rendering/RenderObject.h"
-#include "core/rendering/RenderView.h"
 #include "modules/accessibility/AXObject.h"
 #include "modules/accessibility/AXObjectCacheImpl.h"
 #include "platform/weborigin/SecurityOrigin.h"
@@ -217,7 +217,7 @@ void WebDocument::insertStyleSheet(const WebString& sourceCode)
     ASSERT(document);
     RefPtrWillBeRawPtr<StyleSheetContents> parsedSheet = StyleSheetContents::create(CSSParserContext(*document, 0));
     parsedSheet->parseString(sourceCode);
-    document->styleEngine()->addAuthorSheet(parsedSheet);
+    document->styleEngine().addAuthorSheet(parsedSheet);
 }
 
 void WebDocument::watchCSSSelectors(const WebVector<WebString>& webSelectors)
@@ -298,13 +298,13 @@ void WebDocument::beginExitTransition(const WebString& cssSelector, bool exitToN
     RefPtrWillBeRawPtr<Document> document = unwrap<Document>();
     if (!exitToNativeApp)
         document->hideTransitionElements(cssSelector);
-    document->styleEngine()->setExitTransitionStylesheetsEnabled(true);
+    document->styleEngine().setExitTransitionStylesheetsEnabled(true);
 }
 
 void WebDocument::revertExitTransition()
 {
     RefPtrWillBeRawPtr<Document> document = unwrap<Document>();
-    document->styleEngine()->setExitTransitionStylesheetsEnabled(false);
+    document->styleEngine().setExitTransitionStylesheetsEnabled(false);
 }
 
 void WebDocument::hideTransitionElements(const WebString& cssSelector)
@@ -323,7 +323,7 @@ WebAXObject WebDocument::accessibilityObject() const
 {
     const Document* document = constUnwrap<Document>();
     AXObjectCacheImpl* cache = toAXObjectCacheImpl(document->axObjectCache());
-    return cache ? WebAXObject(cache->getOrCreate(document->renderView())) : WebAXObject();
+    return cache ? WebAXObject(cache->getOrCreate(document->layoutView())) : WebAXObject();
 }
 
 WebAXObject WebDocument::accessibilityObjectFromID(int axID) const
@@ -349,7 +349,7 @@ WebVector<WebDraggableRegion> WebDocument::draggableRegions() const
     return draggableRegions;
 }
 
-v8::Handle<v8::Value> WebDocument::registerEmbedderCustomElement(const WebString& name, v8::Handle<v8::Value> options, WebExceptionCode& ec)
+v8::Local<v8::Value> WebDocument::registerEmbedderCustomElement(const WebString& name, v8::Local<v8::Value> options, WebExceptionCode& ec)
 {
     v8::Isolate* isolate = v8::Isolate::GetCurrent();
     Document* document = unwrap<Document>();
@@ -357,11 +357,11 @@ v8::Handle<v8::Value> WebDocument::registerEmbedderCustomElement(const WebString
     ElementRegistrationOptions registrationOptions;
     V8ElementRegistrationOptions::toImpl(isolate, options, registrationOptions, exceptionState);
     if (exceptionState.hadException())
-        return v8::Handle<v8::Value>();
+        return v8::Local<v8::Value>();
     ScriptValue constructor = document->registerElement(ScriptState::current(isolate), name, registrationOptions, exceptionState, CustomElement::EmbedderNames);
     ec = exceptionState.code();
     if (exceptionState.hadException())
-        return v8::Handle<v8::Value>();
+        return v8::Local<v8::Value>();
     return constructor.v8Value();
 }
 
@@ -369,6 +369,15 @@ WebURL WebDocument::manifestURL() const
 {
     const Document* document = constUnwrap<Document>();
     HTMLLinkElement* linkElement = document->linkManifest();
+    if (!linkElement)
+        return WebURL();
+    return linkElement->href();
+}
+
+WebURL WebDocument::defaultPresentationURL() const
+{
+    const Document* document = constUnwrap<Document>();
+    HTMLLinkElement* linkElement = document->linkDefaultPresentation();
     if (!linkElement)
         return WebURL();
     return linkElement->href();

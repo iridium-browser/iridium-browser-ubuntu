@@ -4,9 +4,12 @@
 
 package org.chromium.android_webview.test;
 
+import android.content.Context;
+import android.content.ContextWrapper;
 import android.graphics.Bitmap;
 import android.graphics.BitmapFactory;
 import android.graphics.Canvas;
+import android.os.Build;
 import android.os.Handler;
 import android.os.Looper;
 import android.os.Message;
@@ -16,6 +19,9 @@ import android.test.suitebuilder.annotation.SmallTest;
 import android.util.Pair;
 import android.view.KeyEvent;
 import android.view.View;
+import android.webkit.JavascriptInterface;
+
+import static org.chromium.base.test.util.ScalableTimeout.scaleTimeout;
 
 import org.apache.http.Header;
 import org.apache.http.HttpRequest;
@@ -23,8 +29,12 @@ import org.chromium.android_webview.AwContents;
 import org.chromium.android_webview.AwSettings;
 import org.chromium.android_webview.test.TestAwContentsClient.OnDownloadStartHelper;
 import org.chromium.android_webview.test.util.CommonResources;
+import org.chromium.base.annotations.SuppressFBWarnings;
 import org.chromium.base.test.util.Feature;
+import org.chromium.base.test.util.MinAndroidSdkLevel;
 import org.chromium.content.browser.test.util.CallbackHelper;
+import org.chromium.content.browser.test.util.Criteria;
+import org.chromium.content.browser.test.util.CriteriaHelper;
 import org.chromium.content_public.browser.LoadUrlParams;
 import org.chromium.net.test.util.TestWebServer;
 
@@ -42,6 +52,7 @@ import java.util.concurrent.atomic.AtomicInteger;
 /**
  * AwContents tests.
  */
+@MinAndroidSdkLevel(Build.VERSION_CODES.KITKAT)
 public class AwContentsTest extends AwTestBase {
 
     private TestAwContentsClient mContentsClient = new TestAwContentsClient();
@@ -113,7 +124,6 @@ public class AwContentsTest extends AwTestBase {
         awContents.loadUrl(new LoadUrlParams("http://www.google.com"));
         awContents.findAllAsync("search");
         assertNull(awContents.getUrl());
-        assertNull(awContents.getContentSettings());
         assertFalse(awContents.canGoBack());
         awContents.disableJavascriptInterfacesInspection();
         awContents.invokeZoomPicker();
@@ -135,6 +145,53 @@ public class AwContentsTest extends AwTestBase {
                 new KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_MENU));
     }
 
+    @SuppressFBWarnings("URF_UNREAD_FIELD")
+    private static class StrongRefTestAwContentsClient extends TestAwContentsClient {
+        private AwContents mAwContentsStrongRef;
+        public void setAwContentsStrongRef(AwContents awContents) {
+            mAwContentsStrongRef = awContents;
+        }
+    }
+
+    private TestDependencyFactory mOverridenFactory;
+
+    @Override
+    protected TestDependencyFactory createTestDependencyFactory() {
+        if (mOverridenFactory == null) {
+            return new TestDependencyFactory();
+        } else {
+            return mOverridenFactory;
+        }
+    }
+
+    @SuppressFBWarnings("URF_UNREAD_FIELD")
+    private static class StrongRefTestContext extends ContextWrapper {
+        private AwContents mAwContents;
+        public void setAwContentsStrongRef(AwContents awContents) {
+            mAwContents = awContents;
+        }
+
+        public StrongRefTestContext(Context context) {
+            super(context);
+        }
+    }
+
+    private static class GcTestDependencyFactory extends TestDependencyFactory {
+        private StrongRefTestContext mContext;
+
+        public GcTestDependencyFactory(StrongRefTestContext context) {
+            mContext = context;
+        }
+
+        @Override
+        public AwTestContainerView createAwTestContainerView(
+                AwTestRunnerActivity activity, boolean allowHardwareAcceleration) {
+            if (activity != mContext.getBaseContext()) fail();
+            return new AwTestContainerView(mContext, allowHardwareAcceleration);
+        }
+    }
+
+    // TODO(boliu): Refactor this test into its own file, then into separate tests.
     @DisableHardwareAccelerationForTest
     @LargeTest
     @Feature({"AndroidWebView"})
@@ -153,29 +210,69 @@ public class AwContentsTest extends AwTestBase {
                 return AwContents.getNativeInstanceCount() <= maxIdleInstances;
             }
         });
-        for (int i = 0; i < repetitions; ++i) {
-            for (int j = 0; j < concurrentInstances; ++j) {
-                AwTestContainerView view = createAwTestContainerViewOnMainSync(mContentsClient);
-                loadUrlAsync(view.getAwContents(), "about:blank");
-            }
-            assertTrue(AwContents.getNativeInstanceCount() >= concurrentInstances);
-            assertTrue(AwContents.getNativeInstanceCount() <= (i + 1) * concurrentInstances);
-            runTestOnUiThread(new Runnable() {
-                @Override
-                public void run() {
-                    getActivity().removeAllViews();
+
+        try {
+            for (int i = 0; i < repetitions; ++i) {
+                for (int j = 0; j < concurrentInstances; ++j) {
+                    final StrongRefTestAwContentsClient client =
+                            new StrongRefTestAwContentsClient();
+                    StrongRefTestContext context = new StrongRefTestContext(getActivity());
+                    mOverridenFactory = new GcTestDependencyFactory(context);
+                    AwTestContainerView view = createAwTestContainerViewOnMainSync(client);
+                    mOverridenFactory = null;
+                    // Embedding app can hold onto a strong ref to the WebView from either
+                    // WebViewClient or WebChromeClient. That should not prevent WebView from
+                    // gc-ed. We simulate that behavior by making the equivalent change here,
+                    // have AwContentsClient hold a strong ref to the AwContents object.
+                    client.setAwContentsStrongRef(view.getAwContents());
+                    context.setAwContentsStrongRef(view.getAwContents());
+                    loadUrlAsync(view.getAwContents(), "about:blank");
                 }
-            });
-        }
-
-        Runtime.getRuntime().gc();
-
-        pollOnUiThread(new Callable<Boolean>() {
-            @Override
-            public Boolean call() {
-                return AwContents.getNativeInstanceCount() <= maxIdleInstances;
+                assertTrue(AwContents.getNativeInstanceCount() >= concurrentInstances);
+                assertTrue(AwContents.getNativeInstanceCount() <= (i + 1) * concurrentInstances);
+                runTestOnUiThread(new Runnable() {
+                    @Override
+                    public void run() {
+                        getActivity().removeAllViews();
+                    }
+                });
             }
-        });
+
+            Runtime.getRuntime().gc();
+
+            Criteria criteria = new Criteria() {
+                @Override
+                public boolean isSatisfied() {
+                    try {
+                        return runTestOnUiThreadAndGetResult(new Callable<Boolean>() {
+                            @Override
+                            public Boolean call() {
+                                return AwContents.getNativeInstanceCount() <= maxIdleInstances;
+                            }
+                        });
+                    } catch (Exception e) {
+                        return false;
+                    }
+                }
+            };
+
+            // Depending on a single gc call can make this test flaky. It's possible
+            // that the WebView still has transient references during load so it does not get
+            // gc-ed in the one gc-call above. Instead call gc again if exit criteria fails to
+            // catch this case.
+            final long timeoutBetweenGcMs = scaleTimeout(1000);
+            for (int i = 0; i < 15; ++i) {
+                if (CriteriaHelper.pollForCriteria(criteria, timeoutBetweenGcMs, CHECK_INTERVAL)) {
+                    break;
+                } else {
+                    Runtime.getRuntime().gc();
+                }
+            }
+
+            assertTrue(criteria.isSatisfied());
+        } finally {
+            mOverridenFactory = null;
+        }
     }
 
     @SmallTest
@@ -421,6 +518,7 @@ public class AwContentsTest extends AwTestBase {
             mCallbackHelper = callbackHelper;
         }
 
+        @JavascriptInterface
         public void run() {
             mCallbackHelper.notifyCalled();
         }
@@ -438,8 +536,7 @@ public class AwContentsTest extends AwTestBase {
                 AwContents awContents = testView.getAwContents();
                 AwSettings awSettings = awContents.getSettings();
                 awSettings.setJavaScriptEnabled(true);
-                awContents.addPossiblyUnsafeJavascriptInterface(
-                        new JavaScriptObject(callback), "bridge", null);
+                awContents.addJavascriptInterface(new JavaScriptObject(callback), "bridge");
                 awContents.evaluateJavaScript("javascript:window.bridge.run();", null);
             }
         });
@@ -465,6 +562,7 @@ public class AwContentsTest extends AwTestBase {
                 script));
     }
 
+    @SuppressFBWarnings("DLS_DEAD_LOCAL_STORE")
     @Feature({"AndroidWebView"})
     @SmallTest
     public void testCanInjectHeaders() throws Throwable {
@@ -561,5 +659,22 @@ public class AwContentsTest extends AwTestBase {
         onSslErrorCallCount = onReceivedSslErrorHelper.getCallCount();
         loadUrlSync(awContents, mContentsClient.getOnPageFinishedHelper(), pageUrl);
         assertEquals(onSslErrorCallCount + 1, onReceivedSslErrorHelper.getCallCount());
+    }
+
+    /**
+     * Verifies that Web Notifications and the Push API are not exposed in WebView.
+     */
+    @Feature({"AndroidWebView"})
+    @SmallTest
+    public void testPushAndNotificationsDisabled() throws Throwable {
+        AwTestContainerView testView = createAwTestContainerViewOnMainSync(mContentsClient);
+        AwContents awContents = testView.getAwContents();
+
+        String script = "window.Notification || window.PushManager";
+
+        enableJavaScriptOnUiThread(awContents);
+        loadUrlSync(awContents, mContentsClient.getOnPageFinishedHelper(), "about:blank");
+        assertEquals("null", executeJavaScriptAndWaitForResult(awContents, mContentsClient,
+                script));
     }
 }

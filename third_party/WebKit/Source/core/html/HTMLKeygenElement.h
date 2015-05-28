@@ -37,6 +37,8 @@ public:
 
     virtual bool willValidate() const override { return false; }
 
+    virtual LayoutObject* createLayoutObject(const ComputedStyle&) override;
+
 private:
     HTMLKeygenElement(Document&, HTMLFormElement*);
 
@@ -58,7 +60,7 @@ private:
     virtual void resetImpl() override;
     virtual bool shouldSaveAndRestoreFormControlState() const override { return false; }
 
-    virtual void didAddUserAgentShadowRoot(ShadowRoot&) override;
+    virtual void didAddClosedShadowRoot(ShadowRoot&) override;
 
     HTMLSelectElement* shadowSelect() const;
 };

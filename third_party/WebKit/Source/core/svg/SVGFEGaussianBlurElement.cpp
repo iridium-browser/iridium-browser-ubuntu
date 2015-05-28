@@ -38,7 +38,7 @@ inline SVGFEGaussianBlurElement::SVGFEGaussianBlurElement(Document& document)
     addToPropertyMap(m_in1);
 }
 
-void SVGFEGaussianBlurElement::trace(Visitor* visitor)
+DEFINE_TRACE(SVGFEGaussianBlurElement)
 {
     visitor->trace(m_stdDeviation);
     visitor->trace(m_in1);
@@ -62,11 +62,6 @@ bool SVGFEGaussianBlurElement::isSupportedAttribute(const QualifiedName& attrNam
         supportedAttributes.add(SVGNames::stdDeviationAttr);
     }
     return supportedAttributes.contains<SVGAttributeHashTranslator>(attrName);
-}
-
-void SVGFEGaussianBlurElement::parseAttribute(const QualifiedName& name, const AtomicString& value)
-{
-    parseAttributeNew(name, value);
 }
 
 void SVGFEGaussianBlurElement::svgAttributeChanged(const QualifiedName& attrName)

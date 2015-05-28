@@ -47,6 +47,7 @@ ASSERT_ENUM_EQ(AudioCodec, kCodec, AUDIO_CODEC_, PCM_S16BE);
 ASSERT_ENUM_EQ(AudioCodec, kCodec, AUDIO_CODEC_, PCM_S24BE);
 ASSERT_ENUM_EQ(AudioCodec, kCodec, AUDIO_CODEC_, Opus);
 ASSERT_ENUM_EQ(AudioCodec, kCodec, AUDIO_CODEC_, PCM_ALAW);
+ASSERT_ENUM_EQ(AudioCodec, kCodec, AUDIO_CODEC_, ALAC);
 ASSERT_ENUM_EQ_RAW(AudioCodec, kAudioCodecMax, AUDIO_CODEC_MAX);
 
 // ChannelLayout.
@@ -143,6 +144,7 @@ ASSERT_ENUM_EQ_RAW(VideoFrame::Format, VideoFrame::YV12J, VIDEO_FORMAT_YV12J);
 ASSERT_ENUM_EQ_RAW(VideoFrame::Format, VideoFrame::NV12, VIDEO_FORMAT_NV12);
 ASSERT_ENUM_EQ_RAW(VideoFrame::Format, VideoFrame::YV24, VIDEO_FORMAT_YV24);
 ASSERT_ENUM_EQ_RAW(VideoFrame::Format, VideoFrame::ARGB, VIDEO_FORMAT_ARGB);
+ASSERT_ENUM_EQ_RAW(VideoFrame::Format, VideoFrame::YV12HD, VIDEO_FORMAT_YV12HD);
 ASSERT_ENUM_EQ_RAW(VideoFrame::Format,
                    VideoFrame::FORMAT_MAX,
                    VIDEO_FORMAT_FORMAT_MAX);
@@ -235,6 +237,17 @@ ASSERT_CDM_EXCEPTION(OUTPUT_ERROR);
 ASSERT_CDM_SESSION_TYPE(TEMPORARY_SESSION);
 ASSERT_CDM_SESSION_TYPE(PERSISTENT_LICENSE_SESSION);
 ASSERT_CDM_SESSION_TYPE(PERSISTENT_RELEASE_MESSAGE_SESSION);
+
+// CDM InitDataType
+#define ASSERT_CDM_INIT_DATA_TYPE(value)                                  \
+  static_assert(media::EmeInitDataType::value ==                          \
+                    static_cast<media::EmeInitDataType>(                  \
+                        ContentDecryptionModule::INIT_DATA_TYPE_##value), \
+                "Mismatched CDM Init Data Type")
+ASSERT_CDM_INIT_DATA_TYPE(UNKNOWN);
+ASSERT_CDM_INIT_DATA_TYPE(WEBM);
+ASSERT_CDM_INIT_DATA_TYPE(CENC);
+ASSERT_CDM_INIT_DATA_TYPE(KEYIDS);
 
 // CDM Key Status
 #define ASSERT_CDM_KEY_STATUS(value)                                  \

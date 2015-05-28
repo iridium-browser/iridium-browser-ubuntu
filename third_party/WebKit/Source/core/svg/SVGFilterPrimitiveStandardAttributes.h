@@ -52,13 +52,12 @@ public:
     SVGAnimatedLength* height() const { return m_height.get(); }
     SVGAnimatedString* result() const { return m_result.get(); }
 
-    virtual void trace(Visitor*) override;
+    DECLARE_VIRTUAL_TRACE();
 
 protected:
     SVGFilterPrimitiveStandardAttributes(const QualifiedName&, Document&);
 
     bool isSupportedAttribute(const QualifiedName&);
-    virtual void parseAttribute(const QualifiedName&, const AtomicString&) override;
     virtual void svgAttributeChanged(const QualifiedName&) override;
     virtual void childrenChanged(const ChildrenChange&) override;
 
@@ -68,8 +67,8 @@ protected:
 private:
     virtual bool isFilterEffect() const override final { return true; }
 
-    virtual RenderObject* createRenderer(RenderStyle*) override final;
-    virtual bool rendererIsNeeded(const RenderStyle&) override final;
+    virtual LayoutObject* createLayoutObject(const ComputedStyle&) override;
+    virtual bool layoutObjectIsNeeded(const ComputedStyle&) override final;
 
     RefPtrWillBeMember<SVGAnimatedLength> m_x;
     RefPtrWillBeMember<SVGAnimatedLength> m_y;

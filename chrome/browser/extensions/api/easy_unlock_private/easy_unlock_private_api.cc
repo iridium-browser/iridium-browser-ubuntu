@@ -7,8 +7,10 @@
 #include <vector>
 
 #include "base/bind.h"
+#include "base/command_line.h"
 #include "base/lazy_instance.h"
 #include "base/memory/linked_ptr.h"
+#include "base/numerics/safe_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/extensions/api/easy_unlock_private/easy_unlock_private_crypto_delegate.h"
@@ -16,18 +18,23 @@
 #include "chrome/browser/signin/easy_unlock_screenlock_state_handler.h"
 #include "chrome/browser/signin/easy_unlock_service.h"
 #include "chrome/browser/signin/screenlock_bridge.h"
+#include "chrome/browser/ui/proximity_auth/proximity_auth_error_bubble.h"
 #include "chrome/common/extensions/api/easy_unlock_private.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/proximity_auth/bluetooth_util.h"
+#include "components/proximity_auth/cryptauth/cryptauth_enrollment_utils.h"
+#include "components/proximity_auth/switches.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/web_contents.h"
 #include "extensions/browser/browser_context_keyed_api_factory.h"
 #include "ui/base/l10n/l10n_util.h"
+#include "ui/gfx/geometry/rect.h"
+#include "ui/gfx/range/range.h"
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/chromeos_utils.h"
 #include "chrome/browser/chromeos/login/easy_unlock/easy_unlock_tpm_key_manager.h"
 #include "chrome/browser/chromeos/login/easy_unlock/easy_unlock_tpm_key_manager_factory.h"
-#include "chrome/browser/ui/webui/options/chromeos/user_image_source.h"
 #include "components/user_manager/user.h"
 #include "components/user_manager/user_manager.h"
 #endif
@@ -68,6 +75,9 @@ EasyUnlockScreenlockStateHandler::State ToScreenlockStateHandlerState(
       return EasyUnlockScreenlockStateHandler::STATE_RSSI_TOO_LOW;
     case easy_unlock_private::STATE_TX_POWER_TOO_HIGH:
       return EasyUnlockScreenlockStateHandler::STATE_TX_POWER_TOO_HIGH;
+    case easy_unlock_private::STATE_PHONE_LOCKED_AND_TX_POWER_TOO_HIGH:
+      return EasyUnlockScreenlockStateHandler::
+                 STATE_PHONE_LOCKED_AND_TX_POWER_TOO_HIGH;
     case easy_unlock_private::STATE_AUTHENTICATED:
       return EasyUnlockScreenlockStateHandler::STATE_AUTHENTICATED;
     default:
@@ -125,8 +135,7 @@ bool EasyUnlockPrivateGetStringsFunction::RunSync() {
   // Setup notification strings.
   strings->SetString(
       "setupNotificationTitle",
-      l10n_util::GetStringFUTF16(IDS_EASY_UNLOCK_SETUP_NOTIFICATION_TITLE,
-                                 device_type));
+      l10n_util::GetStringUTF16(IDS_EASY_UNLOCK_SETUP_NOTIFICATION_TITLE));
   strings->SetString(
       "setupNotificationMessage",
       l10n_util::GetStringFUTF16(IDS_EASY_UNLOCK_SETUP_NOTIFICATION_MESSAGE,
@@ -205,6 +214,10 @@ bool EasyUnlockPrivateGetStringsFunction::RunSync() {
       "setupIntroRetryFindPhoneButtonLabel",
       l10n_util::GetStringUTF16(
           IDS_EASY_UNLOCK_SETUP_INTRO_RETRY_FIND_PHONE_BUTTON_LABEL));
+  strings->SetString(
+      "setupIntroCloseFindPhoneButtonLabel",
+      l10n_util::GetStringUTF16(
+          IDS_EASY_UNLOCK_SETUP_INTRO_CLOSE_FIND_PHONE_BUTTON_LABEL));
   strings->SetString(
       "setupIntroHowIsThisSecureLinkText",
       l10n_util::GetStringUTF16(
@@ -296,18 +309,16 @@ bool EasyUnlockPrivateGetStringsFunction::RunSync() {
       l10n_util::GetStringFUTF16(
           IDS_EASY_UNLOCK_SETUP_ERROR_OFFLINE, device_type));
   strings->SetString(
+      "setupErrorRemoteSoftwareOutOfDate",
+      l10n_util::GetStringUTF16(
+          IDS_EASY_UNLOCK_SETUP_ERROR_REMOTE_SOFTWARE_OUT_OF_DATE));
+  strings->SetString(
+      "setupErrorRemoteSoftwareOutOfDateGeneric",
+      l10n_util::GetStringUTF16(
+          IDS_EASY_UNLOCK_SETUP_ERROR_REMOTE_SOFTWARE_OUT_OF_DATE_GENERIC));
+  strings->SetString(
       "setupErrorFindingPhone",
       l10n_util::GetStringUTF16(IDS_EASY_UNLOCK_SETUP_ERROR_FINDING_PHONE));
-  strings->SetString(
-      "setupErrorBluetoothConnectionFailed",
-      l10n_util::GetStringFUTF16(
-          IDS_EASY_UNLOCK_SETUP_ERROR_BLUETOOTH_CONNECTION_FAILED,
-          device_type));
-  strings->SetString(
-      "setupErrorConnectionToPhoneTimeout",
-       l10n_util::GetStringFUTF16(
-           IDS_EASY_UNLOCK_SETUP_ERROR_CONNECT_TO_PHONE_TIMEOUT,
-           device_type));
   strings->SetString(
       "setupErrorSyncPhoneState",
        l10n_util::GetStringUTF16(
@@ -316,9 +327,6 @@ bool EasyUnlockPrivateGetStringsFunction::RunSync() {
       "setupErrorConnectingToPhone",
       l10n_util::GetStringFUTF16(
           IDS_EASY_UNLOCK_SETUP_ERROR_CONNECTING_TO_PHONE, device_type));
-
-  // TODO(isherman): Remove this string once the app has been updated.
-  strings->SetString("setupIntroHeaderFootnote", base::string16());
 
   SetResult(strings.release());
   return true;
@@ -347,7 +355,7 @@ void EasyUnlockPrivatePerformECDHKeyAgreementFunction::OnData(
   // TODO(tbarzic): Improve error handling.
   if (!secret_key.empty()) {
     results_ = easy_unlock_private::PerformECDHKeyAgreement::Results::Create(
-        secret_key);
+        std::vector<char>(secret_key.begin(), secret_key.end()));
   }
   SendResponse(true);
 }
@@ -371,7 +379,8 @@ void EasyUnlockPrivateGenerateEcP256KeyPairFunction::OnData(
   // TODO(tbarzic): Improve error handling.
   if (!public_key.empty() && !private_key.empty()) {
     results_ = easy_unlock_private::GenerateEcP256KeyPair::Results::Create(
-        public_key, private_key);
+        std::vector<char>(public_key.begin(), public_key.end()),
+        std::vector<char>(private_key.begin(), private_key.end()));
   }
   SendResponse(true);
 }
@@ -399,7 +408,7 @@ void EasyUnlockPrivateCreateSecureMessageFunction::OnData(
   // TODO(tbarzic): Improve error handling.
   if (!message.empty()) {
     results_ = easy_unlock_private::CreateSecureMessage::Results::Create(
-        message);
+        std::vector<char>(message.begin(), message.end()));
   }
   SendResponse(true);
 }
@@ -425,8 +434,10 @@ bool EasyUnlockPrivateUnwrapSecureMessageFunction::RunAsync() {
 void EasyUnlockPrivateUnwrapSecureMessageFunction::OnData(
     const std::string& data) {
   // TODO(tbarzic): Improve error handling.
-  if (!data.empty())
-    results_ = easy_unlock_private::UnwrapSecureMessage::Results::Create(data);
+  if (!data.empty()) {
+    results_ = easy_unlock_private::UnwrapSecureMessage::Results::Create(
+        std::vector<char>(data.begin(), data.end()));
+  }
   SendResponse(true);
 }
 
@@ -623,9 +634,8 @@ bool EasyUnlockPrivateGetSignInChallengeFunction::RunAsync() {
     }
     key_manager->SignUsingTpmKey(
         EasyUnlockService::Get(profile)->GetUserEmail(),
-        params->nonce,
-        base::Bind(&EasyUnlockPrivateGetSignInChallengeFunction::OnDone,
-                   this,
+        std::string(params->nonce.begin(), params->nonce.end()),
+        base::Bind(&EasyUnlockPrivateGetSignInChallengeFunction::OnDone, this,
                    challenge));
   } else {
     OnDone(challenge, std::string());
@@ -641,7 +651,8 @@ void EasyUnlockPrivateGetSignInChallengeFunction::OnDone(
     const std::string& challenge,
     const std::string& signed_nonce) {
   results_ = easy_unlock_private::GetSignInChallenge::Results::Create(
-      challenge, signed_nonce);
+      std::vector<char>(challenge.begin(), challenge.end()),
+      std::vector<char>(signed_nonce.begin(), signed_nonce.end()));
   SendResponse(true);
 }
 
@@ -659,7 +670,8 @@ bool EasyUnlockPrivateTrySignInSecretFunction::RunSync() {
   EXTENSION_FUNCTION_VALIDATE(params.get());
 
   Profile* profile = Profile::FromBrowserContext(browser_context());
-  EasyUnlockService::Get(profile)->FinalizeSignin(params->sign_in_secret);
+  EasyUnlockService::Get(profile)->FinalizeSignin(std::string(
+      params->sign_in_secret.begin(), params->sign_in_secret.end()));
   return true;
 }
 
@@ -682,37 +694,15 @@ bool EasyUnlockPrivateGetUserInfoFunction::RunSync() {
     users[0]->logged_in = service->GetType() == EasyUnlockService::TYPE_REGULAR;
     users[0]->data_ready = users[0]->logged_in ||
                            service->GetRemoteDevices() != NULL;
+
+    EasyUnlockService::UserSettings user_settings =
+        EasyUnlockService::GetUserSettings(user_id);
+    users[0]->require_close_proximity = user_settings.require_close_proximity;
+
+    users[0]->device_user_id = proximity_auth::CalculateDeviceUserId(
+        EasyUnlockService::GetDeviceId(), user_id);
   }
   results_ = easy_unlock_private::GetUserInfo::Results::Create(users);
-  return true;
-}
-
-EasyUnlockPrivateGetUserImageFunction::EasyUnlockPrivateGetUserImageFunction() {
-}
-
-EasyUnlockPrivateGetUserImageFunction::
-    ~EasyUnlockPrivateGetUserImageFunction() {
-}
-
-bool EasyUnlockPrivateGetUserImageFunction::RunSync() {
-#if defined(OS_CHROMEOS)
-  EasyUnlockService* service =
-      EasyUnlockService::Get(Profile::FromBrowserContext(browser_context()));
-  const std::vector<ui::ScaleFactor>& supported_scale_factors =
-      ui::GetSupportedScaleFactors();
-
-  base::RefCountedMemory* user_image =
-      chromeos::options::UserImageSource::GetUserImage(
-          service->GetUserEmail(), supported_scale_factors.back());
-
-  results_ = easy_unlock_private::GetUserImage::Results::Create(std::string(
-      reinterpret_cast<const char*>(user_image->front()), user_image->size()));
-#else
-  // TODO(tengs): Find a way to get the profile picture for non-ChromeOS
-  // devices.
-  results_ = easy_unlock_private::GetUserImage::Results::Create("");
-  SetError("Not supported on non-ChromeOS platforms.");
-#endif
   return true;
 }
 
@@ -757,6 +747,90 @@ void EasyUnlockPrivateGetConnectionInfoFunction::OnConnectionInfo(
   results->AppendInteger(connection_info.max_transmit_power);
   SetResultList(results.Pass());
   SendResponse(true);
+}
+
+EasyUnlockPrivateShowErrorBubbleFunction::
+    EasyUnlockPrivateShowErrorBubbleFunction() {
+}
+
+EasyUnlockPrivateShowErrorBubbleFunction::
+    ~EasyUnlockPrivateShowErrorBubbleFunction() {
+}
+
+bool EasyUnlockPrivateShowErrorBubbleFunction::RunSync() {
+  content::WebContents* web_contents = GetAssociatedWebContents();
+  if (!web_contents) {
+    SetError("A foreground app window is required.");
+    return true;
+  }
+
+  scoped_ptr<easy_unlock_private::ShowErrorBubble::Params> params(
+      easy_unlock_private::ShowErrorBubble::Params::Create(*args_));
+  EXTENSION_FUNCTION_VALIDATE(params.get());
+
+  if (params->link_range.start < 0 ||
+      params->link_range.end < 0 ||
+      base::saturated_cast<size_t>(params->link_range.end) >
+          params->message.size()) {
+    SetError("Invalid link range.");
+    return true;
+  }
+
+#if defined(TOOLKIT_VIEWS)
+  gfx::Rect anchor_rect(
+      params->anchor_rect.left, params->anchor_rect.top,
+      params->anchor_rect.width, params->anchor_rect.height);
+  anchor_rect +=
+      web_contents->GetContainerBounds().OffsetFromOrigin();
+  ShowProximityAuthErrorBubble(
+      base::UTF8ToUTF16(params->message),
+      gfx::Range(params->link_range.start, params->link_range.end),
+      GURL(params->link_target), anchor_rect, web_contents);
+#else
+  SetError("Not supported on non-Views platforms.");
+#endif
+  return true;
+}
+
+EasyUnlockPrivateHideErrorBubbleFunction::
+    EasyUnlockPrivateHideErrorBubbleFunction() {
+}
+
+EasyUnlockPrivateHideErrorBubbleFunction::
+    ~EasyUnlockPrivateHideErrorBubbleFunction() {
+}
+
+bool EasyUnlockPrivateHideErrorBubbleFunction::RunSync() {
+#if defined(TOOLKIT_VIEWS)
+  HideProximityAuthErrorBubble();
+#else
+  SetError("Not supported on non-Views platforms.");
+#endif
+  return true;
+}
+
+EasyUnlockPrivateSetAutoPairingResultFunction::
+    EasyUnlockPrivateSetAutoPairingResultFunction() {
+}
+
+EasyUnlockPrivateSetAutoPairingResultFunction::
+    ~EasyUnlockPrivateSetAutoPairingResultFunction() {
+}
+
+bool EasyUnlockPrivateSetAutoPairingResultFunction::RunSync() {
+  scoped_ptr<easy_unlock_private::SetAutoPairingResult::Params> params =
+      easy_unlock_private::SetAutoPairingResult::Params::Create(*args_);
+  EXTENSION_FUNCTION_VALIDATE(params);
+
+  std::string error_message;
+  if (params->result.error_message)
+    error_message = *params->result.error_message;
+
+  Profile* profile = Profile::FromBrowserContext(browser_context());
+  EasyUnlockService::Get(profile)
+      ->SetAutoPairingResult(params->result.success, error_message);
+
+  return true;
 }
 
 }  // namespace api

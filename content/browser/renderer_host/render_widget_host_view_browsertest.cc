@@ -24,7 +24,7 @@
 #include "content/public/test/content_browser_test_utils.h"
 #include "content/shell/browser/shell.h"
 #include "media/base/video_frame.h"
-#include "media/filters/skcanvas_video_renderer.h"
+#include "media/blink/skcanvas_video_renderer.h"
 #include "net/base/filename_util.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "third_party/skia/include/core/SkCanvas.h"
@@ -509,7 +509,7 @@ class CompositingRenderWidgetHostViewBrowserTestTabCapture
                           video_frame->visible_rect().height());
     // Don't clear the canvas because drawing a video frame by Src mode.
     SkCanvas canvas(bitmap);
-    video_renderer.Copy(video_frame, &canvas);
+    video_renderer.Copy(video_frame, &canvas, media::Context3D());
 
     ReadbackRequestCallbackTest(quit_callback, bitmap, READBACK_SUCCESS);
   }
@@ -942,16 +942,24 @@ IN_PROC_BROWSER_TEST_P(
                                 video_frame);
 }
 
+#if defined(OS_CHROMEOS)
+// On ChromeOS there is no software compositing.
+static const auto kTestCompositingModes = testing::Values(GL_COMPOSITING);
+#else
+static const auto kTestCompositingModes =
+    testing::Values(GL_COMPOSITING, SOFTWARE_COMPOSITING);
+#endif
+
 INSTANTIATE_TEST_CASE_P(GLAndSoftwareCompositing,
                         CompositingRenderWidgetHostViewBrowserTest,
-                        testing::Values(GL_COMPOSITING, SOFTWARE_COMPOSITING));
+                        kTestCompositingModes);
 INSTANTIATE_TEST_CASE_P(GLAndSoftwareCompositing,
                         CompositingRenderWidgetHostViewBrowserTestTabCapture,
-                        testing::Values(GL_COMPOSITING, SOFTWARE_COMPOSITING));
+                        kTestCompositingModes);
 INSTANTIATE_TEST_CASE_P(
     GLAndSoftwareCompositing,
     CompositingRenderWidgetHostViewBrowserTestTabCaptureHighDPI,
-    testing::Values(GL_COMPOSITING, SOFTWARE_COMPOSITING));
+    kTestCompositingModes);
 
 #endif  // !defined(OS_ANDROID) && !defined(OS_IOS)
 

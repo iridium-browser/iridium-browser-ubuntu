@@ -148,13 +148,7 @@ def _ValidatePerfConfigFile(config_contents):
   Returns:
     True if valid.
   """
-  required_parameters = [
-      'command',
-      'repeat_count',
-      'truncate_percent',
-      'max_time_minutes',
-  ]
-  return _ValidateConfigFile(config_contents, required_parameters)
+  return _ValidateConfigFile(config_contents, required_parameters=['command'])
 
 
 def _ValidateBisectConfigFile(config_contents):
@@ -169,16 +163,9 @@ def _ValidateBisectConfigFile(config_contents):
   Returns:
     True if valid.
   """
-  required_params = [
-      'command',
-      'good_revision',
-      'bad_revision',
-      'metric',
-      'repeat_count',
-      'truncate_percent',
-      'max_time_minutes',
-  ]
-  return _ValidateConfigFile(config_contents, required_params)
+  return _ValidateConfigFile(
+      config_contents,
+      required_parameters=['command', 'good_revision', 'bad_revision'])
 
 
 def _OutputFailedResults(text_to_print):
@@ -211,6 +198,9 @@ def _CreateBisectOptionsFromConfig(config):
 
   if config.has_key('improvement_direction'):
     opts_dict['improvement_direction'] = int(config['improvement_direction'])
+
+  if config.has_key('target_arch'):
+    opts_dict['target_arch'] = config['target_arch']
 
   if config.has_key('bug_id') and str(config['bug_id']).isdigit():
     opts_dict['bug_id'] = config['bug_id']
@@ -386,7 +376,8 @@ def _RunCommandStepForPerformanceTest(bisect_instance,
       opts.metric,
       reset_on_first_run=reset_on_first_run,
       upload_on_last_run=upload_on_last_run,
-      results_label=results_label)
+      results_label=results_label,
+      allow_flakes=False)
 
   if results[1]:
     raise RuntimeError('Patched version failed to run performance test.')
@@ -469,6 +460,7 @@ def _SetupAndRunPerformanceTest(config, path_to_goma):
       _RunPerformanceTest(config)
     return 0
   except RuntimeError, e:
+    bisect_utils.OutputAnnotationStepFailure()
     bisect_utils.OutputAnnotationStepClosed()
     _OutputFailedResults('Error: %s' % e.message)
     return 1
@@ -498,21 +490,21 @@ def _RunBisectionScript(
       '--command', config['command'],
       '--good_revision', config['good_revision'],
       '--bad_revision', config['bad_revision'],
-      '--metric', config['metric'],
       '--working_directory', working_directory,
       '--output_buildbot_annotations'
   ]
 
   # Add flags for any optional config parameters if given in the config.
   options = [
+      ('metric', '--metric'),
       ('repeat_count', '--repeat_test_count'),
       ('truncate_percent', '--truncate_percent'),
       ('max_time_minutes', '--max_time_minutes'),
       ('bisect_mode', '--bisect_mode'),
       ('improvement_direction', '--improvement_direction'),
       ('bug_id', '--bug_id'),
-      ('builder_host', '--builder_host'),
-      ('builder_port', '--builder_port'),
+      ('builder_type', '--builder_type'),
+      ('target_arch', '--target_arch'),
   ]
   for config_key, flag in options:
     if config.has_key(config_key):

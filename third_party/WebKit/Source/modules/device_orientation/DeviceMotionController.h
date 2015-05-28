@@ -20,7 +20,10 @@ public:
     static const char* supplementName();
     static DeviceMotionController& from(Document&);
 
-    virtual void trace(Visitor*) override;
+    // DeviceSingleWindowEventController
+    void didAddEventListener(LocalDOMWindow*, const AtomicString& eventType) override;
+
+    DECLARE_VIRTUAL_TRACE();
 
 private:
     explicit DeviceMotionController(Document&);

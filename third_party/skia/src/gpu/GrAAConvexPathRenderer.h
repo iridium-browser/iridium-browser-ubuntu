@@ -16,20 +16,20 @@ public:
     GrAAConvexPathRenderer();
 
     virtual bool canDrawPath(const GrDrawTarget*,
-                             const GrDrawState*,
+                             const GrPipelineBuilder*,
                              const SkMatrix& viewMatrix,
                              const SkPath&,
                              const SkStrokeRec&,
-                             bool antiAlias) const SK_OVERRIDE;
+                             bool antiAlias) const override;
 
 protected:
     virtual bool onDrawPath(GrDrawTarget*,
-                            GrDrawState*,
+                            GrPipelineBuilder*,
                             GrColor,
                             const SkMatrix& viewMatrix,
                             const SkPath&,
                             const SkStrokeRec&,
-                            bool antiAlias) SK_OVERRIDE;
+                            bool antiAlias) override;
 };
 
 #endif

@@ -11,7 +11,6 @@
 #include "SkColorPriv.h"
 #include "SkDescriptor.h"
 #include "SkFDot6.h"
-#include "SkFontHost.h"
 #include "SkFontHost_FreeType_common.h"
 #include "SkGlyph.h"
 #include "SkMask.h"
@@ -194,14 +193,14 @@ public:
     }
 
 protected:
-    virtual unsigned generateGlyphCount() SK_OVERRIDE;
-    virtual uint16_t generateCharToGlyph(SkUnichar uni) SK_OVERRIDE;
-    virtual void generateAdvance(SkGlyph* glyph) SK_OVERRIDE;
-    virtual void generateMetrics(SkGlyph* glyph) SK_OVERRIDE;
-    virtual void generateImage(const SkGlyph& glyph) SK_OVERRIDE;
-    virtual void generatePath(const SkGlyph& glyph, SkPath* path) SK_OVERRIDE;
-    virtual void generateFontMetrics(SkPaint::FontMetrics*) SK_OVERRIDE;
-    virtual SkUnichar generateGlyphToChar(uint16_t glyph) SK_OVERRIDE;
+    unsigned generateGlyphCount() override;
+    uint16_t generateCharToGlyph(SkUnichar uni) override;
+    void generateAdvance(SkGlyph* glyph) override;
+    void generateMetrics(SkGlyph* glyph) override;
+    void generateImage(const SkGlyph& glyph) override;
+    void generatePath(const SkGlyph& glyph, SkPath* path) override;
+    void generateFontMetrics(SkPaint::FontMetrics*) override;
+    SkUnichar generateGlyphToChar(uint16_t glyph) override;
 
 private:
     SkFaceRec*  fFaceRec;
@@ -233,38 +232,30 @@ private:
 ///////////////////////////////////////////////////////////////////////////
 
 struct SkFaceRec {
-    SkFaceRec*      fNext;
-    FT_Face         fFace;
-    FT_StreamRec    fFTStream;
-    SkStream*       fSkStream;
-    uint32_t        fRefCnt;
-    uint32_t        fFontID;
+    SkFaceRec* fNext;
+    FT_Face fFace;
+    FT_StreamRec fFTStream;
+    SkAutoTDelete<SkStreamAsset> fSkStream;
+    uint32_t fRefCnt;
+    uint32_t fFontID;
 
-    // assumes ownership of the stream, will call unref() when its done
-    SkFaceRec(SkStream* strm, uint32_t fontID);
-    ~SkFaceRec() {
-        fSkStream->unref();
-    }
+    // assumes ownership of the stream, will delete when its done
+    SkFaceRec(SkStreamAsset* strm, uint32_t fontID);
 };
 
 extern "C" {
-    static unsigned long sk_ft_stream_io(FT_Stream stream,
+    static unsigned long sk_ft_stream_io(FT_Stream ftStream,
                                          unsigned long offset,
                                          unsigned char* buffer,
                                          unsigned long count)
     {
-        SkStream* str = (SkStream*)stream->descriptor.pointer;
+        SkStreamAsset* stream = static_cast<SkStreamAsset*>(ftStream->descriptor.pointer);
 
         if (count) {
-            if (!str->rewind()) {
+            if (!stream->seek(offset)) {
                 return 0;
             }
-            if (offset) {
-                if (str->skip(offset) != offset) {
-                    return 0;
-                }
-            }
-            count = str->read(buffer, count);
+            count = stream->read(buffer, count);
         }
         return count;
     }
@@ -272,10 +263,9 @@ extern "C" {
     static void sk_ft_stream_close(FT_Stream) {}
 }
 
-SkFaceRec::SkFaceRec(SkStream* strm, uint32_t fontID)
-        : fNext(NULL), fSkStream(strm), fRefCnt(1), fFontID(fontID) {
-//    SkDEBUGF(("SkFaceRec: opening %s (%p)\n", key.c_str(), strm));
-
+SkFaceRec::SkFaceRec(SkStreamAsset* stream, uint32_t fontID)
+        : fNext(NULL), fSkStream(stream), fRefCnt(1), fFontID(fontID)
+{
     sk_bzero(&fFTStream, sizeof(fFTStream));
     fFTStream.size = fSkStream->getLength();
     fFTStream.descriptor.pointer = fSkStream;
@@ -300,22 +290,21 @@ static SkFaceRec* ref_ft_face(const SkTypeface* typeface) {
     }
 
     int face_index;
-    SkStream* strm = typeface->openStream(&face_index);
-    if (NULL == strm) {
+    SkStreamAsset* stream = typeface->openStream(&face_index);
+    if (NULL == stream) {
         return NULL;
     }
 
-    // this passes ownership of strm to the rec
-    rec = SkNEW_ARGS(SkFaceRec, (strm, fontID));
+    // this passes ownership of stream to the rec
+    rec = SkNEW_ARGS(SkFaceRec, (stream, fontID));
 
     FT_Open_Args args;
     memset(&args, 0, sizeof(args));
-    const void* memoryBase = strm->getMemoryBase();
-
+    const void* memoryBase = stream->getMemoryBase();
     if (memoryBase) {
         args.flags = FT_OPEN_MEMORY;
         args.memory_base = (const FT_Byte*)memoryBase;
-        args.memory_size = strm->getLength();
+        args.memory_size = stream->getLength();
     } else {
         args.flags = FT_OPEN_STREAM;
         args.stream = &rec->fFTStream;
@@ -697,11 +686,15 @@ void SkTypeface_FreeType::onFilterRec(SkScalerContextRec* rec) const {
         rec->fTextSize = SkIntToScalar(1 << 14);
     }
 
-    AutoFTAccess fta(this);
-    if (!gFTLibrary->isLCDSupported() && isLCD(*rec)) {
-        // If the runtime Freetype library doesn't support LCD mode, we disable
-        // it here.
-        rec->fMaskFormat = SkMask::kA8_Format;
+    if (isLCD(*rec)) {
+        // TODO: re-work so that FreeType is set-up and selected by the SkFontMgr.
+        SkAutoMutexAcquire ama(gFTMutex);
+        ref_ft_library();
+        if (!gFTLibrary->isLCDSupported()) {
+            // If the runtime Freetype library doesn't support LCD, disable it here.
+            rec->fMaskFormat = SkMask::kA8_Format;
+        }
+        unref_ft_library();
     }
 
     SkPaint::Hinting h = rec->getHinting();
@@ -1322,9 +1315,20 @@ void SkScalerContext_FreeType::generateFontMetrics(SkPaint::FontMetrics* metrics
     SkScalar ascent, descent, leading, xmin, xmax, ymin, ymax;
     SkScalar underlineThickness, underlinePosition;
     if (face->face_flags & FT_FACE_FLAG_SCALABLE) { // scalable outline font
-        ascent = -SkIntToScalar(face->ascender) / upem;
-        descent = -SkIntToScalar(face->descender) / upem;
-        leading = SkIntToScalar(face->height + (face->descender - face->ascender)) / upem;
+        // FreeType will always use HHEA metrics if they're not zero.
+        // It completely ignores the OS/2 fsSelection::UseTypoMetrics bit.
+        // It also ignores the VDMX tables, which are also of interest here
+        // (and override everything else when they apply).
+        static const int kUseTypoMetricsMask = (1 << 7);
+        if (os2 && os2->version != 0xFFFF && (os2->fsSelection & kUseTypoMetricsMask)) {
+            ascent = -SkIntToScalar(os2->sTypoAscender) / upem;
+            descent = -SkIntToScalar(os2->sTypoDescender) / upem;
+            leading = SkIntToScalar(os2->sTypoLineGap) / upem;
+        } else {
+            ascent = -SkIntToScalar(face->ascender) / upem;
+            descent = -SkIntToScalar(face->descender) / upem;
+            leading = SkIntToScalar(face->height + (face->descender - face->ascender)) / upem;
+        }
         xmin = SkIntToScalar(face->bbox.xMin) / upem;
         xmax = SkIntToScalar(face->bbox.xMax) / upem;
         ymin = -SkIntToScalar(face->bbox.yMin) / upem;
@@ -1403,6 +1407,19 @@ void SkScalerContext_FreeType::generateFontMetrics(SkPaint::FontMetrics* metrics
     metrics->fUnderlinePosition = underlinePosition * scale;
 }
 
+///////////////////////////////////////////////////////////////////////////////
+
+// hand-tuned value to reduce outline embolden strength
+#ifndef SK_OUTLINE_EMBOLDEN_DIVISOR
+    #ifdef SK_BUILD_FOR_ANDROID_FRAMEWORK
+        #define SK_OUTLINE_EMBOLDEN_DIVISOR   34
+    #else
+        #define SK_OUTLINE_EMBOLDEN_DIVISOR   24
+    #endif
+#endif
+
+///////////////////////////////////////////////////////////////////////////////
+
 void SkScalerContext_FreeType::emboldenIfNeeded(FT_Face face, FT_GlyphSlot glyph)
 {
     // check to see if the embolden bit is set
@@ -1413,7 +1430,8 @@ void SkScalerContext_FreeType::emboldenIfNeeded(FT_Face face, FT_GlyphSlot glyph
     switch (glyph->format) {
         case FT_GLYPH_FORMAT_OUTLINE:
             FT_Pos strength;
-            strength = FT_MulFix(face->units_per_EM, face->size->metrics.y_scale) / 24;
+            strength = FT_MulFix(face->units_per_EM, face->size->metrics.y_scale)
+                       / SK_OUTLINE_EMBOLDEN_DIVISOR;
             FT_Outline_Embolden(&glyph->outline, strength);
             break;
         case FT_GLYPH_FORMAT_BITMAP:

@@ -16,13 +16,13 @@ public:
     virtual ~SkGScalerContext();
 
 protected:
-    virtual unsigned generateGlyphCount() SK_OVERRIDE;
-    virtual uint16_t generateCharToGlyph(SkUnichar) SK_OVERRIDE;
-    virtual void generateAdvance(SkGlyph*) SK_OVERRIDE;
-    virtual void generateMetrics(SkGlyph*) SK_OVERRIDE;
-    virtual void generateImage(const SkGlyph&) SK_OVERRIDE;
-    virtual void generatePath(const SkGlyph&, SkPath*) SK_OVERRIDE;
-    virtual void generateFontMetrics(SkPaint::FontMetrics*) SK_OVERRIDE;
+    unsigned generateGlyphCount() override;
+    uint16_t generateCharToGlyph(SkUnichar) override;
+    void generateAdvance(SkGlyph*) override;
+    void generateMetrics(SkGlyph*) override;
+    void generateImage(const SkGlyph&) override;
+    void generatePath(const SkGlyph&, SkPath*) override;
+    void generateFontMetrics(SkPaint::FontMetrics*) override;
 
 private:
     SkGTypeface*     fFace;
@@ -184,7 +184,7 @@ SkAdvancedTypefaceMetrics* SkGTypeface::onGetAdvancedTypefaceMetrics(
     return fProxy->getAdvancedTypefaceMetrics(info, glyphIDs, glyphIDsCount);
 }
 
-SkStream* SkGTypeface::onOpenStream(int* ttcIndex) const {
+SkStreamAsset* SkGTypeface::onOpenStream(int* ttcIndex) const {
     return fProxy->openStream(ttcIndex);
 }
 

@@ -9,6 +9,10 @@
 
 class GURL;
 
+namespace extensions {
+class ExtensionViewHost;
+}
+
 class ExtensionActionPlatformDelegate {
  public:
   virtual ~ExtensionActionPlatformDelegate() {}
@@ -20,29 +24,22 @@ class ExtensionActionPlatformDelegate {
 
   // The following are forwarded from ToolbarActionViewController. See that
   // class for the definitions.
-  virtual gfx::NativeView GetPopupNativeView() = 0;
   virtual bool IsMenuRunning() const = 0;
   virtual void RegisterCommand() = 0;
 
   // Called once the delegate is set, in order to do any extra initialization.
   virtual void OnDelegateSet() = 0;
 
-  // Returns true if there is currently a popup for this extension action.
-  virtual bool IsShowingPopup() const = 0;
-
   // Closes the active popup (whether it was this action's popup or not).
   virtual void CloseActivePopup() = 0;
-
-  // Closes this action's popup. This will only be called if the popup is
-  // showing.
-  virtual void CloseOwnPopup() = 0;
 
   // Shows the popup for the extension action, given the associated |popup_url|.
   // |grant_tab_permissions| is true if active tab permissions should be given
   // to the extension; this is only true if the popup is opened through a user
   // action.
-  // Returns true if a popup is successfully shown.
-  virtual bool ShowPopupWithUrl(
+  // Returns the ExtensionViewHost of the created popup, if a popup is
+  // successfully shown.
+  virtual extensions::ExtensionViewHost* ShowPopupWithUrl(
       ExtensionActionViewController::PopupShowAction show_action,
       const GURL& popup_url,
       bool grant_tab_permissions) = 0;

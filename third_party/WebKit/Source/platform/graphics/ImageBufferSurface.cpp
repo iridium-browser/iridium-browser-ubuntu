@@ -66,7 +66,6 @@ void ImageBufferSurface::clear()
             canvas()->drawARGB(255, 0, 0, 0, SkXfermode::kSrc_Mode);
         else
             canvas()->drawARGB(0, 0, 0, 0, SkXfermode::kClear_Mode);
-        didClearCanvas();
     }
 }
 
@@ -97,7 +96,7 @@ static SkBitmap deepSkBitmapCopy(const SkBitmap& bitmap)
     return tmp;
 }
 
-void ImageBufferSurface::draw(GraphicsContext* context, const FloatRect& destRect, const FloatRect& srcRect, CompositeOperator op, WebBlendMode blendMode, bool needsCopy)
+void ImageBufferSurface::draw(GraphicsContext* context, const FloatRect& destRect, const FloatRect& srcRect, SkXfermode::Mode op, bool needsCopy)
 {
     SkBitmap bmp = bitmap();
     // For ImageBufferSurface that enables cachedBitmap, Use the cached bitmap for CPU side usage
@@ -107,9 +106,9 @@ void ImageBufferSurface::draw(GraphicsContext* context, const FloatRect& destRec
         bmp = cachedBitmap();
     }
 
-    RefPtr<Image> image = BitmapImage::create(NativeImageSkia::create(needsCopy ? deepSkBitmapCopy(bmp) : bmp));
+    RefPtr<Image> image = BitmapImage::create(needsCopy ? deepSkBitmapCopy(bmp) : bmp);
 
-    context->drawImage(image.get(), destRect, srcRect, op, blendMode, DoNotRespectImageOrientation);
+    context->drawImage(image.get(), destRect, srcRect, op, DoNotRespectImageOrientation);
 }
 
 } // namespace blink

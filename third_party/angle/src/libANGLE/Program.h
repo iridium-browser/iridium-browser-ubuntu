@@ -29,7 +29,6 @@ namespace rx
 class Renderer;
 class Renderer;
 struct TranslatedAttribute;
-class UniformStorage;
 class ProgramImpl;
 }
 
@@ -61,7 +60,7 @@ class AttributeBindings
     std::set<std::string> mAttributeBinding[MAX_VERTEX_ATTRIBS];
 };
 
-class InfoLog
+class InfoLog : angle::NonCopyable
 {
   public:
     InfoLog();
@@ -74,7 +73,6 @@ class InfoLog
     void append(const char *info, ...);
     void reset();
   private:
-    DISALLOW_COPY_AND_ASSIGN(InfoLog);
     char *mInfoLog;
 };
 
@@ -107,7 +105,7 @@ struct LinkedVarying
     unsigned int semanticIndexCount;
 };
 
-class Program
+class Program : angle::NonCopyable
 {
   public:
     Program(rx::ProgramImpl *impl, ResourceManager *manager, GLuint handle);
@@ -186,7 +184,7 @@ class Program
     void getUniformuiv(GLint location, GLuint *params);
 
     Error applyUniforms();
-    Error applyUniformBuffers(const std::vector<Buffer*> boundBuffers, const Caps &caps);
+    Error applyUniformBuffers(const gl::Data &data);
 
     void getActiveUniformBlockName(GLuint uniformBlockIndex, GLsizei bufSize, GLsizei *length, GLchar *uniformBlockName) const;
     void getActiveUniformBlockiv(GLuint uniformBlockIndex, GLenum pname, GLint *params) const;
@@ -197,6 +195,8 @@ class Program
 
     void bindUniformBlock(GLuint uniformBlockIndex, GLuint uniformBlockBinding);
     GLuint getUniformBlockBinding(GLuint uniformBlockIndex) const;
+
+    const UniformBlock *getUniformBlockByIndex(GLuint index) const;
 
     void setTransformFeedbackVaryings(GLsizei count, const GLchar *const *varyings, GLenum bufferMode);
     void getTransformFeedbackVarying(GLuint index, GLsizei bufSize, GLsizei *length, GLsizei *size, GLenum *type, GLchar *name) const;
@@ -220,8 +220,6 @@ class Program
     void updateSamplerMapping();
 
   private:
-    DISALLOW_COPY_AND_ASSIGN(Program);
-
     void unlink(bool destroy = false);
     void resetUniformBlockBindings();
 

@@ -11,7 +11,6 @@
 #include "base/values.h"
 #include "chrome/browser/extensions/api/declarative_content/content_constants.h"
 #include "chrome/browser/extensions/api/extension_action/extension_action_api.h"
-#include "chrome/browser/extensions/declarative_user_script_manager.h"
 #include "chrome/browser/extensions/extension_action.h"
 #include "chrome/browser/extensions/extension_action_manager.h"
 #include "chrome/browser/extensions/extension_tab_util.h"
@@ -20,6 +19,7 @@
 #include "content/public/browser/invalidate_type.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
+#include "extensions/browser/declarative_user_script_manager.h"
 #include "extensions/browser/extension_registry.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/common/extension.h"
@@ -350,11 +350,12 @@ RequestContentScript::RequestContentScript(
     content::BrowserContext* browser_context,
     const Extension* extension,
     const ScriptData& script_data) {
-  InitScript(extension, script_data);
+  HostID host_id(HostID::EXTENSIONS, extension->id());
+  InitScript(host_id, extension, script_data);
 
   master_ = ExtensionSystem::Get(browser_context)
                 ->declarative_user_script_manager()
-                ->GetDeclarativeUserScriptMasterByID(extension->id());
+                ->GetDeclarativeUserScriptMasterByID(host_id);
   AddScript();
 }
 
@@ -362,7 +363,8 @@ RequestContentScript::RequestContentScript(
     DeclarativeUserScriptMaster* master,
     const Extension* extension,
     const ScriptData& script_data) {
-  InitScript(extension, script_data);
+  HostID host_id(HostID::EXTENSIONS, extension->id());
+  InitScript(host_id, extension, script_data);
 
   master_ = master;
   AddScript();
@@ -373,10 +375,11 @@ RequestContentScript::~RequestContentScript() {
   master_->RemoveScript(script_);
 }
 
-void RequestContentScript::InitScript(const Extension* extension,
+void RequestContentScript::InitScript(const HostID& host_id,
+                                      const Extension* extension,
                                       const ScriptData& script_data) {
   script_.set_id(UserScript::GenerateUserScriptID());
-  script_.set_extension_id(extension->id());
+  script_.set_host_id(host_id);
   script_.set_run_location(UserScript::BROWSER_DRIVEN);
   script_.set_match_all_frames(script_data.all_frames);
   script_.set_match_about_blank(script_data.match_about_blank);

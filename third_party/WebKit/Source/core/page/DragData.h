@@ -54,7 +54,6 @@ public:
 
     // clientPosition is taken to be the position of the drag event within the target window, with (0,0) at the top left
     DragData(DataObject*, const IntPoint& clientPosition, const IntPoint& globalPosition, DragOperation, DragApplicationFlags = DragApplicationNone);
-    DragData(const String& dragStorageName, const IntPoint& clientPosition, const IntPoint& globalPosition, DragOperation, DragApplicationFlags = DragApplicationNone);
     const IntPoint& clientPosition() const { return m_clientPosition; }
     const IntPoint& globalPosition() const { return m_globalPosition; }
     DragApplicationFlags flags() const { return m_applicationFlags; }
@@ -69,7 +68,7 @@ public:
     PassRefPtrWillBeRawPtr<DocumentFragment> asFragment(LocalFrame*, PassRefPtrWillBeRawPtr<Range> context, bool allowPlainText, bool& chosePlainText) const;
     bool canSmartReplace() const;
     bool containsFiles() const;
-    int modifierKeyState() const;
+    int modifiers() const;
 
     String droppedFileSystemId() const;
 

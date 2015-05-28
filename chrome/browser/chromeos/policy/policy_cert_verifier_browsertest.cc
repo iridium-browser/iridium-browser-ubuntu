@@ -15,13 +15,13 @@
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "crypto/nss_util_internal.h"
 #include "crypto/scoped_test_nss_chromeos_user.h"
-#include "net/base/net_log.h"
 #include "net/base/test_completion_callback.h"
 #include "net/base/test_data_directory.h"
 #include "net/cert/cert_trust_anchor_provider.h"
 #include "net/cert/cert_verify_result.h"
 #include "net/cert/nss_cert_database_chromeos.h"
 #include "net/cert/x509_certificate.h"
+#include "net/log/net_log.h"
 #include "net/test/cert_test_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -32,9 +32,9 @@ class PolicyCertVerifierTest : public testing::Test {
   PolicyCertVerifierTest()
       : trust_anchor_used_(false), test_nss_user_("user1") {}
 
-  virtual ~PolicyCertVerifierTest() {}
+  ~PolicyCertVerifierTest() override {}
 
-  virtual void SetUp() override {
+  void SetUp() override {
     ASSERT_TRUE(test_nss_user_.constructed_successfully());
     test_nss_user_.FinishInit();
 
@@ -57,7 +57,7 @@ class PolicyCertVerifierTest : public testing::Test {
     test_ca_cert_list_.push_back(test_ca_cert_);
   }
 
-  virtual void TearDown() override {
+  void TearDown() override {
     // Destroy |cert_verifier_| before destroying the ThreadBundle, otherwise
     // BrowserThread::CurrentlyOn checks fail.
     cert_verifier_.reset();

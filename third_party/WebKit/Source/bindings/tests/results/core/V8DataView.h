@@ -14,24 +14,31 @@
 #include "bindings/core/v8/V8DOMWrapper.h"
 #include "bindings/core/v8/WrapperTypeInfo.h"
 #include "bindings/tests/idls/core/TestDataView.h"
+#include "core/CoreExport.h"
 #include "platform/heap/Handle.h"
 
 namespace blink {
 
 class V8DataView {
 public:
-    static bool hasInstance(v8::Local<v8::Value>, v8::Isolate*);
-    static TestDataView* toImpl(v8::Local<v8::Object> object);
-    static TestDataView* toImplWithTypeCheck(v8::Isolate*, v8::Local<v8::Value>);
-    static const WrapperTypeInfo wrapperTypeInfo;
+    CORE_EXPORT static bool hasInstance(v8::Local<v8::Value>, v8::Isolate*);
+    CORE_EXPORT static TestDataView* toImpl(v8::Local<v8::Object> object);
+    CORE_EXPORT static TestDataView* toImplWithTypeCheck(v8::Isolate*, v8::Local<v8::Value>);
+    CORE_EXPORT static const WrapperTypeInfo wrapperTypeInfo;
     static void refObject(ScriptWrappable*);
     static void derefObject(ScriptWrappable*);
-    static void trace(Visitor* visitor, ScriptWrappable* scriptWrappable)
+    template<typename VisitorDispatcher>
+    static void trace(VisitorDispatcher visitor, ScriptWrappable* scriptWrappable)
     {
     }
     static const int internalFieldCount = v8DefaultWrapperInternalFieldCount + 0;
     static void installConditionallyEnabledProperties(v8::Local<v8::Object>, v8::Isolate*) { }
     static void installConditionallyEnabledMethods(v8::Local<v8::Object>, v8::Isolate*) { }
+};
+
+template <>
+struct V8TypeOf<TestDataView> {
+    typedef V8DataView Type;
 };
 
 } // namespace blink

@@ -25,7 +25,9 @@ class GlRenderer : public RendererBase {
   bool Initialize() override;
   void RenderFrame() override;
 
- private:
+ protected:
+  virtual scoped_refptr<gfx::GLSurface> CreateSurface();
+
   scoped_refptr<gfx::GLSurface> surface_;
   scoped_refptr<gfx::GLContext> context_;
 

@@ -123,17 +123,12 @@ DragSelector.prototype.startDragSelection = function(list, event) {
   this.border_.style.height = '0';
   list.appendChild(this.border_);
 
-  // If no modifier key is pressed, clear the original selection.
-  if (!event.shiftKey && !event.ctrlKey)
-    this.target_.selectionModel_.unselectAll();
-
   // Register event handlers.
   // The handlers are bounded at the constructor.
   this.target_.ownerDocument.addEventListener(
       'mousemove', this.onMouseMoveBound_, true);
   this.target_.ownerDocument.addEventListener(
       'mouseup', this.onMouseUpBound_, true);
-  cr.dispatchSimpleEvent(this.target_, 'dragselectionstart');
 };
 
 /**
@@ -232,7 +227,6 @@ DragSelector.prototype.onMouseUp_ = function(event) {
       'mousemove', this.onMouseMoveBound_, true);
   this.target_.ownerDocument.removeEventListener(
       'mouseup', this.onMouseUpBound_, true);
-  cr.dispatchSimpleEvent(this.target_, 'dragselectionend');
   this.target_.cachedBounds = null;
   this.target_ = null;
   // The target may select an item by reacting to the mouseup event.

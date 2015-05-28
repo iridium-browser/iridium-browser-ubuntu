@@ -52,14 +52,15 @@ public:
     }
     unsigned length() const;
     ClientRect* item(unsigned index);
+    ClientRect* anonymousIndexedGetter(unsigned index) { return item(index); }
 
-    void trace(Visitor*);
+    DECLARE_TRACE();
 
 private:
     ClientRectList();
     explicit ClientRectList(const Vector<FloatQuad>&);
 
-    WillBeHeapVector<RefPtrWillBeMember<ClientRect> > m_list;
+    WillBeHeapVector<RefPtrWillBeMember<ClientRect>> m_list;
 };
 
 } // namespace blink

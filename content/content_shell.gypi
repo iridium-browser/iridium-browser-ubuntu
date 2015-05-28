@@ -46,8 +46,9 @@
         '../base/third_party/dynamic_annotations/dynamic_annotations.gyp:dynamic_annotations',
         '../cc/blink/cc_blink.gyp:cc_blink',
         '../cc/cc.gyp:cc',
-        '../components/components.gyp:crash_component',
+        '../components/components.gyp:crash_component_breakpad_mac_to_be_deleted',
         '../components/components.gyp:web_cache_renderer',
+        '../device/bluetooth/bluetooth.gyp:device_bluetooth',
         '../gin/gin.gyp:gin',
         '../gpu/gpu.gyp:gpu',
         '../ipc/ipc.gyp:ipc',
@@ -59,6 +60,7 @@
         '../storage/storage_browser.gyp:storage',
         '../third_party/WebKit/public/blink.gyp:blink',
         '../third_party/WebKit/public/blink.gyp:blink_test_support',
+        '../ui/base/ime/ui_base_ime.gyp:ui_base_ime',
         '../ui/base/ui_base.gyp:ui_base',
         '../ui/events/events.gyp:events_base',
         '../ui/gfx/gfx.gyp:gfx',
@@ -102,16 +104,20 @@
         'shell/browser/layout_test/layout_test_browser_main_parts.h',
         'shell/browser/layout_test/layout_test_content_browser_client.cc',
         'shell/browser/layout_test/layout_test_content_browser_client.h',
-        'shell/browser/layout_test/layout_test_download_manager_delegate.cc',
-        'shell/browser/layout_test/layout_test_download_manager_delegate.h',
         'shell/browser/layout_test/layout_test_devtools_frontend.cc',
         'shell/browser/layout_test/layout_test_devtools_frontend.h',
+        'shell/browser/layout_test/layout_test_download_manager_delegate.cc',
+        'shell/browser/layout_test/layout_test_download_manager_delegate.h',
         'shell/browser/layout_test/layout_test_javascript_dialog_manager.cc',
         'shell/browser/layout_test/layout_test_javascript_dialog_manager.h',
         'shell/browser/layout_test/layout_test_message_filter.cc',
         'shell/browser/layout_test/layout_test_message_filter.h',
+        'shell/browser/layout_test/layout_test_navigator_connect_service_factory.cc',
+        'shell/browser/layout_test/layout_test_navigator_connect_service_factory.h',
         'shell/browser/layout_test/layout_test_notification_manager.cc',
         'shell/browser/layout_test/layout_test_notification_manager.h',
+        'shell/browser/layout_test/layout_test_permission_manager.h',
+        'shell/browser/layout_test/layout_test_permission_manager.cc',
         'shell/browser/layout_test/layout_test_push_messaging_service.cc',
         'shell/browser/layout_test/layout_test_push_messaging_service.h',
         'shell/browser/layout_test/layout_test_resource_dispatcher_host_delegate.cc',
@@ -137,10 +143,10 @@
         'shell/browser/shell_browser_main_parts_mac.mm',
         'shell/browser/shell_content_browser_client.cc',
         'shell/browser/shell_content_browser_client.h',
-        'shell/browser/shell_devtools_manager_delegate.cc',
-        'shell/browser/shell_devtools_manager_delegate.h',
         'shell/browser/shell_devtools_frontend.cc',
         'shell/browser/shell_devtools_frontend.h',
+        'shell/browser/shell_devtools_manager_delegate.cc',
+        'shell/browser/shell_devtools_manager_delegate.h',
         'shell/browser/shell_download_manager_delegate.cc',
         'shell/browser/shell_download_manager_delegate.h',
         'shell/browser/shell_javascript_dialog.h',
@@ -148,16 +154,18 @@
         'shell/browser/shell_javascript_dialog_manager.cc',
         'shell/browser/shell_javascript_dialog_manager.h',
         'shell/browser/shell_javascript_dialog_win.cc',
-        'shell/browser/shell_mojo_test_utils_android.cc',
-        'shell/browser/shell_mojo_test_utils_android.h',
         'shell/browser/shell_login_dialog.cc',
         'shell/browser/shell_login_dialog.h',
         'shell/browser/shell_login_dialog_mac.mm',
         'shell/browser/shell_mac.mm',
+        'shell/browser/shell_mojo_test_utils_android.cc',
+        'shell/browser/shell_mojo_test_utils_android.h',
         'shell/browser/shell_net_log.cc',
         'shell/browser/shell_net_log.h',
         'shell/browser/shell_network_delegate.cc',
         'shell/browser/shell_network_delegate.h',
+        'shell/browser/shell_permission_manager.cc',
+        'shell/browser/shell_permission_manager.h',
         'shell/browser/shell_platform_data_aura.cc',
         'shell/browser/shell_platform_data_aura.h',
         'shell/browser/shell_plugin_service_filter.cc',
@@ -171,9 +179,9 @@
         'shell/browser/shell_url_request_context_getter.cc',
         'shell/browser/shell_url_request_context_getter.h',
         'shell/browser/shell_views.cc',
+        'shell/browser/shell_web_contents_view_delegate.h',
         'shell/browser/shell_web_contents_view_delegate_android.cc',
         'shell/browser/shell_web_contents_view_delegate_creator.h',
-        'shell/browser/shell_web_contents_view_delegate.h',
         'shell/browser/shell_web_contents_view_delegate_mac.mm',
         'shell/browser/shell_web_contents_view_delegate_win.cc',
         'shell/browser/webkit_test_controller.cc',
@@ -263,9 +271,9 @@
         'shell/renderer/test_runner/text_input_controller.h',
         'shell/renderer/test_runner/web_ax_object_proxy.cc',
         'shell/renderer/test_runner/web_ax_object_proxy.h',
+        'shell/renderer/test_runner/web_content_settings.cc',
+        'shell/renderer/test_runner/web_content_settings.h',
         'shell/renderer/test_runner/web_frame_test_proxy.h',
-        'shell/renderer/test_runner/web_permissions.cc',
-        'shell/renderer/test_runner/web_permissions.h',
         'shell/renderer/test_runner/web_task.cc',
         'shell/renderer/test_runner/web_task.h',
         'shell/renderer/test_runner/web_test_delegate.h',
@@ -325,7 +333,7 @@
             'copy_test_netscape_plugin',
           ],
         }],  # OS=="android"
-        ['os_posix == 1 and OS != "mac" and android_webview_build != 1', {
+        ['os_posix == 1 and OS != "mac"', {
           'dependencies': [
             '../components/components.gyp:breakpad_host',
           ],
@@ -497,6 +505,7 @@
           'variables': {
             'pak_inputs': [
               '<(SHARED_INTERMEDIATE_DIR)/blink/public/resources/blink_resources.pak',
+              '<(SHARED_INTERMEDIATE_DIR)/blink/public/resources/blink_image_resources_100_percent.pak',
               '<(SHARED_INTERMEDIATE_DIR)/content/app/resources/content_resources_100_percent.pak',
               '<(SHARED_INTERMEDIATE_DIR)/content/app/strings/content_strings_en-US.pak',
               '<(SHARED_INTERMEDIATE_DIR)/content/browser/tracing/tracing_resources.pak',
@@ -653,15 +662,13 @@
           ],
         }],  # OS=="mac"
         ['OS=="android"', {
+          'dependencies': [
+            '../tools/imagediff/image_diff.gyp:image_diff#host',
+          ],
           'dependencies!': [
             '../tools/imagediff/image_diff.gyp:image_diff',
           ],
         }],  # OS=="android"
-        ['OS=="android" and android_webview_build==0', {
-          'dependencies': [
-            '../tools/imagediff/image_diff.gyp:image_diff#host',
-          ],
-        }],  # OS=="android" and android_webview_build==0
       ],
     },
     {
@@ -731,6 +738,9 @@
           'cflags': [
             '-fvisibility=default',
           ],
+        }],
+        ['use_x11 == 1', {
+          'dependencies': [ '../build/linux/system.gyp:x11' ],
         }],
         ['OS=="win"', {
           'defines': [
@@ -1012,14 +1022,6 @@
           ],
           'sources': [
             'shell/android/shell_library_loader.cc',
-            'shell/android/shell_library_loader.h',
-          ],
-          'conditions': [
-            ['android_webview_build==1', {
-              'ldflags': [
-                '-lgabi++',  # For rtti
-              ],
-            }],
           ],
         },
         {
@@ -1075,6 +1077,7 @@
             '../net/net.gyp:net_java',
             '../third_party/mesa/mesa.gyp:osmesa_in_lib_dir',
             '../tools/android/forwarder/forwarder.gyp:forwarder',
+            '../tools/imagediff/image_diff.gyp:image_diff#host',
             '../ui/android/ui_android.gyp:ui_java',
           ],
           'variables': {
@@ -1101,13 +1104,6 @@
               }],
             ],
           },
-          'conditions': [
-            ['android_webview_build==0', {
-              'dependencies': [
-                '../tools/imagediff/image_diff.gyp:image_diff#host',
-              ],
-            }],
-          ],
           'includes': [ '../build/java_apk.gypi' ],
         },
       ],

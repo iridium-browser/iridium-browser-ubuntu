@@ -15,6 +15,7 @@
 #include "testing/gtest/include/gtest/gtest.h"
 
 using net::test::DefaultQuicConfig;
+using net::test::MockConnection;
 using net::test::SupportedVersions;
 using std::string;
 using testing::StrictMock;
@@ -28,8 +29,9 @@ namespace {
 class QuicSpdyClientStreamTest : public TestWithParam<QuicVersion> {
  public:
   QuicSpdyClientStreamTest()
-      : connection_(new StrictMock<MockConnection>(
-            false, SupportedVersions(GetParam()))),
+      : connection_(
+            new StrictMock<MockConnection>(Perspective::IS_CLIENT,
+                                           SupportedVersions(GetParam()))),
         session_(DefaultQuicConfig(), connection_),
         body_("hello world") {
     session_.InitializeSession(
@@ -63,31 +65,32 @@ INSTANTIATE_TEST_CASE_P(Tests, QuicSpdyClientStreamTest,
                         ::testing::ValuesIn(QuicSupportedVersions()));
 
 TEST_P(QuicSpdyClientStreamTest, TestFraming) {
-  EXPECT_EQ(headers_string_.size(), stream_->ProcessData(
-      headers_string_.c_str(), headers_string_.size()));
-  EXPECT_EQ(body_.size(),
-            stream_->ProcessData(body_.c_str(), body_.size()));
-  EXPECT_EQ(200u, stream_->headers().parsed_response_code());
+  stream_->OnStreamHeaders(headers_string_);
+  stream_->OnStreamHeadersComplete(false, headers_string_.size());
+  EXPECT_EQ(body_.size(), stream_->ProcessData(body_.c_str(), body_.size()));
+  EXPECT_EQ("200 Ok", stream_->headers().find(":status")->second);
+  EXPECT_EQ(200, stream_->response_code());
   EXPECT_EQ(body_, stream_->data());
 }
 
 TEST_P(QuicSpdyClientStreamTest, TestFramingOnePacket) {
-  string message = headers_string_ + body_;
-
-  EXPECT_EQ(message.size(), stream_->ProcessData(
-      message.c_str(), message.size()));
-  EXPECT_EQ(200u, stream_->headers().parsed_response_code());
+  stream_->OnStreamHeaders(headers_string_);
+  stream_->OnStreamHeadersComplete(false, headers_string_.size());
+  EXPECT_EQ(body_.size(), stream_->ProcessData(body_.c_str(), body_.size()));
+  EXPECT_EQ("200 Ok", stream_->headers().find(":status")->second);
+  EXPECT_EQ(200, stream_->response_code());
   EXPECT_EQ(body_, stream_->data());
 }
 
 TEST_P(QuicSpdyClientStreamTest, DISABLED_TestFramingExtraData) {
   string large_body = "hello world!!!!!!";
 
-  EXPECT_EQ(headers_string_.size(), stream_->ProcessData(
-      headers_string_.c_str(), headers_string_.size()));
+  stream_->OnStreamHeaders(headers_string_);
+  stream_->OnStreamHeadersComplete(false, headers_string_.size());
   // The headers should parse successfully.
   EXPECT_EQ(QUIC_STREAM_NO_ERROR, stream_->stream_error());
-  EXPECT_EQ(200u, stream_->headers().parsed_response_code());
+  EXPECT_EQ("200 Ok", stream_->headers().find(":status")->second);
+  EXPECT_EQ(200, stream_->response_code());
 
   EXPECT_CALL(*connection_,
               SendRstStream(stream_->id(), QUIC_BAD_APPLICATION_PAYLOAD, 0));

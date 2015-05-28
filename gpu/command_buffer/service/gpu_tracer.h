@@ -6,7 +6,9 @@
 #ifndef GPU_COMMAND_BUFFER_SERVICE_GPU_TRACER_H_
 #define GPU_COMMAND_BUFFER_SERVICE_GPU_TRACER_H_
 
+#include <deque>
 #include <string>
+#include <vector>
 
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
@@ -14,7 +16,11 @@
 #include "base/threading/thread.h"
 #include "gpu/command_buffer/service/gles2_cmd_decoder.h"
 #include "gpu/gpu_export.h"
-#include "ui/gl/gl_bindings.h"
+
+namespace gfx {
+  class GPUTimingClient;
+  class GPUTimer;
+}
 
 namespace gpu {
 namespace gles2 {
@@ -33,28 +39,6 @@ enum GpuTracerSource {
   NUM_TRACER_SOURCES
 };
 
-enum GpuTracerType {
-  kTracerTypeInvalid = -1,
-
-  kTracerTypeARBTimer,
-  kTracerTypeDisjointTimer
-};
-
-// Central accesser to CPU Time
-class GPU_EXPORT CPUTime
-    : public base::RefCounted<CPUTime> {
- public:
-  CPUTime();
-
-  virtual int64 GetCurrentTime();
-
- protected:
-  virtual ~CPUTime();
-  friend class base::RefCounted<CPUTime>;
-
-  DISALLOW_COPY_AND_ASSIGN(CPUTime);
-};
-
 // Marker structure for a Trace.
 struct TraceMarker {
   TraceMarker(const std::string& category, const std::string& name);
@@ -71,6 +55,8 @@ class GPU_EXPORT GPUTracer
  public:
   explicit GPUTracer(gles2::GLES2Decoder* decoder);
   virtual ~GPUTracer();
+
+  void Destroy(bool have_context);
 
   // Scheduled processing in decoder begins.
   bool BeginDecoding();
@@ -94,35 +80,28 @@ class GPU_EXPORT GPUTracer
 
  protected:
   // Trace Processing.
-  scoped_refptr<GPUTrace> CreateTrace(const std::string& category,
-                                      const std::string& name);
   virtual scoped_refptr<Outputter> CreateOutputter(const std::string& name);
-  virtual scoped_refptr<CPUTime> CreateCPUTime();
-  virtual GpuTracerType DetermineTracerType();
   virtual void PostTask();
 
   void Process();
   void ProcessTraces();
+  void ClearFinishedTraces(bool have_context);
 
-  void CalculateTimerOffset();
   void IssueProcessTask();
 
+  scoped_refptr<gfx::GPUTimingClient> gpu_timing_client_;
   scoped_refptr<Outputter> outputter_;
-  scoped_refptr<CPUTime> cpu_time_;
   std::vector<TraceMarker> markers_[NUM_TRACER_SOURCES];
-  std::deque<scoped_refptr<GPUTrace> > traces_;
+  std::deque<scoped_refptr<GPUTrace> > finished_traces_;
 
   const unsigned char* gpu_trace_srv_category;
   const unsigned char* gpu_trace_dev_category;
   gles2::GLES2Decoder* decoder_;
 
-  int64 timer_offset_;
-
-  GpuTracerType tracer_type_;
-  bool gpu_timing_synced_;
   bool gpu_executing_;
   bool process_posted_;
 
+ private:
   DISALLOW_COPY_AND_ASSIGN(GPUTracer);
 };
 
@@ -134,12 +113,10 @@ class Outputter : public base::RefCounted<Outputter> {
                            int64 end_time) = 0;
 
   virtual void TraceServiceBegin(const std::string& category,
-                                 const std::string& name,
-                                 void* id) = 0;
+                                 const std::string& name) = 0;
 
   virtual void TraceServiceEnd(const std::string& category,
-                               const std::string& name,
-                               void* id) = 0;
+                               const std::string& name) = 0;
 
  protected:
   virtual ~Outputter() {}
@@ -155,12 +132,10 @@ class TraceOutputter : public Outputter {
                    int64 end_time) override;
 
   void TraceServiceBegin(const std::string& category,
-                         const std::string& name,
-                         void* id) override;
+                         const std::string& name) override;
 
   void TraceServiceEnd(const std::string& category,
-                       const std::string& name,
-                       void* id) override;
+                       const std::string& name) override;
 
  protected:
   friend class base::RefCounted<Outputter>;
@@ -170,6 +145,7 @@ class TraceOutputter : public Outputter {
   base::Thread named_thread_;
   uint64 local_trace_id_;
 
+ private:
   DISALLOW_COPY_AND_ASSIGN(TraceOutputter);
 };
 
@@ -177,17 +153,17 @@ class GPU_EXPORT GPUTrace
     : public base::RefCounted<GPUTrace> {
  public:
   GPUTrace(scoped_refptr<Outputter> outputter,
-           scoped_refptr<CPUTime> cpu_time,
+           gfx::GPUTimingClient* gpu_timing_client,
            const std::string& category,
            const std::string& name,
-           int64 offset,
-           GpuTracerType tracer_type);
+           const bool enabled);
 
-  bool IsEnabled() { return tracer_type_ != kTracerTypeInvalid; }
+  void Destroy(bool have_context);
 
   void Start(bool trace_service);
   void End(bool tracing_service);
   bool IsAvailable();
+  bool IsEnabled() { return enabled_; }
   void Process();
 
  private:
@@ -200,17 +176,27 @@ class GPU_EXPORT GPUTrace
   std::string category_;
   std::string name_;
   scoped_refptr<Outputter> outputter_;
-  scoped_refptr<CPUTime> cpu_time_;
-
-  int64 offset_;
-  int64 start_time_;
-  int64 end_time_;
-  GpuTracerType tracer_type_;
-  bool end_requested_;
-
-  GLuint queries_[2];
+  scoped_ptr<gfx::GPUTimer> gpu_timer_;
+  const bool enabled_ = false;
 
   DISALLOW_COPY_AND_ASSIGN(GPUTrace);
+};
+
+class ScopedGPUTrace {
+ public:
+  ScopedGPUTrace(GPUTracer* gpu_tracer,
+                 GpuTracerSource source,
+                 const std::string& category,
+                 const std::string& name)
+      : gpu_tracer_(gpu_tracer), source_(source) {
+    gpu_tracer_->Begin(category, name, source_);
+  }
+
+  ~ScopedGPUTrace() { gpu_tracer_->End(source_); }
+
+ private:
+  GPUTracer* gpu_tracer_;
+  GpuTracerSource source_;
 };
 
 }  // namespace gles2

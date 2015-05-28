@@ -31,15 +31,17 @@ FetchRequestData* FetchRequestData::create(const WebServiceWorkerRequest& webReq
     request->m_referrer.setURL(webRequest.referrer());
     request->setMode(webRequest.mode());
     request->setCredentials(webRequest.credentialsMode());
+    request->setMIMEType(request->m_headerList->extractMIMEType());
     return request;
 }
 
-FetchRequestData* FetchRequestData::createCopy() const
+FetchRequestData* FetchRequestData::clone() const
 {
+    // TODO(yhirano): This method will be destructive.
     FetchRequestData* request = FetchRequestData::create();
     request->m_url = m_url;
     request->m_method = m_method;
-    request->m_headerList = m_headerList->createCopy();
+    request->m_headerList = m_headerList->clone();
     request->m_unsafeRequestFlag = m_unsafeRequestFlag;
     request->m_blobDataHandle = m_blobDataHandle;
     request->m_origin = m_origin;
@@ -49,7 +51,14 @@ FetchRequestData* FetchRequestData::createCopy() const
     request->m_mode = m_mode;
     request->m_credentials = m_credentials;
     request->m_responseTainting = m_responseTainting;
+    request->m_mimeType = m_mimeType;
     return request;
+}
+
+FetchRequestData* FetchRequestData::pass() const
+{
+    // TODO(yhirano): This method will be destructive.
+    return clone();
 }
 
 FetchRequestData::~FetchRequestData()
@@ -68,7 +77,7 @@ FetchRequestData::FetchRequestData()
 {
 }
 
-void FetchRequestData::trace(Visitor* visitor)
+DEFINE_TRACE(FetchRequestData)
 {
     visitor->trace(m_headerList);
 }

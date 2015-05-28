@@ -9,7 +9,6 @@ from __future__ import print_function
 import logging
 import os
 import re
-import tempfile
 from xml.dom import minidom
 
 from chromite.cbuildbot import cbuildbot_config
@@ -41,19 +40,9 @@ CHROME_VERSION_ATTR = 'version'
 LKGM_ELEMENT = 'lkgm'
 LKGM_VERSION_ATTR = 'version'
 
-MANIFEST_ELEMENT = 'manifest'
-DEFAULT_ELEMENT = 'default'
-PROJECT_ELEMENT = 'project'
-PROJECT_NAME_ATTR = 'name'
-PROJECT_REMOTE_ATTR = 'remote'
-
 
 class PromoteCandidateException(Exception):
   """Exception thrown for failure to promote manifest candidate."""
-
-
-class FilterManifestException(Exception):
-  """Exception thrown when failing to filter the internal manifest."""
 
 
 class _LKGMCandidateInfo(manifest_version.VersionInfo):
@@ -100,12 +89,10 @@ class _LKGMCandidateInfo(manifest_version.VersionInfo):
     return '%s.%s.%s-rc%s' % (self.build_number, self.branch_build_number,
                               self.patch_number, self.revision_number)
 
-  @classmethod
-  def VersionCompare(cls, version_string):
-    """Useful method to return a comparable version of a LKGM string."""
-    lkgm = cls(version_string)
-    return map(int, [lkgm.build_number, lkgm.branch_build_number,
-                     lkgm.patch_number, lkgm.revision_number])
+  def VersionComponents(self):
+    """Return an array of ints of the version fields for comparing."""
+    return map(int, [self.build_number, self.branch_build_number,
+                     self.patch_number, self.revision_number])
 
   def IncrementVersion(self):
     """Increments the version by incrementing the revision #."""
@@ -129,13 +116,12 @@ class LKGMManager(manifest_version.BuildSpecsManager):
   LKGM_SUBDIR = 'LKGM-candidates'
   CHROME_PFQ_SUBDIR = 'chrome-LKGM-candidates'
   COMMIT_QUEUE_SUBDIR = 'paladin'
-
-  # Set path in repository to keep latest approved LKGM manifest.
-  LKGM_PATH = 'LKGM/lkgm.xml'
+  PROJECT_SDK_SUBDIR = 'project-sdk'
 
   def __init__(self, source_repo, manifest_repo, build_names, build_type,
                incr_type, force, branch, manifest=constants.DEFAULT_MANIFEST,
-               dry_run=True, master=False):
+               dry_run=True, master=False,
+               lkgm_path_rel=constants.LKGM_MANIFEST):
     """Initialize an LKGM Manager.
 
     Args:
@@ -151,13 +137,14 @@ class LKGMManager(manifest_version.BuildSpecsManager):
       manifest: Manifest to use for checkout. E.g. 'full' or 'buildtools'.
       dry_run: Whether we actually commit changes we make or not.
       master: Whether we are the master builder.
+      lkgm_path_rel: Path to the LKGM symlink, relative to manifest dir.
     """
     super(LKGMManager, self).__init__(
         source_repo=source_repo, manifest_repo=manifest_repo,
         manifest=manifest, build_names=build_names, incr_type=incr_type,
         force=force, branch=branch, dry_run=dry_run, master=master)
 
-    self.lkgm_path = os.path.join(self.manifest_dir, self.LKGM_PATH)
+    self.lkgm_path = os.path.join(self.manifest_dir, lkgm_path_rel)
     self.compare_versions_fn = _LKGMCandidateInfo.VersionCompare
     self.build_type = build_type
     # Chrome PFQ and PFQ's exist at the same time and version separately so they
@@ -166,6 +153,8 @@ class LKGMManager(manifest_version.BuildSpecsManager):
       self.rel_working_dir = self.CHROME_PFQ_SUBDIR
     elif cbuildbot_config.IsCQType(self.build_type):
       self.rel_working_dir = self.COMMIT_QUEUE_SUBDIR
+    elif self.build_type == constants.PROJECT_SDK_TYPE:
+      self.rel_working_dir = self.PROJECT_SDK_SUBDIR
     else:
       assert cbuildbot_config.IsPFQType(self.build_type)
       self.rel_working_dir = self.LKGM_SUBDIR
@@ -251,76 +240,6 @@ class LKGMManager(manifest_version.BuildSpecsManager):
 
     with open(manifest, 'w+') as manifest_file:
       manifest_dom.writexml(manifest_file)
-
-  @staticmethod
-  def _GetDefaultRemote(manifest_dom):
-    """Returns the default remote in a manifest (if any).
-
-    Args:
-      manifest_dom: DOM Document object representing the manifest.
-
-    Returns:
-      Default remote if one exists, None otherwise.
-    """
-    default_nodes = manifest_dom.getElementsByTagName(DEFAULT_ELEMENT)
-    if default_nodes:
-      if len(default_nodes) > 1:
-        raise FilterManifestException(
-            'More than one <default> element found in manifest')
-      return default_nodes[0].getAttribute(PROJECT_REMOTE_ATTR)
-    return None
-
-  @staticmethod
-  def _FilterCrosInternalProjectsFromManifest(
-      manifest, whitelisted_remotes=constants.EXTERNAL_REMOTES):
-    """Returns a path to a new manifest with internal repositories stripped.
-
-    Args:
-      manifest: Path to an existing manifest that may have internal
-        repositories.
-      whitelisted_remotes: Tuple of remotes to allow in the external manifest.
-        Only projects with those remotes will be included in the external
-        manifest.
-
-    Returns:
-      Path to a new manifest that is a copy of the original without internal
-        repositories or pending commits.
-    """
-    temp_fd, new_path = tempfile.mkstemp('external_manifest')
-    manifest_dom = minidom.parse(manifest)
-    manifest_node = manifest_dom.getElementsByTagName(MANIFEST_ELEMENT)[0]
-    projects = manifest_dom.getElementsByTagName(PROJECT_ELEMENT)
-    pending_commits = manifest_dom.getElementsByTagName(PALADIN_COMMIT_ELEMENT)
-
-    default_remote = LKGMManager._GetDefaultRemote(manifest_dom)
-    internal_projects = set()
-    for project_element in projects:
-      project_remote = project_element.getAttribute(PROJECT_REMOTE_ATTR)
-      project = project_element.getAttribute(PROJECT_NAME_ATTR)
-      if not project_remote:
-        if not default_remote:
-          # This should not happen for a valid manifest. Either each
-          # project must have a remote specified or there should
-          # be manifest default we could use.
-          raise FilterManifestException(
-              'Project %s has unspecified remote with no default' % project)
-        project_remote = default_remote
-      if project_remote not in whitelisted_remotes:
-        internal_projects.add(project)
-        manifest_node.removeChild(project_element)
-
-    for commit_element in pending_commits:
-      if commit_element.getAttribute(
-          PALADIN_PROJECT_ATTR) in internal_projects:
-        manifest_node.removeChild(commit_element)
-
-    with os.fdopen(temp_fd, 'w') as manifest_file:
-      # Filter out empty lines.
-      filtered_manifest_noempty = filter(
-          str.strip, manifest_dom.toxml('utf-8').splitlines())
-      manifest_file.write(os.linesep.join(filtered_manifest_noempty))
-
-    return new_path
 
   def CreateNewCandidate(self, validation_pool=None,
                          chrome_version=None,
@@ -432,7 +351,8 @@ class LKGMManager(manifest_version.BuildSpecsManager):
         manifest because of a git error or the manifest is already checked-in.
     """
     last_error = None
-    new_manifest = self._FilterCrosInternalProjectsFromManifest(manifest)
+    new_manifest = manifest_version.FilterManifest(
+        manifest, whitelisted_remotes=constants.EXTERNAL_REMOTES)
     version_info = self.GetCurrentVersionInfo()
     for _attempt in range(0, retries + 1):
       try:
@@ -523,7 +443,7 @@ class LKGMManager(manifest_version.BuildSpecsManager):
         git.CreatePushBranch(manifest_version.PUSH_BRANCH,
                              self.manifest_dir, sync=False)
         manifest_version.CreateSymlink(path_to_candidate, self.lkgm_path)
-        git.RunGit(self.manifest_dir, ['add', self.LKGM_PATH])
+        git.RunGit(self.manifest_dir, ['add', self.lkgm_path])
         self.PushSpecChanges(
             'Automatic: %s promoting %s to LKGM' % (self.build_names[0],
                                                     self.current_version))

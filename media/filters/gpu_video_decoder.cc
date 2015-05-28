@@ -13,7 +13,6 @@
 #include "base/message_loop/message_loop.h"
 #include "base/metrics/histogram.h"
 #include "base/stl_util.h"
-#include "base/synchronization/waitable_event.h"
 #include "base/task_runner_util.h"
 #include "gpu/command_buffer/common/mailbox_holder.h"
 #include "media/base/bind_to_current_loop.h"
@@ -22,7 +21,7 @@
 #include "media/base/pipeline.h"
 #include "media/base/pipeline_status.h"
 #include "media/base/video_decoder_config.h"
-#include "media/filters/gpu_video_accelerator_factories.h"
+#include "media/renderers/gpu_video_accelerator_factories.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 
 namespace media {
@@ -98,7 +97,8 @@ void GpuVideoDecoder::Reset(const base::Closure& closure)  {
   vda_->Reset();
 }
 
-static bool IsCodedSizeSupported(const gfx::Size& coded_size) {
+static bool IsCodedSizeSupported(const gfx::Size& coded_size,
+                                 VideoCodecProfile profile) {
 #if defined(OS_WIN)
   // Windows Media Foundation H.264 decoding does not support decoding videos
   // with any dimension smaller than 48 pixels:
@@ -119,7 +119,9 @@ static bool IsCodedSizeSupported(const gfx::Size& coded_size) {
   bool hw_large_video_support =
       base::CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kIgnoreResolutionLimitsForAcceleratedVideoDecode) ||
-      ((cpu.vendor_name() == "GenuineIntel") && cpu.model() >= 55);
+      ((cpu.vendor_name() == "GenuineIntel") && cpu.model() >= 55 &&
+       // TODO(posciak, henryhsu): Remove this once we can query in runtime.
+       profile >= H264PROFILE_MIN && profile <= H264PROFILE_MAX);
   bool os_large_video_support = true;
 #if defined(OS_WIN)
   os_large_video_support = false;
@@ -167,7 +169,7 @@ void GpuVideoDecoder::Initialize(const VideoDecoderConfig& config,
     return;
   }
 
-  if (!IsCodedSizeSupported(config.coded_size())) {
+  if (!IsCodedSizeSupported(config.coded_size(), config.profile())) {
     status_cb.Run(DECODER_ERROR_NOT_SUPPORTED);
     return;
   }
@@ -385,33 +387,6 @@ void GpuVideoDecoder::DismissPictureBuffer(int32 id) {
   // Postpone deletion until after it's returned to us.
 }
 
-static void ReadPixelsSyncInner(
-    const scoped_refptr<media::GpuVideoAcceleratorFactories>& factories,
-    uint32 texture_id,
-    const gfx::Rect& visible_rect,
-    const SkBitmap& pixels,
-    base::WaitableEvent* event) {
-  factories->ReadPixels(texture_id, visible_rect, pixels);
-  event->Signal();
-}
-
-static void ReadPixelsSync(
-    const scoped_refptr<media::GpuVideoAcceleratorFactories>& factories,
-    uint32 texture_id,
-    const gfx::Rect& visible_rect,
-    const SkBitmap& pixels) {
-  base::WaitableEvent event(true, false);
-  if (!factories->GetTaskRunner()->PostTask(FROM_HERE,
-                                            base::Bind(&ReadPixelsSyncInner,
-                                                       factories,
-                                                       texture_id,
-                                                       visible_rect,
-                                                       pixels,
-                                                       &event)))
-    return;
-  event.Wait();
-}
-
 void GpuVideoDecoder::PictureReady(const media::Picture& picture) {
   DVLOG(3) << "PictureReady()";
   DCheckGpuVideoAcceleratorFactoriesTaskRunnerIsCurrent();
@@ -450,16 +425,11 @@ void GpuVideoDecoder::PictureReady(const media::Picture& picture) {
   scoped_refptr<VideoFrame> frame(VideoFrame::WrapNativeTexture(
       make_scoped_ptr(new gpu::MailboxHolder(
           pb.texture_mailbox(), decoder_texture_target_, 0 /* sync_point */)),
-      BindToCurrentLoop(base::Bind(&GpuVideoDecoder::ReleaseMailbox,
-                                   weak_factory_.GetWeakPtr(),
-                                   factories_,
-                                   picture.picture_buffer_id(),
-                                   pb.texture_id())),
-      pb.size(),
-      visible_rect,
-      natural_size,
-      timestamp,
-      base::Bind(&ReadPixelsSync, factories_, pb.texture_id(), visible_rect)));
+      BindToCurrentLoop(base::Bind(
+          &GpuVideoDecoder::ReleaseMailbox, weak_factory_.GetWeakPtr(),
+          factories_, picture.picture_buffer_id(), pb.texture_id())),
+      pb.size(), visible_rect, natural_size, timestamp,
+      picture.allow_overlay()));
   CHECK_GT(available_pictures_, 0);
   --available_pictures_;
   bool inserted =

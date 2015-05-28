@@ -11,6 +11,7 @@
 #include "bindings/core/v8/ScriptState.h"
 #include "bindings/core/v8/ScriptValue.h"
 #include "bindings/core/v8/V8Binding.h"
+#include "bindings/core/v8/V8BindingForTesting.h"
 #include "bindings/core/v8/V8GCController.h"
 #include "core/dom/Document.h"
 #include "core/testing/DummyPageHolder.h"
@@ -81,7 +82,7 @@ private:
 
 class GarbageCollectedHolder : public GarbageCollectedScriptWrappable {
 public:
-    typedef ScriptPromiseProperty<Member<GarbageCollectedScriptWrappable>, Member<GarbageCollectedScriptWrappable>, Member<GarbageCollectedScriptWrappable> > Property;
+    typedef ScriptPromiseProperty<Member<GarbageCollectedScriptWrappable>, Member<GarbageCollectedScriptWrappable>, Member<GarbageCollectedScriptWrappable>> Property;
     GarbageCollectedHolder(ExecutionContext* executionContext)
         : GarbageCollectedScriptWrappable("holder")
         , m_property(new Property(executionContext, toGarbageCollectedScriptWrappable(), Property::Ready)) { }
@@ -89,7 +90,7 @@ public:
     Property* property() { return m_property; }
     GarbageCollectedScriptWrappable* toGarbageCollectedScriptWrappable() { return this; }
 
-    virtual void trace(Visitor *visitor) override
+    DEFINE_INLINE_VIRTUAL_TRACE()
     {
         GarbageCollectedScriptWrappable::trace(visitor);
         visitor->trace(m_property);
@@ -103,7 +104,7 @@ class RefCountedHolder : public RefCountedScriptWrappable {
 public:
     // Do not resolve or reject the property with the holder itself. It leads
     // to a leak.
-    typedef ScriptPromiseProperty<RefCountedScriptWrappable*, RefPtr<RefCountedScriptWrappable>, RefPtr<RefCountedScriptWrappable> > Property;
+    typedef ScriptPromiseProperty<RefCountedScriptWrappable*, RefPtr<RefCountedScriptWrappable>, RefPtr<RefCountedScriptWrappable>> Property;
     static PassRefPtr<RefCountedHolder> create(ExecutionContext* executionContext)
     {
         return adoptRef(new RefCountedHolder(executionContext));
@@ -148,7 +149,7 @@ public:
         m_page.clear();
         m_otherScriptState.clear();
         gc();
-        Heap::collectGarbage(ThreadState::HeapPointersOnStack);
+        Heap::collectGarbage(ThreadState::HeapPointersOnStack, ThreadState::GCWithSweep, Heap::ForcedGCForTesting);
     }
 
     void gc() { V8GCController::collectGarbage(v8::Isolate::GetCurrent()); }

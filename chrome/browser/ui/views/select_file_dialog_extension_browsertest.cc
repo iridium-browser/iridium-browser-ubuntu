@@ -22,8 +22,6 @@
 #include "chrome/browser/ui/browser_window.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/pref_names.h"
-#include "content/public/browser/notification_service.h"
-#include "content/public/browser/notification_types.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/test/test_utils.h"
@@ -48,31 +46,45 @@ class MockSelectFileDialogListener : public ui::SelectFileDialog::Listener {
   void* params() const { return params_; }
 
   // ui::SelectFileDialog::Listener implementation.
-  virtual void FileSelected(const base::FilePath& path,
-                            int index,
-                            void* params) override {
+  void FileSelected(const base::FilePath& path,
+                    int index,
+                    void* params) override {
     file_selected_ = true;
     path_ = path;
     params_ = params;
+    QuitMessageLoop();
   }
-  virtual void FileSelectedWithExtraInfo(
-      const ui::SelectedFileInfo& selected_file_info,
-      int index,
-      void* params) override {
+  void FileSelectedWithExtraInfo(const ui::SelectedFileInfo& selected_file_info,
+                                 int index,
+                                 void* params) override {
     FileSelected(selected_file_info.local_path, index, params);
   }
-  virtual void MultiFilesSelected(
-      const std::vector<base::FilePath>& files, void* params) override {}
-  virtual void FileSelectionCanceled(void* params) override {
+  void MultiFilesSelected(const std::vector<base::FilePath>& files,
+                          void* params) override {
+    QuitMessageLoop();
+  }
+  void FileSelectionCanceled(void* params) override {
     canceled_ = true;
     params_ = params;
+    QuitMessageLoop();
+  }
+
+  void WaitForCalled() {
+    message_loop_runner_ = new content::MessageLoopRunner();
+    message_loop_runner_->Run();
   }
 
  private:
+  void QuitMessageLoop() {
+    if (message_loop_runner_.get())
+      message_loop_runner_->Quit();
+  }
+
   bool file_selected_;
   bool canceled_;
   base::FilePath path_;
   void* params_;
+  scoped_refptr<content::MessageLoopRunner> message_loop_runner_;
 
   DISALLOW_COPY_AND_ASSIGN(MockSelectFileDialogListener);
 };
@@ -84,7 +96,7 @@ class SelectFileDialogExtensionBrowserTest : public ExtensionBrowserTest {
     DIALOG_BTN_CANCEL
   };
 
-  virtual void SetUp() override {
+  void SetUp() override {
     extensions::ComponentLoader::EnableBackgroundExtensionsForTesting();
 
     // Create the dialog wrapper object, but don't show it yet.
@@ -103,7 +115,7 @@ class SelectFileDialogExtensionBrowserTest : public ExtensionBrowserTest {
     ExtensionBrowserTest::SetUp();
   }
 
-  virtual void TearDown() override {
+  void TearDown() override {
     ExtensionBrowserTest::TearDown();
 
     // Delete the dialog first, as it holds a pointer to the listener.
@@ -191,9 +203,6 @@ class SelectFileDialogExtensionBrowserTest : public ExtensionBrowserTest {
                    const gfx::NativeWindow& owning_window) {
     // Inject JavaScript to click the cancel button and wait for notification
     // that the window has closed.
-    content::WindowedNotificationObserver host_destroyed(
-        content::NOTIFICATION_RENDER_WIDGET_HOST_DESTROYED,
-        content::NotificationService::AllSources());
     content::RenderViewHost* host = dialog_->GetRenderViewHost();
     std::string button_class =
         (button_type == DIALOG_BTN_OK) ? ".button-panel .ok" :
@@ -205,7 +214,7 @@ class SelectFileDialogExtensionBrowserTest : public ExtensionBrowserTest {
     // to JavaScript, so do not wait for return values.
     host->GetMainFrame()->ExecuteJavaScript(script);
     LOG(INFO) << "Waiting for window close notification.";
-    host_destroyed.Wait();
+    listener_->WaitForCalled();
 
     // Dialog no longer believes it is running.
     ASSERT_FALSE(dialog_->IsRunning(owning_window));

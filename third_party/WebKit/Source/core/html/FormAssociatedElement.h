@@ -24,6 +24,7 @@
 #ifndef FormAssociatedElement_h
 #define FormAssociatedElement_h
 
+#include "core/CoreExport.h"
 #include "platform/heap/Handle.h"
 #include "wtf/WeakPtr.h"
 #include "wtf/text/WTFString.h"
@@ -39,7 +40,7 @@ class HTMLFormElement;
 class Node;
 class ValidityState;
 
-class FormAssociatedElement : public WillBeGarbageCollectedMixin {
+class CORE_EXPORT FormAssociatedElement : public WillBeGarbageCollectedMixin {
 public:
     virtual ~FormAssociatedElement();
 
@@ -92,7 +93,7 @@ public:
 
     typedef WillBeHeapVector<RawPtrWillBeMember<FormAssociatedElement>> List;
 
-    virtual void trace(Visitor*);
+    DECLARE_VIRTUAL_TRACE();
 
 protected:
     FormAssociatedElement();

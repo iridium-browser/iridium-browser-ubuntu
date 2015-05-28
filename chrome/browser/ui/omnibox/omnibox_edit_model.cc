@@ -11,6 +11,7 @@
 #include "base/format_macros.h"
 #include "base/metrics/histogram.h"
 #include "base/prefs/pref_service.h"
+#include "base/profiler/scoped_tracker.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
@@ -69,6 +70,7 @@
 #include "ui/gfx/image/image.h"
 #include "url/url_util.h"
 
+using bookmarks::BookmarkModel;
 using metrics::OmniboxEventProto;
 using predictors::AutocompleteActionPredictor;
 
@@ -254,8 +256,6 @@ void OmniboxEditModel::RestoreState(const State* state) {
   // regardless of whether there is saved state.
   bool url_replacement_enabled = !state || state->url_replacement_enabled;
   controller_->GetToolbarModel()->set_url_replacement_enabled(
-      url_replacement_enabled);
-  controller_->GetToolbarModel()->set_origin_chip_enabled(
       url_replacement_enabled);
   permanent_text_ = controller_->GetToolbarModel()->GetText();
   // Don't muck with the search term replacement state, as we've just set it
@@ -516,17 +516,7 @@ void OmniboxEditModel::SetInputInProgress(bool in_progress) {
     autocomplete_controller()->ResetSession();
   }
 
-  // The following code handles two cases:
-  // * For HIDE_ON_USER_INPUT and ON_SRP, it hides the chip when user input
-  //   begins.
-  // * For HIDE_ON_MOUSE_RELEASE, which only hides the chip on mouse release if
-  //   the omnibox is empty, it handles the "omnibox was not empty" case by
-  //   acting like HIDE_ON_USER_INPUT.
-  if (chrome::ShouldDisplayOriginChip() && in_progress)
-    controller()->GetToolbarModel()->set_origin_chip_enabled(false);
-
   controller_->GetToolbarModel()->set_input_in_progress(in_progress);
-  controller_->EndOriginChipAnimations(true);
   controller_->Update(NULL);
 
   if (user_input_in_progress_ || !in_revert_)
@@ -552,6 +542,10 @@ void OmniboxEditModel::Revert() {
 void OmniboxEditModel::StartAutocomplete(
     bool has_selected_text,
     bool prevent_inline_autocomplete) {
+  // TODO(vadimt): Remove ScopedTracker below once crbug.com/440919 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "440919 OmniboxEditModel::StartAutocomplete"));
   size_t cursor_position;
   if (inline_autocomplete_text_.empty()) {
     // Cursor position is equivalent to the current selection's end.
@@ -685,6 +679,33 @@ void OmniboxEditModel::AcceptInput(WindowOpenDisposition disposition,
     // as aggressively later.
     match.transition = ui::PAGE_TRANSITION_LINK;
   }
+
+  // While the user is typing, the instant search base page may be prerendered
+  // in the background. Even though certain inputs may not be eligible for
+  // prerendering, the prerender isn't automatically cancelled as the user
+  // continues typing, in hopes the final input will end up making use of the
+  // prerenderer. Intermediate inputs that are legal for prerendering will be
+  // sent to the prerendered page to keep it up to date; then once the user
+  // commits a navigation, it will trigger code in chrome::Navigate() to swap in
+  // the prerenderer.
+  //
+  // Unfortunately, that swap code only has the navigated URL, so it doesn't
+  // actually know whether the prerenderer has been sent the relevant input
+  // already, or whether instead the user manually navigated to something that
+  // looks like a search URL (which won't have been sent to the prerenderer).
+  // In this case, we need to ensure the prerenderer is cancelled here so that
+  // code can't attempt to wrongly swap-in, or it could swap in an empty page in
+  // place of the correct navigation.
+  //
+  // This would be clearer if we could swap in the prerenderer here instead of
+  // over in chrome::Navigate(), but we have to wait until then because the
+  // final decision about whether to use the prerendered page depends on other
+  // parts of the chrome::NavigateParams struct not available until then.
+  InstantSearchPrerenderer* prerenderer =
+      InstantSearchPrerenderer::GetForProfile(profile_);
+  if (prerenderer &&
+      !prerenderer->IsAllowed(match, controller_->GetWebContents()))
+    prerenderer->Cancel();
 
   DCHECK(popup_model());
   view_->OpenMatch(match, disposition, alternate_nav_url, base::string16(),
@@ -980,15 +1001,6 @@ bool OmniboxEditModel::OnEscapeKeyPressed() {
     view_->Update();
   }
 
-  // When using the origin chip, hitting escape to revert all should either
-  // display the URL (when search term replacement would not be performed for
-  // this page) or the search terms (when it would).  To accomplish this,
-  // we'll need to disable URL replacement iff it's currently enabled and
-  // search term replacement wouldn't normally happen.
-  bool should_disable_url_replacement =
-      controller_->GetToolbarModel()->url_replacement_enabled() &&
-      !controller_->GetToolbarModel()->WouldPerformSearchTermReplacement(true);
-
   // If the user wasn't editing, but merely had focus in the edit, allow <esc>
   // to be processed as an accelerator, so it can still be used to stop a load.
   // When the permanent text isn't all selected we still fall through to the
@@ -996,8 +1008,8 @@ bool OmniboxEditModel::OnEscapeKeyPressed() {
   // <esc> to quickly replace all the text; this matches IE.
   const bool has_zero_suggest_match = match.provider &&
       (match.provider->type() == AutocompleteProvider::TYPE_ZERO_SUGGEST);
-  if (!has_zero_suggest_match && !should_disable_url_replacement &&
-      !user_input_in_progress_ && view_->IsSelectAll())
+  if (!has_zero_suggest_match && !user_input_in_progress_ &&
+      view_->IsSelectAll())
     return false;
 
   if (!user_text_.empty()) {
@@ -1006,11 +1018,7 @@ bool OmniboxEditModel::OnEscapeKeyPressed() {
                               OMNIBOX_USER_TEXT_CLEARED_NUM_OF_ITEMS);
   }
 
-  if (should_disable_url_replacement) {
-    controller_->GetToolbarModel()->set_url_replacement_enabled(false);
-    UpdatePermanentText();
-  }
-  view_->RevertWithoutResettingSearchTermReplacement();
+  view_->RevertAll();
   view_->SelectAll(true);
   return true;
 }

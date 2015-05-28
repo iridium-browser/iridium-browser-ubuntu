@@ -11,15 +11,10 @@
 
 namespace blink {
 
-BeginTransformDisplayItem::BeginTransformDisplayItem(DisplayItemClient client, const AffineTransform& transform)
-    : DisplayItem(client, BeginTransform)
-    , m_transform(transform)
-{ }
-
-void BeginTransformDisplayItem::replay(GraphicsContext* context)
+void BeginTransformDisplayItem::replay(GraphicsContext& context)
 {
-    context->save();
-    context->concatCTM(m_transform);
+    context.save();
+    context.concatCTM(m_transform);
 }
 
 void BeginTransformDisplayItem::appendToWebDisplayItemList(WebDisplayItemList* list) const
@@ -27,9 +22,9 @@ void BeginTransformDisplayItem::appendToWebDisplayItemList(WebDisplayItemList* l
     list->appendTransformItem(affineTransformToSkMatrix(m_transform));
 }
 
-void EndTransformDisplayItem::replay(GraphicsContext* context)
+void EndTransformDisplayItem::replay(GraphicsContext& context)
 {
-    context->restore();
+    context.restore();
 }
 
 void EndTransformDisplayItem::appendToWebDisplayItemList(WebDisplayItemList* list) const

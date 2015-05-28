@@ -30,6 +30,18 @@ class GFX_EXPORT Display {
     ROTATE_270,
   };
 
+  // The display rotation can have multiple causes for change. A user can set a
+  // preference. On devices with accelerometers, they can change the rotation.
+  // RotationSource allows for the tracking of a Rotation per source of the
+  // change. ROTATION_SOURCE_ACTIVE is the current rotation of the display.
+  // Rotation changes not due to an accelerometer, nor the user, are to use this
+  // source directly.
+  enum RotationSource {
+    ROTATION_SOURCE_ACCELEROMETER = 0,
+    ROTATION_SOURCE_ACTIVE,
+    ROTATION_SOURCE_USER,
+  };
+
   // Touch support for the display.
   enum TouchSupport {
     TOUCH_SUPPORT_UNKNOWN,
@@ -50,6 +62,11 @@ class GFX_EXPORT Display {
   // Indicates if a device scale factor is being explicitly enforced from the
   // command line via "--force-device-scale-factor".
   static bool HasForceDeviceScaleFactor();
+
+  // Resets the caches used to determine if a device scale factor is being
+  // forced from the command line via "--force-device-scale-factor", and thus
+  // ensures that the command line is reevaluated.
+  static void ResetForceDeviceScaleFactorForTesting();
 
   // Sets/Gets unique identifier associated with the display.
   // -1 means invalid display and it doesn't not exit.

@@ -31,6 +31,7 @@
 #ifndef FileReader_h
 #define FileReader_h
 
+#include "core/CoreExport.h"
 #include "core/dom/ActiveDOMObject.h"
 #include "core/events/EventTarget.h"
 #include "core/fileapi/FileError.h"
@@ -39,7 +40,6 @@
 #include "platform/heap/Handle.h"
 #include "wtf/Forward.h"
 #include "wtf/RefCounted.h"
-#include "wtf/text/WTFString.h"
 
 namespace blink {
 
@@ -47,8 +47,9 @@ class Blob;
 class DOMArrayBuffer;
 class ExceptionState;
 class ExecutionContext;
+class StringOrArrayBuffer;
 
-class FileReader final : public RefCountedGarbageCollectedEventTargetWithInlineData<FileReader>, public ActiveDOMObject, public FileReaderLoaderClient {
+class CORE_EXPORT FileReader final : public RefCountedGarbageCollectedEventTargetWithInlineData<FileReader>, public ActiveDOMObject, public FileReaderLoaderClient {
     DEFINE_WRAPPERTYPEINFO();
     DEFINE_EVENT_TARGET_REFCOUNTING_WILL_BE_REMOVED(RefCountedGarbageCollected<FileReader>);
     WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(FileReader);
@@ -74,9 +75,7 @@ public:
 
     ReadyState readyState() const { return m_state; }
     FileError* error() { return m_error; }
-    FileReaderLoader::ReadType readType() const { return m_readType; }
-    PassRefPtr<DOMArrayBuffer> arrayBufferResult() const;
-    String stringResult();
+    void result(StringOrArrayBuffer& resultAttribute) const;
 
     // ActiveDOMObject
     virtual void stop() override;
@@ -99,7 +98,7 @@ public:
     DEFINE_ATTRIBUTE_EVENT_LISTENER(error);
     DEFINE_ATTRIBUTE_EVENT_LISTENER(loadend);
 
-    virtual void trace(Visitor*) override;
+    DECLARE_VIRTUAL_TRACE();
 
 private:
     explicit FileReader(ExecutionContext*);

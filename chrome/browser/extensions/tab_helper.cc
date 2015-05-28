@@ -26,7 +26,6 @@
 #include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/browser_dialogs.h"
 #include "chrome/browser/ui/browser_finder.h"
-#include "chrome/browser/ui/browser_window.h"
 #include "chrome/browser/ui/host_desktop.h"
 #include "chrome/browser/web_applications/web_app.h"
 #include "chrome/common/extensions/chrome_extension_messages.h"
@@ -60,10 +59,6 @@
 #include "extensions/common/feature_switch.h"
 #include "extensions/common/manifest_handlers/icons_handler.h"
 
-#if defined(OS_CHROMEOS)
-#include "chrome/browser/ui/ash/launcher/chrome_launcher_controller.h"
-#endif
-
 #if defined(OS_WIN)
 #include "chrome/browser/web_applications/web_app_win.h"
 #endif
@@ -84,7 +79,7 @@ TabHelper::TabHelper(content::WebContents* web_contents)
           Profile::FromBrowserContext(web_contents->GetBrowserContext()),
           this),
       pending_web_app_action_(NONE),
-      last_committed_page_id_(-1),
+      last_committed_nav_entry_unique_id_(0),
       update_shortcut_on_load_complete_(false),
       script_executor_(
           new ScriptExecutor(web_contents, &script_execution_observers_)),
@@ -198,19 +193,6 @@ void TabHelper::FinishCreateBookmarkApp(
     const Extension* extension,
     const WebApplicationInfo& web_app_info) {
   pending_web_app_action_ = NONE;
-
-  // There was an error with downloading the icons or installing the app.
-  if (!extension)
-    return;
-
-#if defined(OS_CHROMEOS)
-  ChromeLauncherController::instance()->PinAppWithID(extension->id());
-#endif
-
-  Browser* browser = chrome::FindBrowserWithWebContents(web_contents());
-  if (browser) {
-    browser->window()->ShowBookmarkAppBubble(web_app_info, extension->id());
-  }
 }
 
 void TabHelper::RenderViewCreated(RenderViewHost* render_view_host) {
@@ -230,7 +212,7 @@ void TabHelper::DidNavigateMainFrame(
   ExtensionRegistry* registry = ExtensionRegistry::Get(context);
   const ExtensionSet& enabled_extensions = registry->enabled_extensions();
 
-  if (util::IsStreamlinedHostedAppsEnabled()) {
+  if (util::IsNewBookmarkAppsEnabled()) {
     Browser* browser = chrome::FindBrowserWithWebContents(web_contents());
     if (browser && browser->is_app()) {
       const Extension* extension = registry->GetExtensionById(
@@ -297,9 +279,9 @@ void TabHelper::OnDidGetWebApplicationInfo(const WebApplicationInfo& info) {
 
   NavigationEntry* entry =
       web_contents()->GetController().GetLastCommittedEntry();
-  if (!entry || last_committed_page_id_ != entry->GetPageID())
+  if (!entry || last_committed_nav_entry_unique_id_ != entry->GetUniqueID())
     return;
-  last_committed_page_id_ = -1;
+  last_committed_nav_entry_unique_id_ = 0;
 
   switch (pending_web_app_action_) {
 #if !defined(OS_MACOSX)
@@ -319,9 +301,8 @@ void TabHelper::OnDidGetWebApplicationInfo(const WebApplicationInfo& info) {
       if (web_app_info_.title.empty())
         web_app_info_.title = base::UTF8ToUTF16(web_app_info_.app_url.spec());
 
-      bookmark_app_helper_.reset(new BookmarkAppHelper(
-          ExtensionSystem::Get(profile_)->extension_service(),
-          web_app_info_, web_contents()));
+      bookmark_app_helper_.reset(
+          new BookmarkAppHelper(profile_, web_app_info_, web_contents()));
       bookmark_app_helper_->Create(base::Bind(
           &TabHelper::FinishCreateBookmarkApp, weak_ptr_factory_.GetWeakPtr()));
       break;
@@ -571,7 +552,7 @@ void TabHelper::GetApplicationInfo(WebAppAction action) {
     return;
 
   pending_web_app_action_ = action;
-  last_committed_page_id_ = entry->GetPageID();
+  last_committed_nav_entry_unique_id_ = entry->GetUniqueID();
 
   Send(new ChromeViewMsg_GetWebApplicationInfo(routing_id()));
 }

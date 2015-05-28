@@ -34,6 +34,7 @@ class PrefRegistrySimple;
 class PrefService;
 class Profile;
 class ProfileManager;
+class PromoResourceService;
 class SafeBrowsingService;
 class StatusTray;
 class WatchDogThread;
@@ -48,6 +49,7 @@ class VariationsService;
 namespace component_updater {
 class ComponentUpdateService;
 class PnaclComponentInstaller;
+class SupervisedUserWhitelistInstaller;
 }
 
 namespace extensions {
@@ -77,10 +79,6 @@ class NetworkTimeTracker;
 namespace policy {
 class BrowserPolicyConnector;
 class PolicyService;
-}
-
-namespace prerender {
-class PrerenderTracker;
 }
 
 namespace printing {
@@ -124,6 +122,7 @@ class BrowserProcess {
   virtual PrefService* local_state() = 0;
   virtual net::URLRequestContextGetter* system_request_context() = 0;
   virtual chrome_variations::VariationsService* variations_service() = 0;
+  virtual PromoResourceService* promo_resource_service() = 0;
 
   virtual BrowserProcessPlatformPart* platform_part() = 0;
 
@@ -218,14 +217,15 @@ class BrowserProcess {
 
   virtual ChromeNetLog* net_log() = 0;
 
-  virtual prerender::PrerenderTracker* prerender_tracker() = 0;
-
   virtual component_updater::ComponentUpdateService* component_updater() = 0;
 
   virtual CRLSetFetcher* crl_set_fetcher() = 0;
 
   virtual component_updater::PnaclComponentInstaller*
-      pnacl_component_installer() = 0;
+  pnacl_component_installer() = 0;
+
+  virtual component_updater::SupervisedUserWhitelistInstaller*
+  supervised_user_whitelist_installer() = 0;
 
   virtual MediaFileSystemRegistry* media_file_system_registry() = 0;
 

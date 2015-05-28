@@ -41,23 +41,59 @@ Still reading?
   <issue id="HandlerLeak">
     <ignore path="remoting/android/java/src/org/chromium/chromoting/TapGestureDetector.java"/>
   </issue>
+  <issue id="IconDensities">
+    <!-- crbug.com/457918 is tracking missing assets -->
+    <ignore path="components/web_contents_delegate_android/android/java/res/drawable-xxhdpi"/>
+    <ignore path="components/web_contents_delegate_android/android/java/res/drawable-xxxhdpi"/>
+    <ignore path="content/public/android/java/res/drawable-xxhdpi"/>
+    <ignore path="content/public/android/java/res/drawable-xxxhdpi"/>
+    <ignore path="chrome/android/java/res/drawable-xxhdpi"/>
+    <ignore path="chrome/android/java/res/drawable-xxxhdpi"/>
+    <ignore path="ui/android/java/res/drawable-xxhdpi"/>
+    <ignore path="ui/android/java/res/drawable-xxxhdpi"/>
+  </issue>
+  <!-- It is OK for content_shell_apk and chrome_shell_apk to have missing assets. -->
+  <issue id="IconLocation">
+    <ignore path="content/shell/android/java/res/"/>
+    <ignore path="chrome/android/shell/res/"/>
+  </issue>
+  <issue id="InconsistentLayout" severity="ignore"/>
+  <issue id="InflateParams" severity="ignore"/>
   <issue id="MissingApplicationIcon" severity="ignore"/>
   <issue id="MissingRegistered" severity="ignore"/>
   <issue id="MissingVersion">
     <ignore path="AndroidManifest.xml"/>
   </issue>
-  <!-- Disabling is InlinedApi and NewApi is bad but we have too many of these errors and nobody is fixing it. crbug.com/411461 -->
   <issue id="InlinedApi" severity="ignore"/>
-  <issue id="NewApi" severity="ignore"/>
+  <issue id="NewApi">
+    <ignore regexp="Attribute `paddingStart` referenced here can result in a crash on some specific devices older than API 17"/>
+    <ignore path="org/chromium/base/AnimationFrameTimeHistogram$Recorder.class"/>
+    <ignore path="org/chromium/base/JavaHandlerThread.class"/>
+    <ignore path="org/chromium/base/SysUtils.class"/>
+    <ignore path="org/chromium/chrome/browser/TtsPlatformImpl.class"/>
+    <ignore path="org/chromium/chrome/browser/TtsPlatformImpl$*.class"/>
+  </issue>
   <issue id="OldTargetApi">
     <ignore path="AndroidManifest.xml"/>
   </issue>
+  <issue id="Overdraw" severity="ignore"/>
   <issue id="Recycle" severity="ignore"/>
   <issue id="Registered" severity="ignore"/>
+  <issue id="RtlCompat" severity="ignore"/>
+  <issue id="RtlEnabled" severity="ignore"/>
+  <issue id="RtlSymmetry" severity="ignore"/>
   <issue id="SdCardPath">
     <ignore path="content/public/android/java/src/org/chromium/content/browser/MediaResourceGetter.java"/>
   </issue>
   <issue id="SetJavaScriptEnabled" severity="ignore"/>
+  <issue id="UnusedResources">
+    <!-- These files are used by chrome_shell_apk and chrome_apk targets. -->
+    <ignore path="chrome/android/java/res/layout/accessibility_tab_switcher.xml" />
+    <ignore path="chrome/android/java/res/drawable/btn_back.xml" />
+    <ignore path="chrome/android/java/res/drawable/btn_forward.xml" />
+  </issue>
+  <issue id="SignatureOrSystemPermissions" severity="ignore"/>
+  <issue id="UnusedAttribute" severity="ignore"/>
   <issue id="ViewConstructor" severity="ignore"/>
   <issue id="WrongCall" severity="ignore"/>
 </lint>

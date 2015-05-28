@@ -24,10 +24,13 @@ import org.chromium.base.FieldTrialList;
 import org.chromium.base.ObserverList;
 import org.chromium.base.ThreadUtils;
 import org.chromium.chrome.R;
+import org.chromium.chrome.browser.child_accounts.ChildAccountService;
 import org.chromium.chrome.browser.invalidation.InvalidationController;
+import org.chromium.chrome.browser.notifications.GoogleServicesNotificationController;
 import org.chromium.chrome.browser.sync.ProfileSyncService;
+import org.chromium.chrome.browser.sync.SyncController;
+import org.chromium.sync.AndroidSyncSettings;
 import org.chromium.sync.internal_api.pub.base.ModelType;
-import org.chromium.sync.notifier.SyncStatusHelper;
 import org.chromium.sync.signin.ChromeSigninController;
 
 import java.util.HashSet;
@@ -46,6 +49,24 @@ public class SigninManager {
 
     public static final String CONFIRM_MANAGED_SIGNIN_DIALOG_TAG =
             "confirm_managed_signin_dialog_tag";
+
+    // The type of signin flow.
+    /** Regular (interactive) signin. */
+    public static final int SIGNIN_TYPE_INTERACTIVE = 0;
+
+    /** Forced signin for education-enrolled devices. */
+    public static final int SIGNIN_TYPE_FORCED_EDU = 1;
+
+    /** Forced signin for child accounts. */
+    public static final int SIGNIN_TYPE_FORCED_CHILD_ACCOUNT = 2;
+
+    // The timing of enabling the ProfileSyncService.
+    /** Postpone sync till the set up is fully complete. */
+    public static final int SIGNIN_SYNC_SETUP_IN_PROGRESS = 0;
+
+    /** Enable sync immediately. */
+    public static final int SIGNIN_SYNC_IMMEDIATELY = 1;
+
     private static final String CLEAR_DATA_PROGRESS_DIALOG_TAG = "clear_data_progress";
 
     private static final String TAG = "SigninManager";
@@ -65,6 +86,8 @@ public class SigninManager {
             new ObserverList<SignInStateObserver>();
     private final ObserverList<SignInAllowedObserver> mSignInAllowedObservers =
             new ObserverList<SignInAllowedObserver>();
+
+    private final SigninNotificationController mSigninNotificationController;
 
     private Activity mSignInActivity;
     private Account mSignInAccount;
@@ -164,6 +187,13 @@ public class SigninManager {
         mContext = context.getApplicationContext();
         mNativeSigninManagerAndroid = nativeInit();
         mSigninAllowedByPolicy = nativeIsSigninAllowedByPolicy(mNativeSigninManagerAndroid);
+
+        // Setup notification system for Google services. This includes both sign-in and sync.
+        GoogleServicesNotificationController controller =
+                GoogleServicesNotificationController.get(mContext);
+        mSigninNotificationController = new SigninNotificationController(
+                mContext, controller, AccountManagementFragment.class);
+        ChromeSigninController.get(mContext).addListener(mSigninNotificationController);
     }
 
     /**
@@ -227,6 +257,13 @@ public class SigninManager {
                 }
             }
         });
+    }
+
+    /**
+     * Return the SigninNotificationController.
+     */
+    public SigninNotificationController getSigninNotificationController() {
+        return mSigninNotificationController;
     }
 
     /**
@@ -371,14 +408,13 @@ public class SigninManager {
 
         // Sign-in to sync.
         ProfileSyncService profileSyncService = ProfileSyncService.get(mContext);
-        if (SyncStatusHelper.get(mContext).isSyncEnabled(mSignInAccount)
+        if (AndroidSyncSettings.get(mContext).isSyncEnabled()
                 && !profileSyncService.hasSyncSetupCompleted()) {
             profileSyncService.setSetupInProgress(true);
             profileSyncService.syncSignIn();
         }
 
-        if (mSignInFlowObserver != null)
-            mSignInFlowObserver.onSigninComplete();
+        if (mSignInFlowObserver != null) mSignInFlowObserver.onSigninComplete();
 
         // All done, cleanup.
         Log.d(TAG, "Signin done");
@@ -436,8 +472,7 @@ public class SigninManager {
     }
 
     private void cancelSignIn() {
-        if (mSignInFlowObserver != null)
-            mSignInFlowObserver.onSigninCancelled();
+        if (mSignInFlowObserver != null) mSignInFlowObserver.onSigninCancelled();
         mSignInActivity = null;
         mSignInFlowObserver = null;
         mSignInAccount = null;
@@ -454,8 +489,63 @@ public class SigninManager {
         nativeWipeProfileData(mNativeSigninManagerAndroid);
     }
 
-    // This class must be public and static. Otherwise an exception will be thrown when Android
-    // recreates the fragment (e.g. after a configuration change).
+    /**
+     * Signs in to the specified account.
+     * The operation will be performed in the background.
+     *
+     * @param activity   The context to use for the operation.
+     * @param account    The account to sign into.
+     * @param signInType The type of the sign-in (one of SIGNIN_TYPE constants).
+     * @param signInSync When to enable the ProfileSyncService (one of SIGNIN_SYNC constants).
+     * @param showSignInNotification Whether the sign-in notification should be shown.
+     * @param observer   The observer to invoke when done, or null.
+     */
+    public void signInToSelectedAccount(final Activity activity, final Account account,
+            final int signInType, final int signInSync, final boolean showSignInNotification,
+            final SignInFlowObserver observer) {
+        // The SigninManager handles most of the sign-in flow, and onSigninComplete handles the
+        // Chrome-specific details.
+        final boolean passive = signInType != SIGNIN_TYPE_INTERACTIVE;
+
+        startSignIn(activity, account, passive, new SignInFlowObserver() {
+            @Override
+            public void onSigninComplete() {
+                // TODO(acleung): Maybe GoogleServicesManager should have a
+                // sync = true but setSetupInProgress(true) state?
+                ProfileSyncService.get(activity).setSetupInProgress(
+                        signInSync == SIGNIN_SYNC_SETUP_IN_PROGRESS);
+                SyncController.get(activity).start();
+
+                if (observer != null) observer.onSigninComplete();
+
+                if (signInType != SIGNIN_TYPE_INTERACTIVE) {
+                    AccountManagementFragment.setSignOutAllowedPreferenceValue(activity, false);
+                }
+
+                if (signInType == SIGNIN_TYPE_FORCED_CHILD_ACCOUNT) {
+                    ChildAccountService.getInstance(activity).onChildAccountSigninComplete();
+                }
+
+                SigninManager.get(activity).logInSignedInUser();
+                // If Chrome was started from an external intent we should show the sync signin
+                // popup, since the user has not seen the welcome screen where there is easy access
+                // to turn off sync.
+                if (showSignInNotification) {
+                    SigninManager.get(activity).getSigninNotificationController()
+                            .showSyncSignInNotification();
+                }
+            }
+            @Override
+            public void onSigninCancelled() {
+                if (observer != null) observer.onSigninCancelled();
+            }
+        });
+    }
+
+    /**
+     * This class must be public and static. Otherwise an exception will be thrown when Android
+     * recreates the fragment (e.g. after a configuration change).
+     */
     public static class ClearDataProgressDialog extends DialogFragment {
         @Override
         public void onCreate(Bundle savedInstanceState) {
@@ -496,13 +586,6 @@ public class SigninManager {
         for (SignInStateObserver observer : mSignInStateObservers) {
             observer.onSignedOut();
         }
-    }
-
-    /**
-     * @return True if the new profile management is enabled.
-     */
-    public static boolean isNewProfileManagementEnabled() {
-        return nativeIsNewProfileManagementEnabled();
     }
 
     /**
@@ -549,5 +632,4 @@ public class SigninManager {
     private native void nativeClearLastSignedInUser(long nativeSigninManagerAndroid);
     private native void nativeLogInSignedInUser(long nativeSigninManagerAndroid);
     private native boolean nativeIsSignedInOnNative(long nativeSigninManagerAndroid);
-    private static native boolean nativeIsNewProfileManagementEnabled();
 }

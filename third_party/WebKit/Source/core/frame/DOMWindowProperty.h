@@ -26,6 +26,7 @@
 #ifndef DOMWindowProperty_h
 #define DOMWindowProperty_h
 
+#include "core/CoreExport.h"
 #include "platform/heap/Handle.h"
 
 namespace blink {
@@ -33,7 +34,7 @@ namespace blink {
 class LocalDOMWindow;
 class LocalFrame;
 
-class DOMWindowProperty : public WillBeGarbageCollectedMixin {
+class CORE_EXPORT DOMWindowProperty : public WillBeGarbageCollectedMixin {
 public:
     explicit DOMWindowProperty(LocalFrame*);
 
@@ -42,14 +43,14 @@ public:
 
     LocalFrame* frame() const { return m_frame; }
 
-    virtual void trace(Visitor*);
+    DECLARE_VIRTUAL_TRACE();
 
 protected:
 #if !ENABLE(OILPAN)
     virtual ~DOMWindowProperty();
 #endif
 
-    RawPtrWillBeWeakMember<LocalFrame> m_frame;
+    RawPtrWillBeMember<LocalFrame> m_frame;
 
 #if !ENABLE(OILPAN)
 private:

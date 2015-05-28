@@ -28,12 +28,16 @@ class SearchResultObserver;
 // default style.
 class APP_LIST_EXPORT SearchResult {
  public:
-  // How the result should be displayed.
+  // How the result should be displayed. Do not change the order of these as
+  // they are used for metrics.
   enum DisplayType {
+    DISPLAY_NONE = 0,
     DISPLAY_LIST,
     DISPLAY_TILE,
     DISPLAY_RECOMMENDATION,
-    DISPLAY_NONE,
+    // Add new values here.
+
+    DISPLAY_TYPE_LAST,
   };
 
   // A tagged range in search result text.
@@ -98,8 +102,14 @@ class APP_LIST_EXPORT SearchResult {
   void set_details_tags(const Tags& tags) { details_tags_ = tags; }
 
   const std::string& id() const { return id_; }
+
   double relevance() const { return relevance_; }
+  void set_relevance(double relevance) { relevance_ = relevance; }
+
   DisplayType display_type() const { return display_type_; }
+  void set_display_type(DisplayType display_type) {
+    display_type_ = display_type;
+  }
 
   const Actions& actions() const {
     return actions_;
@@ -127,7 +137,7 @@ class APP_LIST_EXPORT SearchResult {
 
   // TODO(mukai): Remove this method and really simplify the ownership of
   // SearchResult. Ideally, SearchResult will be copyable.
-  virtual scoped_ptr<SearchResult> Duplicate() = 0;
+  virtual scoped_ptr<SearchResult> Duplicate() const = 0;
 
   // Opens the result.
   virtual void Open(int event_flags);
@@ -142,10 +152,6 @@ class APP_LIST_EXPORT SearchResult {
 
  protected:
   void set_id(const std::string& id) { id_ = id; }
-  void set_relevance(double relevance) { relevance_ = relevance; }
-  void set_display_type(DisplayType display_type) {
-    display_type_ = display_type;
-  }
   void set_voice_result(bool voice_result) { voice_result_ = voice_result; }
 
  private:

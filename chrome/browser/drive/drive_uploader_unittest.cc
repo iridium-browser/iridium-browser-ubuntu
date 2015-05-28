@@ -20,9 +20,9 @@
 
 using google_apis::CancelCallback;
 using google_apis::FileResource;
-using google_apis::GDataErrorCode;
-using google_apis::GDATA_NO_CONNECTION;
-using google_apis::GDATA_OTHER_ERROR;
+using google_apis::DriveApiErrorCode;
+using google_apis::DRIVE_NO_CONNECTION;
+using google_apis::DRIVE_OTHER_ERROR;
 using google_apis::HTTP_CONFLICT;
 using google_apis::HTTP_CREATED;
 using google_apis::HTTP_NOT_FOUND;
@@ -184,7 +184,7 @@ class MockDriveServiceWithUploadExpectation : public DummyDriveService {
     UploadRangeResponse response;
     scoped_ptr<FileResource> entry;
     if (received_bytes_ == expected_content_length_) {
-      GDataErrorCode response_code =
+      DriveApiErrorCode response_code =
           upload_location == GURL(kTestUploadNewFileURL) ?
           HTTP_CREATED : HTTP_SUCCESS;
       response = UploadRangeResponse(response_code, -1, -1);
@@ -245,7 +245,7 @@ class MockDriveServiceWithUploadExpectation : public DummyDriveService {
   }
 
   CancelCallback SendMultipartUploadResult(
-      GDataErrorCode response_code,
+      DriveApiErrorCode response_code,
       int64 content_length,
       const google_apis::FileResourceCallback& callback,
       const google_apis::ProgressCallback& progress_callback) {
@@ -289,7 +289,7 @@ class MockDriveServiceNoConnectionAtInitiate : public DummyDriveService {
       const UploadNewFileOptions& options,
       const InitiateUploadCallback& callback) override {
     base::MessageLoop::current()->PostTask(FROM_HERE,
-        base::Bind(callback, GDATA_NO_CONNECTION, GURL()));
+        base::Bind(callback, DRIVE_NO_CONNECTION, GURL()));
     return CancelCallback();
   }
 
@@ -300,7 +300,7 @@ class MockDriveServiceNoConnectionAtInitiate : public DummyDriveService {
       const UploadExistingFileOptions& options,
       const InitiateUploadCallback& callback) override {
     base::MessageLoop::current()->PostTask(FROM_HERE,
-        base::Bind(callback, GDATA_NO_CONNECTION, GURL()));
+        base::Bind(callback, DRIVE_NO_CONNECTION, GURL()));
     return CancelCallback();
   }
 
@@ -329,7 +329,7 @@ class MockDriveServiceNoConnectionAtInitiate : public DummyDriveService {
       const google_apis::ProgressCallback& progress_callback) override {
     base::MessageLoop::current()->PostTask(
         FROM_HERE,
-        base::Bind(callback, GDATA_NO_CONNECTION,
+        base::Bind(callback, DRIVE_NO_CONNECTION,
                    base::Passed(make_scoped_ptr<FileResource>(NULL))));
     return CancelCallback();
   }
@@ -344,7 +344,7 @@ class MockDriveServiceNoConnectionAtInitiate : public DummyDriveService {
       const google_apis::ProgressCallback& progress_callback) override {
     base::MessageLoop::current()->PostTask(
         FROM_HERE,
-        base::Bind(callback, GDATA_NO_CONNECTION,
+        base::Bind(callback, DRIVE_NO_CONNECTION,
                    base::Passed(make_scoped_ptr<FileResource>(NULL))));
     return CancelCallback();
   }
@@ -388,7 +388,7 @@ class MockDriveServiceNoConnectionAtResume : public DummyDriveService {
       const ProgressCallback& progress_callback) override {
     base::MessageLoop::current()->PostTask(FROM_HERE,
         base::Bind(callback,
-                   UploadRangeResponse(GDATA_NO_CONNECTION, -1, -1),
+                   UploadRangeResponse(DRIVE_NO_CONNECTION, -1, -1),
                    base::Passed(scoped_ptr<FileResource>())));
     return CancelCallback();
   }
@@ -402,7 +402,7 @@ class MockDriveServiceNoConnectionAtGetUploadStatus : public DummyDriveService {
                                  const UploadRangeCallback& callback) override {
     base::MessageLoop::current()->PostTask(FROM_HERE,
         base::Bind(callback,
-                   UploadRangeResponse(GDATA_NO_CONNECTION, -1, -1),
+                   UploadRangeResponse(DRIVE_NO_CONNECTION, -1, -1),
                    base::Passed(scoped_ptr<FileResource>())));
     return CancelCallback();
   }
@@ -425,7 +425,7 @@ TEST_F(DriveUploaderTest, UploadExisting0KB) {
   ASSERT_TRUE(test_util::CreateFileOfSpecifiedSize(
       temp_dir_.path(), 0, &local_path, &data));
 
-  GDataErrorCode error = GDATA_OTHER_ERROR;
+  DriveApiErrorCode error = DRIVE_OTHER_ERROR;
   GURL upload_location;
   scoped_ptr<FileResource> entry;
 
@@ -434,12 +434,9 @@ TEST_F(DriveUploaderTest, UploadExisting0KB) {
                          base::MessageLoopProxy::current().get());
   std::vector<test_util::ProgressInfo> upload_progress_values;
   uploader.UploadExistingFile(
-      kTestInitiateUploadResourceId,
-      local_path,
-      kTestMimeType,
-      DriveUploader::UploadExistingFileOptions(),
-      test_util::CreateCopyResultCallback(
-          &error, &upload_location, &entry),
+      kTestInitiateUploadResourceId, local_path, kTestMimeType,
+      UploadExistingFileOptions(),
+      test_util::CreateCopyResultCallback(&error, &upload_location, &entry),
       base::Bind(&test_util::AppendProgressCallbackResult,
                  &upload_progress_values));
   base::RunLoop().RunUntilIdle();
@@ -461,7 +458,7 @@ TEST_F(DriveUploaderTest, UploadExisting512KB) {
   ASSERT_TRUE(test_util::CreateFileOfSpecifiedSize(
       temp_dir_.path(), 512 * 1024, &local_path, &data));
 
-  GDataErrorCode error = GDATA_OTHER_ERROR;
+  DriveApiErrorCode error = DRIVE_OTHER_ERROR;
   GURL upload_location;
   scoped_ptr<FileResource> entry;
 
@@ -470,12 +467,9 @@ TEST_F(DriveUploaderTest, UploadExisting512KB) {
                          base::MessageLoopProxy::current().get());
   std::vector<test_util::ProgressInfo> upload_progress_values;
   uploader.UploadExistingFile(
-      kTestInitiateUploadResourceId,
-      local_path,
-      kTestMimeType,
-      DriveUploader::UploadExistingFileOptions(),
-      test_util::CreateCopyResultCallback(
-          &error, &upload_location, &entry),
+      kTestInitiateUploadResourceId, local_path, kTestMimeType,
+      UploadExistingFileOptions(),
+      test_util::CreateCopyResultCallback(&error, &upload_location, &entry),
       base::Bind(&test_util::AppendProgressCallbackResult,
                  &upload_progress_values));
   base::RunLoop().RunUntilIdle();
@@ -499,7 +493,7 @@ TEST_F(DriveUploaderTest, UploadExisting2MB) {
   ASSERT_TRUE(test_util::CreateFileOfSpecifiedSize(
       temp_dir_.path(), 2 * 1024 * 1024, &local_path, &data));
 
-  GDataErrorCode error = GDATA_OTHER_ERROR;
+  DriveApiErrorCode error = DRIVE_OTHER_ERROR;
   GURL upload_location;
   scoped_ptr<FileResource> entry;
 
@@ -509,7 +503,7 @@ TEST_F(DriveUploaderTest, UploadExisting2MB) {
   std::vector<test_util::ProgressInfo> upload_progress_values;
   uploader.UploadExistingFile(
       kTestInitiateUploadResourceId, local_path, kTestMimeType,
-      DriveUploader::UploadExistingFileOptions(),
+      UploadExistingFileOptions(),
       test_util::CreateCopyResultCallback(&error, &upload_location, &entry),
       base::Bind(&test_util::AppendProgressCallbackResult,
                  &upload_progress_values));
@@ -534,7 +528,7 @@ TEST_F(DriveUploaderTest, InitiateUploadFail) {
   ASSERT_TRUE(test_util::CreateFileOfSpecifiedSize(
       temp_dir_.path(), 2 * 1024 * 1024, &local_path, &data));
 
-  GDataErrorCode error = HTTP_SUCCESS;
+  DriveApiErrorCode error = HTTP_SUCCESS;
   GURL upload_location;
   scoped_ptr<FileResource> entry;
 
@@ -543,12 +537,12 @@ TEST_F(DriveUploaderTest, InitiateUploadFail) {
                          base::MessageLoopProxy::current().get());
   uploader.UploadExistingFile(
       kTestInitiateUploadResourceId, local_path, kTestMimeType,
-      DriveUploader::UploadExistingFileOptions(),
+      UploadExistingFileOptions(),
       test_util::CreateCopyResultCallback(&error, &upload_location, &entry),
       google_apis::ProgressCallback());
   base::RunLoop().RunUntilIdle();
 
-  EXPECT_EQ(GDATA_NO_CONNECTION, error);
+  EXPECT_EQ(DRIVE_NO_CONNECTION, error);
   EXPECT_TRUE(upload_location.is_empty());
   EXPECT_FALSE(entry);
 }
@@ -559,23 +553,21 @@ TEST_F(DriveUploaderTest, MultipartUploadFail) {
   ASSERT_TRUE(test_util::CreateFileOfSpecifiedSize(temp_dir_.path(), 512 * 1024,
                                                    &local_path, &data));
 
-  GDataErrorCode error = HTTP_SUCCESS;
+  DriveApiErrorCode error = HTTP_SUCCESS;
   GURL upload_location;
   scoped_ptr<FileResource> entry;
 
   MockDriveServiceNoConnectionAtInitiate mock_service;
   DriveUploader uploader(&mock_service,
                          base::MessageLoopProxy::current().get());
-  uploader.UploadExistingFile(kTestInitiateUploadResourceId,
-                              local_path,
-                              kTestMimeType,
-                              DriveUploader::UploadExistingFileOptions(),
-                              test_util::CreateCopyResultCallback(
-                                  &error, &upload_location, &entry),
-                              google_apis::ProgressCallback());
+  uploader.UploadExistingFile(
+      kTestInitiateUploadResourceId, local_path, kTestMimeType,
+      UploadExistingFileOptions(),
+      test_util::CreateCopyResultCallback(&error, &upload_location, &entry),
+      google_apis::ProgressCallback());
   base::RunLoop().RunUntilIdle();
 
-  EXPECT_EQ(GDATA_NO_CONNECTION, error);
+  EXPECT_EQ(DRIVE_NO_CONNECTION, error);
   EXPECT_TRUE(upload_location.is_empty());
   EXPECT_FALSE(entry);
 }
@@ -586,14 +578,14 @@ TEST_F(DriveUploaderTest, InitiateUploadNoConflict) {
   ASSERT_TRUE(test_util::CreateFileOfSpecifiedSize(
       temp_dir_.path(), 512 * 1024, &local_path, &data));
 
-  GDataErrorCode error = GDATA_OTHER_ERROR;
+  DriveApiErrorCode error = DRIVE_OTHER_ERROR;
   GURL upload_location;
   scoped_ptr<FileResource> entry;
 
   MockDriveServiceWithUploadExpectation mock_service(local_path, data.size());
   DriveUploader uploader(&mock_service,
                          base::MessageLoopProxy::current().get());
-  DriveUploader::UploadExistingFileOptions options;
+  UploadExistingFileOptions options;
   options.etag = kTestETag;
   uploader.UploadExistingFile(kTestInitiateUploadResourceId,
                               local_path,
@@ -615,14 +607,14 @@ TEST_F(DriveUploaderTest, MultipartUploadConflict) {
       temp_dir_.path(), 512 * 1024, &local_path, &data));
   const std::string kDestinationETag("destination_etag");
 
-  GDataErrorCode error = GDATA_OTHER_ERROR;
+  DriveApiErrorCode error = DRIVE_OTHER_ERROR;
   GURL upload_location;
   scoped_ptr<FileResource> entry;
 
   MockDriveServiceWithUploadExpectation mock_service(local_path, data.size());
   DriveUploader uploader(&mock_service,
                          base::MessageLoopProxy::current().get());
-  DriveUploader::UploadExistingFileOptions options;
+  UploadExistingFileOptions options;
   options.etag = kDestinationETag;
   uploader.UploadExistingFile(kTestInitiateUploadResourceId,
                               local_path,
@@ -644,14 +636,14 @@ TEST_F(DriveUploaderTest, InitiateUploadConflict) {
       temp_dir_.path(), 2 * 1024 * 1024, &local_path, &data));
   const std::string kDestinationETag("destination_etag");
 
-  GDataErrorCode error = GDATA_OTHER_ERROR;
+  DriveApiErrorCode error = DRIVE_OTHER_ERROR;
   GURL upload_location;
   scoped_ptr<FileResource> entry;
 
   MockDriveServiceWithUploadExpectation mock_service(local_path, data.size());
   DriveUploader uploader(&mock_service,
                          base::MessageLoopProxy::current().get());
-  DriveUploader::UploadExistingFileOptions options;
+  UploadExistingFileOptions options;
   options.etag = kDestinationETag;
   uploader.UploadExistingFile(
       kTestInitiateUploadResourceId, local_path, kTestMimeType, options,
@@ -669,23 +661,21 @@ TEST_F(DriveUploaderTest, ResumeUploadFail) {
   ASSERT_TRUE(test_util::CreateFileOfSpecifiedSize(
       temp_dir_.path(), 2 * 1024 * 1024, &local_path, &data));
 
-  GDataErrorCode error = HTTP_SUCCESS;
+  DriveApiErrorCode error = HTTP_SUCCESS;
   GURL upload_location;
   scoped_ptr<FileResource> entry;
 
   MockDriveServiceNoConnectionAtResume mock_service;
   DriveUploader uploader(&mock_service,
                          base::MessageLoopProxy::current().get());
-  uploader.UploadExistingFile(kTestInitiateUploadResourceId,
-                              local_path,
-                              kTestMimeType,
-                              DriveUploader::UploadExistingFileOptions(),
-                              test_util::CreateCopyResultCallback(
-                                  &error, &upload_location, &entry),
-                              google_apis::ProgressCallback());
+  uploader.UploadExistingFile(
+      kTestInitiateUploadResourceId, local_path, kTestMimeType,
+      UploadExistingFileOptions(),
+      test_util::CreateCopyResultCallback(&error, &upload_location, &entry),
+      google_apis::ProgressCallback());
   base::RunLoop().RunUntilIdle();
 
-  EXPECT_EQ(GDATA_NO_CONNECTION, error);
+  EXPECT_EQ(DRIVE_NO_CONNECTION, error);
   EXPECT_EQ(GURL(kTestUploadExistingFileURL), upload_location);
 }
 
@@ -695,7 +685,7 @@ TEST_F(DriveUploaderTest, GetUploadStatusFail) {
   ASSERT_TRUE(test_util::CreateFileOfSpecifiedSize(
       temp_dir_.path(), 2 * 1024 * 1024, &local_path, &data));
 
-  GDataErrorCode error = HTTP_SUCCESS;
+  DriveApiErrorCode error = HTTP_SUCCESS;
   GURL upload_location;
   scoped_ptr<FileResource> entry;
 
@@ -710,12 +700,12 @@ TEST_F(DriveUploaderTest, GetUploadStatusFail) {
                             google_apis::ProgressCallback());
   base::RunLoop().RunUntilIdle();
 
-  EXPECT_EQ(GDATA_NO_CONNECTION, error);
+  EXPECT_EQ(DRIVE_NO_CONNECTION, error);
   EXPECT_TRUE(upload_location.is_empty());
 }
 
 TEST_F(DriveUploaderTest, NonExistingSourceFile) {
-  GDataErrorCode error = GDATA_OTHER_ERROR;
+  DriveApiErrorCode error = DRIVE_OTHER_ERROR;
   GURL upload_location;
   scoped_ptr<FileResource> entry;
 
@@ -724,10 +714,8 @@ TEST_F(DriveUploaderTest, NonExistingSourceFile) {
   uploader.UploadExistingFile(
       kTestInitiateUploadResourceId,
       temp_dir_.path().AppendASCII("_this_path_should_not_exist_"),
-      kTestMimeType,
-      DriveUploader::UploadExistingFileOptions(),
-      test_util::CreateCopyResultCallback(
-          &error, &upload_location, &entry),
+      kTestMimeType, UploadExistingFileOptions(),
+      test_util::CreateCopyResultCallback(&error, &upload_location, &entry),
       google_apis::ProgressCallback());
   base::RunLoop().RunUntilIdle();
 
@@ -742,7 +730,7 @@ TEST_F(DriveUploaderTest, ResumeUpload) {
   ASSERT_TRUE(test_util::CreateFileOfSpecifiedSize(
       temp_dir_.path(), 1024 * 1024, &local_path, &data));
 
-  GDataErrorCode error = GDATA_OTHER_ERROR;
+  DriveApiErrorCode error = DRIVE_OTHER_ERROR;
   GURL upload_location;
   scoped_ptr<FileResource> entry;
 

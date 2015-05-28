@@ -38,7 +38,7 @@
 #include "wtf/Assertions.h"
 #include "wtf/FastAllocBase.h"
 #include "wtf/PartitionAlloc.h"
-#include "wtf/WTF.h"
+#include "wtf/Partitions.h"
 
 #include <string.h>
 
@@ -65,6 +65,11 @@ public:
 
     template <typename T>
     static T* allocateVectorBacking(size_t size)
+    {
+        return reinterpret_cast<T*>(allocateBacking(size));
+    }
+    template <typename T>
+    static T* allocateExpandedVectorBacking(size_t size)
     {
         return reinterpret_cast<T*>(allocateBacking(size));
     }

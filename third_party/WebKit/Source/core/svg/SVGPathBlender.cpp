@@ -20,6 +20,7 @@
 #include "config.h"
 #include "core/svg/SVGPathBlender.h"
 
+#include "core/svg/SVGPathConsumer.h"
 #include "core/svg/SVGPathSeg.h"
 #include "core/svg/SVGPathSource.h"
 #include "platform/animation/AnimationUtilities.h"
@@ -34,13 +35,16 @@ SVGPathBlender::SVGPathBlender(SVGPathSource* fromSource, SVGPathSource* toSourc
     , m_progress(0)
     , m_addTypesCount(0)
     , m_isInFirstHalfOfAnimation(false)
+    , m_typesAreEqual(false)
+    , m_fromIsAbsolute(false)
+    , m_toIsAbsolute(false)
 {
     ASSERT(m_fromSource);
     ASSERT(m_toSource);
     ASSERT(m_consumer);
 }
 
-void SVGPathBlender::trace(Visitor* visitor)
+DEFINE_TRACE(SVGPathBlender)
 {
     visitor->trace(m_fromSource);
     visitor->trace(m_toSource);
@@ -56,254 +60,227 @@ static inline FloatPoint blendFloatPoint(const FloatPoint& a, const FloatPoint& 
 float SVGPathBlender::blendAnimatedDimensonalFloat(float from, float to, FloatBlendMode blendMode)
 {
     if (m_addTypesCount) {
-        ASSERT(m_fromMode == m_toMode);
+        ASSERT(m_typesAreEqual);
         return from + to * m_addTypesCount;
     }
 
-    if (m_fromMode == m_toMode)
+    if (m_typesAreEqual)
         return blend(from, to, m_progress);
 
     float fromValue = blendMode == BlendHorizontal ? m_fromCurrentPoint.x() : m_fromCurrentPoint.y();
     float toValue = blendMode == BlendHorizontal ? m_toCurrentPoint.x() : m_toCurrentPoint.y();
 
     // Transform toY to the coordinate mode of fromY
-    float animValue = blend(from, m_fromMode == AbsoluteCoordinates ? to + toValue : to - toValue, m_progress);
+    float animValue = blend(from, m_fromIsAbsolute ? to + toValue : to - toValue, m_progress);
 
+    // If we're in the first half of the animation, we should use the type of the from segment.
     if (m_isInFirstHalfOfAnimation)
         return animValue;
 
     // Transform the animated point to the coordinate mode, needed for the current progress.
     float currentValue = blend(fromValue, toValue, m_progress);
-    return m_toMode == AbsoluteCoordinates ? animValue + currentValue : animValue - currentValue;
+    return !m_fromIsAbsolute ? animValue + currentValue : animValue - currentValue;
 }
 
-FloatPoint SVGPathBlender::blendAnimatedFloatPoint(const FloatPoint& fromPoint, const FloatPoint& toPoint)
+FloatPoint SVGPathBlender::blendAnimatedFloatPointSameCoordinates(const FloatPoint& fromPoint, const FloatPoint& toPoint)
 {
     if (m_addTypesCount) {
-        ASSERT(m_fromMode == m_toMode);
         FloatPoint repeatedToPoint = toPoint;
         repeatedToPoint.scale(m_addTypesCount, m_addTypesCount);
         return fromPoint + repeatedToPoint;
     }
+    return blendFloatPoint(fromPoint, toPoint, m_progress);
+}
 
-    if (m_fromMode == m_toMode)
-        return blendFloatPoint(fromPoint, toPoint, m_progress);
+FloatPoint SVGPathBlender::blendAnimatedFloatPoint(const FloatPoint& fromPoint, const FloatPoint& toPoint)
+{
+    if (m_typesAreEqual)
+        return blendAnimatedFloatPointSameCoordinates(fromPoint, toPoint);
 
     // Transform toPoint to the coordinate mode of fromPoint
     FloatPoint animatedPoint = toPoint;
-    if (m_fromMode == AbsoluteCoordinates)
+    if (m_fromIsAbsolute)
         animatedPoint += m_toCurrentPoint;
     else
         animatedPoint.move(-m_toCurrentPoint.x(), -m_toCurrentPoint.y());
 
     animatedPoint = blendFloatPoint(fromPoint, animatedPoint, m_progress);
 
+    // If we're in the first half of the animation, we should use the type of the from segment.
     if (m_isInFirstHalfOfAnimation)
         return animatedPoint;
 
     // Transform the animated point to the coordinate mode, needed for the current progress.
     FloatPoint currentPoint = blendFloatPoint(m_fromCurrentPoint, m_toCurrentPoint, m_progress);
-    if (m_toMode == AbsoluteCoordinates)
+    if (!m_fromIsAbsolute)
         return animatedPoint + currentPoint;
 
     animatedPoint.move(-currentPoint.x(), -currentPoint.y());
     return animatedPoint;
 }
 
-bool SVGPathBlender::blendMoveToSegment()
+PathSegmentData SVGPathBlender::blendMoveToSegment(const PathSegmentData& fromSeg, const PathSegmentData& toSeg)
 {
-    FloatPoint fromTargetPoint;
-    FloatPoint toTargetPoint;
-    if ((m_fromSource->hasMoreData() && !m_fromSource->parseMoveToSegment(fromTargetPoint))
-        || !m_toSource->parseMoveToSegment(toTargetPoint))
-        return false;
+    PathSegmentData blendedSegment;
+    blendedSegment.command = m_isInFirstHalfOfAnimation ? fromSeg.command : toSeg.command;
+    blendedSegment.targetPoint = blendAnimatedFloatPoint(fromSeg.targetPoint, toSeg.targetPoint);
 
-    m_consumer->moveTo(blendAnimatedFloatPoint(fromTargetPoint, toTargetPoint), false, m_isInFirstHalfOfAnimation ? m_fromMode : m_toMode);
-    m_fromCurrentPoint = m_fromMode == AbsoluteCoordinates ? fromTargetPoint : m_fromCurrentPoint + fromTargetPoint;
-    m_toCurrentPoint = m_toMode == AbsoluteCoordinates ? toTargetPoint : m_toCurrentPoint + toTargetPoint;
-    return true;
+    m_fromCurrentPoint = m_fromIsAbsolute ? fromSeg.targetPoint : m_fromCurrentPoint + fromSeg.targetPoint;
+    m_toCurrentPoint = m_toIsAbsolute ? toSeg.targetPoint : m_toCurrentPoint + toSeg.targetPoint;
+    return blendedSegment;
 }
 
-bool SVGPathBlender::blendLineToSegment()
+PathSegmentData SVGPathBlender::blendLineToSegment(const PathSegmentData& fromSeg, const PathSegmentData& toSeg)
 {
-    FloatPoint fromTargetPoint;
-    FloatPoint toTargetPoint;
-    if ((m_fromSource->hasMoreData() && !m_fromSource->parseLineToSegment(fromTargetPoint))
-        || !m_toSource->parseLineToSegment(toTargetPoint))
-        return false;
+    PathSegmentData blendedSegment;
+    blendedSegment.command = m_isInFirstHalfOfAnimation ? fromSeg.command : toSeg.command;
+    blendedSegment.targetPoint = blendAnimatedFloatPoint(fromSeg.targetPoint, toSeg.targetPoint);
 
-    m_consumer->lineTo(blendAnimatedFloatPoint(fromTargetPoint, toTargetPoint), m_isInFirstHalfOfAnimation ? m_fromMode : m_toMode);
-    m_fromCurrentPoint = m_fromMode == AbsoluteCoordinates ? fromTargetPoint : m_fromCurrentPoint + fromTargetPoint;
-    m_toCurrentPoint = m_toMode == AbsoluteCoordinates ? toTargetPoint : m_toCurrentPoint + toTargetPoint;
-    return true;
+    m_fromCurrentPoint = m_fromIsAbsolute ? fromSeg.targetPoint : m_fromCurrentPoint + fromSeg.targetPoint;
+    m_toCurrentPoint = m_toIsAbsolute ? toSeg.targetPoint : m_toCurrentPoint + toSeg.targetPoint;
+    return blendedSegment;
 }
 
-bool SVGPathBlender::blendLineToHorizontalSegment()
+PathSegmentData SVGPathBlender::blendLineToHorizontalSegment(const PathSegmentData& fromSeg, const PathSegmentData& toSeg)
 {
-    float fromX = 0;
-    float toX = 0;
-    if ((m_fromSource->hasMoreData() && !m_fromSource->parseLineToHorizontalSegment(fromX))
-        || !m_toSource->parseLineToHorizontalSegment(toX))
-        return false;
+    PathSegmentData blendedSegment;
+    blendedSegment.command = m_isInFirstHalfOfAnimation ? fromSeg.command : toSeg.command;
+    blendedSegment.targetPoint.setX(blendAnimatedDimensonalFloat(fromSeg.targetPoint.x(), toSeg.targetPoint.x(), BlendHorizontal));
 
-    m_consumer->lineToHorizontal(blendAnimatedDimensonalFloat(fromX, toX, BlendHorizontal), m_isInFirstHalfOfAnimation ? m_fromMode : m_toMode);
-    m_fromCurrentPoint.setX(m_fromMode == AbsoluteCoordinates ? fromX : m_fromCurrentPoint.x() + fromX);
-    m_toCurrentPoint.setX(m_toMode == AbsoluteCoordinates ? toX : m_toCurrentPoint.x() + toX);
-    return true;
+    m_fromCurrentPoint.setX(m_fromIsAbsolute ? fromSeg.targetPoint.x() : m_fromCurrentPoint.x() + fromSeg.targetPoint.x());
+    m_toCurrentPoint.setX(m_toIsAbsolute ? toSeg.targetPoint.x() : m_toCurrentPoint.x() + toSeg.targetPoint.x());
+    return blendedSegment;
 }
 
-bool SVGPathBlender::blendLineToVerticalSegment()
+PathSegmentData SVGPathBlender::blendLineToVerticalSegment(const PathSegmentData& fromSeg, const PathSegmentData& toSeg)
 {
-    float fromY = 0;
-    float toY = 0;
-    if ((m_fromSource->hasMoreData() && !m_fromSource->parseLineToVerticalSegment(fromY))
-        || !m_toSource->parseLineToVerticalSegment(toY))
-        return false;
+    PathSegmentData blendedSegment;
+    blendedSegment.command = m_isInFirstHalfOfAnimation ? fromSeg.command : toSeg.command;
+    blendedSegment.targetPoint.setY(blendAnimatedDimensonalFloat(fromSeg.targetPoint.y(), toSeg.targetPoint.y(), BlendVertical));
 
-    m_consumer->lineToVertical(blendAnimatedDimensonalFloat(fromY, toY, BlendVertical), m_isInFirstHalfOfAnimation ? m_fromMode : m_toMode);
-    m_fromCurrentPoint.setY(m_fromMode == AbsoluteCoordinates ? fromY : m_fromCurrentPoint.y() + fromY);
-    m_toCurrentPoint.setY(m_toMode == AbsoluteCoordinates ? toY : m_toCurrentPoint.y() + toY);
-    return true;
+    m_fromCurrentPoint.setY(m_fromIsAbsolute ? fromSeg.targetPoint.y() : m_fromCurrentPoint.y() + fromSeg.targetPoint.y());
+    m_toCurrentPoint.setY(m_toIsAbsolute ? toSeg.targetPoint.y() : m_toCurrentPoint.y() + toSeg.targetPoint.y());
+    return blendedSegment;
 }
 
-bool SVGPathBlender::blendCurveToCubicSegment()
+PathSegmentData SVGPathBlender::blendCurveToCubicSegment(const PathSegmentData& fromSeg, const PathSegmentData& toSeg)
 {
-    FloatPoint fromTargetPoint;
-    FloatPoint fromPoint1;
-    FloatPoint fromPoint2;
-    FloatPoint toTargetPoint;
-    FloatPoint toPoint1;
-    FloatPoint toPoint2;
-    if ((m_fromSource->hasMoreData() && !m_fromSource->parseCurveToCubicSegment(fromPoint1, fromPoint2, fromTargetPoint))
-        || !m_toSource->parseCurveToCubicSegment(toPoint1, toPoint2, toTargetPoint))
-        return false;
+    PathSegmentData blendedSegment;
+    blendedSegment.command = m_isInFirstHalfOfAnimation ? fromSeg.command : toSeg.command;
+    blendedSegment.targetPoint = blendAnimatedFloatPoint(fromSeg.targetPoint, toSeg.targetPoint);
+    blendedSegment.point1 = blendAnimatedFloatPoint(fromSeg.point1, toSeg.point1);
+    blendedSegment.point2 = blendAnimatedFloatPoint(fromSeg.point2, toSeg.point2);
 
-    m_consumer->curveToCubic(blendAnimatedFloatPoint(fromPoint1, toPoint1),
-                             blendAnimatedFloatPoint(fromPoint2, toPoint2),
-                             blendAnimatedFloatPoint(fromTargetPoint, toTargetPoint),
-                             m_isInFirstHalfOfAnimation ? m_fromMode : m_toMode);
-    m_fromCurrentPoint = m_fromMode == AbsoluteCoordinates ? fromTargetPoint : m_fromCurrentPoint + fromTargetPoint;
-    m_toCurrentPoint = m_toMode == AbsoluteCoordinates ? toTargetPoint : m_toCurrentPoint + toTargetPoint;
-    return true;
+    m_fromCurrentPoint = m_fromIsAbsolute ? fromSeg.targetPoint : m_fromCurrentPoint + fromSeg.targetPoint;
+    m_toCurrentPoint = m_toIsAbsolute ? toSeg.targetPoint : m_toCurrentPoint + toSeg.targetPoint;
+    return blendedSegment;
 }
 
-bool SVGPathBlender::blendCurveToCubicSmoothSegment()
+PathSegmentData SVGPathBlender::blendCurveToCubicSmoothSegment(const PathSegmentData& fromSeg, const PathSegmentData& toSeg)
 {
-    FloatPoint fromTargetPoint;
-    FloatPoint fromPoint2;
-    FloatPoint toTargetPoint;
-    FloatPoint toPoint2;
-    if ((m_fromSource->hasMoreData() && !m_fromSource->parseCurveToCubicSmoothSegment(fromPoint2, fromTargetPoint))
-        || !m_toSource->parseCurveToCubicSmoothSegment(toPoint2, toTargetPoint))
-        return false;
+    PathSegmentData blendedSegment;
+    blendedSegment.command = m_isInFirstHalfOfAnimation ? fromSeg.command : toSeg.command;
+    blendedSegment.targetPoint = blendAnimatedFloatPoint(fromSeg.targetPoint, toSeg.targetPoint);
+    blendedSegment.point2 = blendAnimatedFloatPoint(fromSeg.point2, toSeg.point2);
 
-    m_consumer->curveToCubicSmooth(blendAnimatedFloatPoint(fromPoint2, toPoint2),
-                                   blendAnimatedFloatPoint(fromTargetPoint, toTargetPoint),
-                                   m_isInFirstHalfOfAnimation ? m_fromMode : m_toMode);
-    m_fromCurrentPoint = m_fromMode == AbsoluteCoordinates ? fromTargetPoint : m_fromCurrentPoint + fromTargetPoint;
-    m_toCurrentPoint = m_toMode == AbsoluteCoordinates ? toTargetPoint : m_toCurrentPoint + toTargetPoint;
-    return true;
+    m_fromCurrentPoint = m_fromIsAbsolute ? fromSeg.targetPoint : m_fromCurrentPoint + fromSeg.targetPoint;
+    m_toCurrentPoint = m_toIsAbsolute ? toSeg.targetPoint : m_toCurrentPoint + toSeg.targetPoint;
+    return blendedSegment;
 }
 
-bool SVGPathBlender::blendCurveToQuadraticSegment()
+PathSegmentData SVGPathBlender::blendCurveToQuadraticSegment(const PathSegmentData& fromSeg, const PathSegmentData& toSeg)
 {
-    FloatPoint fromTargetPoint;
-    FloatPoint fromPoint1;
-    FloatPoint toTargetPoint;
-    FloatPoint toPoint1;
-    if ((m_fromSource->hasMoreData() && !m_fromSource->parseCurveToQuadraticSegment(fromPoint1, fromTargetPoint))
-        || !m_toSource->parseCurveToQuadraticSegment(toPoint1, toTargetPoint))
-        return false;
+    PathSegmentData blendedSegment;
+    blendedSegment.command = m_isInFirstHalfOfAnimation ? fromSeg.command : toSeg.command;
+    blendedSegment.targetPoint = blendAnimatedFloatPoint(fromSeg.targetPoint, toSeg.targetPoint);
+    blendedSegment.point1 = blendAnimatedFloatPoint(fromSeg.point1, toSeg.point1);
 
-    m_consumer->curveToQuadratic(blendAnimatedFloatPoint(fromPoint1, toPoint1),
-                                 blendAnimatedFloatPoint(fromTargetPoint, toTargetPoint),
-                                 m_isInFirstHalfOfAnimation ? m_fromMode : m_toMode);
-    m_fromCurrentPoint = m_fromMode == AbsoluteCoordinates ? fromTargetPoint : m_fromCurrentPoint + fromTargetPoint;
-    m_toCurrentPoint = m_toMode == AbsoluteCoordinates ? toTargetPoint : m_toCurrentPoint + toTargetPoint;
-    return true;
+    m_fromCurrentPoint = m_fromIsAbsolute ? fromSeg.targetPoint : m_fromCurrentPoint + fromSeg.targetPoint;
+    m_toCurrentPoint = m_toIsAbsolute ? toSeg.targetPoint : m_toCurrentPoint + toSeg.targetPoint;
+    return blendedSegment;
 }
 
-bool SVGPathBlender::blendCurveToQuadraticSmoothSegment()
+PathSegmentData SVGPathBlender::blendCurveToQuadraticSmoothSegment(const PathSegmentData& fromSeg, const PathSegmentData& toSeg)
 {
-    FloatPoint fromTargetPoint;
-    FloatPoint toTargetPoint;
-    if ((m_fromSource->hasMoreData() && !m_fromSource->parseCurveToQuadraticSmoothSegment(fromTargetPoint))
-        || !m_toSource->parseCurveToQuadraticSmoothSegment(toTargetPoint))
-        return false;
+    PathSegmentData blendedSegment;
+    blendedSegment.command = m_isInFirstHalfOfAnimation ? fromSeg.command : toSeg.command;
+    blendedSegment.targetPoint = blendAnimatedFloatPoint(fromSeg.targetPoint, toSeg.targetPoint);
 
-    m_consumer->curveToQuadraticSmooth(blendAnimatedFloatPoint(fromTargetPoint, toTargetPoint), m_isInFirstHalfOfAnimation ? m_fromMode : m_toMode);
-    m_fromCurrentPoint = m_fromMode == AbsoluteCoordinates ? fromTargetPoint : m_fromCurrentPoint + fromTargetPoint;
-    m_toCurrentPoint = m_toMode == AbsoluteCoordinates ? toTargetPoint : m_toCurrentPoint + toTargetPoint;
-    return true;
+    m_fromCurrentPoint = m_fromIsAbsolute ? fromSeg.targetPoint : m_fromCurrentPoint + fromSeg.targetPoint;
+    m_toCurrentPoint = m_toIsAbsolute ? toSeg.targetPoint : m_toCurrentPoint + toSeg.targetPoint;
+    return blendedSegment;
 }
 
-bool SVGPathBlender::blendArcToSegment()
+PathSegmentData SVGPathBlender::blendArcToSegment(const PathSegmentData& fromSeg, const PathSegmentData& toSeg)
 {
-    float fromRx = 0;
-    float fromRy = 0;
-    float fromAngle = 0;
-    bool fromLargeArc = false;
-    bool fromSweep = false;
-    FloatPoint fromTargetPoint;
-    float toRx = 0;
-    float toRy = 0;
-    float toAngle = 0;
-    bool toLargeArc = false;
-    bool toSweep = false;
-    FloatPoint toTargetPoint;
-    if ((m_fromSource->hasMoreData() && !m_fromSource->parseArcToSegment(fromRx, fromRy, fromAngle, fromLargeArc, fromSweep, fromTargetPoint))
-        || !m_toSource->parseArcToSegment(toRx, toRy, toAngle, toLargeArc, toSweep, toTargetPoint))
-        return false;
+    ASSERT(!m_addTypesCount || fromSeg.command == toSeg.command);
 
+    PathSegmentData blendedSegment;
+    blendedSegment.command = m_isInFirstHalfOfAnimation ? fromSeg.command : toSeg.command;
+    blendedSegment.targetPoint = blendAnimatedFloatPoint(fromSeg.targetPoint, toSeg.targetPoint);
+    blendedSegment.point1 = blendAnimatedFloatPointSameCoordinates(fromSeg.arcRadii(), toSeg.arcRadii());
+    blendedSegment.point2 = blendAnimatedFloatPointSameCoordinates(fromSeg.point2, toSeg.point2);
     if (m_addTypesCount) {
-        ASSERT(m_fromMode == m_toMode);
-        FloatPoint scaledToTargetPoint = toTargetPoint;
-        scaledToTargetPoint.scale(m_addTypesCount, m_addTypesCount);
-        m_consumer->arcTo(fromRx + toRx * m_addTypesCount,
-                          fromRy + toRy * m_addTypesCount,
-                          fromAngle + toAngle * m_addTypesCount,
-                          fromLargeArc || toLargeArc,
-                          fromSweep || toSweep,
-                          fromTargetPoint + scaledToTargetPoint,
-                          m_fromMode);
+        blendedSegment.arcLarge = fromSeg.arcLarge || toSeg.arcLarge;
+        blendedSegment.arcSweep = fromSeg.arcSweep || toSeg.arcSweep;
     } else {
-        m_consumer->arcTo(blend(fromRx, toRx, m_progress),
-                          blend(fromRy, toRy, m_progress),
-                          blend(fromAngle, toAngle, m_progress),
-                          m_isInFirstHalfOfAnimation ? fromLargeArc : toLargeArc,
-                          m_isInFirstHalfOfAnimation ? fromSweep : toSweep,
-                          blendAnimatedFloatPoint(fromTargetPoint, toTargetPoint),
-                          m_isInFirstHalfOfAnimation ? m_fromMode : m_toMode);
+        blendedSegment.arcLarge = m_isInFirstHalfOfAnimation ? fromSeg.arcLarge : toSeg.arcLarge;
+        blendedSegment.arcSweep = m_isInFirstHalfOfAnimation ? fromSeg.arcSweep : toSeg.arcSweep;
     }
-    m_fromCurrentPoint = m_fromMode == AbsoluteCoordinates ? fromTargetPoint : m_fromCurrentPoint + fromTargetPoint;
-    m_toCurrentPoint = m_toMode == AbsoluteCoordinates ? toTargetPoint : m_toCurrentPoint + toTargetPoint;
-    return true;
+
+    m_fromCurrentPoint = m_fromIsAbsolute ? fromSeg.targetPoint : m_fromCurrentPoint + fromSeg.targetPoint;
+    m_toCurrentPoint = m_toIsAbsolute ? toSeg.targetPoint : m_toCurrentPoint + toSeg.targetPoint;
+    return blendedSegment;
 }
 
-static inline PathCoordinateMode coordinateModeOfCommand(const SVGPathSegType& type)
+void SVGPathBlender::blendSegments(const PathSegmentData& fromSeg, const PathSegmentData& toSeg)
 {
-    if (type < PathSegMoveToAbs)
-        return AbsoluteCoordinates;
+    PathSegmentData blendedSegment;
+    switch (toSeg.command) {
+    case PathSegMoveToRel:
+    case PathSegMoveToAbs:
+        blendedSegment = blendMoveToSegment(fromSeg, toSeg);
+        break;
+    case PathSegLineToRel:
+    case PathSegLineToAbs:
+        blendedSegment = blendLineToSegment(fromSeg, toSeg);
+        break;
+    case PathSegLineToHorizontalRel:
+    case PathSegLineToHorizontalAbs:
+        blendedSegment = blendLineToHorizontalSegment(fromSeg, toSeg);
+        break;
+    case PathSegLineToVerticalRel:
+    case PathSegLineToVerticalAbs:
+        blendedSegment = blendLineToVerticalSegment(fromSeg, toSeg);
+        break;
+    case PathSegClosePath:
+        blendedSegment = toSeg;
+        break;
+    case PathSegCurveToCubicRel:
+    case PathSegCurveToCubicAbs:
+        blendedSegment = blendCurveToCubicSegment(fromSeg, toSeg);
+        break;
+    case PathSegCurveToCubicSmoothRel:
+    case PathSegCurveToCubicSmoothAbs:
+        blendedSegment = blendCurveToCubicSmoothSegment(fromSeg, toSeg);
+        break;
+    case PathSegCurveToQuadraticRel:
+    case PathSegCurveToQuadraticAbs:
+        blendedSegment = blendCurveToQuadraticSegment(fromSeg, toSeg);
+        break;
+    case PathSegCurveToQuadraticSmoothRel:
+    case PathSegCurveToQuadraticSmoothAbs:
+        blendedSegment = blendCurveToQuadraticSmoothSegment(fromSeg, toSeg);
+        break;
+    case PathSegArcRel:
+    case PathSegArcAbs:
+        blendedSegment = blendArcToSegment(fromSeg, toSeg);
+        break;
+    default:
+        ASSERT_NOT_REACHED();
+    }
 
-    // Odd number = relative command
-    if (type % 2)
-        return RelativeCoordinates;
-
-    return AbsoluteCoordinates;
-}
-
-static inline bool isSegmentEqual(const SVGPathSegType& fromType, const SVGPathSegType& toType, const PathCoordinateMode& fromMode, const PathCoordinateMode& toMode)
-{
-    if (fromType == toType && (fromType == PathSegUnknown || fromType == PathSegClosePath))
-        return true;
-
-    unsigned short from = fromType;
-    unsigned short to = toType;
-    if (fromMode == toMode)
-        return from == to;
-    if (fromMode == AbsoluteCoordinates)
-        return from == to - 1;
-    return to == from - 1;
+    m_consumer->emitSegment(blendedSegment);
 }
 
 bool SVGPathBlender::addAnimatedPath(unsigned repeatCount)
@@ -319,80 +296,41 @@ bool SVGPathBlender::blendAnimatedPath(float progress)
 
     bool fromSourceHadData = m_fromSource->hasMoreData();
     while (m_toSource->hasMoreData()) {
-        SVGPathSegType fromCommand;
-        SVGPathSegType toCommand;
-        if ((fromSourceHadData && !m_fromSource->parseSVGSegmentType(fromCommand)) || !m_toSource->parseSVGSegmentType(toCommand))
+        PathSegmentData toSeg = m_toSource->parseSegment();
+        if (toSeg.command == PathSegUnknown)
             return false;
 
-        m_toMode = coordinateModeOfCommand(toCommand);
-        m_fromMode = fromSourceHadData ? coordinateModeOfCommand(fromCommand) : m_toMode;
-        if (m_fromMode != m_toMode && m_addTypesCount)
-            return false;
+        PathSegmentData fromSeg;
+        fromSeg.command = toSeg.command;
 
-        if (fromSourceHadData && !isSegmentEqual(fromCommand, toCommand, m_fromMode, m_toMode))
-            return false;
-
-        switch (toCommand) {
-        case PathSegMoveToRel:
-        case PathSegMoveToAbs:
-            if (!blendMoveToSegment())
+        if (m_fromSource->hasMoreData()) {
+            fromSeg = m_fromSource->parseSegment();
+            if (fromSeg.command == PathSegUnknown)
                 return false;
-            break;
-        case PathSegLineToRel:
-        case PathSegLineToAbs:
-            if (!blendLineToSegment())
-                return false;
-            break;
-        case PathSegLineToHorizontalRel:
-        case PathSegLineToHorizontalAbs:
-            if (!blendLineToHorizontalSegment())
-                return false;
-            break;
-        case PathSegLineToVerticalRel:
-        case PathSegLineToVerticalAbs:
-            if (!blendLineToVerticalSegment())
-                return false;
-            break;
-        case PathSegClosePath:
-            m_consumer->closePath();
-            break;
-        case PathSegCurveToCubicRel:
-        case PathSegCurveToCubicAbs:
-            if (!blendCurveToCubicSegment())
-                return false;
-            break;
-        case PathSegCurveToCubicSmoothRel:
-        case PathSegCurveToCubicSmoothAbs:
-            if (!blendCurveToCubicSmoothSegment())
-                return false;
-            break;
-        case PathSegCurveToQuadraticRel:
-        case PathSegCurveToQuadraticAbs:
-            if (!blendCurveToQuadraticSegment())
-                return false;
-            break;
-        case PathSegCurveToQuadraticSmoothRel:
-        case PathSegCurveToQuadraticSmoothAbs:
-            if (!blendCurveToQuadraticSmoothSegment())
-                return false;
-            break;
-        case PathSegArcRel:
-        case PathSegArcAbs:
-            if (!blendArcToSegment())
-                return false;
-            break;
-        case PathSegUnknown:
-            return false;
         }
+
+        m_typesAreEqual = fromSeg.command == toSeg.command;
+
+        // If the types are equal, they'll blend regardless of parameters.
+        if (!m_typesAreEqual) {
+            // Addition require segments with the same type.
+            if (m_addTypesCount)
+                return false;
+            // Allow the segments to differ in "relativeness".
+            if (toAbsolutePathSegType(fromSeg.command) != toAbsolutePathSegType(toSeg.command))
+                return false;
+        }
+
+        m_fromIsAbsolute = isAbsolutePathSegType(fromSeg.command);
+        m_toIsAbsolute = isAbsolutePathSegType(toSeg.command);
+
+        blendSegments(fromSeg, toSeg);
 
         if (!fromSourceHadData)
             continue;
         if (m_fromSource->hasMoreData() != m_toSource->hasMoreData())
             return false;
-        if (!m_fromSource->hasMoreData() || !m_toSource->hasMoreData())
-            return true;
     }
-
     return true;
 }
 

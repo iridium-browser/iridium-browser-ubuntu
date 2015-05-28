@@ -8,14 +8,14 @@
 #include "base/bind_helpers.h"
 #include "base/strings/utf_string_conversions.h"
 #include "net/base/address_list.h"
-#include "net/base/capturing_net_log.h"
-#include "net/base/net_log.h"
-#include "net/base/net_log_unittest.h"
 #include "net/base/test_completion_callback.h"
 #include "net/base/winsock_init.h"
 #include "net/dns/mock_host_resolver.h"
 #include "net/http/http_response_headers.h"
 #include "net/http/http_response_info.h"
+#include "net/log/capturing_net_log.h"
+#include "net/log/net_log.h"
+#include "net/log/net_log_unittest.h"
 #include "net/socket/client_socket_factory.h"
 #include "net/socket/next_proto.h"
 #include "net/socket/socket_test_util.h"
@@ -139,10 +139,11 @@ class SpdyProxyClientSocketTest
   DISALLOW_COPY_AND_ASSIGN(SpdyProxyClientSocketTest);
 };
 
-INSTANTIATE_TEST_CASE_P(
-    NextProto,
-    SpdyProxyClientSocketTest,
-    testing::Values(kProtoSPDY31, kProtoSPDY4_14, kProtoSPDY4_15));
+INSTANTIATE_TEST_CASE_P(NextProto,
+                        SpdyProxyClientSocketTest,
+                        testing::Values(kProtoSPDY31,
+                                        kProtoSPDY4_14,
+                                        kProtoSPDY4));
 
 SpdyProxyClientSocketTest::SpdyProxyClientSocketTest()
     : spdy_util_(GetParam()),
@@ -1281,8 +1282,8 @@ TEST_P(SpdyProxyClientSocketTest, NetLog) {
   ASSERT_EQ(entry_list.size(), 10u);
   EXPECT_TRUE(LogContainsBeginEvent(entry_list, 0, NetLog::TYPE_SOCKET_ALIVE));
   EXPECT_TRUE(LogContainsEvent(entry_list, 1,
-                  NetLog::TYPE_SPDY_PROXY_CLIENT_SESSION,
-                  NetLog::PHASE_NONE));
+                               NetLog::TYPE_HTTP2_PROXY_CLIENT_SESSION,
+                               NetLog::PHASE_NONE));
   EXPECT_TRUE(LogContainsBeginEvent(entry_list, 2,
                   NetLog::TYPE_HTTP_TRANSACTION_TUNNEL_SEND_REQUEST));
   EXPECT_TRUE(LogContainsEvent(entry_list, 3,

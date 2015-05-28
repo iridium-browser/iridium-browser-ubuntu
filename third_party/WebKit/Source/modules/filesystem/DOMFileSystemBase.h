@@ -50,7 +50,7 @@ class EntryCallback;
 class ErrorCallback;
 class File;
 class FileError;
-struct FileMetadata;
+class FileMetadata;
 class MetadataCallback;
 class ExecutionContext;
 class SecurityOrigin;
@@ -116,10 +116,12 @@ public:
     int readDirectory(DirectoryReaderBase*, const String& path, EntriesCallback*, ErrorCallback*, SynchronousType = Asynchronous);
     bool waitForAdditionalResult(int callbacksId);
 
-    virtual void trace(Visitor*) { }
+    DEFINE_INLINE_VIRTUAL_TRACE() { }
 
 protected:
     DOMFileSystemBase(ExecutionContext*, const String& name, FileSystemType, const KURL& rootURL);
+
+    friend class DOMFileSystemBaseTest;
     friend class DOMFileSystemSync;
 
     ExecutionContext* m_context;
@@ -127,6 +129,12 @@ protected:
     FileSystemType m_type;
     KURL m_filesystemRootURL;
     bool m_clonable;
+
+private:
+    // This does the same thing with encodeWithURLEscapeSequences defined in
+    // KURL.h other than the unicode normalization (NFC).
+    // See http://crbug.com/252551 for more details.
+    static String encodeFilePathAsURIComponent(const String& fullPath);
 };
 
 inline bool operator==(const DOMFileSystemBase& a, const DOMFileSystemBase& b) { return a.name() == b.name() && a.type() == b.type() && a.rootURL() == b.rootURL(); }

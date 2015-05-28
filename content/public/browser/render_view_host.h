@@ -5,15 +5,13 @@
 #ifndef CONTENT_PUBLIC_BROWSER_RENDER_VIEW_HOST_H_
 #define CONTENT_PUBLIC_BROWSER_RENDER_VIEW_HOST_H_
 
-#include <list>
-
 #include "base/callback_forward.h"
 #include "content/common/content_export.h"
 #include "content/public/browser/render_widget_host.h"
 #include "content/public/common/file_chooser_params.h"
 #include "content/public/common/page_zoom.h"
-#include "mojo/public/cpp/system/core.h"
 #include "third_party/WebKit/public/web/WebDragOperation.h"
+#include "third_party/mojo/src/mojo/public/cpp/system/core.h"
 
 class GURL;
 
@@ -29,10 +27,6 @@ struct WebPluginAction;
 
 namespace gfx {
 class Point;
-}
-
-namespace media {
-class AudioOutputController;
 }
 
 namespace content {
@@ -57,10 +51,17 @@ struct WebPreferences;
 // The intent of this interface is to provide a view-agnostic communication
 // conduit with a renderer. This is so we can build HTML views not only as
 // WebContents (see WebContents for an example) but also as views, etc.
+//
+// DEPRECATED: RenderViewHost is being removed as part of the SiteIsolation
+// project. New code should not be added here, but to either RenderFrameHost
+// (if frame specific) or WebContents (if page specific).
+//
+// For context, please see https://crbug.com/467770 and
+// http://www.chromium.org/developers/design-documents/site-isolation.
 class CONTENT_EXPORT RenderViewHost : virtual public RenderWidgetHost {
  public:
   // Returns the RenderViewHost given its ID and the ID of its render process.
-  // Returns NULL if the IDs do not correspond to a live RenderViewHost.
+  // Returns nullptr if the IDs do not correspond to a live RenderViewHost.
   static RenderViewHost* FromID(int render_process_id, int render_view_id);
 
   // Downcasts from a RenderWidgetHost to a RenderViewHost.  Required
@@ -153,9 +154,6 @@ class CONTENT_EXPORT RenderViewHost : virtual public RenderWidgetHost {
   virtual void ExecutePluginActionAtLocation(
       const gfx::Point& location, const blink::WebPluginAction& action) = 0;
 
-  // Asks the renderer to exit fullscreen
-  virtual void ExitFullscreen() = 0;
-
   // Notifies the Listener that one or more files have been chosen by the user
   // from a file chooser dialog for the form. |permissions| is the file
   // selection mode in which the chooser dialog was created.
@@ -201,16 +199,6 @@ class CONTENT_EXPORT RenderViewHost : virtual public RenderWidgetHost {
 
   // Passes a list of Webkit preferences to the renderer.
   virtual void UpdateWebkitPreferences(const WebPreferences& prefs) = 0;
-
-  // Retrieves the list of AudioOutputController objects associated
-  // with this object and passes it to the callback you specify, on
-  // the same thread on which you called the method.
-  typedef std::list<scoped_refptr<media::AudioOutputController> >
-      AudioOutputControllerList;
-  typedef base::Callback<void(const AudioOutputControllerList&)>
-      GetAudioOutputControllersCallback;
-  virtual void GetAudioOutputControllers(
-      const GetAudioOutputControllersCallback& callback) const = 0;
 
   // Notify the render view host to select the word around the caret.
   virtual void SelectWordAroundCaret() = 0;

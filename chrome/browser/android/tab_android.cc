@@ -7,10 +7,15 @@
 #include "base/android/jni_android.h"
 #include "base/android/jni_array.h"
 #include "base/android/jni_string.h"
-#include "base/debug/trace_event.h"
 #include "base/metrics/histogram.h"
+#include "base/trace_event/trace_event.h"
+#include "cc/layers/layer.h"
 #include "chrome/browser/android/chrome_web_contents_delegate_android.h"
-#include "chrome/browser/android/uma_utils.h"
+#include "chrome/browser/android/compositor/tab_content_manager.h"
+#include "chrome/browser/android/metrics/uma_utils.h"
+#include "chrome/browser/bookmarks/bookmark_model_factory.h"
+#include "chrome/browser/bookmarks/chrome_bookmark_client.h"
+#include "chrome/browser/bookmarks/chrome_bookmark_client_factory.h"
 #include "chrome/browser/browser_about_handler.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/content_settings/tab_specific_content_settings.h"
@@ -44,16 +49,22 @@
 #include "chrome/common/instant_types.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/url_constants.h"
+#include "components/bookmarks/browser/bookmark_model.h"
+#include "components/bookmarks/browser/bookmark_node.h"
+#include "components/bookmarks/browser/bookmark_utils.h"
+#include "components/dom_distiller/core/url_utils.h"
 #include "components/infobars/core/infobar_container.h"
 #include "components/navigation_interception/intercept_navigation_delegate.h"
 #include "components/navigation_interception/navigation_params.h"
 #include "components/url_fixer/url_fixer.h"
 #include "content/public/browser/android/content_view_core.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/interstitial_page.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
+#include "content/public/browser/render_view_host.h"
 #include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/common/top_controls_state.h"
@@ -110,11 +121,14 @@ void TabAndroid::AttachTabHelpers(content::WebContents* web_contents) {
 
 TabAndroid::TabAndroid(JNIEnv* env, jobject obj)
     : weak_java_tab_(env, obj),
+      content_layer_(cc::Layer::Create()),
+      tab_content_manager_(NULL),
       synced_tab_delegate_(new browser_sync::SyncedTabDelegateAndroid(this)) {
   Java_Tab_setNativePtr(env, obj, reinterpret_cast<intptr_t>(this));
 }
 
 TabAndroid::~TabAndroid() {
+  GetContentLayer()->RemoveAllChildren();
   JNIEnv* env = base::android::AttachCurrentThread();
   Java_Tab_clearNativePtr(env, weak_java_tab_.get(env).obj());
 }
@@ -122,6 +136,10 @@ TabAndroid::~TabAndroid() {
 base::android::ScopedJavaLocalRef<jobject> TabAndroid::GetJavaObject() {
   JNIEnv* env = base::android::AttachCurrentThread();
   return weak_java_tab_.get(env);
+}
+
+scoped_refptr<cc::Layer> TabAndroid::GetContentLayer() const {
+  return content_layer_;
 }
 
 int TabAndroid::GetAndroidId() const {
@@ -276,26 +294,16 @@ void TabAndroid::SwapTabContents(content::WebContents* old_contents,
                                  bool did_start_load,
                                  bool did_finish_load) {
   JNIEnv* env = base::android::AttachCurrentThread();
-
-  // We need to notify the native InfobarContainer so infobars can be swapped.
-  InfoBarContainerAndroid* infobar_container =
-      reinterpret_cast<InfoBarContainerAndroid*>(
-          Java_Tab_getNativeInfoBarContainer(
-              env,
-              weak_java_tab_.get(env).obj()));
-  InfoBarService* new_infobar_service =
-      new_contents ? InfoBarService::FromWebContents(new_contents) : NULL;
-  infobar_container->ChangeInfoBarManager(new_infobar_service);
-
   Java_Tab_swapWebContents(
       env,
       weak_java_tab_.get(env).obj(),
-      reinterpret_cast<intptr_t>(new_contents),
+      new_contents->GetJavaWebContents().obj(),
       did_start_load,
       did_finish_load);
 }
 
-void TabAndroid::DefaultSearchProviderChanged() {
+void TabAndroid::DefaultSearchProviderChanged(
+    bool google_base_url_domain_changed) {
   // TODO(kmadhusu): Move this function definition to a common place and update
   // BrowserInstantController::DefaultSearchProviderChanged to use the same.
   if (!web_contents())
@@ -439,12 +447,18 @@ void TabAndroid::InitWebContents(JNIEnv* env,
       InstantServiceFactory::GetForProfile(GetProfile());
   if (instant_service)
     instant_service->AddObserver(this);
+
+  content_layer_->InsertChild(content_view_core->GetLayer(), 0);
 }
 
 void TabAndroid::DestroyWebContents(JNIEnv* env,
                                     jobject obj,
                                     jboolean delete_native) {
   DCHECK(web_contents());
+
+  content::ContentViewCore* content_view_core = GetContentViewCore();
+  if (content_view_core)
+    content_view_core->GetLayer()->RemoveFromParent();
 
   notification_registrar_.Remove(
       this,
@@ -470,6 +484,18 @@ void TabAndroid::DestroyWebContents(JNIEnv* env,
   web_contents()->SetDelegate(NULL);
 
   if (delete_native) {
+    // Terminate the renderer process if this is the last tab.
+    // If there's no unload listener, FastShutdownForPageCount kills the
+    // renderer process. Otherwise, we go with the slow path where renderer
+    // process shuts down itself when ref count becomes 0.
+    // This helps the render process exit quickly which avoids some issues
+    // during shutdown. See https://codereview.chromium.org/146693011/
+    // and http://crbug.com/338709 for details.
+    content::RenderProcessHost* process =
+        web_contents()->GetRenderProcessHost();
+    if (process)
+      process->FastShutdownForPageCount(1);
+
     web_contents_.reset();
     synced_tab_delegate_->ResetWebContents();
   } else {
@@ -702,6 +728,14 @@ void TabAndroid::UpdateTopControlsState(JNIEnv* env,
   WebContents* sender = web_contents();
   sender->Send(new ChromeViewMsg_UpdateTopControlsState(
       sender->GetRoutingID(), constraints_state, current_state, animate));
+
+  if (sender->ShowingInterstitialPage()) {
+    content::RenderViewHost* interstitial_view_host =
+        sender->GetInterstitialPage()->GetMainFrame()->GetRenderViewHost();
+    interstitial_view_host->Send(new ChromeViewMsg_UpdateTopControlsState(
+        interstitial_view_host->GetRoutingID(), constraints_state,
+        current_state, animate));
+  }
 }
 
 void TabAndroid::SearchByImageInNewTabAsync(JNIEnv* env, jobject obj) {
@@ -713,6 +747,37 @@ void TabAndroid::SearchByImageInNewTabAsync(JNIEnv* env, jobject obj) {
           kImageSearchThumbnailMinSize,
           gfx::Size(kImageSearchThumbnailMaxWidth,
                     kImageSearchThumbnailMaxHeight)));
+}
+
+jlong TabAndroid::GetBookmarkId(JNIEnv* env,
+                               jobject obj,
+                               jboolean only_editable) {
+  const GURL& url = dom_distiller::url_utils::GetOriginalUrlFromDistillerUrl(
+      web_contents()->GetURL());
+  Profile* profile = GetProfile();
+
+  // Get all the nodes for |url| and sort them by date added.
+  std::vector<const bookmarks::BookmarkNode*> nodes;
+  ChromeBookmarkClient* client =
+      ChromeBookmarkClientFactory::GetForProfile(profile);
+  bookmarks::BookmarkModel* model =
+      BookmarkModelFactory::GetForProfile(profile);
+  model->GetNodesByURL(url, &nodes);
+  std::sort(nodes.begin(), nodes.end(), &bookmarks::MoreRecentlyAdded);
+
+  // Return the first node matching the search criteria.
+  for (size_t i = 0; i < nodes.size(); ++i) {
+    if (only_editable && !client->CanBeEditedByUser(nodes[i]))
+      continue;
+    return nodes[i]->id();
+  }
+
+  return -1;
+}
+
+bool TabAndroid::HasPrerenderedUrl(JNIEnv* env, jobject obj, jstring url) {
+  GURL gurl(base::android::ConvertJavaStringToUTF8(env, url));
+  return HasPrerenderedUrl(gurl);
 }
 
 namespace {
@@ -736,10 +801,50 @@ class ChromeInterceptNavigationDelegate : public InterceptNavigationDelegate {
 
 void TabAndroid::SetInterceptNavigationDelegate(JNIEnv* env, jobject obj,
                                                jobject delegate) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   InterceptNavigationDelegate::Associate(
       web_contents(),
       make_scoped_ptr(new ChromeInterceptNavigationDelegate(env, delegate)));
+}
+
+void TabAndroid::AttachToTabContentManager(JNIEnv* env,
+                                           jobject obj,
+                                           jobject jtab_content_manager) {
+  chrome::android::TabContentManager* tab_content_manager =
+      chrome::android::TabContentManager::FromJavaObject(jtab_content_manager);
+  if (tab_content_manager == tab_content_manager_)
+    return;
+
+  if (tab_content_manager_)
+    tab_content_manager_->DetachLiveLayer(GetAndroidId(), GetContentLayer());
+  tab_content_manager_ = tab_content_manager;
+  if (tab_content_manager_)
+    tab_content_manager_->AttachLiveLayer(GetAndroidId(), GetContentLayer());
+}
+
+void TabAndroid::AttachOverlayContentViewCore(JNIEnv* env,
+                                              jobject obj,
+                                              jobject jcontent_view_core,
+                                              jboolean visible) {
+  content::ContentViewCore* content_view_core =
+      content::ContentViewCore::GetNativeContentViewCore(env,
+                                                         jcontent_view_core);
+  DCHECK(content_view_core);
+
+  content_view_core->GetLayer()->SetHideLayerAndSubtree(!visible);
+  content_layer_->AddChild(content_view_core->GetLayer());
+}
+
+void TabAndroid::DetachOverlayContentViewCore(JNIEnv* env,
+                                              jobject obj,
+                                              jobject jcontent_view_core) {
+  content::ContentViewCore* content_view_core =
+      content::ContentViewCore::GetNativeContentViewCore(env,
+                                                         jcontent_view_core);
+  DCHECK(content_view_core);
+
+  if (content_view_core->GetLayer()->parent() == content_layer_)
+    content_view_core->GetLayer()->RemoveFromParent();
 }
 
 static void Init(JNIEnv* env, jobject obj) {

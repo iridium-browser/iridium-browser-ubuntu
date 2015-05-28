@@ -5,17 +5,36 @@
 (function() {
   'use strict';
 
-  Polymer('track-list', {
+  /**
+   * @constructor
+   * @extends {PolymerElement}
+   */
+  var TrackListElement = function() {};
+
+  TrackListElement.prototype = {
     /**
      * Initializes an element. This method is called automatically when the
      * element is ready.
      */
     ready: function() {
-      this.tracksObserver_ = new ArrayObserver(
-          this.tracks,
-          this.tracksValueChanged_.bind(this));
+      this.observeTrackList();
 
       window.addEventListener('resize', this.onWindowResize_.bind(this));
+    },
+
+    observeTrackList: function() {
+      // Unobserve the previous track list.
+      if (this.unobserveTrackList_)
+        this.unobserveTrackList_();
+
+      // Observe the new track list.
+      var observer = this.tracksValueChanged_.bind(this);
+      Array.observe(this.tracks, observer);
+
+      // Set the function to unobserve it.
+      this.unobserveTrackList_ = function(tracks, observer) {
+        Array.unobserve(tracks, observer);
+      }.bind(null, this.tracks, observer);
     },
 
     /**
@@ -93,17 +112,15 @@
 
     /**
      * Invoked when 'tracks' property is changed.
-     * @param {Array.<TrackInfo>} oldValue Old value.
-     * @param {Array.<TrackInfo>} newValue New value.
+     * @param {Array.<AudioPlayer.TrackInfo>} oldValue Old value.
+     * @param {Array.<AudioPlayer.TrackInfo>} newValue New value.
      */
     tracksChanged: function(oldValue, newValue) {
       // Note: Sometimes both oldValue and newValue are null though the actual
       // values are not null. Maybe it's a bug of Polymer.
 
       // Re-register the observer of 'this.tracks'.
-      this.tracksObserver_.close();
-      this.tracksObserver_ = new ArrayObserver(this.tracks);
-      this.tracksObserver_.open(this.tracksValueChanged_.bind(this));
+      this.observeTrackList();
 
       if (this.tracks.length !== 0) {
         // Restore the active track.
@@ -122,9 +139,9 @@
 
     /**
      * Invoked when the value in the 'tracks' is changed.
-     * @param {Array.<Object>} splices The detail of the change.
+     * @param {Array.<Object>} changes The detail of the change.
      */
-    tracksValueChanged_: function(splices) {
+    tracksValueChanged_: function(changes) {
       if (this.tracks.length === 0)
         this.currentTrackIndex = -1;
       else
@@ -249,7 +266,7 @@
 
     /**
      * Returns the current track.
-     * @param {AudioPlayer.TrackInfo} track TrackInfo of the current track.
+     * @return {AudioPlayer.TrackInfo} track TrackInfo of the current track.
      */
     getCurrentTrack: function() {
       if (this.tracks.length === 0)
@@ -293,5 +310,7 @@
 
       return newTrackIndex;
     },
-  });  // Polymer('track-list') block
+  };  // TrackListElement.prototype for 'track-list'
+
+  Polymer('track-list', TrackListElement.prototype);
 })();  // Anonymous closure

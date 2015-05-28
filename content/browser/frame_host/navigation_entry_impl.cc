@@ -7,6 +7,7 @@
 #include "base/metrics/histogram.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
+#include "content/common/navigation_params.h"
 #include "content/public/common/content_constants.h"
 #include "content/public/common/url_constants.h"
 #include "net/base/net_util.h"
@@ -23,12 +24,24 @@ namespace content {
 
 int NavigationEntryImpl::kInvalidBindings = -1;
 
-NavigationEntry* NavigationEntry::Create() {
-  return new NavigationEntryImpl();
+NavigationEntryImpl::TreeNode::TreeNode(FrameNavigationEntry* frame_entry)
+    : frame_entry(frame_entry) {
 }
 
-NavigationEntry* NavigationEntry::Create(const NavigationEntry& copy) {
-  return new NavigationEntryImpl(static_cast<const NavigationEntryImpl&>(copy));
+NavigationEntryImpl::TreeNode::~TreeNode() {
+}
+
+NavigationEntryImpl::TreeNode* NavigationEntryImpl::TreeNode::Clone() const {
+  // Clone the tree using a copy of the FrameNavigationEntry, without sharing.
+  NavigationEntryImpl::TreeNode* copy =
+      new NavigationEntryImpl::TreeNode(frame_entry->Clone());
+
+  // TODO(creis): Clone children once we add them.
+  return copy;
+}
+
+NavigationEntry* NavigationEntry::Create() {
+  return new NavigationEntryImpl();
 }
 
 NavigationEntryImpl* NavigationEntryImpl::FromNavigationEntry(
@@ -48,12 +61,11 @@ NavigationEntryImpl::NavigationEntryImpl(SiteInstanceImpl* instance,
                                          const base::string16& title,
                                          ui::PageTransition transition_type,
                                          bool is_renderer_initiated)
-    : unique_id_(GetUniqueIDInConstructor()),
-      site_instance_(instance),
+    : frame_tree_(
+          new TreeNode(new FrameNavigationEntry(instance, url, referrer))),
+      unique_id_(GetUniqueIDInConstructor()),
       bindings_(kInvalidBindings),
       page_type_(PAGE_TYPE_NORMAL),
-      url_(url),
-      referrer_(referrer),
       update_virtual_url_with_url_(false),
       title_(title),
       page_id_(page_id),
@@ -82,12 +94,12 @@ PageType NavigationEntryImpl::GetPageType() const {
 }
 
 void NavigationEntryImpl::SetURL(const GURL& url) {
-  url_ = url;
+  frame_tree_->frame_entry->set_url(url);
   cached_display_title_.clear();
 }
 
 const GURL& NavigationEntryImpl::GetURL() const {
-  return url_;
+  return frame_tree_->frame_entry->url();
 }
 
 void NavigationEntryImpl::SetBaseURLForDataURL(const GURL& url) {
@@ -99,20 +111,20 @@ const GURL& NavigationEntryImpl::GetBaseURLForDataURL() const {
 }
 
 void NavigationEntryImpl::SetReferrer(const Referrer& referrer) {
-  referrer_ = referrer;
+  frame_tree_->frame_entry->set_referrer(referrer);
 }
 
 const Referrer& NavigationEntryImpl::GetReferrer() const {
-  return referrer_;
+  return frame_tree_->frame_entry->referrer();
 }
 
 void NavigationEntryImpl::SetVirtualURL(const GURL& url) {
-  virtual_url_ = (url == url_) ? GURL() : url;
+  virtual_url_ = (url == GetURL()) ? GURL() : url;
   cached_display_title_.clear();
 }
 
 const GURL& NavigationEntryImpl::GetVirtualURL() const {
-  return virtual_url_.is_empty() ? url_ : virtual_url_;
+  return virtual_url_.is_empty() ? GetURL() : virtual_url_;
 }
 
 void NavigationEntryImpl::SetTitle(const base::string16& title) {
@@ -141,7 +153,8 @@ int32 NavigationEntryImpl::GetPageID() const {
 }
 
 void NavigationEntryImpl::set_site_instance(SiteInstanceImpl* site_instance) {
-  site_instance_ = site_instance;
+  // TODO(creis): Update all callers and remove this method.
+  frame_tree_->frame_entry->set_site_instance(site_instance);
 }
 
 void NavigationEntryImpl::set_source_site_instance(
@@ -172,12 +185,12 @@ const base::string16& NavigationEntryImpl::GetTitleForDisplay(
   base::string16 title;
   if (!virtual_url_.is_empty()) {
     title = net::FormatUrl(virtual_url_, languages);
-  } else if (!url_.is_empty()) {
-    title = net::FormatUrl(url_, languages);
+  } else if (!GetURL().is_empty()) {
+    title = net::FormatUrl(GetURL(), languages);
   }
 
   // For file:// URLs use the filename as the title, not the full path.
-  if (url_.SchemeIsFile()) {
+  if (GetURL().SchemeIsFile()) {
     base::string16::size_type slashpos = title.rfind('/');
     if (slashpos != base::string16::npos)
       title = title.substr(slashpos + 1);
@@ -327,17 +340,129 @@ void NavigationEntryImpl::ClearExtraData(const std::string& key) {
   extra_data_.erase(key);
 }
 
+NavigationEntryImpl* NavigationEntryImpl::Clone() const {
+  NavigationEntryImpl* copy = new NavigationEntryImpl();
+
+  // TODO(creis): Only share the same FrameNavigationEntries if cloning within
+  // the same tab.
+  copy->frame_tree_.reset(frame_tree_->Clone());
+
+  // Copy all state over, unless cleared in ResetForCommit.
+  copy->unique_id_ = unique_id_;
+  copy->bindings_ = bindings_;
+  copy->page_type_ = page_type_;
+  copy->virtual_url_ = virtual_url_;
+  copy->update_virtual_url_with_url_ = update_virtual_url_with_url_;
+  copy->title_ = title_;
+  copy->favicon_ = favicon_;
+  copy->page_state_ = page_state_;
+  copy->page_id_ = page_id_;
+  copy->ssl_ = ssl_;
+  copy->transition_type_ = transition_type_;
+  copy->user_typed_url_ = user_typed_url_;
+  copy->has_post_data_ = has_post_data_;
+  copy->post_id_ = post_id_;
+  copy->restore_type_ = restore_type_;
+  copy->original_request_url_ = original_request_url_;
+  copy->is_overriding_user_agent_ = is_overriding_user_agent_;
+  copy->timestamp_ = timestamp_;
+  copy->http_status_code_ = http_status_code_;
+  // ResetForCommit: browser_initiated_post_data_
+  copy->screenshot_ = screenshot_;
+  copy->extra_headers_ = extra_headers_;
+  // ResetForCommit: source_site_instance_
+  copy->base_url_for_data_url_ = base_url_for_data_url_;
+  // ResetForCommit: is_renderer_initiated_
+  copy->cached_display_title_ = cached_display_title_;
+  // ResetForCommit: transferred_global_request_id_
+  // ResetForCommit: should_replace_entry_
+  copy->redirect_chain_ = redirect_chain_;
+  // ResetForCommit: should_clear_history_list_
+  copy->frame_to_navigate_ = frame_to_navigate_;
+  // ResetForCommit: frame_tree_node_id_
+  // ResetForCommit: intent_received_timestamp_
+  copy->extra_data_ = extra_data_;
+
+  return copy;
+}
+
+CommonNavigationParams NavigationEntryImpl::ConstructCommonNavigationParams(
+    FrameMsg_Navigate_Type::Value navigation_type) const {
+  FrameMsg_UILoadMetricsReportType::Value report_type =
+      FrameMsg_UILoadMetricsReportType::NO_REPORT;
+  base::TimeTicks ui_timestamp = base::TimeTicks();
+#if defined(OS_ANDROID)
+  if (!intent_received_timestamp().is_null())
+    report_type = FrameMsg_UILoadMetricsReportType::REPORT_INTENT;
+  ui_timestamp = intent_received_timestamp();
+#endif
+
+  return CommonNavigationParams(
+      GetURL(), GetReferrer(), GetTransitionType(), navigation_type,
+      !IsViewSourceMode(), ui_timestamp, report_type, GetBaseURLForDataURL(),
+      GetHistoryURLForDataURL());
+}
+
+StartNavigationParams NavigationEntryImpl::ConstructStartNavigationParams()
+    const {
+  std::vector<unsigned char> browser_initiated_post_data;
+  if (GetBrowserInitiatedPostData()) {
+    browser_initiated_post_data.assign(
+        GetBrowserInitiatedPostData()->front(),
+        GetBrowserInitiatedPostData()->front() +
+            GetBrowserInitiatedPostData()->size());
+  }
+
+  return StartNavigationParams(
+      GetHasPostData(), extra_headers(), browser_initiated_post_data,
+      should_replace_entry(), transferred_global_request_id().child_id,
+      transferred_global_request_id().request_id);
+}
+
+RequestNavigationParams NavigationEntryImpl::ConstructRequestNavigationParams(
+    base::TimeTicks navigation_start,
+    int pending_history_list_offset,
+    int current_history_list_offset,
+    int current_history_list_length) const {
+  // Set the redirect chain to the navigation's redirects, unless returning to a
+  // completed navigation (whose previous redirects don't apply).
+  std::vector<GURL> redirects;
+  if (ui::PageTransitionIsNewNavigation(GetTransitionType())) {
+    redirects = GetRedirectChain();
+  }
+
+  int pending_offset_to_send = pending_history_list_offset;
+  int current_offset_to_send = current_history_list_offset;
+  int current_length_to_send = current_history_list_length;
+  if (should_clear_history_list()) {
+    // Set the history list related parameters to the same values a
+    // NavigationController would return before its first navigation. This will
+    // fully clear the RenderView's view of the session history.
+    pending_offset_to_send = -1;
+    current_offset_to_send = -1;
+    current_length_to_send = 0;
+  }
+  return RequestNavigationParams(
+      GetIsOverridingUserAgent(), navigation_start, redirects,
+      GetCanLoadLocalResources(), GetFrameToNavigate(), base::Time::Now(),
+      GetPageState(), GetPageID(), pending_offset_to_send,
+      current_offset_to_send, current_length_to_send,
+      should_clear_history_list());
+}
+
 void NavigationEntryImpl::ResetForCommit() {
   // Any state that only matters when a navigation entry is pending should be
   // cleared here.
+  // TODO(creis): This state should be moved to NavigationRequest once
+  // PlzNavigate is enabled.
   SetBrowserInitiatedPostData(nullptr);
+  set_source_site_instance(nullptr);
   set_is_renderer_initiated(false);
   set_transferred_global_request_id(GlobalRequestID());
   set_should_replace_entry(false);
 
   set_should_clear_history_list(false);
   set_frame_tree_node_id(-1);
-  set_source_site_instance(nullptr);
 
 #if defined(OS_ANDROID)
   // Reset the time stamp so that the metrics are not reported if this entry is
@@ -346,11 +471,27 @@ void NavigationEntryImpl::ResetForCommit() {
 #endif
 }
 
+void NavigationEntryImpl::AddOrUpdateFrameEntry(int64 frame_tree_node_id,
+                                                SiteInstanceImpl* site_instance,
+                                                const GURL& url,
+                                                const Referrer& referrer) {
+  // TODO(creis): Walk tree to find the node to update.
+  // TODO(creis): Only create a new entry if one doesn't exist yet.
+  FrameNavigationEntry* frame_entry =
+      new FrameNavigationEntry(site_instance, url, referrer);
+  root_node()->children.push_back(
+      new NavigationEntryImpl::TreeNode(frame_entry));
+}
+
 void NavigationEntryImpl::SetScreenshotPNGData(
     scoped_refptr<base::RefCountedBytes> png_data) {
   screenshot_ = png_data;
   if (screenshot_.get())
     UMA_HISTOGRAM_MEMORY_KB("Overscroll.ScreenshotSize", screenshot_->size());
+}
+
+GURL NavigationEntryImpl::GetHistoryURLForDataURL() const {
+  return GetBaseURLForDataURL().is_empty() ? GURL() : GetVirtualURL();
 }
 
 }  // namespace content

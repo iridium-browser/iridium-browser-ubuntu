@@ -42,6 +42,7 @@
 #include "wtf/Forward.h"
 #include "wtf/HashMap.h"
 #include "wtf/HashSet.h"
+#include "wtf/ListHashSet.h"
 #include "wtf/PassRefPtr.h"
 #include "wtf/Vector.h"
 #include "wtf/text/StringHash.h"
@@ -49,7 +50,9 @@
 namespace blink {
 
 class AsyncCallChain;
+class AsyncCallStack;
 class ConsoleMessage;
+class DevToolsFunctionInfo;
 class InjectedScript;
 class InjectedScriptManager;
 class JavaScriptCallFrame;
@@ -63,11 +66,12 @@ class V8AsyncCallTracker;
 typedef String ErrorString;
 
 class InspectorDebuggerAgent
-    : public InspectorBaseAgent<InspectorDebuggerAgent>
+    : public InspectorBaseAgent<InspectorDebuggerAgent, InspectorFrontend::Debugger>
     , public ScriptDebugListener
-    , public InspectorBackendDispatcher::DebuggerCommandHandler {
+    , public InspectorBackendDispatcher::DebuggerCommandHandler
+    , public PromiseTracker::Listener {
     WTF_MAKE_NONCOPYABLE(InspectorDebuggerAgent);
-    WTF_MAKE_FAST_ALLOCATED_WILL_BE_REMOVED;
+    WTF_MAKE_FAST_ALLOCATED_WILL_BE_REMOVED(InspectorDebuggerAgent);
 public:
     enum BreakpointSource {
         UserBreakpointSource,
@@ -78,26 +82,21 @@ public:
     static const char backtraceObjectGroup[];
 
     ~InspectorDebuggerAgent() override;
-    void trace(Visitor*) override;
+    DECLARE_VIRTUAL_TRACE();
 
     void canSetScriptSource(ErrorString*, bool* result) final { *result = true; }
 
-    void init() final;
-    void setFrontend(InspectorFrontend*) final;
-    void clearFrontend() final;
-    void restore() final;
+    void init() override final;
+    void restore() override final;
+    void disable(ErrorString*) override final;
 
     bool isPaused();
     void addMessageToConsole(ConsoleMessage*);
 
-    String preprocessEventListener(LocalFrame*, const String& source, const String& url, const String& functionName);
-    PassOwnPtr<ScriptSourceCode> preprocess(LocalFrame*, const ScriptSourceCode&);
-
     // Part of the protocol.
     void enable(ErrorString*) final;
-    void disable(ErrorString*) final;
     void setBreakpointsActive(ErrorString*, bool active) final;
-    void setSkipAllPauses(ErrorString*, bool skipped, const bool* untilReload) final;
+    void setSkipAllPauses(ErrorString*, bool skipped) final;
 
     void setBreakpointByUrl(ErrorString*, int lineNumber, const String* optionalURL, const String* optionalURLRegex, const int* optionalColumnNumber, const String* optionalCondition, TypeBuilder::Debugger::BreakpointId*, RefPtr<TypeBuilder::Array<TypeBuilder::Debugger::Location> >& locations) final;
     void setBreakpoint(ErrorString*, const RefPtr<JSONObject>& location, const String* optionalCondition, TypeBuilder::Debugger::BreakpointId*, RefPtr<TypeBuilder::Debugger::Location>& actualLocation) final;
@@ -105,7 +104,7 @@ public:
     void continueToLocation(ErrorString*, const RefPtr<JSONObject>& location, const bool* interstateLocationOpt) final;
     void getStepInPositions(ErrorString*, const String& callFrameId, RefPtr<TypeBuilder::Array<TypeBuilder::Debugger::Location> >& positions) final;
     void getBacktrace(ErrorString*, RefPtr<TypeBuilder::Array<TypeBuilder::Debugger::CallFrame> >&, RefPtr<TypeBuilder::Debugger::StackTrace>&) final;
-    void searchInContent(ErrorString*, const String& scriptId, const String& query, const bool* optionalCaseSensitive, const bool* optionalIsRegex, RefPtr<TypeBuilder::Array<TypeBuilder::Page::SearchMatch> >&) final;
+    void searchInContent(ErrorString*, const String& scriptId, const String& query, const bool* optionalCaseSensitive, const bool* optionalIsRegex, RefPtr<TypeBuilder::Array<TypeBuilder::Debugger::SearchMatch>>&) final;
     void setScriptSource(ErrorString*, RefPtr<TypeBuilder::Debugger::SetScriptSourceError>&, const String& scriptId, const String& newContent, const bool* preview, RefPtr<TypeBuilder::Array<TypeBuilder::Debugger::CallFrame> >& newCallFrames, RefPtr<JSONObject>& result, RefPtr<TypeBuilder::Debugger::StackTrace>& asyncStackTrace) final;
     void restartFrame(ErrorString*, const String& callFrameId, RefPtr<TypeBuilder::Array<TypeBuilder::Debugger::CallFrame> >& newCallFrames, RefPtr<JSONObject>& result, RefPtr<TypeBuilder::Debugger::StackTrace>& asyncStackTrace) final;
     void getScriptSource(ErrorString*, const String& scriptId, String* scriptSource) final;
@@ -130,7 +129,7 @@ public:
         RefPtr<TypeBuilder::Runtime::RemoteObject>& result,
         TypeBuilder::OptOutput<bool>* wasThrown,
         RefPtr<TypeBuilder::Debugger::ExceptionDetails>&) final;
-    void compileScript(ErrorString*, const String& expression, const String& sourceURL, const int* executionContextId, TypeBuilder::OptOutput<TypeBuilder::Debugger::ScriptId>*, RefPtr<TypeBuilder::Debugger::ExceptionDetails>&) override;
+    void compileScript(ErrorString*, const String& expression, const String& sourceURL, bool persistScript, const int* executionContextId, TypeBuilder::OptOutput<TypeBuilder::Debugger::ScriptId>*, RefPtr<TypeBuilder::Debugger::ExceptionDetails>&) override;
     void runScript(ErrorString*, const TypeBuilder::Debugger::ScriptId&, const int* executionContextId, const String* objectGroup, const bool* doNotPauseOnExceptionsAndMuteConsole, RefPtr<TypeBuilder::Runtime::RemoteObject>& result, RefPtr<TypeBuilder::Debugger::ExceptionDetails>&) override;
     void setVariableValue(ErrorString*, int in_scopeNumber, const String& in_variableName, const RefPtr<JSONObject>& in_newValue, const String* in_callFrame, const String* in_functionObjectId) final;
     void skipStackFrames(ErrorString*, const String* pattern, const bool* skipContentScripts) final;
@@ -139,6 +138,9 @@ public:
     void disablePromiseTracker(ErrorString*) final;
     void getPromises(ErrorString*, RefPtr<TypeBuilder::Array<TypeBuilder::Debugger::PromiseDetails> >& promises) final;
     void getPromiseById(ErrorString*, int promiseId, const String* objectGroup, RefPtr<TypeBuilder::Runtime::RemoteObject>& promise) final;
+    void flushAsyncOperationEvents(ErrorString*) final;
+    void setAsyncOperationBreakpoint(ErrorString*, int operationId) final;
+    void removeAsyncOperationBreakpoint(ErrorString*, int operationId) final;
 
     void schedulePauseOnNextStatement(InspectorFrontend::Debugger::Reason::Enum breakReason, PassRefPtr<JSONObject> data);
     void didFireTimer();
@@ -146,10 +148,11 @@ public:
     bool canBreakProgram();
     void breakProgram(InspectorFrontend::Debugger::Reason::Enum breakReason, PassRefPtr<JSONObject> data);
     void scriptExecutionBlockedByCSP(const String& directiveText);
-    void willCallFunction(ExecutionContext*, int scriptId, const String& scriptName, int scriptLine);
+    void willCallFunction(ExecutionContext*, const DevToolsFunctionInfo&);
     void didCallFunction();
     void willEvaluateScript(LocalFrame*, const String& url, int lineNumber);
     void didEvaluateScript();
+    bool getEditedScript(const String& url, String* content);
 
     class Listener : public WillBeGarbageCollectedMixin {
     public:
@@ -172,22 +175,25 @@ public:
 
     // Async call stacks implementation
     PassRefPtrWillBeRawPtr<ScriptAsyncCallStack> currentAsyncStackTraceForConsole();
-    PassRefPtrWillBeRawPtr<AsyncCallChain> createAsyncCallChain(const String& description);
-    void setCurrentAsyncCallChain(v8::Isolate*, PassRefPtrWillBeRawPtr<AsyncCallChain>);
-    const AsyncCallChain* currentAsyncCallChain() const;
-    void clearCurrentAsyncCallChain();
-    void didCompleteAsyncOperation(AsyncCallChain*);
+    static const int unknownAsyncOperationId;
+    int traceAsyncOperationStarting(const String& description);
+    void traceAsyncCallbackStarting(int operationId);
+    void traceAsyncCallbackCompleted();
+    void traceAsyncOperationCompleted(int operationId);
     bool trackingAsyncCalls() const { return m_maxAsyncCallStackDepth; }
 
     class AsyncCallTrackingListener : public WillBeGarbageCollectedMixin {
     public:
         virtual ~AsyncCallTrackingListener() { }
-        virtual void trace(Visitor*) { }
+        DEFINE_INLINE_VIRTUAL_TRACE() { }
         virtual void asyncCallTrackingStateChanged(bool tracking) = 0;
-        virtual void resetAsyncCallChains() = 0;
+        virtual void resetAsyncOperations() = 0;
     };
     void addAsyncCallTrackingListener(AsyncCallTrackingListener*);
     void removeAsyncCallTrackingListener(AsyncCallTrackingListener*);
+
+    // PromiseTracker::Listener
+    void didUpdatePromise(InspectorFrontend::Debugger::EventType::Enum, PassRefPtr<TypeBuilder::Debugger::PromiseDetails>) final;
 
 protected:
     explicit InspectorDebuggerAgent(InjectedScriptManager*);
@@ -204,12 +210,11 @@ protected:
     SkipPauseRequest didPause(ScriptState*, const ScriptValue& callFrames, const ScriptValue& exception, const Vector<String>& hitBreakpoints, bool isPromiseRejection) final;
     void didContinue() final;
     void reset();
-    void pageDidCommitLoad();
+    void resetModifiedSources();
 
 private:
     SkipPauseRequest shouldSkipExceptionPause();
     SkipPauseRequest shouldSkipStepPause();
-    bool isTopCallFrameInFramework();
 
     void schedulePauseOnNextStatementIfSteppingInto();
     void cancelPauseOnNextStatement();
@@ -218,8 +223,8 @@ private:
     PassRefPtr<TypeBuilder::Array<TypeBuilder::Debugger::CallFrame> > currentCallFrames();
     PassRefPtr<TypeBuilder::Debugger::StackTrace> currentAsyncStackTrace();
 
+    void clearCurrentAsyncOperation();
     void resetAsyncCallTracker();
-    void didCreateAsyncCallChain(AsyncCallChain*);
 
     void changeJavaScriptRecursionLevel(int step);
 
@@ -241,7 +246,8 @@ private:
     String sourceMapURLForScript(const Script&, CompileResult);
 
     bool isCallStackEmptyOrBlackboxed();
-    PassRefPtrWillBeRawPtr<JavaScriptCallFrame> topCallFrameSkipUnknownSources(String* scriptURL, bool* isBlackboxed, int* index = nullptr);
+    bool isTopCallFrameBlackboxed();
+    bool isCallFrameWithUnknownScriptOrBlackboxed(PassRefPtrWillBeRawPtr<JavaScriptCallFrame>);
     PromiseTracker& promiseTracker() const { return *m_promiseTracker; }
 
     void internalSetAsyncCallStackDepth(int);
@@ -259,7 +265,6 @@ private:
     };
 
     RawPtrWillBeMember<InjectedScriptManager> m_injectedScriptManager;
-    InspectorFrontend::Debugger* m_frontend;
     RefPtr<ScriptState> m_pausedScriptState;
     ScriptValue m_currentCallStack;
     ScriptsMap m_scripts;
@@ -273,7 +278,7 @@ private:
     bool m_javaScriptPauseScheduled;
     bool m_steppingFromFramework;
     bool m_pausingOnNativeEvent;
-    bool m_inAsyncOperationForStepInto;
+    bool m_pausingOnAsyncOperation;
     RawPtrWillBeMember<Listener> m_listener;
 
     int m_skippedStepFrameCount;
@@ -285,12 +290,20 @@ private:
     unsigned m_cachedSkipStackGeneration;
     OwnPtrWillBeMember<V8AsyncCallTracker> m_v8AsyncCallTracker;
     OwnPtrWillBeMember<PromiseTracker> m_promiseTracker;
+    HashMap<String, String> m_editedScripts;
 
-    WillBeHeapHashSet<RefPtrWillBeMember<AsyncCallChain> > m_asyncOperationsForStepInto;
+    using AsyncOperationIdToAsyncCallChain = WillBeHeapHashMap<int, RefPtrWillBeMember<AsyncCallChain>>;
+    AsyncOperationIdToAsyncCallChain m_asyncOperations;
+    int m_lastAsyncOperationId;
+    ListHashSet<int> m_asyncOperationNotifications;
+    HashSet<int> m_asyncOperationBreakpoints;
+    HashSet<int> m_pausingAsyncOperations;
     unsigned m_maxAsyncCallStackDepth;
     RefPtrWillBeMember<AsyncCallChain> m_currentAsyncCallChain;
     unsigned m_nestedAsyncCallCount;
-    bool m_performingAsyncStepIn;
+    int m_currentAsyncOperationId;
+    bool m_pendingTraceAsyncOperationCompleted;
+    bool m_startingStepIntoAsync;
     WillBeHeapVector<RawPtrWillBeMember<AsyncCallTrackingListener>> m_asyncCallTrackingListeners;
 };
 

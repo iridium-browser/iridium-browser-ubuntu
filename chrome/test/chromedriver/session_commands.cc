@@ -105,6 +105,32 @@ scoped_ptr<base::DictionaryValue> CreateCapabilities(Chrome* chrome) {
   return caps.Pass();
 }
 
+Status CheckSessionCreated(Session* session) {
+  WebView* web_view = NULL;
+  Status status = session->GetTargetWindow(&web_view);
+  if (status.IsError())
+    return Status(kSessionNotCreatedException, status);
+
+  status = web_view->ConnectIfNecessary();
+  if (status.IsError())
+    return Status(kSessionNotCreatedException, status);
+
+  base::ListValue args;
+  scoped_ptr<base::Value> result(new base::FundamentalValue(0));
+  status = web_view->CallFunction(session->GetCurrentFrameId(),
+                                  "function(s) { return 1; }", args, &result);
+  if (status.IsError())
+    return Status(kSessionNotCreatedException, status);
+
+  int response;
+  if (!result->GetAsInteger(&response) || response != 1) {
+    return Status(kSessionNotCreatedException,
+                  "unexpected response from browser");
+  }
+
+  return Status(kOk);
+}
+
 Status InitSessionHelper(
     const InitSessionParams& bound_params,
     Session* session,
@@ -165,7 +191,7 @@ Status InitSessionHelper(
   session->force_devtools_screenshot = capabilities.force_devtools_screenshot;
   session->capabilities = CreateCapabilities(session->chrome.get());
   value->reset(session->capabilities->DeepCopy());
-  return Status(kOk);
+  return CheckSessionCreated(session);
 }
 
 }  // namespace
@@ -356,6 +382,20 @@ Status ExecuteSwitchToWindow(
       return status;
   }
 
+  if (session->overridden_network_conditions) {
+    WebView* web_view;
+    status = session->chrome->GetWebViewById(web_view_id, &web_view);
+    if (status.IsError())
+      return status;
+    status = web_view->ConnectIfNecessary();
+    if (status.IsError())
+      return status;
+    status = web_view->OverrideNetworkConditions(
+        *session->overridden_network_conditions);
+    if (status.IsError())
+      return status;
+  }
+
   session->window = web_view_id;
   session->SwitchToTopFrame();
   session->mouse_position = WebPoint(0, 0);
@@ -453,6 +493,29 @@ Status ExecuteGetLocation(
   // https://code.google.com/p/chromedriver/issues/detail?id=281
   location.SetDouble("altitude", 0);
   value->reset(location.DeepCopy());
+  return Status(kOk);
+}
+
+Status ExecuteGetNetworkConditions(
+    Session* session,
+    const base::DictionaryValue& params,
+    scoped_ptr<base::Value>* value) {
+  if (!session->overridden_network_conditions) {
+    return Status(kUnknownError,
+                  "network conditions must be set before it can be retrieved");
+  }
+  base::DictionaryValue conditions;
+  conditions.SetBoolean("offline",
+                        session->overridden_network_conditions->offline);
+  conditions.SetInteger("latency",
+                        session->overridden_network_conditions->latency);
+  conditions.SetInteger(
+      "download_throughput",
+      session->overridden_network_conditions->download_throughput);
+  conditions.SetInteger(
+      "upload_throughput",
+      session->overridden_network_conditions->upload_throughput);
+  value->reset(conditions.DeepCopy());
   return Status(kOk);
 }
 

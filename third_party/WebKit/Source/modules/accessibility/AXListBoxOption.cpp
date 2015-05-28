@@ -31,7 +31,7 @@
 
 #include "core/html/HTMLOptionElement.h"
 #include "core/html/HTMLSelectElement.h"
-#include "core/rendering/RenderListBox.h"
+#include "core/layout/LayoutListBox.h"
 #include "modules/accessibility/AXObjectCacheImpl.h"
 
 
@@ -39,8 +39,8 @@ namespace blink {
 
 using namespace HTMLNames;
 
-AXListBoxOption::AXListBoxOption(RenderObject* renderer, AXObjectCacheImpl* axObjectCache)
-    : AXRenderObject(renderer, axObjectCache)
+AXListBoxOption::AXListBoxOption(LayoutObject* layoutObject, AXObjectCacheImpl* axObjectCache)
+    : AXLayoutObject(layoutObject, axObjectCache)
 {
 }
 
@@ -48,9 +48,41 @@ AXListBoxOption::~AXListBoxOption()
 {
 }
 
-PassRefPtr<AXListBoxOption> AXListBoxOption::create(RenderObject* renderer, AXObjectCacheImpl* axObjectCache)
+PassRefPtr<AXListBoxOption> AXListBoxOption::create(LayoutObject* layoutObject, AXObjectCacheImpl* axObjectCache)
 {
-    return adoptRef(new AXListBoxOption(renderer, axObjectCache));
+    return adoptRef(new AXListBoxOption(layoutObject, axObjectCache));
+}
+
+AccessibilityRole AXListBoxOption::roleValue() const
+{
+    AccessibilityRole ariaRole = ariaRoleAttribute();
+    if (ariaRole != UnknownRole)
+        return ariaRole;
+
+    // http://www.w3.org/TR/wai-aria/complete#presentation
+    // ARIA spec says that the presentation role causes a given element to be treated
+    // as having no role or to be removed from the accessibility tree, but does not cause the
+    // content contained within the element to be removed from the accessibility tree.
+    if (isParentPresentationalRole())
+        return StaticTextRole;
+
+    return ListBoxOptionRole;
+}
+
+bool AXListBoxOption::isParentPresentationalRole() const
+{
+    AXObject* parent = parentObject();
+    if (!parent)
+        return false;
+
+    LayoutObject* layoutObject = parent->layoutObject();
+    if (!layoutObject)
+        return false;
+
+    if (layoutObject->isListBox() && parent->hasInheritedPresentationalRole())
+        return true;
+
+    return false;
 }
 
 bool AXListBoxOption::isEnabled() const
@@ -157,7 +189,7 @@ int AXListBoxOption::listBoxOptionIndex() const
     if (!selectElement)
         return -1;
 
-    const WillBeHeapVector<RawPtrWillBeMember<HTMLElement> >& listItems = selectElement->listItems();
+    const WillBeHeapVector<RawPtrWillBeMember<HTMLElement>>& listItems = selectElement->listItems();
     unsigned length = listItems.size();
     for (unsigned i = 0; i < length; i++) {
         if (listItems[i] == node())

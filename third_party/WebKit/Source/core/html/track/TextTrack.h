@@ -34,6 +34,7 @@
 
 namespace blink {
 
+class CueTimeline;
 class ExceptionState;
 class HTMLMediaElement;
 class TextTrack;
@@ -78,7 +79,7 @@ public:
     void setReadinessState(ReadinessState state) { m_readinessState = state; }
 
     TextTrackCueList* cues();
-    TextTrackCueList* activeCues() const;
+    TextTrackCueList* activeCues();
 
     HTMLMediaElement* mediaElement() const;
     Node* owner() const;
@@ -108,7 +109,6 @@ public:
     void setHasBeenConfigured(bool flag) { m_hasBeenConfigured = flag; }
 
     virtual bool isDefault() const { return false; }
-    virtual void setIsDefault(bool) { }
 
     void removeAllCues();
 
@@ -116,7 +116,7 @@ public:
     virtual const AtomicString& interfaceName() const override;
     virtual ExecutionContext* executionContext() const override;
 
-    virtual void trace(Visitor*) override;
+    DECLARE_VIRTUAL_TRACE();
 
 protected:
     TextTrack(const AtomicString& kind, const AtomicString& label, const AtomicString& language, const AtomicString& id, TextTrackType);
@@ -124,13 +124,17 @@ protected:
     virtual bool isValidKind(const AtomicString& kind) const override { return isValidKindKeyword(kind); }
     virtual AtomicString defaultKind() const override { return subtitlesKeyword(); }
 
-    RefPtrWillBeMember<TextTrackCueList> m_cues;
+    void addListOfCues(WillBeHeapVector<RefPtrWillBeMember<TextTrackCue>>&);
 
 private:
-    VTTRegionList* ensureVTTRegionList();
-    RefPtrWillBeMember<VTTRegionList> m_regions;
+    CueTimeline* cueTimeline() const;
 
     TextTrackCueList* ensureTextTrackCueList();
+    RefPtrWillBeMember<TextTrackCueList> m_cues;
+    RefPtrWillBeMember<TextTrackCueList> m_activeCues;
+
+    VTTRegionList* ensureVTTRegionList();
+    RefPtrWillBeMember<VTTRegionList> m_regions;
 
     RawPtrWillBeMember<TextTrackList> m_trackList;
     AtomicString m_mode;

@@ -9,8 +9,8 @@
 
 #include "base/compiler_specific.h"
 #include "base/prefs/pref_service.h"
+#include "base/profiler/scoped_tracker.h"
 #include "base/strings/utf_string_conversions.h"
-#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/profiles/profiles_state.h"
 #include "chrome/browser/signin/signin_header_helper.h"
 #include "chrome/browser/themes/theme_properties.h"
@@ -22,7 +22,6 @@
 #include "chrome/browser/ui/views/profiles/new_avatar_button.h"
 #include "chrome/browser/ui/views/tab_icon_view.h"
 #include "chrome/browser/ui/views/tabs/tab_strip.h"
-#include "chrome/browser/ui/views/theme_image_mapper.h"
 #include "chrome/browser/ui/views/toolbar/toolbar_view.h"
 #include "chrome/grit/generated_resources.h"
 #include "components/signin/core/common/profile_management_switches.h"
@@ -147,15 +146,7 @@ OpaqueBrowserFrameView::OpaqueBrowserFrameView(BrowserFrame* frame,
   window_title_->set_id(VIEW_ID_WINDOW_TITLE);
   AddChildView(window_title_);
 
-  if (browser_view->IsRegularOrGuestSession() && switches::IsNewAvatarMenu())
-    UpdateNewStyleAvatarInfo(this, NewAvatarButton::THEMED_BUTTON);
-  else
-    UpdateAvatarInfo();
-
-  if (!browser_view->IsOffTheRecord()) {
-    registrar_.Add(this, chrome::NOTIFICATION_PROFILE_CACHED_INFO_CHANGED,
-                   content::NotificationService::AllSources());
-  }
+  UpdateAvatar();
 
   platform_observer_.reset(OpaqueBrowserFrameViewPlatformSpecific::Create(
       this, layout_, browser_view->browser()->profile()));
@@ -186,6 +177,11 @@ int OpaqueBrowserFrameView::GetThemeBackgroundXInset() const {
 }
 
 void OpaqueBrowserFrameView::UpdateThrobber(bool running) {
+  // TODO(robliao): Remove ScopedTracker below once crbug.com/461137 is fixed.
+  tracked_objects::ScopedTracker tracking_profile(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "461137 OpaqueBrowserFrameView::UpdateThrobber"));
+
   if (window_icon_)
     window_icon_->Update();
 }
@@ -294,7 +290,8 @@ void OpaqueBrowserFrameView::ResetWindowControls() {
 }
 
 void OpaqueBrowserFrameView::UpdateWindowIcon() {
-  window_icon_->SchedulePaint();
+  if (window_icon_)
+    window_icon_->SchedulePaint();
 }
 
 void OpaqueBrowserFrameView::UpdateWindowTitle() {
@@ -327,8 +324,14 @@ void OpaqueBrowserFrameView::ButtonPressed(views::Button* sender,
   } else if (sender == close_button_) {
     frame()->Close();
   } else if (sender == new_avatar_button()) {
+    BrowserWindow::AvatarBubbleMode mode =
+        BrowserWindow::AVATAR_BUBBLE_MODE_DEFAULT;
+    if (event.IsMouseEvent() &&
+        static_cast<const ui::MouseEvent&>(event).IsRightMouseButton()) {
+      mode = BrowserWindow::AVATAR_BUBBLE_MODE_FAST_USER_SWITCH;
+    }
     browser_view()->ShowAvatarBubbleFromAvatarButton(
-        BrowserWindow::AVATAR_BUBBLE_MODE_DEFAULT,
+        mode,
         signin::ManageAccountsParams());
   }
 }
@@ -364,28 +367,6 @@ gfx::ImageSkia OpaqueBrowserFrameView::GetFaviconForTabIconView() {
     return gfx::ImageSkia();
   }
   return delegate->GetWindowIcon();
-}
-
-///////////////////////////////////////////////////////////////////////////////
-// OpaqueBrowserFrameView, protected:
-
-void OpaqueBrowserFrameView::Observe(
-    int type,
-    const content::NotificationSource& source,
-    const content::NotificationDetails& details) {
-  switch (type) {
-    case chrome::NOTIFICATION_PROFILE_CACHED_INFO_CHANGED:
-      if (browser_view() ->IsRegularOrGuestSession() &&
-          switches::IsNewAvatarMenu()) {
-        UpdateNewStyleAvatarInfo(this, NewAvatarButton::THEMED_BUTTON);
-      } else {
-        UpdateAvatarInfo();
-      }
-      break;
-    default:
-      NOTREACHED() << "Got a notification we didn't register for!";
-      break;
-  }
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -471,8 +452,9 @@ gfx::Size OpaqueBrowserFrameView::GetTabstripPreferredSize() const {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-// OpaqueBrowserFrameView, views::View overrides:
+// OpaqueBrowserFrameView, protected:
 
+// views::View:
 void OpaqueBrowserFrameView::OnPaint(gfx::Canvas* canvas) {
   if (frame()->IsFullscreen())
     return;  // Nothing is visible, so don't bother to paint.
@@ -494,6 +476,17 @@ void OpaqueBrowserFrameView::OnPaint(gfx::Canvas* canvas) {
     PaintToolbarBackground(canvas);
   if (!layout_->IsTitleBarCondensed())
     PaintRestoredClientEdge(canvas);
+}
+
+// BrowserNonClientFrameView:
+bool OpaqueBrowserFrameView::ShouldPaintAsThemed() const {
+  // Theme app and popup windows if |platform_observer_| wants it.
+  return browser_view()->IsBrowserTypeNormal() ||
+         platform_observer_->IsUsingSystemTheme();
+}
+
+void OpaqueBrowserFrameView::UpdateNewAvatarButtonImpl() {
+  UpdateNewAvatarButton(this, NewAvatarButton::THEMED_BUTTON);
 }
 
 ///////////////////////////////////////////////////////////////////////////////
@@ -588,11 +581,9 @@ gfx::Rect OpaqueBrowserFrameView::IconBounds() const {
 }
 
 bool OpaqueBrowserFrameView::ShouldShowWindowTitleBar() const {
-#if defined(OS_LINUX) && !defined(OS_CHROMEOS)
   // Do not show the custom title bar if the system title bar option is enabled.
   if (!frame()->UseCustomFrame())
     return false;
-#endif
 
   // Do not show caption buttons if the window manager is forcefully providing a
   // title bar (e.g., in Ubuntu Unity, if the window is maximized).
@@ -851,83 +842,4 @@ void OpaqueBrowserFrameView::PaintRestoredClientEdge(gfx::Canvas* canvas) {
       kClientEdgeThickness,
       client_area_bottom + kClientEdgeThickness - client_area_top),
       toolbar_color);
-}
-
-SkColor OpaqueBrowserFrameView::GetFrameColor() const {
-  bool is_incognito = browser_view()->IsOffTheRecord();
-  ThemeProperties::OverwritableByUserThemeProperty color_id;
-  if (ShouldPaintAsActive()) {
-    color_id = is_incognito ?
-               ThemeProperties::COLOR_FRAME_INCOGNITO :
-               ThemeProperties::COLOR_FRAME;
-  } else {
-    color_id = is_incognito ?
-               ThemeProperties::COLOR_FRAME_INCOGNITO_INACTIVE :
-               ThemeProperties::COLOR_FRAME_INACTIVE;
-  }
-
-  if (browser_view()->IsBrowserTypeNormal() ||
-      platform_observer_->IsUsingSystemTheme()) {
-    return GetThemeProvider()->GetColor(color_id);
-  }
-
-  // Never theme app and popup windows unless the |platform_observer_|
-  // requested an override.
-  return ThemeProperties::GetDefaultColor(color_id);
-}
-
-gfx::ImageSkia* OpaqueBrowserFrameView::GetFrameImage() const {
-  bool is_incognito = browser_view()->IsOffTheRecord();
-  int resource_id;
-  if (browser_view()->IsBrowserTypeNormal()) {
-    if (ShouldPaintAsActive()) {
-      resource_id = is_incognito ?
-          IDR_THEME_FRAME_INCOGNITO : IDR_THEME_FRAME;
-    } else {
-      resource_id = is_incognito ?
-          IDR_THEME_FRAME_INCOGNITO_INACTIVE : IDR_THEME_FRAME_INACTIVE;
-    }
-    return GetThemeProvider()->GetImageSkiaNamed(resource_id);
-  }
-  if (ShouldPaintAsActive()) {
-    resource_id = is_incognito ?
-        IDR_THEME_FRAME_INCOGNITO : IDR_FRAME;
-  } else {
-    resource_id = is_incognito ?
-        IDR_THEME_FRAME_INCOGNITO_INACTIVE : IDR_THEME_FRAME_INACTIVE;
-  }
-
-  if (platform_observer_->IsUsingSystemTheme()) {
-    // We want to use theme images provided by the system theme when enabled,
-    // even if we are an app or popup window.
-    return GetThemeProvider()->GetImageSkiaNamed(resource_id);
-  }
-
-  // Otherwise, never theme app and popup windows.
-  ui::ResourceBundle& rb = ui::ResourceBundle::GetSharedInstance();
-  return rb.GetImageSkiaNamed(chrome::MapThemeImage(
-      chrome::GetHostDesktopTypeForNativeWindow(
-          browser_view()->GetNativeWindow()),
-      resource_id));
-}
-
-gfx::ImageSkia* OpaqueBrowserFrameView::GetFrameOverlayImage() const {
-  ui::ThemeProvider* tp = GetThemeProvider();
-  if (tp->HasCustomImage(IDR_THEME_FRAME_OVERLAY) &&
-      browser_view()->IsBrowserTypeNormal() &&
-      !browser_view()->IsOffTheRecord()) {
-    return tp->GetImageSkiaNamed(ShouldPaintAsActive() ?
-        IDR_THEME_FRAME_OVERLAY : IDR_THEME_FRAME_OVERLAY_INACTIVE);
-  }
-  return nullptr;
-}
-
-int OpaqueBrowserFrameView::GetTopAreaHeight() const {
-  gfx::ImageSkia* frame_image = GetFrameImage();
-  int top_area_height = frame_image->height();
-  if (browser_view()->IsTabStripVisible()) {
-    top_area_height = std::max(top_area_height,
-      GetBoundsForTabStrip(browser_view()->tabstrip()).bottom());
-  }
-  return top_area_height;
 }

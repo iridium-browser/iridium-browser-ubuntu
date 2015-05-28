@@ -14,13 +14,14 @@
 
 #include "base/logging.h"
 #include "build/build_config.h"
+#include "sandbox/linux/bpf_dsl/seccomp_macros.h"
 #include "sandbox/linux/seccomp-bpf/die.h"
-#include "sandbox/linux/seccomp-bpf/linux_seccomp.h"
 #include "sandbox/linux/seccomp-bpf/syscall.h"
+#include "sandbox/linux/system_headers/linux_seccomp.h"
 
 // Android's signal.h doesn't define ucontext etc.
 #if defined(OS_ANDROID)
-#include "sandbox/linux/services/android_ucontext.h"
+#include "sandbox/linux/system_headers/android_ucontext.h"
 #endif
 
 namespace {
@@ -250,10 +251,6 @@ bool Trap::TrapKey::operator<(const TrapKey& o) const {
   }
 }
 
-uint16_t Trap::MakeTrap(TrapFnc fnc, const void* aux, bool safe) {
-  return Registry()->Add(fnc, aux, safe);
-}
-
 uint16_t Trap::Add(TrapFnc fnc, const void* aux, bool safe) {
   if (!safe && !SandboxDebuggingAllowedByUser()) {
     // Unless the user set the CHROME_SANDBOX_DEBUGGING environment variable,
@@ -352,13 +349,9 @@ uint16_t Trap::Add(TrapFnc fnc, const void* aux, bool safe) {
   return id;
 }
 
-bool Trap::SandboxDebuggingAllowedByUser() const {
+bool Trap::SandboxDebuggingAllowedByUser() {
   const char* debug_flag = getenv(kSandboxDebuggingEnv);
   return debug_flag && *debug_flag;
-}
-
-bool Trap::EnableUnsafeTrapsInSigSysHandler() {
-  return Registry()->EnableUnsafeTraps();
 }
 
 bool Trap::EnableUnsafeTraps() {

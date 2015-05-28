@@ -10,6 +10,8 @@
 
 #include "base/basictypes.h"
 #include "components/autofill/core/browser/autofill_client.h"
+#include "components/autofill/core/browser/autofill_profile.h"
+#include "components/autofill/core/browser/credit_card.h"
 #include "components/autofill/core/browser/field_types.h"
 
 namespace base {
@@ -243,6 +245,104 @@ class AutofillMetrics {
     NUM_USER_HAPPINESS_METRICS,
   };
 
+  // Form Events for autofill.
+  // These events are triggered separetly for address and credit card forms.
+  enum FormEvent {
+    // User interacted with a field of this kind of form. Logged only once per
+    // page load.
+    FORM_EVENT_INTERACTED_ONCE = 0,
+    // A dropdown with suggestions was shown.
+    FORM_EVENT_SUGGESTIONS_SHOWN,
+    // Same as above, but recoreded only once per page load.
+    FORM_EVENT_SUGGESTIONS_SHOWN_ONCE,
+    // A local suggestion was used to fill the form.
+    FORM_EVENT_LOCAL_SUGGESTION_FILLED,
+    // A server suggestion was used to fill the form.
+    // When dealing with credit cards, this means a full server card was used
+    // to fill.
+    FORM_EVENT_SERVER_SUGGESTION_FILLED,
+    // A masked server card suggestion was used to fill the form.
+    FORM_EVENT_MASKED_SERVER_CARD_SUGGESTION_FILLED,
+    // A suggestion was used to fill the form. The origin type (local or server
+    // or masked server card) of the first selected within a page load will
+    // determine which of the following two will be fired.
+    FORM_EVENT_LOCAL_SUGGESTION_FILLED_ONCE,
+    FORM_EVENT_SERVER_SUGGESTION_FILLED_ONCE,
+    FORM_EVENT_MASKED_SERVER_CARD_SUGGESTION_FILLED_ONCE,
+    // A form was submitted. Depending on the user filling a local, server,
+    // masked server card or no suggestion one of the following will be
+    // triggered. Only one of the following four will be triggered per page
+    // load.
+    FORM_EVENT_NO_SUGGESTION_SUBMITTED_ONCE,
+    FORM_EVENT_LOCAL_SUGGESTION_SUBMITTED_ONCE,
+    FORM_EVENT_SERVER_SUGGESTION_SUBMITTED_ONCE,
+    FORM_EVENT_MASKED_SERVER_CARD_SUGGESTION_SUBMITTED_ONCE,
+    // A masked server card suggestion was selected to fill the form.
+    FORM_EVENT_MASKED_SERVER_CARD_SUGGESTION_SELECTED,
+    // Same as above but only triggered once per page load.
+    FORM_EVENT_MASKED_SERVER_CARD_SUGGESTION_SELECTED_ONCE,
+    // An autofillable form is about to be submitted. If the submission is not
+    // interrupted by JavaScript, the "form submitted" events above will also be
+    // logged. Depending on the user filling a local, server, masked server card
+    // or no suggestion one of the following will be triggered, at most once per
+    // page load.
+    FORM_EVENT_NO_SUGGESTION_WILL_SUBMIT_ONCE,
+    FORM_EVENT_LOCAL_SUGGESTION_WILL_SUBMIT_ONCE,
+    FORM_EVENT_SERVER_SUGGESTION_WILL_SUBMIT_ONCE,
+    FORM_EVENT_MASKED_SERVER_CARD_SUGGESTION_WILL_SUBMIT_ONCE,
+
+    NUM_FORM_EVENTS,
+  };
+
+  // Events related to the Unmask Credit Card Prompt.
+  enum UnmaskPromptEvent {
+    // The prompt was shown.
+    UNMASK_PROMPT_SHOWN = 0,
+    // The prompt was closed without attempting to unmask the card.
+    UNMASK_PROMPT_CLOSED_NO_ATTEMPTS,
+    // The prompt was closed without unmasking the card, but with at least
+    // one attempt. The last failure was retriable.
+    UNMASK_PROMPT_CLOSED_FAILED_TO_UNMASK_RETRIABLE_FAILURE,
+    // The prompt was closed without unmasking the card, but with at least
+    // one attempt. The last failure was non retriable.
+    UNMASK_PROMPT_CLOSED_FAILED_TO_UNMASK_NON_RETRIABLE_FAILURE,
+    // Successfully unmasked the card in the first attempt.
+    UNMASK_PROMPT_UNMASKED_CARD_FIRST_ATTEMPT,
+    // Successfully unmasked the card after retriable failures.
+    UNMASK_PROMPT_UNMASKED_CARD_AFTER_FAILED_ATTEMPTS,
+    // Saved the card locally (masked card was upgraded to a full card).
+    UNMASK_PROMPT_SAVED_CARD_LOCALLY,
+    // User chose to opt in (checked the checkbox when it was empty).
+    // Only logged if there was an attempt to unmask.
+    UNMASK_PROMPT_LOCAL_SAVE_DID_OPT_IN,
+    // User did not opt in when he had the chance (left the checkbox unchecked).
+    // Only logged if there was an attempt to unmask.
+    UNMASK_PROMPT_LOCAL_SAVE_DID_NOT_OPT_IN,
+    // User chose to opt out (unchecked the checkbox when it was check).
+    // Only logged if there was an attempt to unmask.
+    UNMASK_PROMPT_LOCAL_SAVE_DID_OPT_OUT,
+    // User did not opt out when he had a chance (left the checkbox checked).
+    // Only logged if there was an attempt to unmask.
+    UNMASK_PROMPT_LOCAL_SAVE_DID_NOT_OPT_OUT,
+    // The prompt was closed while chrome was unmasking the card (user pressed
+    // verify and we were waiting for the server response).
+    UNMASK_PROMPT_CLOSED_ABANDON_UNMASKING,
+    NUM_UNMASK_PROMPT_EVENTS,
+  };
+
+  // Possible results of the GetRealPan call.
+  enum GetRealPanResult {
+    // Request succeeded.
+    GET_REAL_PAN_RESULT_SUCCESS = 0,
+    // Request failed; try again.
+    GET_REAL_PAN_RESULT_TRY_AGAIN_FAILURE,
+    // Request failed; don't try again.
+    GET_REAL_PAN_RESULT_PERMANENT_FAILURE,
+    // Unable to connect to Wallet servers.
+    GET_REAL_PAN_RESULT_NETWORK_ERROR,
+    NUM_GET_REAL_PAN_RESULTS,
+  };
+
   // For measuring the network request time of various Wallet API calls. See
   // WalletClient::RequestType.
   enum WalletApiCallMetric {
@@ -318,8 +418,23 @@ class AutofillMetrics {
     NUM_WALLET_REQUIRED_ACTIONS
   };
 
+  // For measuring the increased load on the Autofill server if the restriction
+  // on querying for password forms with fewer than 3 fields were omitted.
+  enum PasswordFormQueryVolumeMetric {
+    NEW_PASSWORD_QUERY,
+    CURRENT_QUERY,
+    NUM_PASSWORD_FORM_QUERY_VOLUME_METRIC,
+  };
+
   static void LogCreditCardInfoBarMetric(InfoBarMetric metric);
   static void LogScanCreditCardPromptMetric(ScanCreditCardPromptMetric metric);
+
+  // Should be called when credit card scan is finished. |duration| should be
+  // the time elapsed between launching the credit card scanner and getting back
+  // the result. |completed| should be true if a credit card was scanned, false
+  // if the scan was cancelled.
+  static void LogScanCreditCardCompleted(const base::TimeDelta& duration,
+                                         bool completed);
 
   static void LogDeveloperEngagementMetric(DeveloperEngagementMetric metric);
 
@@ -361,6 +476,30 @@ class AutofillMetrics {
 
   // Logs |event| to the UI events histogram.
   static void LogDialogUiEvent(DialogUiEvent event);
+
+  // Logs |event| to the unmask prompt events histogram.
+  static void LogUnmaskPromptEvent(UnmaskPromptEvent event);
+
+  // Logs the time elapsed between the unmask prompt being shown and it
+  // being closed.
+  static void LogUnmaskPromptEventDuration(const base::TimeDelta& duration,
+                                           UnmaskPromptEvent close_event);
+
+  // Logs the time elapsed between the user clicking Verify and
+  // hitting cancel when abandoning a pending unmasking operation
+  // (aka GetRealPan).
+  static void LogTimeBeforeAbandonUnmasking(const base::TimeDelta& duration);
+
+  // Logs |result| to the get real pan result histogram.
+  static void LogRealPanResult(AutofillClient::GetRealPanResult result);
+
+  // Logs |result| to duration of the GetRealPan RPC.
+  static void LogRealPanDuration(const base::TimeDelta& duration,
+                                 AutofillClient::GetRealPanResult result);
+
+  // Logs |result| to the get real pan result histogram.
+  static void LogUnmaskingDuration(const base::TimeDelta& duration,
+                                   AutofillClient::GetRealPanResult result);
 
   // Logs |metric| to the Wallet errors histogram.
   static void LogWalletErrorMetric(WalletErrorMetric metric);
@@ -411,9 +550,64 @@ class AutofillMetrics {
   // This should be called each time a new profile is launched.
   static void LogStoredProfileCount(size_t num_profiles);
 
+  // Log the number of profiles available when an autofillable form is
+  // submitted.
+  static void LogNumberOfProfilesAtAutofillableFormSubmission(
+      size_t num_profiles);
+
   // Log the number of Autofill suggestions presented to the user when filling a
   // form.
   static void LogAddressSuggestionsCount(size_t num_suggestions);
+
+  // Log password form query: current and if one-to-two fields password forms
+  // were allowed.
+  static void LogPasswordFormQueryVolume(PasswordFormQueryVolumeMetric metric);
+
+  // Utility to autofill form events in the relevant histograms depending on
+  // the presence of server and/or local data.
+  class FormEventLogger {
+   public:
+    FormEventLogger(bool is_for_credit_card);
+
+    inline void set_is_server_data_available(bool is_server_data_available) {
+      is_server_data_available_ = is_server_data_available;
+    }
+
+    inline void set_is_local_data_available(bool is_local_data_available) {
+      is_local_data_available_ = is_local_data_available;
+    }
+
+    void OnDidInteractWithAutofillableForm();
+
+    void OnDidShowSuggestions();
+
+    void OnDidSelectMaskedServerCardSuggestion();
+
+    // In case of masked cards, caller must make sure this gets called before
+    // the card is upgraded to a full card.
+    void OnDidFillSuggestion(const CreditCard& credit_card);
+
+    void OnDidFillSuggestion(const AutofillProfile& profile);
+
+    void OnWillSubmitForm();
+
+    void OnFormSubmitted();
+
+   private:
+    void Log(FormEvent event) const;
+
+    bool is_for_credit_card_;
+    bool is_server_data_available_;
+    bool is_local_data_available_;
+    bool has_logged_interacted_;
+    bool has_logged_suggestions_shown_;
+    bool has_logged_masked_server_card_suggestion_selected_;
+    bool has_logged_suggestion_filled_;
+    bool has_logged_will_submit_;
+    bool has_logged_submitted_;
+    bool logged_suggestion_filled_was_server_data_;
+    bool logged_suggestion_filled_was_masked_server_card_;
+  };
 
  private:
   DISALLOW_IMPLICIT_CONSTRUCTORS(AutofillMetrics);

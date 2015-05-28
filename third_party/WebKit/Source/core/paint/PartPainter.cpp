@@ -5,94 +5,95 @@
 #include "config.h"
 #include "core/paint/PartPainter.h"
 
+#include "core/layout/LayoutPart.h"
+#include "core/layout/PaintInfo.h"
 #include "core/paint/BoxPainter.h"
-
+#include "core/paint/DeprecatedPaintLayer.h"
 #include "core/paint/GraphicsContextAnnotator.h"
+#include "core/paint/LayoutObjectDrawingRecorder.h"
+#include "core/paint/RoundedInnerRectClipper.h"
 #include "core/paint/ScrollableAreaPainter.h"
-#include "core/rendering/PaintInfo.h"
-#include "core/rendering/RenderLayer.h"
-#include "core/rendering/RenderPart.h"
+#include "core/paint/TransformRecorder.h"
 
 namespace blink {
 
 void PartPainter::paint(const PaintInfo& paintInfo, const LayoutPoint& paintOffset)
 {
-    ANNOTATE_GRAPHICS_CONTEXT(paintInfo, &m_renderPart);
+    ANNOTATE_GRAPHICS_CONTEXT(paintInfo, &m_layoutPart);
 
-    if (!m_renderPart.shouldPaint(paintInfo, paintOffset))
+    if (!m_layoutPart.shouldPaint(paintInfo, paintOffset))
         return;
 
-    LayoutPoint adjustedPaintOffset = paintOffset + m_renderPart.location();
+    LayoutPoint adjustedPaintOffset = paintOffset + m_layoutPart.location();
+    LayoutRect borderRect(adjustedPaintOffset, m_layoutPart.size());
 
-    if (m_renderPart.hasBoxDecorationBackground() && (paintInfo.phase == PaintPhaseForeground || paintInfo.phase == PaintPhaseSelection))
-        BoxPainter(m_renderPart).paintBoxDecorationBackground(paintInfo, adjustedPaintOffset);
+    if (m_layoutPart.hasBoxDecorationBackground() && (paintInfo.phase == PaintPhaseForeground || paintInfo.phase == PaintPhaseSelection))
+        BoxPainter(m_layoutPart).paintBoxDecorationBackground(paintInfo, adjustedPaintOffset);
 
     if (paintInfo.phase == PaintPhaseMask) {
-        BoxPainter(m_renderPart).paintMask(paintInfo, adjustedPaintOffset);
+        BoxPainter(m_layoutPart).paintMask(paintInfo, adjustedPaintOffset);
         return;
     }
 
-    if ((paintInfo.phase == PaintPhaseOutline || paintInfo.phase == PaintPhaseSelfOutline) && m_renderPart.style()->hasOutline())
-        ObjectPainter(m_renderPart).paintOutline(paintInfo, LayoutRect(adjustedPaintOffset, m_renderPart.size()));
+    LayoutRect visualOverflowRect(m_layoutPart.visualOverflowRect());
+    visualOverflowRect.moveBy(adjustedPaintOffset);
+
+    if ((paintInfo.phase == PaintPhaseOutline || paintInfo.phase == PaintPhaseSelfOutline) && m_layoutPart.style()->hasOutline())
+        ObjectPainter(m_layoutPart).paintOutline(paintInfo, borderRect, visualOverflowRect);
 
     if (paintInfo.phase != PaintPhaseForeground)
         return;
 
-    if (m_renderPart.style()->hasBorderRadius()) {
-        LayoutRect borderRect = LayoutRect(adjustedPaintOffset, m_renderPart.size());
+    {
+        OwnPtr<RoundedInnerRectClipper> clipper;
+        if (m_layoutPart.style()->hasBorderRadius()) {
+            if (borderRect.isEmpty())
+                return;
 
-        if (borderRect.isEmpty())
-            return;
+            FloatRoundedRect roundedInnerRect = m_layoutPart.style()->getRoundedInnerBorderFor(borderRect,
+                m_layoutPart.paddingTop() + m_layoutPart.borderTop(), m_layoutPart.paddingBottom() + m_layoutPart.borderBottom(), m_layoutPart.paddingLeft() + m_layoutPart.borderLeft(), m_layoutPart.paddingRight() + m_layoutPart.borderRight(), true, true);
+            clipper = adoptPtr(new RoundedInnerRectClipper(m_layoutPart, paintInfo, borderRect, roundedInnerRect, ApplyToDisplayListIfEnabled));
+        }
 
-        // Push a clip if we have a border radius, since we want to round the foreground content that gets painted.
-        paintInfo.context->save();
-        FloatRoundedRect roundedInnerRect = m_renderPart.style()->getRoundedInnerBorderFor(borderRect,
-            m_renderPart.paddingTop() + m_renderPart.borderTop(), m_renderPart.paddingBottom() + m_renderPart.borderBottom(), m_renderPart.paddingLeft() + m_renderPart.borderLeft(), m_renderPart.paddingRight() + m_renderPart.borderRight(), true, true);
-        BoxPainter::clipRoundedInnerRect(paintInfo.context, borderRect, roundedInnerRect);
+        if (m_layoutPart.widget())
+            m_layoutPart.paintContents(paintInfo, paintOffset);
     }
-
-    if (m_renderPart.widget())
-        m_renderPart.paintContents(paintInfo, paintOffset);
-
-    if (m_renderPart.style()->hasBorderRadius())
-        paintInfo.context->restore();
 
     // Paint a partially transparent wash over selected widgets.
-    if (m_renderPart.isSelected() && !m_renderPart.document().printing()) {
-        LayoutRect rect = m_renderPart.localSelectionRect();
+    if (m_layoutPart.isSelected() && !m_layoutPart.document().printing()) {
+        LayoutRect rect = m_layoutPart.localSelectionRect();
         rect.moveBy(adjustedPaintOffset);
-        paintInfo.context->fillRect(pixelSnappedIntRect(rect), m_renderPart.selectionBackgroundColor());
+        IntRect selectionRect = pixelSnappedIntRect(rect);
+        LayoutObjectDrawingRecorder drawingRecorder(*paintInfo.context, m_layoutPart, paintInfo.phase, selectionRect);
+        if (!drawingRecorder.canUseCachedDrawing())
+            paintInfo.context->fillRect(selectionRect, m_layoutPart.selectionBackgroundColor());
     }
 
-    if (m_renderPart.canResize())
-        ScrollableAreaPainter(*m_renderPart.layer()->scrollableArea()).paintResizer(paintInfo.context, roundedIntPoint(adjustedPaintOffset), paintInfo.rect);
+    if (m_layoutPart.canResize())
+        ScrollableAreaPainter(*m_layoutPart.layer()->scrollableArea()).paintResizer(paintInfo.context, roundedIntPoint(adjustedPaintOffset), paintInfo.rect);
 }
 
 void PartPainter::paintContents(const PaintInfo& paintInfo, const LayoutPoint& paintOffset)
 {
-    LayoutPoint adjustedPaintOffset = paintOffset + m_renderPart.location();
+    LayoutPoint adjustedPaintOffset = paintOffset + m_layoutPart.location();
 
-    Widget* widget = m_renderPart.widget();
+    Widget* widget = m_layoutPart.widget();
     RELEASE_ASSERT(widget);
 
     // Tell the widget to paint now. This is the only time the widget is allowed
     // to paint itself. That way it will composite properly with z-indexed layers.
     IntPoint widgetLocation = widget->frameRect().location();
-    IntPoint paintLocation(roundToInt(adjustedPaintOffset.x() + m_renderPart.borderLeft() + m_renderPart.paddingLeft()),
-        roundToInt(adjustedPaintOffset.y() + m_renderPart.borderTop() + m_renderPart.paddingTop()));
+    IntPoint paintLocation(roundToInt(adjustedPaintOffset.x() + m_layoutPart.borderLeft() + m_layoutPart.paddingLeft()),
+        roundToInt(adjustedPaintOffset.y() + m_layoutPart.borderTop() + m_layoutPart.paddingTop()));
     IntRect paintRect = paintInfo.rect;
 
     IntSize widgetPaintOffset = paintLocation - widgetLocation;
     // When painting widgets into compositing layers, tx and ty are relative to the enclosing compositing layer,
-    // not the root. In this case, shift the CTM and adjust the paintRect to be root-relative to fix plug-in drawing.
-    if (!widgetPaintOffset.isZero()) {
-        paintInfo.context->translate(widgetPaintOffset.width(), widgetPaintOffset.height());
-        paintRect.move(-widgetPaintOffset);
-    }
+    // not the root. In this case, shift the CTM and adjust the paintRect to be root-relative to fix plugin drawing.
+    TransformRecorder transform(*paintInfo.context, m_layoutPart,
+        AffineTransform::translation(widgetPaintOffset.width(), widgetPaintOffset.height()));
+    paintRect.move(-widgetPaintOffset);
     widget->paint(paintInfo.context, paintRect);
-
-    if (!widgetPaintOffset.isZero())
-        paintInfo.context->translate(-widgetPaintOffset.width(), -widgetPaintOffset.height());
 }
 
 } // namespace blink

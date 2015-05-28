@@ -1,9 +1,11 @@
 <?xml version="1.0" ?><!DOCTYPE translationbundle><translationbundle lang="fr">
 <translation id="1408730541890277710">Remplacez les images par leur texte de substitution.</translation>
+<translation id="6017514345406065928">Vert</translation>
 <translation id="595639123821853262">Niveaux de gris inversés</translation>
 <translation id="8260673944985561857">Options de navigation au clavier</translation>
 <translation id="3410969471888629217">Oublier les préférences du site</translation>
 <translation id="6050189528197190982">Niveaux de gris</translation>
+<translation id="8261559421026395104">Améliorer la perception pour :</translation>
 <translation id="5094574508723441140">Contraste accru</translation>
 <translation id="8609925175482059018">Appuyez sur &lt;span class='key'&gt;F7&lt;/span&gt; pour activer la Navigation au clavier. Appuyez à nouveau sur la touche pour la désactiver.</translation>
 <translation id="3435896845095436175">Activer</translation>
@@ -14,6 +16,8 @@
 <translation id="2394933097471027016">Essayez dès maintenant : la navigation au clavier est toujours activée sur cette page.</translation>
 <translation id="3622586652998721735">Définir comme modèle par défaut</translation>
 <translation id="2179565792157161713">Ouvrir la description longue dans un nouvel onglet</translation>
+<translation id="7942349550061667556">Rouge</translation>
+<translation id="1555130319947370107">Bleu</translation>
 <translation id="2471847333270902538">Palette de couleurs pour <ph name="SITE"/> :</translation>
 <translation id="381767806621926835">Cliquez avec le bouton droit de la souris sur un élément qui présente un attribut &quot;longdesc&quot; ou &quot;aria-describedat&quot; pour accéder à sa description longue.</translation>
 <translation id="786423340267544509">Ajouter une bordure à des éléments avec des attributs aria-describedat ou longdesc</translation>
@@ -31,6 +35,7 @@
 <translation id="4896660567607030658">Aucun retour, n'afficher que le curseur</translation>
 <translation id="5631241868147802353">Palette de couleurs par défaut :</translation>
 <translation id="5173942593318174089">Mettre la position du curseur en évidence à l'aide d'une animation</translation>
+<translation id="7379645913608427028">Degré</translation>
 <translation id="894241283505723656">Descriptions longues dans le menu contextuel</translation>
 <translation id="5555153510860501336">Le contraste élevé est désactivé.</translation>
 <translation id="1703735871906654364">Navigation au clavier</translation>
@@ -38,6 +43,7 @@
 <translation id="6550675742724504774">Options</translation>
 <translation id="5650358096585648000">Retour visuel</translation>
 <translation id="4388820049312272371">Mettre la position du curseur en évidence avec un bref flash</translation>
+<translation id="2223143012868735942">Filtre de couleur personnalisable appliqué aux pages Web pour améliorer la perception des couleurs</translation>
 <translation id="4023902424053835668">Parcourir le texte des pages Web à l'aide des flèches</translation>
 <translation id="2795227192542594043">Cette extension ajoute un curseur sur la page Web que vous pouvez déplacer pour sélectionner du texte à l'aide du clavier.</translation>
 <translation id="4394049700291259645">Désactiver</translation>

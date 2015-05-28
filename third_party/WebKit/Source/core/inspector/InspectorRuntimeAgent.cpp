@@ -47,12 +47,12 @@ namespace InspectorRuntimeAgentState {
 static const char runtimeEnabled[] = "runtimeEnabled";
 };
 
-InspectorRuntimeAgent::InspectorRuntimeAgent(InjectedScriptManager* injectedScriptManager, ScriptDebugServer* scriptDebugServer)
-    : InspectorBaseAgent<InspectorRuntimeAgent>("Runtime")
+InspectorRuntimeAgent::InspectorRuntimeAgent(InjectedScriptManager* injectedScriptManager, ScriptDebugServer* scriptDebugServer, Client* client)
+    : InspectorBaseAgent<InspectorRuntimeAgent, InspectorFrontend::Runtime>("Runtime")
     , m_enabled(false)
-    , m_frontend(nullptr)
     , m_injectedScriptManager(injectedScriptManager)
     , m_scriptDebugServer(scriptDebugServer)
+    , m_client(client)
 {
 }
 
@@ -60,7 +60,7 @@ InspectorRuntimeAgent::~InspectorRuntimeAgent()
 {
 }
 
-void InspectorRuntimeAgent::trace(Visitor* visitor)
+DEFINE_TRACE(InspectorRuntimeAgent)
 {
     visitor->trace(m_injectedScriptManager);
     InspectorBaseAgent::trace(visitor);
@@ -119,7 +119,7 @@ void InspectorRuntimeAgent::callFunctionOn(ErrorString* errorString, const Strin
     }
 }
 
-void InspectorRuntimeAgent::getProperties(ErrorString* errorString, const String& objectId, const bool* ownProperties, const bool* accessorPropertiesOnly, RefPtr<TypeBuilder::Array<TypeBuilder::Runtime::PropertyDescriptor> >& result, RefPtr<TypeBuilder::Array<TypeBuilder::Runtime::InternalPropertyDescriptor> >& internalProperties)
+void InspectorRuntimeAgent::getProperties(ErrorString* errorString, const String& objectId, const bool* ownProperties, const bool* accessorPropertiesOnly, const bool* generatePreview, RefPtr<TypeBuilder::Array<TypeBuilder::Runtime::PropertyDescriptor>>& result, RefPtr<TypeBuilder::Array<TypeBuilder::Runtime::InternalPropertyDescriptor>>& internalProperties)
 {
     InjectedScript injectedScript = m_injectedScriptManager->injectedScriptForObjectId(objectId);
     if (injectedScript.isEmpty()) {
@@ -130,7 +130,7 @@ void InspectorRuntimeAgent::getProperties(ErrorString* errorString, const String
     ScriptDebugServer::PauseOnExceptionsState previousPauseOnExceptionsState = setPauseOnExceptionsState(m_scriptDebugServer, ScriptDebugServer::DontPauseOnExceptions);
     muteConsole();
 
-    injectedScript.getProperties(errorString, objectId, asBool(ownProperties), asBool(accessorPropertiesOnly), &result);
+    injectedScript.getProperties(errorString, objectId, asBool(ownProperties), asBool(accessorPropertiesOnly), asBool(generatePreview), &result);
 
     if (!asBool(accessorPropertiesOnly))
         injectedScript.getInternalProperties(errorString, objectId, &internalProperties);
@@ -164,11 +164,12 @@ void InspectorRuntimeAgent::releaseObjectGroup(ErrorString*, const String& objec
 
 void InspectorRuntimeAgent::run(ErrorString*)
 {
+    m_client->resumeStartup();
 }
 
 void InspectorRuntimeAgent::isRunRequired(ErrorString*, bool* out_result)
 {
-    *out_result = false;
+    *out_result = m_client->isRunRequired();
 }
 
 void InspectorRuntimeAgent::setCustomObjectFormatterEnabled(ErrorString*, bool enabled)
@@ -176,23 +177,11 @@ void InspectorRuntimeAgent::setCustomObjectFormatterEnabled(ErrorString*, bool e
     injectedScriptManager()->setCustomObjectFormatterEnabled(enabled);
 }
 
-void InspectorRuntimeAgent::setFrontend(InspectorFrontend* frontend)
-{
-    m_frontend = frontend->runtime();
-}
-
-void InspectorRuntimeAgent::clearFrontend()
-{
-    m_frontend = nullptr;
-    String errorString;
-    disable(&errorString);
-}
-
 void InspectorRuntimeAgent::restore()
 {
     if (m_state->getBoolean(InspectorRuntimeAgentState::runtimeEnabled)) {
         m_scriptStateToId.clear();
-        m_frontend->executionContextsCleared();
+        frontend()->executionContextsCleared();
         String error;
         enable(&error);
     }
@@ -223,13 +212,14 @@ void InspectorRuntimeAgent::addExecutionContextToFrontend(ScriptState* scriptSta
     m_scriptStateToId.set(scriptState, executionContextId);
     DOMWrapperWorld& world = scriptState->world();
     String humanReadableName = world.isIsolatedWorld() ? world.isolatedWorldHumanReadableName() : "";
-    m_frontend->executionContextCreated(ExecutionContextDescription::create()
+    RefPtr<ExecutionContextDescription> description = ExecutionContextDescription::create()
         .setId(executionContextId)
-        .setIsPageContext(isPageContext)
         .setName(humanReadableName)
         .setOrigin(origin)
-        .setFrameId(frameId)
-        .release());
+        .setFrameId(frameId);
+    if (isPageContext)
+        description->setIsPageContext(isPageContext);
+    frontend()->executionContextCreated(description.release());
 }
 
 } // namespace blink

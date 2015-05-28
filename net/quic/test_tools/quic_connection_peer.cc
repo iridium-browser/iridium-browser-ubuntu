@@ -5,7 +5,6 @@
 #include "net/quic/test_tools/quic_connection_peer.h"
 
 #include "base/stl_util.h"
-#include "net/quic/congestion_control/receive_algorithm_interface.h"
 #include "net/quic/congestion_control/send_algorithm_interface.h"
 #include "net/quic/quic_connection.h"
 #include "net/quic/quic_packet_writer.h"
@@ -23,14 +22,6 @@ void QuicConnectionPeer::SendAck(QuicConnection* connection) {
 }
 
 // static
-void QuicConnectionPeer::SetReceiveAlgorithm(
-    QuicConnection* connection,
-    ReceiveAlgorithmInterface* receive_algorithm) {
-  connection->received_packet_manager_.receive_algorithm_.reset(
-      receive_algorithm);
-}
-
-// static
 void QuicConnectionPeer::SetSendAlgorithm(
     QuicConnection* connection,
     SendAlgorithmInterface* send_algorithm) {
@@ -38,14 +29,16 @@ void QuicConnectionPeer::SetSendAlgorithm(
 }
 
 // static
-QuicAckFrame* QuicConnectionPeer::CreateAckFrame(QuicConnection* connection) {
-  return connection->CreateAckFrame();
+void QuicConnectionPeer::PopulateAckFrame(QuicConnection* connection,
+                                          QuicAckFrame* ack) {
+  connection->PopulateAckFrame(ack);
 }
 
 // static
-QuicStopWaitingFrame* QuicConnectionPeer::CreateStopWaitingFrame(
-    QuicConnection* connection) {
-  return connection->CreateStopWaitingFrame();
+void QuicConnectionPeer::PopulateStopWaitingFrame(
+    QuicConnection* connection,
+    QuicStopWaitingFrame* stop_waiting) {
+  connection->PopulateStopWaitingFrame(stop_waiting);
 }
 
 // static
@@ -74,32 +67,9 @@ QuicSentPacketManager* QuicConnectionPeer::GetSentPacketManager(
 }
 
 // static
-QuicReceivedPacketManager* QuicConnectionPeer::GetReceivedPacketManager(
-    QuicConnection* connection) {
-  return &connection->received_packet_manager_;
-}
-
-// static
 QuicTime::Delta QuicConnectionPeer::GetNetworkTimeout(
     QuicConnection* connection) {
   return connection->idle_network_timeout_;
-}
-
-// static
-bool QuicConnectionPeer::IsSavedForRetransmission(
-    QuicConnection* connection,
-    QuicPacketSequenceNumber sequence_number) {
-  return connection->sent_packet_manager_.IsUnacked(sequence_number) &&
-      connection->sent_packet_manager_.HasRetransmittableFrames(
-          sequence_number);
-}
-
-// static
-bool QuicConnectionPeer::IsRetransmission(
-    QuicConnection* connection,
-    QuicPacketSequenceNumber sequence_number) {
-  return QuicSentPacketManagerPeer::IsRetransmission(
-      &connection->sent_packet_manager_, sequence_number);
 }
 
 // static
@@ -130,15 +100,10 @@ QuicPacketEntropyHash QuicConnectionPeer::ReceivedEntropyHash(
 }
 
 // static
-bool QuicConnectionPeer::IsServer(QuicConnection* connection) {
-  return connection->is_server_;
-}
-
-// static
-void QuicConnectionPeer::SetIsServer(QuicConnection* connection,
-                                     bool is_server) {
-  connection->is_server_ = is_server;
-  QuicFramerPeer::SetIsServer(&connection->framer_, is_server);
+void QuicConnectionPeer::SetPerspective(QuicConnection* connection,
+                                        Perspective perspective) {
+  connection->perspective_ = perspective;
+  QuicFramerPeer::SetPerspective(&connection->framer_, perspective);
 }
 
 // static
@@ -193,6 +158,11 @@ QuicAlarm* QuicConnectionPeer::GetPingAlarm(QuicConnection* connection) {
 }
 
 // static
+QuicAlarm* QuicConnectionPeer::GetFecAlarm(QuicConnection* connection) {
+  return connection->fec_alarm_.get();
+}
+
+// static
 QuicAlarm* QuicConnectionPeer::GetResumeWritesAlarm(
     QuicConnection* connection) {
   return connection->resume_writes_alarm_.get();
@@ -239,12 +209,6 @@ void QuicConnectionPeer::CloseConnection(QuicConnection* connection) {
 QuicEncryptedPacket* QuicConnectionPeer::GetConnectionClosePacket(
     QuicConnection* connection) {
   return connection->connection_close_packet_.get();
-}
-
-// static
-void QuicConnectionPeer::SetSupportedVersions(QuicConnection* connection,
-                                              QuicVersionVector versions) {
-  connection->framer_.SetSupportedVersions(versions);
 }
 
 // static

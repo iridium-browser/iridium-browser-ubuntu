@@ -22,6 +22,7 @@ class ChromeRenderFrameObserver : public content::RenderFrameObserver {
  private:
   // RenderFrameObserver implementation.
   bool OnMessageReceived(const IPC::Message& message) override;
+  void DidFinishDocumentLoad() override;
 
   // IPC handlers
   void OnSetIsPrerendering(bool is_prerendering);
@@ -29,6 +30,7 @@ class ChromeRenderFrameObserver : public content::RenderFrameObserver {
       int thumbnail_min_area_pixels,
       const gfx::Size& thumbnail_max_size_pixels);
   void OnPrintNodeUnderContextMenu();
+  void OnAppBannerPromptRequest(int request_id, const std::string& platform);
 
   DISALLOW_COPY_AND_ASSIGN(ChromeRenderFrameObserver);
 };

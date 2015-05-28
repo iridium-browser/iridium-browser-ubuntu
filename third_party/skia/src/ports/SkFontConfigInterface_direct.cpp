@@ -111,14 +111,14 @@ public:
                                  SkTypeface::Style requested,
                                  FontIdentity* outFontIdentifier,
                                  SkString* outFamilyName,
-                                 SkTypeface::Style* outStyle) SK_OVERRIDE;
-    virtual SkStream* openStream(const FontIdentity&) SK_OVERRIDE;
+                                 SkTypeface::Style* outStyle) override;
+    SkStreamAsset* openStream(const FontIdentity&) override;
 
     // new APIs
-    virtual SkDataTable* getFamilyNames() SK_OVERRIDE;
+    SkDataTable* getFamilyNames() override;
     virtual bool matchFamilySet(const char inFamilyName[],
                                 SkString* outFamilyName,
-                                SkTArray<FontIdentity>*) SK_OVERRIDE;
+                                SkTArray<FontIdentity>*) override;
 
 private:
     SkMutex mutex_;
@@ -552,7 +552,7 @@ bool SkFontConfigInterfaceDirect::matchFamilyName(const char familyName[],
     return true;
 }
 
-SkStream* SkFontConfigInterfaceDirect::openStream(const FontIdentity& identity) {
+SkStreamAsset* SkFontConfigInterfaceDirect::openStream(const FontIdentity& identity) {
     return SkStream::NewFromFile(identity.fString.c_str());
 }
 

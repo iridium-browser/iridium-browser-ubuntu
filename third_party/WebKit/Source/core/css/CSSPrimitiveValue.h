@@ -43,7 +43,7 @@ class Pair;
 class Quad;
 class RGBColor;
 class Rect;
-class RenderStyle;
+class ComputedStyle;
 
 // Dimension calculations are imprecise, often resulting in values of e.g.
 // 44.99998. We need to go ahead and round if we're really close to the next
@@ -89,8 +89,7 @@ public:
         CSS_S = 15,
         CSS_HZ = 16,
         CSS_KHZ = 17,
-        CSS_DIMENSION = 18,
-        CSS_STRING = 19,
+        CSS_CUSTOM_IDENT = 19,
         CSS_URI = 20,
         CSS_IDENT = 21,
         CSS_ATTR = 22,
@@ -109,9 +108,6 @@ public:
         CSS_PAIR = 100, // We envision this being exposed as a means of getting computed style values for pairs (border-spacing/radius, background-position, etc.)
         CSS_UNICODE_RANGE = 102,
 
-        // FIXME: This is only used in CSSParserValue, so it's probably better as part of the enum there
-        CSS_PARSER_HEXCOLOR = 105,
-
         // These are from CSS3 Values and Units, but that isn't a finished standard yet
         CSS_TURN = 107,
         CSS_REMS = 108,
@@ -129,6 +125,8 @@ public:
         CSS_CALC = 113,
         CSS_CALC_PERCENTAGE_WITH_NUMBER = 114,
         CSS_CALC_PERCENTAGE_WITH_LENGTH = 115,
+
+        CSS_STRING = 116,
 
         CSS_PROPERTY_ID = 117,
         CSS_VALUE_ID = 118
@@ -168,6 +166,9 @@ public:
         UOther
     };
     static UnitCategory unitCategory(UnitType);
+    static float clampToCSSLengthRange(double);
+
+    static void initUnitTable();
 
     static UnitType fromName(const String& unit);
 
@@ -201,7 +202,7 @@ public:
     bool isRect() const { return m_primitiveUnitType == CSS_RECT; }
     bool isRGBColor() const { return m_primitiveUnitType == CSS_RGBCOLOR; }
     bool isShape() const { return m_primitiveUnitType == CSS_SHAPE; }
-    bool isString() const { return m_primitiveUnitType == CSS_STRING; }
+    bool isString() const { return m_primitiveUnitType == CSS_CUSTOM_IDENT || m_primitiveUnitType == CSS_STRING; }
     bool isTime() const { return m_primitiveUnitType == CSS_S || m_primitiveUnitType == CSS_MS; }
     bool isURI() const { return m_primitiveUnitType == CSS_URI; }
     bool isCalculated() const { return m_primitiveUnitType == CSS_CALC; }
@@ -239,7 +240,7 @@ public:
     {
         return adoptRefWillBeNoop(new CSSPrimitiveValue(value, zoom));
     }
-    static PassRefPtrWillBeRawPtr<CSSPrimitiveValue> create(const LengthSize& value, const RenderStyle& style)
+    static PassRefPtrWillBeRawPtr<CSSPrimitiveValue> create(const LengthSize& value, const ComputedStyle& style)
     {
         return adoptRefWillBeNoop(new CSSPrimitiveValue(value, style));
     }
@@ -279,19 +280,14 @@ public:
      */
     template<typename T> T computeLength(const CSSToLengthConversionData&);
 
-    // Converts to a Length, mapping various unit types appropriately.
-    template<int> Length convertToLength(const CSSToLengthConversionData&);
+    // Converts to a Length (Fixed, Percent or Calculated)
+    Length convertToLength(const CSSToLengthConversionData&);
 
-    double getDoubleValue(UnitType) const;
+    double deprecatedGetDoubleValue() const;
+
     double getDoubleValue() const;
-
-    float getFloatValue(UnitType type) const { return getValue<float>(type); }
     float getFloatValue() const { return getValue<float>(); }
-
-    int getIntValue(UnitType type) const { return getValue<int>(type); }
     int getIntValue() const { return getValue<int>(); }
-
-    template<typename T> inline T getValue(UnitType type) const { return clampTo<T>(getDoubleValue(type)); }
     template<typename T> inline T getValue() const { return clampTo<T>(getDoubleValue()); }
 
     String getStringValue() const;
@@ -316,13 +312,13 @@ public:
     template<typename T> inline operator T() const; // Defined in CSSPrimitiveValueMappings.h
 
     static const char* unitTypeToString(UnitType);
-    String customCSSText(CSSTextFormattingFlags = QuoteCSSStringIfNeeded) const;
+    String customCSSText() const;
 
     bool isQuirkValue() { return m_isQuirkValue; }
 
     bool equals(const CSSPrimitiveValue&) const;
 
-    void traceAfterDispatch(Visitor*);
+    DECLARE_TRACE_AFTER_DISPATCH();
 
     static UnitType canonicalUnitTypeForCategory(UnitCategory);
     static double conversionToCanonicalUnitsScaleFactor(UnitType);
@@ -338,7 +334,7 @@ private:
     CSSPrimitiveValue(int parserOperator, UnitType);
     CSSPrimitiveValue(unsigned color, UnitType); // RGB value
     CSSPrimitiveValue(const Length&, float zoom);
-    CSSPrimitiveValue(const LengthSize&, const RenderStyle&);
+    CSSPrimitiveValue(const LengthSize&, const ComputedStyle&);
     CSSPrimitiveValue(const String&, UnitType);
     CSSPrimitiveValue(double, UnitType);
 
@@ -360,14 +356,13 @@ private:
     template<typename T> operator T*(); // compile-time guard
 
     void init(const Length&);
-    void init(const LengthSize&, const RenderStyle&);
+    void init(const LengthSize&, const ComputedStyle&);
     void init(PassRefPtrWillBeRawPtr<Counter>);
     void init(PassRefPtrWillBeRawPtr<Rect>);
     void init(PassRefPtrWillBeRawPtr<Pair>);
     void init(PassRefPtrWillBeRawPtr<Quad>);
     void init(PassRefPtrWillBeRawPtr<CSSBasicShape>);
     void init(PassRefPtrWillBeRawPtr<CSSCalcValue>);
-    bool getDoubleValueInternal(UnitType targetUnitType, double* result) const;
 
     double computeLengthDouble(const CSSToLengthConversionData&);
 

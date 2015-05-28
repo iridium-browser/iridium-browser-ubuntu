@@ -19,9 +19,12 @@
 
 class ChromeWhispernetClient;
 
+namespace audio_modem {
+class WhispernetClient;
+}
+
 namespace copresence {
 class CopresenceManager;
-class WhispernetClient;
 }
 
 namespace gcm {
@@ -47,7 +50,8 @@ class CopresenceService final : public BrowserContextKeyedAPI,
   // These accessors will always return an object (except during shutdown).
   // If the object doesn't exist, they will create one first.
   copresence::CopresenceManager* manager();
-  copresence::WhispernetClient* whispernet_client();
+  // TODO(ckehoe): Merge this with GetWhispernetClient() below.
+  audio_modem::WhispernetClient* whispernet_client();
 
   // A registry containing the app id's associated with every subscription.
   SubscriptionToAppMap& apps_by_subscription_id() {
@@ -86,8 +90,7 @@ class CopresenceService final : public BrowserContextKeyedAPI,
   net::URLRequestContextGetter* GetRequestContext() const override;
   const std::string GetPlatformVersionString() const override;
   const std::string GetAPIKey(const std::string& app_id) const override;
-  const std::string GetProjectId(const std::string& app_id) const override;
-  copresence::WhispernetClient* GetWhispernetClient() override;
+  audio_modem::WhispernetClient* GetWhispernetClient() override;
   gcm::GCMDriver* GetGCMDriver() override;
   const std::string GetDeviceId(bool authenticated) override;
   void SaveDeviceId(bool authenticated, const std::string& device_id) override;
@@ -105,8 +108,8 @@ class CopresenceService final : public BrowserContextKeyedAPI,
   std::map<std::string, std::string> api_keys_by_app_;
   std::map<std::string, std::string> auth_tokens_by_app_;
 
+  scoped_ptr<audio_modem::WhispernetClient> whispernet_client_;
   scoped_ptr<copresence::CopresenceManager> manager_;
-  scoped_ptr<ChromeWhispernetClient> whispernet_client_;
 
   DISALLOW_COPY_AND_ASSIGN(CopresenceService);
 };
@@ -127,6 +130,7 @@ class CopresenceExecuteFunction : public ChromeUIThreadExtensionFunction {
   void SendResult(copresence::CopresenceStatus status);
 };
 
+// TODO(ckehoe): Remove this function.
 class CopresenceSetApiKeyFunction : public ChromeUIThreadExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("copresence.setApiKey", COPRESENCE_SETAPIKEY);

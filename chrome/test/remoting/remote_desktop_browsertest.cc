@@ -29,7 +29,7 @@
 namespace remoting {
 
 RemoteDesktopBrowserTest::RemoteDesktopBrowserTest()
-    : extension_(NULL) {
+    : remote_test_helper_(nullptr), extension_(nullptr) {
 }
 
 RemoteDesktopBrowserTest::~RemoteDesktopBrowserTest() {}
@@ -72,7 +72,7 @@ void RemoteDesktopBrowserTest::OpenClientBrowserPage() {
   // Open the client browser page in a new tab
   ui_test_utils::NavigateToURLWithDisposition(
       browser(),
-      GURL(http_server() + "/clientpage.html"),
+      GURL(http_server() + "/client.html"),
       NEW_FOREGROUND_TAB, ui_test_utils::BROWSER_TEST_WAIT_FOR_TAB);
 
   // Save this web content for later reference
@@ -80,6 +80,9 @@ void RemoteDesktopBrowserTest::OpenClientBrowserPage() {
 
   // Go back to the previous tab that has chromoting opened
   browser()->tab_strip_model()->SelectPreviousTab();
+
+  // Create the RemoteTestHelper object to use.
+  remote_test_helper_.reset(new RemoteTestHelper(client_web_content_));
 }
 
 bool RemoteDesktopBrowserTest::HtmlElementVisible(const std::string& name) {
@@ -166,8 +169,10 @@ void RemoteDesktopBrowserTest::VerifyChromotingLoaded(bool expected) {
   ASSERT_EQ(installed, expected);
 }
 
-void RemoteDesktopBrowserTest::LaunchChromotingApp(bool defer_start) {
-  ASSERT_TRUE(extension_);
+content::WebContents* RemoteDesktopBrowserTest::LaunchChromotingApp(
+    bool defer_start,
+    WindowOpenDisposition window_open_disposition) {
+  _ASSERT_TRUE(extension_);
 
   GURL chromoting_main = Chromoting_Main_URL();
   // We cannot simply wait for any page load because the first page
@@ -177,17 +182,22 @@ void RemoteDesktopBrowserTest::LaunchChromotingApp(bool defer_start) {
   observer.set_ignore_url_parameters(true);
 
   // If the app should be started in deferred mode, ensure that a "source" URL
-  // parameter; if not, ensure that no such parameter is present. The value of
-  // the parameter is determined by the AppLaunchParams ("test", in this case).
+  // parameter is present; if not, ensure that no such parameter is present.
+  // The value of the parameter is determined by the AppLaunchParams ("test",
+  // in this case).
   extensions::FeatureSwitch::ScopedOverride override_trace_app_source(
       extensions::FeatureSwitch::trace_app_source(),
       defer_start);
+
+  if (is_platform_app()) {
+    window_open_disposition = NEW_WINDOW;
+  }
 
   OpenApplication(AppLaunchParams(browser()->profile(), extension_,
                                   is_platform_app()
                                       ? extensions::LAUNCH_CONTAINER_NONE
                                       : extensions::LAUNCH_CONTAINER_TAB,
-                                  is_platform_app() ? NEW_WINDOW : CURRENT_TAB,
+                                  window_open_disposition,
                                   extensions::SOURCE_TEST));
 
   observer.Wait();
@@ -199,10 +209,10 @@ void RemoteDesktopBrowserTest::LaunchChromotingApp(bool defer_start) {
       content::Source<content::NavigationController>(observer.source()).ptr();
 
   content::WebContents* web_contents = controller->GetWebContents();
+  _ASSERT_TRUE(web_contents);
+
   if (web_contents != active_web_contents())
     web_contents_stack_.push_back(web_contents);
-
-  app_web_content_ = web_contents;
 
   if (is_platform_app()) {
     EXPECT_EQ(GetFirstAppWindowWebContents(), active_web_contents());
@@ -212,10 +222,16 @@ void RemoteDesktopBrowserTest::LaunchChromotingApp(bool defer_start) {
     // injection to work.
     // TODO(weitaosu): Find out whether there is a more appropriate notification
     // to wait for so we can get rid of this wait.
-    ASSERT_TRUE(TimeoutWaiter(base::TimeDelta::FromSeconds(5)).Wait());
+    _ASSERT_TRUE(TimeoutWaiter(base::TimeDelta::FromSeconds(5)).Wait());
   }
 
   EXPECT_EQ(Chromoting_Main_URL(), GetCurrentURL());
+  return web_contents;
+}
+
+content::WebContents* RemoteDesktopBrowserTest::LaunchChromotingApp(
+    bool defer_start) {
+  return LaunchChromotingApp(defer_start, CURRENT_TAB);
 }
 
 void RemoteDesktopBrowserTest::StartChromotingApp() {
@@ -231,14 +247,12 @@ void RemoteDesktopBrowserTest::Authorize() {
   ASSERT_EQ(Chromoting_Main_URL(), GetCurrentURL());
   ASSERT_FALSE(IsAuthenticated());
 
-  // The second observer monitors the loading of the Google login page.
-  // Unfortunately we cannot specify a source in this observer because
-  // we can't get a handle of the new window until the first observer
-  // has finished waiting. But we will assert that the source of the
-  // load stop event is indeed the newly created browser window.
-  content::WindowedNotificationObserver observer(
-      content::NOTIFICATION_LOAD_STOP,
-      content::NotificationService::AllSources());
+  // We cannot simply wait for any page load because the first page
+  // loaded will be chrome://chrome-signin in a packaged app. We need to wait
+  // for the Google login page to be loaded (inside an embedded iframe).
+  GURL google_login("https://accounts.google.com/ServiceLogin");
+  PageLoadNotificationObserver observer(google_login);
+  observer.set_ignore_url_parameters(true);
 
   ClickOnControl("auth-button");
 
@@ -247,10 +261,21 @@ void RemoteDesktopBrowserTest::Authorize() {
   content::NavigationController* controller =
       content::Source<content::NavigationController>(observer.source()).ptr();
 
-  web_contents_stack_.push_back(controller->GetWebContents());
+  content::WebContents* web_contents = controller->GetWebContents();
+  _ASSERT_TRUE(web_contents);
+
+  if (web_contents != active_web_contents()) {
+    // Pushing the WebContents hosting the Google login page onto the stack.
+    // If this is a packaged app the Google login page will be loaded in an
+    // iframe embedded in the chrome://chrome-signin page. But we can ignore
+    // that WebContents because we never need to interact with it directly.
+    LOG(INFO) << "Pushing onto the stack: " << web_contents->GetURL();
+    web_contents_stack_.push_back(web_contents);
+  }
 
   // Verify the active tab is at the "Google Accounts" login page.
   EXPECT_EQ("accounts.google.com", GetCurrentURL().host());
+
   EXPECT_TRUE(HtmlElementExists("Email"));
   EXPECT_TRUE(HtmlElementExists("Passwd"));
 }
@@ -259,8 +284,9 @@ void RemoteDesktopBrowserTest::Authenticate() {
   // The chromoting extension should be installed.
   ASSERT_TRUE(extension_);
 
-  // The active tab should have the "Google Accounts" login page loaded.
+  // The active WebContents should have the "Google Accounts" login page loaded.
   ASSERT_EQ("accounts.google.com", GetCurrentURL().host());
+
   ASSERT_TRUE(HtmlElementExists("Email"));
   ASSERT_TRUE(HtmlElementExists("Passwd"));
 
@@ -361,7 +387,7 @@ void RemoteDesktopBrowserTest::DisconnectMe2Me() {
 
   ASSERT_TRUE(RemoteDesktopBrowserTest::IsSessionConnected());
 
-  ExecuteScript("remoting.disconnect();");
+  ExecuteScript("remoting.app.disconnect();");
 
   EXPECT_TRUE(HtmlElementVisible("client-dialog"));
   EXPECT_TRUE(HtmlElementVisible("client-reconnect-button"));
@@ -482,18 +508,19 @@ void RemoteDesktopBrowserTest::Cleanup() {
   ASSERT_TRUE(TimeoutWaiter(base::TimeDelta::FromSeconds(2)).Wait());
 }
 
-void RemoteDesktopBrowserTest::SetUpTestForMe2Me() {
+content::WebContents* RemoteDesktopBrowserTest::SetUpTest() {
   VerifyInternetAccess();
   Install();
-  LaunchChromotingApp(false);
-  LoadBrowserTestJavaScript(app_web_content());
+  content::WebContents* app_web_content = LaunchChromotingApp(false);
   Auth();
+  LoadBrowserTestJavaScript(app_web_content);
   ExpandMe2Me();
   // The call to EnsureRemoteConnectionEnabled() does a PIN reset.
   // This causes the test to fail because of a recent bug:
   // crbug.com/430676
   // TODO(anandc): Reactivate this call after above bug is fixed.
-  //EnsureRemoteConnectionEnabled();
+  //EnsureRemoteConnectionEnabled(app_web_content);
+  return app_web_content;
 }
 
 void RemoteDesktopBrowserTest::Auth() {
@@ -505,7 +532,8 @@ void RemoteDesktopBrowserTest::Auth() {
   Approve();
 }
 
-void RemoteDesktopBrowserTest::EnsureRemoteConnectionEnabled() {
+void RemoteDesktopBrowserTest::EnsureRemoteConnectionEnabled(
+    content::WebContents* app_web_contents) {
   // browser_test.ensureRemoteConnectionEnabled is defined in
   // browser_test.js, which must be loaded before calling this function.
   // TODO(kelvinp): This function currently only works on linux when the user is
@@ -513,7 +541,7 @@ void RemoteDesktopBrowserTest::EnsureRemoteConnectionEnabled() {
   // to Mac (https://crbug.com/397576) and Windows (https://crbug.com/397575).
   bool result;
   EXPECT_TRUE(content::ExecuteScriptAndExtractBool(
-      app_web_content(),
+      app_web_contents,
       "browserTest.ensureRemoteConnectionEnabled(" + me2me_pin() + ")",
       &result));
   EXPECT_TRUE(result) << "Cannot start the host with Pin:" << me2me_pin();
@@ -529,13 +557,13 @@ void RemoteDesktopBrowserTest::ConnectToLocalHost(bool remember_pin) {
 
   // Verify that the local host is online.
   ASSERT_TRUE(ExecuteScriptAndExtractBool(
-      "remoting.hostList.localHost_.hostName && "
-      "remoting.hostList.localHost_.hostId && "
-      "remoting.hostList.localHost_.status && "
-      "remoting.hostList.localHost_.status == 'ONLINE'"));
+      "remoting.hostList.localHostSection_.host_.hostName && "
+      "remoting.hostList.localHostSection_.host_.hostId && "
+      "remoting.hostList.localHostSection_.host_.status && "
+      "remoting.hostList.localHostSection_.host_.status == 'ONLINE'"));
 
   // Connect.
-  ClickOnControl("this-host-connect");
+  ClickOnControl("local-host-connect-button");
 
   // Enter the pin # passed in from the command line.
   EnterPin(me2me_pin(), remember_pin);
@@ -649,11 +677,6 @@ void RemoteDesktopBrowserTest::ParseCommandLine() {
     ASSERT_NE(webapp_crx_.empty(), webapp_unpacked_.empty());
   }
 
-  // Run with "enable-web-based-signin" flag to enforce web-based sign-in,
-  // rather than inline signin. This ensures we use the same authentication
-  // page, regardless of whether we are testing the v1 or v2 web-app.
-  command_line->AppendSwitch(switches::kEnableWebBasedSignin);
-
   // Enable experimental extensions; this is to allow adding the LG extensions
   command_line->AppendSwitch(
     extensions::switches::kEnableExperimentalExtensionApis);
@@ -677,49 +700,15 @@ void RemoteDesktopBrowserTest::ExecuteScriptAndWaitForAnyPageLoad(
 }
 
 // static
-bool RemoteDesktopBrowserTest::ExecuteScriptAndExtractBool(
-    content::WebContents* web_contents, const std::string& script) {
-  bool result;
-  EXPECT_TRUE(content::ExecuteScriptAndExtractBool(
-      web_contents,
-      "window.domAutomationController.send(" + script + ");",
-      &result));
-
-  return result;
-}
-
-// static
-int RemoteDesktopBrowserTest::ExecuteScriptAndExtractInt(
-    content::WebContents* web_contents, const std::string& script) {
-  int result;
-  _ASSERT_TRUE(content::ExecuteScriptAndExtractInt(
-      web_contents,
-      "window.domAutomationController.send(" + script + ");",
-      &result));
-
-  return result;
-}
-
-// static
-std::string RemoteDesktopBrowserTest::ExecuteScriptAndExtractString(
-    content::WebContents* web_contents, const std::string& script) {
-  std::string result;
-  _ASSERT_TRUE(content::ExecuteScriptAndExtractString(
-      web_contents,
-      "window.domAutomationController.send(" + script + ");",
-      &result));
-
-  return result;
-}
-
-// static
 bool RemoteDesktopBrowserTest::LoadScript(
     content::WebContents* web_contents,
     const base::FilePath::StringType& path) {
   std::string script;
   base::FilePath src_dir;
   _ASSERT_TRUE(PathService::Get(base::DIR_EXE, &src_dir));
-  base::FilePath script_path = src_dir.Append(path);
+  base::FilePath script_path =
+      src_dir.Append(FILE_PATH_LITERAL("remoting/browser_test_resources/"));
+  script_path = script_path.Append(path);
 
   if (!base::ReadFileToString(script_path, &script)) {
     LOG(ERROR) << "Failed to load script " << script_path.value();
@@ -770,8 +759,8 @@ void RemoteDesktopBrowserTest::ClickOnControl(const std::string& name) {
   std::string has_disabled_attribute =
     "document.getElementById('" + name + "').hasAttribute('disabled')";
 
-  if (ExecuteScriptAndExtractBool(active_web_contents(),
-                                  has_disabled_attribute)) {
+  if (RemoteTestHelper::ExecuteScriptAndExtractBool(active_web_contents(),
+                                                    has_disabled_attribute)) {
     // This element has a disabled attribute. Wait for it become enabled.
     ConditionalTimeoutWaiter waiter(
           base::TimeDelta::FromSeconds(5),
@@ -834,7 +823,8 @@ void RemoteDesktopBrowserTest::WaitForConnection() {
 bool RemoteDesktopBrowserTest::IsLocalHostReady() {
   // TODO(weitaosu): Instead of polling, can we register a callback to
   // remoting.hostList.setLocalHost_?
-  return ExecuteScriptAndExtractBool("remoting.hostList.localHost_ != null");
+  return ExecuteScriptAndExtractBool(
+      "remoting.hostList.localHostSection_.host_ != null");
 }
 
 bool RemoteDesktopBrowserTest::IsHostListReady() {
@@ -891,7 +881,7 @@ void RemoteDesktopBrowserTest::SetUserNameAndPassword(
 // static
 bool RemoteDesktopBrowserTest::IsAuthenticatedInWindow(
     content::WebContents* web_contents) {
-  return ExecuteScriptAndExtractBool(
+  return RemoteTestHelper::ExecuteScriptAndExtractBool(
       web_contents, "remoting.identity.isAuthenticated()");
 }
 
@@ -899,7 +889,7 @@ bool RemoteDesktopBrowserTest::IsAuthenticatedInWindow(
 bool RemoteDesktopBrowserTest::IsHostActionComplete(
     content::WebContents* client_web_content,
     std::string host_action_var) {
-  return ExecuteScriptAndExtractBool(
+  return RemoteTestHelper::ExecuteScriptAndExtractBool(
       client_web_content,
       host_action_var);
 }
@@ -908,9 +898,40 @@ bool RemoteDesktopBrowserTest::IsHostActionComplete(
 bool RemoteDesktopBrowserTest::IsEnabled(
     content::WebContents* client_web_content,
     const std::string& element_name) {
-  return !ExecuteScriptAndExtractBool(
+  return !RemoteTestHelper::ExecuteScriptAndExtractBool(
     client_web_content,
     "document.getElementById(\"" + element_name + "\").disabled");
+}
+
+bool RemoteDesktopBrowserTest::IsAppModeEqualTo(const std::string& mode) {
+  return ExecuteScriptAndExtractBool(
+      "remoting.currentMode == " + mode);
+}
+
+void RemoteDesktopBrowserTest::DisableRemoteConnection() {
+  ConditionalTimeoutWaiter hostReadyWaiter(
+        base::TimeDelta::FromSeconds(5),
+        base::TimeDelta::FromMilliseconds(500),
+        base::Bind(&RemoteDesktopBrowserTest::IsLocalHostReady, this));
+  EXPECT_TRUE(hostReadyWaiter.Wait());
+
+  ClickOnControl("stop-daemon");
+
+  ConditionalTimeoutWaiter setupDoneWaiter(
+          base::TimeDelta::FromSeconds(30),
+          base::TimeDelta::FromMilliseconds(500),
+          base::Bind(&RemoteDesktopBrowserTest::IsAppModeEqualTo,
+                     this, "remoting.AppMode.HOST_SETUP_DONE"));
+  EXPECT_TRUE(setupDoneWaiter.Wait());
+
+  ClickOnControl("host-config-done-dismiss");
+
+  ConditionalTimeoutWaiter homeWaiter(
+          base::TimeDelta::FromSeconds(5),
+          base::TimeDelta::FromMilliseconds(500),
+          base::Bind(&RemoteDesktopBrowserTest::IsAppModeEqualTo,
+                     this, "remoting.AppMode.HOME"));
+  EXPECT_TRUE(homeWaiter.Wait());
 }
 
 }  // namespace remoting

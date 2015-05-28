@@ -50,7 +50,7 @@ class CustomElementRegistry final {
     WTF_MAKE_NONCOPYABLE(CustomElementRegistry);
     DISALLOW_ALLOCATION();
 public:
-    void trace(Visitor*);
+    DECLARE_TRACE();
     void documentWasDetached() { m_documentWasDetached = true; }
 
 protected:
@@ -62,7 +62,7 @@ protected:
     CustomElementDefinition* find(const CustomElementDescriptor&) const;
 
 private:
-    typedef WillBeHeapHashMap<CustomElementDescriptor, RefPtrWillBeMember<CustomElementDefinition> > DefinitionMap;
+    typedef WillBeHeapHashMap<CustomElementDescriptor, RefPtrWillBeMember<CustomElementDefinition>> DefinitionMap;
     DefinitionMap m_definitions;
     HashSet<AtomicString> m_registeredTypeNames;
     bool m_documentWasDetached;

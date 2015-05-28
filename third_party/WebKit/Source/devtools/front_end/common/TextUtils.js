@@ -103,62 +103,21 @@ WebInspector.TextUtils = {
     /**
      * @param {string} text
      * @param {function(string):boolean} isWordChar
-     * @return {!Array.<string>}
+     * @param {function(string)} wordCallback
      */
-    textToWords: function(text, isWordChar)
+    textToWords: function(text, isWordChar, wordCallback)
     {
-        var words = [];
         var startWord = -1;
         for(var i = 0; i < text.length; ++i) {
             if (!isWordChar(text.charAt(i))) {
                 if (startWord !== -1)
-                    words.push(text.substring(startWord, i));
+                    wordCallback(text.substring(startWord, i));
                 startWord = -1;
             } else if (startWord === -1)
                 startWord = i;
         }
         if (startWord !== -1)
-            words.push(text.substring(startWord));
-        return words;
-    },
-
-    /**
-     * @param {string} source
-     * @param {number=} startIndex
-     * @param {number=} lastIndex
-     * @return {number}
-     */
-    findBalancedCurlyBrackets: function(source, startIndex, lastIndex)
-    {
-        // The function is performance sensitive.
-        lastIndex = lastIndex || source.length;
-        startIndex = startIndex || 0;
-        var counter = 0;
-
-        var index = startIndex;
-        while (index < lastIndex) {
-            // This part counts brackets until end of string or a double quote.
-            for (; index < lastIndex; ++index) {
-                var character = source[index];
-                if (character === "\"")
-                    break;
-                else if (character === "{")
-                    ++counter;
-                else if (character === "}") {
-                    if (--counter === 0)
-                        return index + 1;
-                }
-            }
-            if (index === lastIndex)
-                return -1;
-            // This part seeks the closing double quote which could have even number of back slashes prefix.
-            var regexp = WebInspector.TextUtils._ClosingDoubleQuoteRegexp;
-            regexp.lastIndex = index;
-            if (!regexp.test(source))
-                return -1;
-            index = regexp.lastIndex;
-        }
-        return -1;
+            wordCallback(text.substring(startWord));
     },
 
     /**
@@ -193,7 +152,6 @@ WebInspector.TextUtils = {
 }
 
 WebInspector.TextUtils._SpaceCharRegex = /\s/;
-WebInspector.TextUtils._ClosingDoubleQuoteRegexp = /[^\\](?:\\\\)*"/g;
 
 /**
  * @enum {string}
@@ -203,4 +161,68 @@ WebInspector.TextUtils.Indent = {
     FourSpaces: "    ",
     EightSpaces: "        ",
     TabCharacter: "\t"
+}
+
+/**
+ * @constructor
+ * @param {function(string)} callback
+ * @param {boolean=} findMultiple
+ */
+WebInspector.TextUtils.BalancedJSONTokenizer = function(callback, findMultiple)
+{
+    this._callback = callback;
+    this._index = 0;
+    this._balance = 0;
+    this._buffer = "";
+    this._findMultiple = findMultiple || false;
+    this._closingDoubleQuoteRegex = /[^\\](?:\\\\)*"/g;
+}
+
+WebInspector.TextUtils.BalancedJSONTokenizer.prototype = {
+    /**
+     * @param {string} chunk
+     */
+    write: function(chunk)
+    {
+        this._buffer += chunk;
+        var lastIndex = this._buffer.length;
+        var buffer = this._buffer;
+        for (var index = this._index; index < lastIndex; ++index) {
+            var character = buffer[index];
+            if (character === "\"") {
+                this._closingDoubleQuoteRegex.lastIndex = index;
+                if (!this._closingDoubleQuoteRegex.test(buffer))
+                    break;
+                index = this._closingDoubleQuoteRegex.lastIndex - 1;
+            } else if (character === "{") {
+                ++this._balance;
+            } else if (character === "}") {
+                if (--this._balance === 0) {
+                    this._lastBalancedIndex = index + 1;
+                    if (!this._findMultiple)
+                        break;
+                }
+            }
+        }
+        this._index = index;
+        this._reportBalanced();
+    },
+
+    _reportBalanced: function()
+    {
+        if (!this._lastBalancedIndex)
+            return;
+        this._callback(this._buffer.slice(0, this._lastBalancedIndex));
+        this._buffer = this._buffer.slice(this._lastBalancedIndex);
+        this._index -= this._lastBalancedIndex;
+        this._lastBalancedIndex = 0;
+    },
+
+    /**
+     * @return {string}
+     */
+    remainder: function()
+    {
+        return this._buffer;
+    }
 }

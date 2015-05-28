@@ -88,8 +88,8 @@ bool IsTokenCacheable(const sandbox::PolicyBase* policy) {
   const sandbox::AppContainerAttributes* app_container =
       policy->GetAppContainer();
 
-  // We cannot cache tokens with an app container.
-  if (app_container)
+  // We cannot cache tokens with an app container or lowbox.
+  if (app_container || policy->GetLowBoxSid())
     return false;
 
   return true;
@@ -349,6 +349,9 @@ ResultCode BrokerServicesBase::SpawnTarget(const wchar_t* exe_path,
   // This downcast is safe as long as we control CreatePolicy()
   PolicyBase* policy_base = static_cast<PolicyBase*>(policy);
 
+  if (policy_base->GetAppContainer() && policy_base->GetLowBoxSid())
+    return SBOX_ERROR_BAD_PARAMS;
+
   // Construct the tokens and the job object that we are going to associate
   // with the soon to be created target process.
   HANDLE initial_token_temp;
@@ -482,9 +485,12 @@ ResultCode BrokerServicesBase::SpawnTarget(const wchar_t* exe_path,
                                             thread_pool_);
 
   DWORD win_result = target->Create(exe_path, command_line, inherit_handles,
+                                    policy_base->GetLowBoxSid() ? true : false,
                                     startup_info, &process_info);
-  if (ERROR_SUCCESS != win_result)
-    return SpawnCleanup(target, win_result);
+  if (ERROR_SUCCESS != win_result) {
+    SpawnCleanup(target, win_result);
+    return SBOX_ERROR_CREATE_PROCESS;
+  }
 
   // Now the policy is the owner of the target.
   if (!policy_base->AddTarget(target)) {

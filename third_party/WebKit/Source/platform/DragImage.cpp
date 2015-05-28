@@ -39,8 +39,8 @@
 #include "platform/graphics/GraphicsContext.h"
 #include "platform/graphics/Image.h"
 #include "platform/graphics/ImageBuffer.h"
+#include "platform/graphics/paint/DisplayItemListContextRecorder.h"
 #include "platform/graphics/paint/DrawingRecorder.h"
-#include "platform/graphics/skia/NativeImageSkia.h"
 #include "platform/text/BidiTextRun.h"
 #include "platform/text/StringTruncator.h"
 #include "platform/text/TextRun.h"
@@ -69,13 +69,13 @@ const float kMaxDragLabelStringWidth = (kMaxDragLabelWidth - 2 * kDragLabelBorde
 const float kDragLinkLabelFontSize = 11;
 const float kDragLinkUrlFontSize = 10;
 
-PassOwnPtr<DragImage> DragImage::create(Image* image, RespectImageOrientationEnum shouldRespectImageOrientation, float deviceScaleFactor)
+PassOwnPtr<DragImage> DragImage::create(Image* image, RespectImageOrientationEnum shouldRespectImageOrientation, float deviceScaleFactor, InterpolationQuality interpolationQuality)
 {
     if (!image)
         return nullptr;
 
-    RefPtr<NativeImageSkia> bitmap = image->nativeImageForCurrentFrame();
-    if (!bitmap)
+    SkBitmap bitmap;
+    if (!image->bitmapForCurrentFrame(&bitmap))
         return nullptr;
 
     if (image->isBitmapImage()) {
@@ -98,16 +98,16 @@ PassOwnPtr<DragImage> DragImage::create(Image* image, RespectImageOrientationEnu
             skBitmap.eraseColor(SK_ColorTRANSPARENT);
             SkCanvas canvas(skBitmap);
             canvas.concat(affineTransformToSkMatrix(orientation.transformFromDefault(sizeRespectingOrientation)));
-            canvas.drawBitmapRect(bitmap->bitmap(), 0, destRect);
+            canvas.drawBitmapRect(bitmap, 0, destRect);
 
-            return adoptPtr(new DragImage(skBitmap, deviceScaleFactor));
+            return adoptPtr(new DragImage(skBitmap, deviceScaleFactor, interpolationQuality));
         }
     }
 
     SkBitmap skBitmap;
-    if (!bitmap->bitmap().copyTo(&skBitmap, kN32_SkColorType))
+    if (!bitmap.copyTo(&skBitmap, kN32_SkColorType))
         return nullptr;
-    return adoptPtr(new DragImage(skBitmap, deviceScaleFactor));
+    return adoptPtr(new DragImage(skBitmap, deviceScaleFactor, interpolationQuality));
 }
 
 static Font deriveDragLabelFont(int size, FontWeight fontWeight, const FontDescription& systemFont)
@@ -170,61 +170,53 @@ PassOwnPtr<DragImage> DragImage::create(const KURL& url, const String& inLabel, 
     if (!buffer)
         return nullptr;
 
-    OwnPtr<GraphicsContext> extraGraphicsContext;
-    OwnPtr<DisplayItemList> displayItemList;
-    GraphicsContext* context;
-    if (RuntimeEnabledFeatures::slimmingPaintEnabled()) {
-        displayItemList = DisplayItemList::create();
-        extraGraphicsContext = adoptPtr(new GraphicsContext(0, displayItemList.get()));
-        context = extraGraphicsContext.get();
-    } else {
-        context = buffer->context();
-    }
-
     {
+        DisplayItemListContextRecorder contextRecorder(*buffer->context());
+        GraphicsContext& paintContext = contextRecorder.context();
+
         IntRect rect(IntPoint(), imageSize);
-        DrawingRecorder drawingRecorder(context, buffer->displayItemClient(), DisplayItem::DragImage, rect);
-        context->scale(deviceScaleFactor, deviceScaleFactor);
+        DrawingRecorder drawingRecorder(paintContext, *buffer, DisplayItem::DragImage, rect);
+        if (!drawingRecorder.canUseCachedDrawing()) {
+            paintContext.scale(deviceScaleFactor, deviceScaleFactor);
 
-        const float DragLabelRadius = 5;
-        const IntSize radii(DragLabelRadius, DragLabelRadius);
+            const float DragLabelRadius = 5;
+            const IntSize radii(DragLabelRadius, DragLabelRadius);
 
-        const Color backgroundColor(140, 140, 140);
-        context->fillRoundedRect(rect, radii, radii, radii, radii, backgroundColor);
+            const Color backgroundColor(140, 140, 140);
+            paintContext.fillRoundedRect(rect, radii, radii, radii, radii, backgroundColor);
 
-        // Draw the text
-        if (drawURLString) {
-            if (clipURLString)
-                urlString = StringTruncator::centerTruncate(urlString, imageSize.width() - (kDragLabelBorderX * 2.0f), urlFont);
-            IntPoint textPos(kDragLabelBorderX, imageSize.height() - (kLabelBorderYOffset + urlFont.fontMetrics().descent()));
-            TextRun textRun(urlString);
-            context->drawText(urlFont, TextRunPaintInfo(textRun), textPos);
+            // Draw the text
+            if (drawURLString) {
+                if (clipURLString)
+                    urlString = StringTruncator::centerTruncate(urlString, imageSize.width() - (kDragLabelBorderX * 2.0f), urlFont);
+                IntPoint textPos(kDragLabelBorderX, imageSize.height() - (kLabelBorderYOffset + urlFont.fontMetrics().descent()));
+                TextRun textRun(urlString);
+                paintContext.drawText(urlFont, TextRunPaintInfo(textRun), textPos);
+            }
+
+            if (clipLabelString)
+                label = StringTruncator::rightTruncate(label, imageSize.width() - (kDragLabelBorderX * 2.0f), labelFont);
+
+            bool hasStrongDirectionality;
+            TextRun textRun = textRunWithDirectionality(label, &hasStrongDirectionality);
+            IntPoint textPos(kDragLabelBorderX, kDragLabelBorderY + labelFont.fontDescription().computedPixelSize());
+            if (hasStrongDirectionality && textRun.direction() == RTL) {
+                float textWidth = labelFont.width(textRun);
+                int availableWidth = imageSize.width() - kDragLabelBorderX * 2;
+                textPos.setX(availableWidth - ceilf(textWidth));
+            }
+            paintContext.drawBidiText(labelFont, TextRunPaintInfo(textRun), FloatPoint(textPos));
         }
-
-        if (clipLabelString)
-            label = StringTruncator::rightTruncate(label, imageSize.width() - (kDragLabelBorderX * 2.0f), labelFont);
-
-        bool hasStrongDirectionality;
-        TextRun textRun = textRunWithDirectionality(label, hasStrongDirectionality);
-        IntPoint textPos(kDragLabelBorderX, kDragLabelBorderY + labelFont.fontDescription().computedPixelSize());
-        if (hasStrongDirectionality && textRun.direction() == RTL) {
-            float textWidth = labelFont.width(textRun);
-            int availableWidth = imageSize.width() - kDragLabelBorderX * 2;
-            textPos.setX(availableWidth - ceilf(textWidth));
-        }
-        context->drawBidiText(labelFont, TextRunPaintInfo(textRun), FloatPoint(textPos));
     }
-
-    if (RuntimeEnabledFeatures::slimmingPaintEnabled())
-        displayItemList->replay(buffer->context());
 
     RefPtr<Image> image = buffer->copyImage();
     return DragImage::create(image.get(), DoNotRespectImageOrientation, deviceScaleFactor);
 }
 
-DragImage::DragImage(const SkBitmap& bitmap, float resolutionScale)
+DragImage::DragImage(const SkBitmap& bitmap, float resolutionScale, InterpolationQuality interpolationQuality)
     : m_bitmap(bitmap)
     , m_resolutionScale(resolutionScale)
+    , m_interpolationQuality(interpolationQuality)
 {
 }
 
@@ -269,10 +261,10 @@ void DragImage::fitToMaxSize(const IntSize& srcSize, const IntSize& maxSize)
 
 void DragImage::scale(float scaleX, float scaleY)
 {
+    skia::ImageOperations::ResizeMethod resizeMethod = m_interpolationQuality == InterpolationNone ? skia::ImageOperations::RESIZE_BOX : skia::ImageOperations::RESIZE_LANCZOS3;
     int imageWidth = scaleX * m_bitmap.width();
     int imageHeight = scaleY * m_bitmap.height();
-    m_bitmap = skia::ImageOperations::Resize(
-        m_bitmap, skia::ImageOperations::RESIZE_LANCZOS3, imageWidth, imageHeight);
+    m_bitmap = skia::ImageOperations::Resize(m_bitmap, resizeMethod, imageWidth, imageHeight);
 }
 
 void DragImage::dissolveToFraction(float fraction)

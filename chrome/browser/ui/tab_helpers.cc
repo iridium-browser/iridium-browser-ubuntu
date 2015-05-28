@@ -12,6 +12,7 @@
 #include "chrome/browser/history/history_tab_helper.h"
 #include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/net/net_error_tab_helper.h"
+#include "chrome/browser/net/predictor_tab_helper.h"
 #include "chrome/browser/password_manager/chrome_password_manager_client.h"
 #include "chrome/browser/predictors/resource_prefetch_predictor_factory.h"
 #include "chrome/browser/predictors/resource_prefetch_predictor_tab_helper.h"
@@ -24,6 +25,7 @@
 #include "chrome/browser/ui/bookmarks/bookmark_tab_helper.h"
 #include "chrome/browser/ui/find_bar/find_tab_helper.h"
 #include "chrome/browser/ui/navigation_correction_tab_observer.h"
+#include "chrome/browser/ui/passwords/manage_passwords_ui_controller.h"
 #include "chrome/browser/ui/pdf/chrome_pdf_web_contents_helper_client.h"
 #include "chrome/browser/ui/prefs/prefs_tab_helper.h"
 #include "chrome/browser/ui/search/search_tab_helper.h"
@@ -34,21 +36,20 @@
 #include "components/autofill/core/browser/autofill_manager.h"
 #include "components/dom_distiller/content/web_contents_main_frame_observer.h"
 #include "components/password_manager/core/browser/password_manager.h"
-#include "components/signin/core/common/profile_management_switches.h"
 #include "content/public/browser/web_contents.h"
 
 #if defined(OS_ANDROID)
+#include "chrome/browser/android/voice_search_tab_helper.h"
 #include "chrome/browser/android/webapps/single_tab_mode_tab_helper.h"
+#include "chrome/browser/enhanced_bookmarks/android/enhanced_bookmark_tab_helper.h"
 #include "chrome/browser/ui/android/context_menu_helper.h"
 #include "chrome/browser/ui/android/window_android_helper.h"
 #else
 #include "chrome/browser/external_protocol/external_protocol_observer.h"
-#include "chrome/browser/net/predictor_tab_helper.h"
 #include "chrome/browser/plugins/plugin_observer.h"
 #include "chrome/browser/safe_browsing/safe_browsing_tab_observer.h"
 #include "chrome/browser/thumbnails/thumbnail_tab_helper.h"
 #include "chrome/browser/ui/hung_plugin_tab_helper.h"
-#include "chrome/browser/ui/passwords/manage_passwords_ui_controller.h"
 #include "chrome/browser/ui/sad_tab_helper.h"
 #include "chrome/browser/ui/search_engines/search_engine_tab_helper.h"
 #include "chrome/browser/ui/sync/tab_contents_synced_tab_delegate.h"
@@ -85,10 +86,6 @@
 #include "chrome/browser/printing/print_view_manager_basic.h"
 #endif  // defined(ENABLE_PRINT_PREVIEW)
 #endif  // defined(ENABLE_PRINTING)
-
-#if defined(ENABLE_ONE_CLICK_SIGNIN)
-#include "chrome/browser/ui/sync/one_click_signin_helper.h"
-#endif
 
 using content::WebContents;
 
@@ -137,14 +134,18 @@ void TabHelpers::AttachTabHelpers(WebContents* web_contents) {
       autofill::AutofillManager::ENABLE_AUTOFILL_DOWNLOAD_MANAGER);
   BookmarkTabHelper::CreateForWebContents(web_contents);
   chrome_browser_net::NetErrorTabHelper::CreateForWebContents(web_contents);
+  chrome_browser_net::PredictorTabHelper::CreateForWebContents(web_contents);
+  ChromeContentSettingsClient::CreateForWebContents(web_contents);
   ChromePasswordManagerClient::CreateForWebContentsWithAutofillClient(
       web_contents,
       autofill::ChromeAutofillClient::FromWebContents(web_contents));
+  ChromeTranslateClient::CreateForWebContents(web_contents);
   CoreTabHelper::CreateForWebContents(web_contents);
   FaviconTabHelper::CreateForWebContents(web_contents);
   FindTabHelper::CreateForWebContents(web_contents);
   HistoryTabHelper::CreateForWebContents(web_contents);
   InfoBarService::CreateForWebContents(web_contents);
+  ManagePasswordsUIController::CreateForWebContents(web_contents);
   NavigationCorrectionTabObserver::CreateForWebContents(web_contents);
   NavigationMetricsRecorder::CreateForWebContents(web_contents);
   PopupBlockerTabHelper::CreateForWebContents(web_contents);
@@ -154,23 +155,21 @@ void TabHelpers::AttachTabHelpers(WebContents* web_contents) {
   // TODO(vabr): Remove TabSpecificContentSettings from here once their function
   // is taken over by ChromeContentSettingsClient. http://crbug.com/387075
   TabSpecificContentSettings::CreateForWebContents(web_contents);
-  ChromeContentSettingsClient::CreateForWebContents(web_contents);
-  ChromeTranslateClient::CreateForWebContents(web_contents);
 
   // --- Platform-specific tab helpers ---
 
 #if defined(OS_ANDROID)
   ContextMenuHelper::CreateForWebContents(web_contents);
+  EnhancedBookmarkTabHelper::CreateForWebContents(web_contents);
   SingleTabModeTabHelper::CreateForWebContents(web_contents);
+  VoiceSearchTabHelper::CreateForWebContents(web_contents);
   WindowAndroidHelper::CreateForWebContents(web_contents);
 #else
-  chrome_browser_net::PredictorTabHelper::CreateForWebContents(web_contents);
   extensions::ChromeExtensionWebContentsObserver::CreateForWebContents(
       web_contents);
   extensions::WebNavigationTabObserver::CreateForWebContents(web_contents);
   ExternalProtocolObserver::CreateForWebContents(web_contents);
   HungPluginTabHelper::CreateForWebContents(web_contents);
-  ManagePasswordsUIController::CreateForWebContents(web_contents);
   pdf::PDFWebContentsHelper::CreateForWebContentsWithClient(
       web_contents,
       scoped_ptr<pdf::PDFWebContentsHelperClient>(
@@ -218,21 +217,6 @@ void TabHelpers::AttachTabHelpers(WebContents* web_contents) {
     dom_distiller::WebContentsMainFrameObserver::CreateForWebContents(
         web_contents);
   }
-
-#if defined(ENABLE_ONE_CLICK_SIGNIN)
-  // If this is not an incognito window, setup to handle one-click login.
-  // We don't want to check that the profile is already connected at this time
-  // because the connected state may change while this tab is open.  Having a
-  // one-click signin helper attached does not cause problems if the profile
-  // happens to be already connected.
-  if (switches::IsEnableWebBasedSignin() &&
-      OneClickSigninHelper::CanOffer(web_contents,
-                                     OneClickSigninHelper::CAN_OFFER_FOR_ALL,
-                                     std::string(),
-                                     NULL)) {
-    OneClickSigninHelper::CreateForWebContents(web_contents);
-  }
-#endif
 
   if (predictors::ResourcePrefetchPredictorFactory::GetForProfile(
       web_contents->GetBrowserContext())) {

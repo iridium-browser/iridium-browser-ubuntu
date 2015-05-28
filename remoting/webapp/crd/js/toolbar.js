@@ -17,43 +17,23 @@ var remoting = remoting || {};
  * @constructor
  */
 remoting.Toolbar = function(toolbar) {
-  /**
-   * @type {HTMLElement}
-   * @private
-   */
+  /** @private {HTMLElement} */
   this.toolbar_ = toolbar;
-  /**
-   * @type {HTMLElement}
-   * @private
-   */
-  this.stub_ = /** @type {HTMLElement} */toolbar.querySelector('.toolbar-stub');
-  /**
-   * @type {number?} The id of the preview timer, if any.
-   * @private
-   */
+  /** @private {HTMLElement} */
+  this.stub_ =
+      /** @type {HTMLElement} */(toolbar.querySelector('.toolbar-stub'));
+  /** @private {number?} The id of the preview timer, if any. */
   this.timerId_ = null;
-  /**
-   * @type {number} The left edge of the tool-bar stub, updated on resize.
-   * @private
-   */
+  /** @private {number} Left edge of the toolbar stub, updated on resize. */
   this.stubLeft_ = 0;
-  /**
-   * @type {number} The right edge of the tool-bar stub, updated on resize.
-   * @private
-   */
+  /** @private {number} Right edge of the toolbar stub, updated on resize. */
   this.stubRight_ = 0;
 
-  /**
-   * @type {remoting.MenuButton}
-   * @private
-   */
+  /** @private {remoting.MenuButton} */
   this.screenOptionsMenu_ = new remoting.MenuButton(
       document.getElementById('screen-options-menu'),
       this.onShowOptionsMenu_.bind(this));
-  /**
-   * @type {remoting.MenuButton}
-   * @private
-   */
+  /** @private {remoting.MenuButton} */
   this.sendKeysMenu_ = new remoting.MenuButton(
       document.getElementById('send-keys-menu')
   );
@@ -62,9 +42,10 @@ remoting.Toolbar = function(toolbar) {
   window.addEventListener('mousemove', remoting.Toolbar.onMouseMove, false);
   window.addEventListener('resize', this.center.bind(this), false);
 
-  registerEventListener('toolbar-disconnect', 'click', remoting.disconnect);
-  registerEventListener('toolbar-stub', 'click',
-      function() { remoting.toolbar.toggle(); });
+  registerEventListener('toolbar-disconnect', 'click',
+                        remoting.app.disconnect.bind(remoting.app));
+  registerEventListener('toolbar-stub',
+                        'click', function() { remoting.toolbar.toggle(); });
 
   // Prevent the preview canceling if the user is interacting with the tool-bar.
   /** @type {remoting.Toolbar} */
@@ -128,13 +109,14 @@ remoting.Toolbar.prototype.toggle = function() {
 };
 
 /**
- * @param {remoting.ClientSession} clientSession The active session, or null if
- *     there is no connection.
+ * @param {remoting.DesktopConnectedView} desktopConnectedView The view for
+ *     the active session, or null if there is no connection.
  */
-remoting.Toolbar.prototype.setClientSession = function(clientSession) {
+remoting.Toolbar.prototype.setDesktopConnectedView = function(
+    desktopConnectedView) {
   var connectedTo = document.getElementById('connected-to');
   connectedTo.innerText =
-      clientSession ? clientSession.getHostDisplayName() : "";
+      desktopConnectedView ? desktopConnectedView.getHostDisplayName() : "";
 };
 
 /**

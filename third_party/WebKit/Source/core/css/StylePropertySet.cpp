@@ -110,8 +110,8 @@ int ImmutableStylePropertySet::findPropertyIndex(CSSPropertyID propertyID) const
     uint16_t id = static_cast<uint16_t>(propertyID);
     for (int n = m_arraySize - 1 ; n >= 0; --n) {
         if (metadataArray()[n].m_propertyID == id) {
-            // Only enabled or internal properties should be part of the style.
-            ASSERT(CSSPropertyMetadata::isEnabledProperty(propertyID) || isInternalProperty(propertyID));
+            // Only enabled properties should be part of the style.
+            ASSERT(CSSPropertyMetadata::isEnabledProperty(propertyID));
             return n;
         }
     }
@@ -119,7 +119,7 @@ int ImmutableStylePropertySet::findPropertyIndex(CSSPropertyID propertyID) const
     return -1;
 }
 
-void ImmutableStylePropertySet::traceAfterDispatch(Visitor* visitor)
+DEFINE_TRACE_AFTER_DISPATCH(ImmutableStylePropertySet)
 {
     const RawPtrWillBeMember<CSSValue>* values = valueArray();
     for (unsigned i = 0; i < m_arraySize; i++)
@@ -156,7 +156,7 @@ PassRefPtrWillBeRawPtr<CSSValue> StylePropertySet::getPropertyCSSValue(CSSProper
     return propertyAt(foundPropertyIndex).value();
 }
 
-void StylePropertySet::trace(Visitor* visitor)
+DEFINE_TRACE(StylePropertySet)
 {
     if (m_isMutable)
         toMutableStylePropertySet(this)->traceAfterDispatch(visitor);
@@ -334,7 +334,7 @@ bool MutableStylePropertySet::setProperty(CSSPropertyID propertyID, CSSValueID i
     return true;
 }
 
-void MutableStylePropertySet::parseDeclaration(const String& styleDeclaration, StyleSheetContents* contextStyleSheet)
+void MutableStylePropertySet::parseDeclarationList(const String& styleDeclaration, StyleSheetContents* contextStyleSheet)
 {
     m_propertyVector.clear();
 
@@ -344,8 +344,7 @@ void MutableStylePropertySet::parseDeclaration(const String& styleDeclaration, S
         context.setMode(cssParserMode());
     }
 
-    CSSParser parser(context);
-    parser.parseDeclaration(this, styleDeclaration, 0, contextStyleSheet);
+    CSSParser::parseDeclarationList(context, this, styleDeclaration, 0, contextStyleSheet);
 }
 
 void MutableStylePropertySet::addParsedProperties(const WillBeHeapVector<CSSProperty, 256>& properties)
@@ -451,21 +450,22 @@ bool MutableStylePropertySet::removePropertiesInSet(const CSSPropertyID* set, un
     if (m_propertyVector.isEmpty())
         return false;
 
-    WillBeHeapVector<CSSProperty> newProperties;
-    newProperties.reserveInitialCapacity(m_propertyVector.size());
-
-    unsigned initialSize = m_propertyVector.size();
-    const CSSProperty* properties = m_propertyVector.data();
-    for (unsigned n = 0; n < initialSize; ++n) {
-        const CSSProperty& property = properties[n];
+    CSSProperty* properties = m_propertyVector.data();
+    unsigned oldSize = m_propertyVector.size();
+    unsigned newIndex = 0;
+    for (unsigned oldIndex = 0; oldIndex < oldSize; ++oldIndex) {
+        const CSSProperty& property = properties[oldIndex];
         // Not quite sure if the isImportant test is needed but it matches the existing behavior.
         if (!property.isImportant() && containsId(set, length, property.id()))
             continue;
-        newProperties.append(property);
+        // Modify m_propertyVector in-place since this method is performance-sensitive.
+        properties[newIndex++] = properties[oldIndex];
     }
-
-    m_propertyVector = newProperties;
-    return initialSize != m_propertyVector.size();
+    if (newIndex != oldSize) {
+        m_propertyVector.shrink(newIndex);
+        return true;
+    }
+    return false;
 }
 
 CSSProperty* MutableStylePropertySet::findCSSPropertyWithID(CSSPropertyID propertyID)
@@ -550,8 +550,8 @@ int MutableStylePropertySet::findPropertyIndex(CSSPropertyID propertyID) const
     const CSSProperty* properties = m_propertyVector.data();
     for (int n = m_propertyVector.size() - 1 ; n >= 0; --n) {
         if (properties[n].metadata().m_propertyID == id) {
-            // Only enabled or internal properties should be part of the style.
-            ASSERT(CSSPropertyMetadata::isEnabledProperty(propertyID) || isInternalProperty(propertyID));
+            // Only enabled properties should be part of the style.
+            ASSERT(CSSPropertyMetadata::isEnabledProperty(propertyID));
             return n;
         }
     }
@@ -559,7 +559,7 @@ int MutableStylePropertySet::findPropertyIndex(CSSPropertyID propertyID) const
     return -1;
 }
 
-void MutableStylePropertySet::traceAfterDispatch(Visitor* visitor)
+DEFINE_TRACE_AFTER_DISPATCH(MutableStylePropertySet)
 {
     visitor->trace(m_cssomWrapper);
     visitor->trace(m_propertyVector);

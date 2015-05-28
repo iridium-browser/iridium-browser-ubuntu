@@ -5,8 +5,8 @@
 #ifndef WebMediaKeySystemConfiguration_h
 #define WebMediaKeySystemConfiguration_h
 
+#include "public/platform/WebEncryptedMediaTypes.h"
 #include "public/platform/WebMediaKeySystemMediaCapability.h"
-#include "public/platform/WebString.h"
 #include "public/platform/WebVector.h"
 
 namespace blink {
@@ -18,17 +18,28 @@ struct WebMediaKeySystemConfiguration {
         NotAllowed,
     };
 
-    WebMediaKeySystemConfiguration()
-        : distinctiveIdentifier(Requirement::Optional)
-        , persistentState(Requirement::Optional)
-    {
-    }
+    // As MediaKeySystemConfiguration is a dictionary, some members may be
+    // not-present. Because requestMediaKeySystemAccess() distinguishes empty
+    // from not-present, we require a presence flag for each member.
+    bool hasInitDataTypes = false;
+    WebVector<WebEncryptedMediaInitDataType> initDataTypes;
 
-    WebVector<WebString> initDataTypes;
+    bool hasAudioCapabilities = false;
     WebVector<WebMediaKeySystemMediaCapability> audioCapabilities;
+
+    bool hasVideoCapabilities = false;
     WebVector<WebMediaKeySystemMediaCapability> videoCapabilities;
-    Requirement distinctiveIdentifier;
-    Requirement persistentState;
+
+    // |distinctiveIdentifier| and |persistentState| are always present because
+    // they have default values.
+    Requirement distinctiveIdentifier = Requirement::Optional;
+    Requirement persistentState = Requirement::Optional;
+
+    bool hasSessionTypes = false;
+    WebVector<WebEncryptedMediaSessionType> sessionTypes;
+
+    // |label| may be not-present, but we use a null string to represent that.
+    WebString label;
 };
 
 } // namespace blink

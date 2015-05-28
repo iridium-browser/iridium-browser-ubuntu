@@ -45,27 +45,30 @@
 
 namespace blink {
 
-PassOwnPtrWillBeRawPtr<PageDebuggerAgent> PageDebuggerAgent::create(PageScriptDebugServer* pageScriptDebugServer, InspectorPageAgent* pageAgent, InjectedScriptManager* injectedScriptManager, InspectorOverlay* overlay)
+PassOwnPtrWillBeRawPtr<PageDebuggerAgent> PageDebuggerAgent::create(PageScriptDebugServer* pageScriptDebugServer, InspectorPageAgent* pageAgent, InjectedScriptManager* injectedScriptManager, InspectorOverlay* overlay, int debuggerId)
 {
-    return adoptPtrWillBeNoop(new PageDebuggerAgent(pageScriptDebugServer, pageAgent, injectedScriptManager, overlay));
+    return adoptPtrWillBeNoop(new PageDebuggerAgent(pageScriptDebugServer, pageAgent, injectedScriptManager, overlay, debuggerId));
 }
 
-PageDebuggerAgent::PageDebuggerAgent(PageScriptDebugServer* pageScriptDebugServer, InspectorPageAgent* pageAgent, InjectedScriptManager* injectedScriptManager, InspectorOverlay* overlay)
+PageDebuggerAgent::PageDebuggerAgent(PageScriptDebugServer* pageScriptDebugServer, InspectorPageAgent* pageAgent, InjectedScriptManager* injectedScriptManager, InspectorOverlay* overlay, int debuggerId)
     : InspectorDebuggerAgent(injectedScriptManager)
     , m_pageScriptDebugServer(pageScriptDebugServer)
     , m_pageAgent(pageAgent)
     , m_overlay(overlay)
+    , m_debuggerId(debuggerId)
 {
-    m_overlay->overlayHost()->setListener(this);
+    m_overlay->setListener(this);
 }
 
 PageDebuggerAgent::~PageDebuggerAgent()
 {
 }
 
-void PageDebuggerAgent::trace(Visitor* visitor)
+DEFINE_TRACE(PageDebuggerAgent)
 {
+    visitor->trace(m_pageScriptDebugServer);
     visitor->trace(m_pageAgent);
+    visitor->trace(m_overlay);
     InspectorDebuggerAgent::trace(visitor);
 }
 
@@ -83,12 +86,12 @@ void PageDebuggerAgent::disable()
 
 void PageDebuggerAgent::startListeningScriptDebugServer()
 {
-    scriptDebugServer().addListener(this, m_pageAgent->page());
+    scriptDebugServer().addListener(this, m_pageAgent->inspectedFrame(), m_debuggerId);
 }
 
 void PageDebuggerAgent::stopListeningScriptDebugServer()
 {
-    scriptDebugServer().removeListener(this, m_pageAgent->page());
+    scriptDebugServer().removeListener(this, m_pageAgent->inspectedFrame());
 }
 
 PageScriptDebugServer& PageDebuggerAgent::scriptDebugServer()
@@ -121,7 +124,7 @@ void PageDebuggerAgent::overlaySteppedOver()
 InjectedScript PageDebuggerAgent::injectedScriptForEval(ErrorString* errorString, const int* executionContextId)
 {
     if (!executionContextId) {
-        ScriptState* scriptState = ScriptState::forMainWorld(m_pageAgent->mainFrame());
+        ScriptState* scriptState = ScriptState::forMainWorld(m_pageAgent->inspectedFrame());
         InjectedScript result = injectedScriptManager()->injectedScriptFor(scriptState);
         if (result.isEmpty())
             *errorString = "Internal error: main world execution context not found.";
@@ -133,25 +136,25 @@ InjectedScript PageDebuggerAgent::injectedScriptForEval(ErrorString* errorString
     return injectedScript;
 }
 
-void PageDebuggerAgent::didClearDocumentOfWindowObject(LocalFrame* frame)
+void PageDebuggerAgent::didStartProvisionalLoad(LocalFrame* frame)
 {
-    if (frame != m_pageAgent->mainFrame())
-        return;
-
-    reset();
-
-    scriptDebugServer().setPreprocessorSource(String());
-    ASSERT(m_pageAgent);
-    if (!m_pageAgent->scriptPreprocessorSource().isEmpty())
-        scriptDebugServer().setPreprocessorSource(m_pageAgent->scriptPreprocessorSource());
+    if (frame == m_pageAgent->inspectedFrame()) {
+        ErrorString error;
+        resume(&error);
+    }
 }
 
-void PageDebuggerAgent::didCommitLoad(LocalFrame* frame, DocumentLoader* loader)
+void PageDebuggerAgent::didClearDocumentOfWindowObject(LocalFrame* frame)
 {
-    Frame* mainFrame = frame->page()->deprecatedLocalMainFrame();
-    if (loader->frame() == mainFrame)
-        pageDidCommitLoad();
+    // FIXME: what about nested objects?
+    if (frame != m_pageAgent->inspectedFrame())
+        return;
+    reset();
+}
+
+void PageDebuggerAgent::didCommitLoadForLocalFrame(LocalFrame*)
+{
+    resetModifiedSources();
 }
 
 } // namespace blink
-

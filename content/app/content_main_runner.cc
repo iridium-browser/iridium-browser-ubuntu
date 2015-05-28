@@ -10,22 +10,22 @@
 #include "base/at_exit.h"
 #include "base/command_line.h"
 #include "base/debug/debugger.h"
-#include "base/debug/trace_event.h"
 #include "base/files/file_path.h"
 #include "base/i18n/icu_util.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/scoped_vector.h"
-#include "base/metrics/stats_table.h"
 #include "base/path_service.h"
 #include "base/process/launch.h"
 #include "base/process/memory.h"
 #include "base/process/process_handle.h"
 #include "base/profiler/alternate_timer.h"
+#include "base/profiler/scoped_tracker.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
+#include "base/trace_event/trace_event.h"
 #include "content/browser/browser_main.h"
 #include "content/common/set_process_title.h"
 #include "content/common/url_schemes.h"
@@ -52,10 +52,6 @@
 
 #ifdef V8_USE_EXTERNAL_STARTUP_DATA
 #include "gin/public/isolate_holder.h"
-#endif
-
-#if defined(OS_ANDROID)
-#include "content/public/common/content_descriptors.h"
 #endif
 
 #if defined(USE_TCMALLOC)
@@ -99,6 +95,7 @@
 #include "content/public/common/content_descriptors.h"
 
 #if !defined(OS_MACOSX)
+#include "content/public/common/content_descriptors.h"
 #include "content/public/common/zygote_fork_delegate_linux.h"
 #endif
 #if !defined(OS_MACOSX) && !defined(OS_ANDROID)
@@ -211,38 +208,6 @@ static base::ProcessId GetBrowserPid(const base::CommandLine& command_line) {
 }
 #endif
 
-static void InitializeStatsTable(const base::CommandLine& command_line) {
-  // Initialize the Stats Counters table.  With this initialized,
-  // the StatsViewer can be utilized to read counters outside of
-  // Chrome.  These lines can be commented out to effectively turn
-  // counters 'off'.  The table is created and exists for the life
-  // of the process.  It is not cleaned up.
-  if (command_line.HasSwitch(switches::kEnableStatsTable)) {
-    // NOTIMPLEMENTED: we probably need to shut this down correctly to avoid
-    // leaking shared memory regions on posix platforms.
-#if defined(OS_POSIX)
-    // Stats table is in the global file descriptors table on Posix.
-    base::GlobalDescriptors* global_descriptors =
-        base::GlobalDescriptors::GetInstance();
-    base::FileDescriptor table_ident;
-    if (global_descriptors->MaybeGet(kStatsTableSharedMemFd) != -1) {
-      // Open the shared memory file descriptor passed by the browser process.
-      table_ident = base::FileDescriptor(
-          global_descriptors->Get(kStatsTableSharedMemFd), false);
-    }
-#elif defined(OS_WIN)
-    // Stats table is in a named segment on Windows. Use the PID to make this
-    // unique on the system.
-    std::string table_ident =
-      base::StringPrintf("%s-%u", kStatsFilename,
-          static_cast<unsigned int>(GetBrowserPid(command_line)));
-#endif
-    base::StatsTable* stats_table =
-        new base::StatsTable(table_ident, kStatsMaxThreads, kStatsMaxCounters);
-    base::StatsTable::set_current(stats_table);
-  }
-}
-
 class ContentClientInitializer {
  public:
   static void Set(const std::string& process_type,
@@ -333,11 +298,6 @@ int RunZygote(const MainFunctionParams& main_function_params,
   std::string process_type =
       command_line.GetSwitchValueASCII(switches::kProcessType);
   ContentClientInitializer::Set(process_type, delegate);
-
-  // The StatsTable must be initialized in each process; we already
-  // initialized for the browser process, now we need to initialize
-  // within the new processes as well.
-  InitializeStatsTable(command_line);
 
   MainFunctionParams main_params(command_line);
   main_params.zygote_child = true;
@@ -486,6 +446,7 @@ class ContentMainRunnerImpl : public ContentMainRunner {
   int Initialize(const ContentMainParams& params) override {
     ui_task_ = params.ui_task;
 
+    base::EnableTerminationOnOutOfMemory();
 #if defined(OS_WIN)
     RegisterInvalidParamHandler();
     ui::win::CreateATLModuleIfNeeded();
@@ -535,6 +496,10 @@ class ContentMainRunnerImpl : public ContentMainRunner {
     }
 #endif  // !OS_MACOSX && USE_TCMALLOC
 
+#if !defined(OS_IOS)
+    base::GlobalDescriptors* g_fds = base::GlobalDescriptors::GetInstance();
+#endif
+
     // On Android,
     // - setlocale() is not supported.
     // - We do not override the signal handlers so that we can get
@@ -547,8 +512,6 @@ class ContentMainRunnerImpl : public ContentMainRunner {
     setlocale(LC_ALL, "");
 
     SetupSignalHandlers();
-
-    base::GlobalDescriptors* g_fds = base::GlobalDescriptors::GetInstance();
     g_fds->Set(kPrimaryIPCChannel,
                kPrimaryIPCChannel + base::GlobalDescriptors::kBaseDescriptor);
 #endif  // !OS_ANDROID && !OS_IOS
@@ -556,7 +519,8 @@ class ContentMainRunnerImpl : public ContentMainRunner {
 #if defined(OS_LINUX) || defined(OS_OPENBSD)
     g_fds->Set(kCrashDumpSignal,
                kCrashDumpSignal + base::GlobalDescriptors::kBaseDescriptor);
-#endif
+#endif  // OS_LINUX || OS_OPENBSD
+
 
 #endif  // !OS_WIN
 
@@ -577,7 +541,10 @@ class ContentMainRunnerImpl : public ContentMainRunner {
     }
 #endif  // !OS_ANDROID && !OS_IOS
 
-#if defined(OS_MACOSX)
+    // Don't create this loop on iOS, since the outer loop is already handled
+    // and a loop that's destroyed in shutdown interleaves badly with the event
+    // loop pool on iOS.
+#if defined(OS_MACOSX) && !defined(OS_IOS)
     // We need this pool for all the objects created before we get to the
     // event loop, but we don't want to leave them hanging around until the
     // app quits. Each "main" needs to flush this pool right before it goes into
@@ -600,9 +567,13 @@ class ContentMainRunnerImpl : public ContentMainRunner {
 
     base::CommandLine::Init(argc, argv);
 
-    if (!delegate_ || delegate_->ShouldEnableTerminationOnHeapCorruption())
-      base::EnableTerminationOnHeapCorruption();
-    base::EnableTerminationOnOutOfMemory();
+    base::EnableTerminationOnHeapCorruption();
+
+    // TODO(yiyaoliu, vadimt): Remove this once crbug.com/453640 is fixed.
+    // Enable profiler recording right after command line is initialized so that
+    // browser startup can be instrumented.
+    if (delegate_ && delegate_->ShouldEnableProfilerRecording())
+      tracked_objects::ScopedTracker::Enable();
 
 #if !defined(OS_IOS)
     SetProcessTitleFromCommandLine(argv);
@@ -653,13 +624,13 @@ class ContentMainRunnerImpl : public ContentMainRunner {
     // Enable startup tracing asap to avoid early TRACE_EVENT calls being
     // ignored.
     if (command_line.HasSwitch(switches::kTraceStartup)) {
-      base::debug::CategoryFilter category_filter(
+      base::trace_event::CategoryFilter category_filter(
           command_line.GetSwitchValueASCII(switches::kTraceStartup));
-      base::debug::TraceLog::GetInstance()->SetEnabled(
+      base::trace_event::TraceLog::GetInstance()->SetEnabled(
           category_filter,
-          base::debug::TraceLog::RECORDING_MODE,
-          base::debug::TraceOptions(
-              base::debug::RECORD_UNTIL_FULL));
+          base::trace_event::TraceLog::RECORDING_MODE,
+          base::trace_event::TraceOptions(
+              base::trace_event::RECORD_UNTIL_FULL));
     }
 #if !defined(OS_ANDROID)
     // Android tracing started at the beginning of the method.
@@ -714,45 +685,49 @@ class ContentMainRunnerImpl : public ContentMainRunner {
     RegisterContentSchemes(true);
 
 #if defined(OS_ANDROID)
-    int icudata_fd = base::GlobalDescriptors::GetInstance()->MaybeGet(
-        kAndroidICUDataDescriptor);
+    int icudata_fd = g_fds->MaybeGet(kAndroidICUDataDescriptor);
     if (icudata_fd != -1) {
-      auto icudata_region = base::GlobalDescriptors::GetInstance()->GetRegion(
-          kAndroidICUDataDescriptor);
+      auto icudata_region = g_fds->GetRegion(kAndroidICUDataDescriptor);
       CHECK(base::i18n::InitializeICUWithFileDescriptor(icudata_fd,
                                                         icudata_region));
     } else {
       CHECK(base::i18n::InitializeICU());
     }
+#else
+    CHECK(base::i18n::InitializeICU());
+#endif  // OS_ANDROID
 
 #if defined(V8_USE_EXTERNAL_STARTUP_DATA)
-    int v8_natives_fd = base::GlobalDescriptors::GetInstance()->MaybeGet(
-        kV8NativesDataDescriptor);
-    int v8_snapshot_fd = base::GlobalDescriptors::GetInstance()->MaybeGet(
-        kV8SnapshotDataDescriptor);
+#if defined(OS_POSIX) && !defined(OS_MACOSX)
+#if !defined(OS_ANDROID)
+    // kV8NativesDataDescriptor and kV8SnapshotDataDescriptor are shared with
+    // child processes. On Android they are set in
+    // ChildProcessService::InternalInitChildProcess, otherwise set them here.
+    if (!process_type.empty() && process_type != switches::kZygoteProcess
+        && process_type != "service") {
+      g_fds->Set(
+          kV8NativesDataDescriptor,
+          kV8NativesDataDescriptor + base::GlobalDescriptors::kBaseDescriptor);
+      g_fds->Set(
+          kV8SnapshotDataDescriptor,
+          kV8SnapshotDataDescriptor + base::GlobalDescriptors::kBaseDescriptor);
+    }
+#endif  // !OS_ANDROID
+    int v8_natives_fd = g_fds->MaybeGet(kV8NativesDataDescriptor);
+    int v8_snapshot_fd = g_fds->MaybeGet(kV8SnapshotDataDescriptor);
     if (v8_natives_fd != -1 && v8_snapshot_fd != -1) {
-      auto v8_natives_region =
-          base::GlobalDescriptors::GetInstance()->GetRegion(
-              kV8NativesDataDescriptor);
-      auto v8_snapshot_region =
-          base::GlobalDescriptors::GetInstance()->GetRegion(
-              kV8SnapshotDataDescriptor);
+      auto v8_natives_region = g_fds->GetRegion(kV8NativesDataDescriptor);
+      auto v8_snapshot_region = g_fds->GetRegion(kV8SnapshotDataDescriptor);
       CHECK(gin::IsolateHolder::LoadV8SnapshotFd(
           v8_natives_fd, v8_natives_region.offset, v8_natives_region.size,
           v8_snapshot_fd, v8_snapshot_region.offset, v8_snapshot_region.size));
     } else {
       CHECK(gin::IsolateHolder::LoadV8Snapshot());
     }
-#endif // V8_USE_EXTERNAL_STARTUP_DATA
-
 #else
-    CHECK(base::i18n::InitializeICU());
-#if defined(V8_USE_EXTERNAL_STARTUP_DATA)
     CHECK(gin::IsolateHolder::LoadV8Snapshot());
+#endif  // OS_POSIX && !OS_MACOSX
 #endif  // V8_USE_EXTERNAL_STARTUP_DATA
-#endif  // OS_ANDROID
-
-    InitializeStatsTable(command_line);
 
     if (delegate_)
       delegate_->PreSandboxStartup();
@@ -822,7 +797,7 @@ class ContentMainRunnerImpl : public ContentMainRunner {
 #endif  // _CRTDBG_MAP_ALLOC
 #endif  // OS_WIN
 
-#if defined(OS_MACOSX)
+#if defined(OS_MACOSX) && !defined(OS_IOS)
     autorelease_pool_.reset(NULL);
 #endif
 

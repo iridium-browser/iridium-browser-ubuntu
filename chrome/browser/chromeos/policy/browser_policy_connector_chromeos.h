@@ -24,9 +24,10 @@ class URLRequestContextGetter;
 
 namespace policy {
 
+class AffiliatedInvalidationServiceProvider;
 class ConsumerManagementService;
 class DeviceCloudPolicyInitializer;
-class DeviceCloudPolicyInvalidator;
+class AffiliatedCloudPolicyInvalidator;
 class DeviceLocalAccountPolicyService;
 class DeviceManagementService;
 struct EnrollmentConfig;
@@ -42,9 +43,9 @@ class BrowserPolicyConnectorChromeOS
  public:
   BrowserPolicyConnectorChromeOS();
 
-  virtual ~BrowserPolicyConnectorChromeOS();
+  ~BrowserPolicyConnectorChromeOS() override;
 
-  virtual void Init(
+  void Init(
       PrefService* local_state,
       scoped_refptr<net::URLRequestContextGetter> request_context) override;
 
@@ -54,7 +55,7 @@ class BrowserPolicyConnectorChromeOS
   // connection to these dependencies to be severed earlier.
   void PreShutdown();
 
-  virtual void Shutdown() override;
+  void Shutdown() override;
 
   // Returns true if this device is managed by an enterprise (as opposed to
   // a local owner).
@@ -137,21 +138,29 @@ class BrowserPolicyConnectorChromeOS
 
   // DeviceCloudPolicyManagerChromeOS::Observer:
   void OnDeviceCloudPolicyManagerConnected() override;
+  void OnDeviceCloudPolicyManagerDisconnected() override;
 
  private:
   // Set the timezone as soon as the policies are available.
   void SetTimezoneIfPolicyAvailable();
 
+  // Restarts the device cloud policy initializer, because the device's
+  // registration status changed from registered to unregistered.
+  void RestartDeviceCloudPolicyInitializer();
+
   // Components of the device cloud policy implementation.
   scoped_ptr<ServerBackedStateKeysBroker> state_keys_broker_;
   scoped_ptr<EnterpriseInstallAttributes> install_attributes_;
+  scoped_ptr<AffiliatedInvalidationServiceProvider>
+      affiliated_invalidation_service_provider_;
   scoped_ptr<ConsumerManagementService> consumer_management_service_;
   DeviceCloudPolicyManagerChromeOS* device_cloud_policy_manager_;
+  PrefService* local_state_;
   scoped_ptr<DeviceManagementService> consumer_device_management_service_;
   scoped_ptr<DeviceCloudPolicyInitializer> device_cloud_policy_initializer_;
   scoped_ptr<DeviceLocalAccountPolicyService>
       device_local_account_policy_service_;
-  scoped_ptr<DeviceCloudPolicyInvalidator> device_cloud_policy_invalidator_;
+  scoped_ptr<AffiliatedCloudPolicyInvalidator> device_cloud_policy_invalidator_;
 
   // This policy provider is used on Chrome OS to feed user policy into the
   // global PolicyService instance. This works by installing the cloud policy

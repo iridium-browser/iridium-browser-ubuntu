@@ -8,6 +8,7 @@ import android.app.AlertDialog;
 import android.test.suitebuilder.annotation.MediumTest;
 import android.test.suitebuilder.annotation.SmallTest;
 
+import org.chromium.base.test.util.DisabledTest;
 import org.chromium.base.test.util.Feature;
 import org.chromium.chrome.shell.ChromeShellTab;
 import org.chromium.chrome.shell.ChromeShellTestBase;
@@ -37,8 +38,12 @@ public class RepostFormWarningTest extends ChromeShellTestBase {
     }
 
     /** Verifies that the form resubmission warning is not displayed upon first POST navigation. */
+    /*
     @MediumTest
     @Feature({"Navigation"})
+    crbug.com/454834
+    */
+    @DisabledTest
     public void testFormFirstNavigation() throws Throwable {
         // Load the url posting data for the first time.
         postNavigation();
@@ -51,8 +56,12 @@ public class RepostFormWarningTest extends ChromeShellTestBase {
     }
 
     /** Verifies that confirming the form reload performs the reload. */
+    /*
     @MediumTest
     @Feature({"Navigation"})
+    crbug.com/454834
+    */
+    @DisabledTest
     public void testFormResubmissionContinue() throws Throwable {
         // Load the url posting data for the first time.
         postNavigation();
@@ -78,8 +87,12 @@ public class RepostFormWarningTest extends ChromeShellTestBase {
      * after the "Cancel" button is clicked to verify that the load was not triggered, which blocks
      * for CallbackHelper's default timeout upon each execution.
      */
+    /*
     @SmallTest
     @Feature({"Navigation"})
+    crbug.com/454834
+    */
+    @DisabledTest
     public void testFormResubmissionCancel() throws Throwable {
         // Load the url posting data for the first time.
         postNavigation();

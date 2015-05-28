@@ -17,6 +17,7 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/sessions/session_restore.h"
+#include "chrome/browser/sessions/session_restore_test_helper.h"
 #include "chrome/browser/sessions/session_service.h"
 #include "chrome/browser/sessions/session_service_factory.h"
 #include "chrome/browser/sessions/session_service_test_helper.h"
@@ -66,7 +67,7 @@ class SessionRestoreTest : public InProcessBrowserTest {
 
  protected:
 #if defined(OS_CHROMEOS)
-  virtual void SetUpCommandLine(base::CommandLine* command_line) override {
+  void SetUpCommandLine(base::CommandLine* command_line) override {
     // TODO(nkostylev): Investigate if we can remove this switch.
     command_line->AppendSwitch(switches::kCreateBrowserOnStartupForTests);
     InProcessBrowserTest::SetUpCommandLine(command_line);
@@ -139,9 +140,7 @@ class SessionRestoreTest : public InProcessBrowserTest {
 
     // Create a new window, which should trigger session restore.
     ui_test_utils::BrowserAddedObserver window_observer;
-    content::WindowedNotificationObserver restore_observer(
-        chrome::NOTIFICATION_SESSION_RESTORE_DONE,
-        content::NotificationService::AllSources());
+    SessionRestoreTestHelper restore_observer;
     if (url.is_empty()) {
       chrome::NewEmptyWindow(profile, chrome::HOST_DESKTOP_TYPE_NATIVE);
     } else {
@@ -157,6 +156,10 @@ class SessionRestoreTest : public InProcessBrowserTest {
           base::MemoryPressureListener::MEMORY_PRESSURE_LEVEL_CRITICAL);
     }
     restore_observer.Wait();
+
+    if (no_memory_pressure)
+      WaitForTabsToLoad(new_browser);
+
     g_browser_process->ReleaseModule();
 
     return new_browser;
@@ -191,6 +194,15 @@ class SessionRestoreTest : public InProcessBrowserTest {
       hosts.Advance();
     }
     return count;
+  }
+
+  void WaitForTabsToLoad(Browser* browser) {
+    for (int i = 0; i < browser->tab_strip_model()->count(); ++i) {
+      content::WebContents* contents =
+          browser->tab_strip_model()->GetWebContentsAt(i);
+      contents->GetController().LoadIfNecessary();
+      content::WaitForLoadStop(contents);
+    }
   }
 
   GURL url1_;
@@ -397,7 +409,7 @@ IN_PROC_BROWSER_TEST_F(SessionRestoreTest, RestoreIndividualTabFromWindow) {
       base::FilePath(base::FilePath::kCurrentDirectory),
       base::FilePath(FILE_PATH_LITERAL("title1.html"))));
   // Any page that will yield a 200 status code will work here.
-  GURL url2("about:version");
+  GURL url2("chrome://version");
   GURL url3(ui_test_utils::GetTestUrl(
       base::FilePath(base::FilePath::kCurrentDirectory),
       base::FilePath(FILE_PATH_LITERAL("title3.html"))));

@@ -108,6 +108,7 @@ namespace cellular {
 ONC_EXPORT extern const char kActivationState[];
 ONC_EXPORT extern const char kActivated[];
 ONC_EXPORT extern const char kActivating[];
+ONC_EXPORT extern const char kAutoConnect[];
 ONC_EXPORT extern const char kNotActivated[];
 ONC_EXPORT extern const char kPartiallyActivated[];
 ONC_EXPORT extern const char kActivationType[];
@@ -132,15 +133,26 @@ ONC_EXPORT extern const char kMIN[];
 ONC_EXPORT extern const char kModelID[];
 ONC_EXPORT extern const char kNetworkTechnology[];
 ONC_EXPORT extern const char kPRLVersion[];
-ONC_EXPORT extern const char kProviderRequiresRoaming[];
+ONC_EXPORT extern const char kRoamingHome[];
+ONC_EXPORT extern const char kRoamingRequired[];
+ONC_EXPORT extern const char kRoamingRoaming[];
 ONC_EXPORT extern const char kRoamingState[];
-ONC_EXPORT extern const char kHome[];
-ONC_EXPORT extern const char kRoaming[];
 ONC_EXPORT extern const char kServingOperator[];
+ONC_EXPORT extern const char kSignalStrength[];
 ONC_EXPORT extern const char kSIMLockStatus[];
 ONC_EXPORT extern const char kSIMPresent[];
 ONC_EXPORT extern const char kSupportedCarriers[];
 ONC_EXPORT extern const char kSupportNetworkScan[];
+ONC_EXPORT extern const char kTechnologyCdma1Xrtt[];
+ONC_EXPORT extern const char kTechnologyEdge[];
+ONC_EXPORT extern const char kTechnologyEvdo[];
+ONC_EXPORT extern const char kTechnologyGprs[];
+ONC_EXPORT extern const char kTechnologyGsm[];
+ONC_EXPORT extern const char kTechnologyHspa[];
+ONC_EXPORT extern const char kTechnologyHspaPlus[];
+ONC_EXPORT extern const char kTechnologyLte[];
+ONC_EXPORT extern const char kTechnologyLteAdvanced[];
+ONC_EXPORT extern const char kTechnologyUmts[];
 }  // namespace cellular
 
 namespace cellular_provider {
@@ -365,6 +377,10 @@ ONC_EXPORT extern const char kOTP[];
 ONC_EXPORT extern const char kPassword[];
 ONC_EXPORT extern const char kPasswordAndOTP[];
 }  // openvpn_user_auth_type
+
+namespace third_party_vpn {
+ONC_EXPORT extern const char kExtensionID[];
+}  // third_party_vpn
 
 namespace verify_x509 {
 ONC_EXPORT extern const char kName[];

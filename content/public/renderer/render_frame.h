@@ -6,6 +6,7 @@
 #define CONTENT_PUBLIC_RENDERER_RENDER_FRAME_H_
 
 #include "base/callback_forward.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/strings/string16.h"
 #include "content/common/content_export.h"
 #include "ipc/ipc_listener.h"
@@ -15,6 +16,7 @@
 class GURL;
 
 namespace blink {
+class WebElement;
 class WebFrame;
 class WebLocalFrame;
 class WebNode;
@@ -36,6 +38,7 @@ class Isolate;
 
 namespace content {
 class ContextMenuClient;
+class PluginInstanceThrottler;
 class RenderView;
 class ServiceRegistry;
 struct ContextMenuParams;
@@ -48,15 +51,6 @@ struct WebPreferences;
 class CONTENT_EXPORT RenderFrame : public IPC::Listener,
                                    public IPC::Sender {
  public:
-  enum PluginPowerSaverMode {
-    // Plugin content is main content, and therefore never throttled.
-    POWER_SAVER_MODE_ESSENTIAL = 0,
-    // Plugin content is peripheral, but throttling is disabled.
-    POWER_SAVER_MODE_PERIPHERAL_UNTHROTTLED = 1,
-    // Plugin content is peripheral, and throttling is enabled.
-    POWER_SAVER_MODE_PERIPHERAL_THROTTLED = 2
-  };
-
   // Returns the RenderFrame given a WebFrame.
   static RenderFrame* FromWebFrame(blink::WebFrame* web_frame);
 
@@ -68,6 +62,10 @@ class CONTENT_EXPORT RenderFrame : public IPC::Listener,
 
   // Returns the associated WebFrame.
   virtual blink::WebLocalFrame* GetWebFrame() = 0;
+
+  // Gets the focused element. If no such element exists then
+  // the element will be Null.
+  virtual blink::WebElement GetFocusedElement() const = 0;
 
    // Gets WebKit related preferences associated with this frame.
   virtual WebPreferences& GetWebkitPreferences() = 0;
@@ -94,12 +92,12 @@ class CONTENT_EXPORT RenderFrame : public IPC::Listener,
   virtual blink::WebNode GetContextMenuNode() const = 0;
 
   // Create a new NPAPI/Pepper plugin depending on |info|. Returns NULL if no
-  // plugin was found.
+  // plugin was found. |throttler| may be empty.
   virtual blink::WebPlugin* CreatePlugin(
       blink::WebFrame* frame,
       const WebPluginInfo& info,
       const blink::WebPluginParams& params,
-      PluginPowerSaverMode power_saver_mode) = 0;
+      scoped_ptr<PluginInstanceThrottler> throttler) = 0;
 
   // The client should handle the navigation externally.
   virtual void LoadURLExternally(blink::WebLocalFrame* frame,
@@ -122,34 +120,6 @@ class CONTENT_EXPORT RenderFrame : public IPC::Listener,
   virtual void RegisterPeripheralPlugin(
       const GURL& content_origin,
       const base::Closure& unthrottle_callback) = 0;
-
-  // Returns true if this plugin should have power saver enabled.
-  //
-  // Power Saver is enabled for plugin content that are cross-origin and
-  // heuristically determined to be not essential to the web page content.
-  //
-  // Plugin content is defined to be cross-origin when the plugin source's
-  // origin differs from the top level frame's origin. For example:
-  //  - Cross-origin:  a.com -> b.com/plugin.swf
-  //  - Cross-origin:  a.com -> b.com/iframe.html -> b.com/plugin.swf
-  //  - Same-origin:   a.com -> b.com/iframe-to-a.html -> a.com/plugin.swf
-  //
-  // |page_frame_url| is the URL of the frame containing the plugin, which may
-  // be different from the URL of the top level document.
-  //
-  // |poster_image| may be NULL. It is set to the absolute URL of the poster
-  // image if it exists and this method returns true. Otherwise, an empty GURL.
-  //
-  // |cross_origin_main_content| may be NULL. It is set to true if the
-  // plugin content is cross-origin but still the "main attraction" of the page.
-  virtual bool ShouldThrottleContent(const blink::WebPluginParams& params,
-                                     const GURL& page_frame_url,
-                                     GURL* poster_image,
-                                     bool* cross_origin_main_content) const = 0;
-
-  // Whitelists a |content_origin| so its content will never be throttled in
-  // this RenderFrame. Whitelist is cleared by top level navigation.
-  virtual void WhitelistContentOrigin(const GURL& content_origin) = 0;
 #endif
 
   // Returns true if this frame is a FTP directory listing.

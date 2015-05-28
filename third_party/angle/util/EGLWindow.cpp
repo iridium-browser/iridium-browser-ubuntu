@@ -5,6 +5,7 @@
 //
 
 #include <cassert>
+#include <vector>
 
 #include "EGLWindow.h"
 #include "OSWindow.h"
@@ -20,7 +21,7 @@ EGLPlatformParameters::EGLPlatformParameters()
     : renderer(EGL_PLATFORM_ANGLE_TYPE_DEFAULT_ANGLE),
       majorVersion(EGL_DONT_CARE),
       minorVersion(EGL_DONT_CARE),
-      useWarp(EGL_FALSE)
+      deviceType(EGL_PLATFORM_ANGLE_DEVICE_TYPE_HARDWARE_ANGLE)
 {
 }
 
@@ -28,7 +29,7 @@ EGLPlatformParameters::EGLPlatformParameters(EGLint renderer)
     : renderer(renderer),
       majorVersion(EGL_DONT_CARE),
       minorVersion(EGL_DONT_CARE),
-      useWarp(EGL_FALSE)
+      deviceType(EGL_PLATFORM_ANGLE_DEVICE_TYPE_HARDWARE_ANGLE)
 {
 }
 
@@ -36,7 +37,7 @@ EGLPlatformParameters::EGLPlatformParameters(EGLint renderer, EGLint majorVersio
     : renderer(renderer),
       majorVersion(majorVersion),
       minorVersion(minorVersion),
-      useWarp(useWarp)
+      deviceType(useWarp)
 {
 }
 
@@ -103,7 +104,7 @@ bool EGLWindow::initializeGL(OSWindow *osWindow)
         EGL_PLATFORM_ANGLE_TYPE_ANGLE,              mPlatform.renderer,
         EGL_PLATFORM_ANGLE_MAX_VERSION_MAJOR_ANGLE, mPlatform.majorVersion,
         EGL_PLATFORM_ANGLE_MAX_VERSION_MINOR_ANGLE, mPlatform.minorVersion,
-        EGL_PLATFORM_ANGLE_USE_WARP_ANGLE,          mPlatform.useWarp,
+        EGL_PLATFORM_ANGLE_DEVICE_TYPE_ANGLE,       mPlatform.deviceType,
         EGL_NONE,
     };
 
@@ -154,13 +155,17 @@ bool EGLWindow::initializeGL(OSWindow *osWindow)
     eglGetConfigAttrib(mDisplay, mConfig, EGL_DEPTH_SIZE, &mDepthBits);
     eglGetConfigAttrib(mDisplay, mConfig, EGL_STENCIL_SIZE, &mStencilBits);
 
-    const EGLint surfaceAttributes[] =
+    std::vector<EGLint> surfaceAttributes;
+    if (strstr(eglQueryString(mDisplay, EGL_EXTENSIONS), "EGL_NV_post_sub_buffer") != nullptr)
     {
-        EGL_POST_SUB_BUFFER_SUPPORTED_NV, EGL_TRUE,
-        EGL_NONE, EGL_NONE,
-    };
+        surfaceAttributes.push_back(EGL_POST_SUB_BUFFER_SUPPORTED_NV);
+        surfaceAttributes.push_back(EGL_TRUE);
+    }
 
-    mSurface = eglCreateWindowSurface(mDisplay, mConfig, osWindow->getNativeWindow(), surfaceAttributes);
+    surfaceAttributes.push_back(EGL_NONE);
+    surfaceAttributes.push_back(EGL_NONE);
+
+    mSurface = eglCreateWindowSurface(mDisplay, mConfig, osWindow->getNativeWindow(), &surfaceAttributes[0]);
     if (mSurface == EGL_NO_SURFACE)
     {
         eglGetError(); // Clear error and try again

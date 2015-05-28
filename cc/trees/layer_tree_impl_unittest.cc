@@ -13,6 +13,7 @@
 #include "cc/test/geometry_test_utils.h"
 #include "cc/test/layer_tree_host_common_test.h"
 #include "cc/test/test_shared_bitmap_manager.h"
+#include "cc/test/test_task_graph_runner.h"
 #include "cc/trees/layer_tree_host_impl.h"
 #include "ui/gfx/geometry/size_conversions.h"
 
@@ -25,8 +26,8 @@ class LayerTreeImplTest : public LayerTreeHostCommonTest {
     LayerTreeSettings settings;
     settings.layer_transforms_should_scale_layer_contents = true;
     settings.scrollbar_show_scale_threshold = 1.1f;
-    host_impl_.reset(
-        new FakeLayerTreeHostImpl(settings, &proxy_, &shared_bitmap_manager_));
+    host_impl_.reset(new FakeLayerTreeHostImpl(
+        settings, &proxy_, &shared_bitmap_manager_, &task_graph_runner_));
     EXPECT_TRUE(host_impl_->InitializeRenderer(FakeOutputSurface::Create3d()));
   }
 
@@ -40,6 +41,7 @@ class LayerTreeImplTest : public LayerTreeHostCommonTest {
 
  private:
   TestSharedBitmapManager shared_bitmap_manager_;
+  TestTaskGraphRunner task_graph_runner_;
   FakeImplProxy proxy_;
   scoped_ptr<FakeLayerTreeHostImpl> host_impl_;
 };
@@ -919,14 +921,6 @@ TEST_F(LayerTreeImplTest, HitTestingForMultipleLayersAtVaryingDepths) {
   ASSERT_TRUE(child2);
   ASSERT_TRUE(grand_child1);
   ASSERT_EQ(1u, RenderSurfaceLayerList().size());
-
-  RenderSurfaceImpl* root_render_surface =
-      host_impl().active_tree()->root_layer()->render_surface();
-  ASSERT_EQ(4u, root_render_surface->layer_list().size());
-  ASSERT_EQ(3, root_render_surface->layer_list().at(0)->id());
-  ASSERT_EQ(1, root_render_surface->layer_list().at(1)->id());
-  ASSERT_EQ(2, root_render_surface->layer_list().at(2)->id());
-  ASSERT_EQ(4, root_render_surface->layer_list().at(3)->id());
 
   // Nothing overlaps the root_layer at (1, 1), so hit testing there should find
   // the root layer.

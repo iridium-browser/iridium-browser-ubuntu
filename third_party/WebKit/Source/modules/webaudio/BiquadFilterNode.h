@@ -33,7 +33,7 @@ namespace blink {
 
 class AudioParam;
 
-class BiquadFilterNode final : public AudioBasicProcessorNode {
+class BiquadFilterNode final : public AudioNode {
     DEFINE_WRAPPERTYPEINFO();
 public:
     // These must be defined as in the .idl file and must match those in the BiquadProcessor class.
@@ -52,14 +52,15 @@ public:
     {
         return new BiquadFilterNode(context, sampleRate);
     }
+    DECLARE_VIRTUAL_TRACE();
 
     String type() const;
     void setType(const String&);
 
-    AudioParam* frequency() { return biquadProcessor()->parameter1(); }
-    AudioParam* q() { return biquadProcessor()->parameter2(); }
-    AudioParam* gain() { return biquadProcessor()->parameter3(); }
-    AudioParam* detune() { return biquadProcessor()->parameter4(); }
+    AudioParam* frequency() { return m_frequency; }
+    AudioParam* q() { return m_q; }
+    AudioParam* gain() { return m_gain; }
+    AudioParam* detune() { return m_detune; }
 
     // Get the magnitude and phase response of the filter at the given
     // set of frequencies (in Hz). The phase response is in radians.
@@ -68,8 +69,13 @@ public:
 private:
     BiquadFilterNode(AudioContext*, float sampleRate);
 
-    BiquadProcessor* biquadProcessor() { return static_cast<BiquadProcessor*>(processor()); }
+    BiquadProcessor* biquadProcessor() const;
     bool setType(unsigned); // Returns true on success.
+
+    Member<AudioParam> m_frequency;
+    Member<AudioParam> m_q;
+    Member<AudioParam> m_gain;
+    Member<AudioParam> m_detune;
 };
 
 } // namespace blink

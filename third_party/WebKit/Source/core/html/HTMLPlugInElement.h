@@ -33,8 +33,8 @@ namespace blink {
 
 class HTMLImageLoader;
 class PluginPlaceholder;
-class RenderEmbeddedObject;
-class RenderPart;
+class LayoutEmbeddedObject;
+class LayoutPart;
 class Widget;
 
 enum PreferPlugInsForImagesOption {
@@ -45,7 +45,7 @@ enum PreferPlugInsForImagesOption {
 class HTMLPlugInElement : public HTMLFrameOwnerElement {
 public:
     virtual ~HTMLPlugInElement();
-    virtual void trace(Visitor*) override;
+    DECLARE_VIRTUAL_TRACE();
 #if ENABLE(OILPAN)
     virtual void disconnectContentFrame() override;
     void shouldDisposePlugin();
@@ -58,11 +58,12 @@ public:
 
     // Returns the plugin widget, forcing layout and post-layout tasks
     // to happen synchronously (e.g. for JS bindings).
-    // See also renderPartForJSBindings().
+    // See also layoutPartForJSBindings().
     Widget* pluginWidgetForJSBindings();
 
     SharedPersistent<v8::Object>* pluginWrapper();
     NPObject* getNPObject();
+    void setPluginFocus(bool focused);
     bool canProcessDrag() const;
     const String& url() const { return m_url; }
 
@@ -92,13 +93,13 @@ protected:
 
     virtual bool hasFallbackContent() const;
     virtual bool useFallbackContent() const;
-    // Create or update the RenderPart and return it, triggering layout if
+    // Create or update the LayoutPart and return it, triggering layout if
     // necessary.
-    virtual RenderPart* renderPartForJSBindings() const;
+    virtual LayoutPart* layoutPartForJSBindings() const;
 
     bool isImageType();
     bool shouldPreferPlugInsForImages() const { return m_shouldPreferPlugInsForImages; }
-    RenderEmbeddedObject* renderEmbeddedObject() const;
+    LayoutEmbeddedObject* layoutEmbeddedObject() const;
     bool allowedToLoadFrameURL(const String& url);
     bool requestObject(const String& url, const String& mimeType, const Vector<String>& paramNames, const Vector<String>& paramValues);
     bool shouldUsePlugin(const KURL&, const String& mimeType, bool hasFallback, bool& useFallback);
@@ -125,20 +126,20 @@ private:
     virtual void finishParsingChildren() override final;
 
     // Element functions:
-    virtual RenderObject* createRenderer(RenderStyle*) override;
+    virtual LayoutObject* createLayoutObject(const ComputedStyle&) override;
     virtual bool supportsFocus() const override final { return true; }
-    virtual bool rendererIsFocusable() const override final;
+    virtual bool layoutObjectIsFocusable() const override final;
     virtual bool isKeyboardFocusable() const override final;
-    virtual void didAddUserAgentShadowRoot(ShadowRoot&) override final;
-    virtual void willAddFirstAuthorShadowRoot() override final;
+    virtual void didAddClosedShadowRoot(ShadowRoot&) override final;
+    virtual void willAddFirstOpenShadowRoot() override final;
 
     // HTMLElement function:
     virtual bool hasCustomFocusLogic() const override;
     virtual bool isPluginElement() const override final;
 
-    // Return any existing RenderPart without triggering relayout, or 0 if it
+    // Return any existing LayoutPart without triggering relayout, or 0 if it
     // doesn't yet exist.
-    virtual RenderPart* existingRenderPart() const = 0;
+    virtual LayoutPart* existingLayoutPart() const = 0;
     virtual void updateWidgetInternal() = 0;
 
     bool loadPlugin(const KURL&, const String& mimeType, const Vector<String>& paramNames, const Vector<String>& paramValues, bool useFallback, bool requireRenderer);

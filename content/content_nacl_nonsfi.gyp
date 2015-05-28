@@ -26,7 +26,7 @@
 
             'sources': [
               'common/send_zygote_child_ping_linux.cc',
-              'public/common/send_zygote_child_ping_linux.h',
+              'public/common/content_switches.cc',
               # TODO(hidehiko): Add sandbox code.
             ],
           },

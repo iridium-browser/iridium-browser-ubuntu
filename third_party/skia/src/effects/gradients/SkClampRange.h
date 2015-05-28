@@ -11,19 +11,11 @@
 #include "SkFixed.h"
 #include "SkScalar.h"
 
-#ifdef SK_SUPPORT_LEGACY_GRADIENT_PRECISION
-    #define SkGradFixed             SkFixed
-    #define SkScalarToGradFixed     SkScalarToFixed
-    #define SkFixedToGradFixed(x)   (x)
-    #define SkGradFixedToFixed(x)   (x)
-    #define kFracMax_SkGradFixed    0xFFFF
-#else
-    #define SkGradFixed             SkFixed3232
-    #define SkScalarToGradFixed     SkScalarToFixed3232
-    #define SkFixedToGradFixed      SkFixedToFixed3232
-    #define SkGradFixedToFixed(x)   (SkFixed)((x) >> 16)
-    #define kFracMax_SkGradFixed    0xFFFFFFFFLL
-#endif
+#define SkGradFixed             SkFixed3232
+#define SkScalarToGradFixed     SkScalarToFixed3232
+#define SkFixedToGradFixed      SkFixedToFixed3232
+#define SkGradFixedToFixed(x)   (SkFixed)((x) >> 16)
+#define kFracMax_SkGradFixed    0xFFFFFFFFLL
 
 /**
  *  Iteration fixed fx by dx, clamping as you go to [0..kFracMax_SkGradFixed], this class
@@ -42,6 +34,15 @@ struct SkClampRange {
     int fV0, fV1;
 
     void init(SkGradFixed fx, SkGradFixed dx, int count, int v0, int v1);
+
+    void validate(int count) const {
+#ifdef SK_DEBUG
+        SkASSERT(fCount0 >= 0);
+        SkASSERT(fCount1 >= 0);
+        SkASSERT(fCount2 >= 0);
+        SkASSERT(fCount0 + fCount1 + fCount2 == count);
+#endif
+    }
 
 private:
     void initFor1(SkGradFixed fx);

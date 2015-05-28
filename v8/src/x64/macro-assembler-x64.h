@@ -17,10 +17,7 @@ namespace internal {
 // a spare register). The register isn't callee save, and not used by the
 // function calling convention.
 const Register kScratchRegister = { 10 };      // r10.
-const Register kSmiConstantRegister = { 12 };  // r12 (callee save).
 const Register kRootRegister = { 13 };         // r13 (callee save).
-// Value of smi in kSmiConstantRegister.
-const int kSmiConstantRegisterValue = 1;
 // Actual value of root register is offset from the root array's start
 // to take advantage of negitive 8-bit displacement values.
 const int kRootRegisterBias = 128;
@@ -390,11 +387,6 @@ class MacroAssembler: public Assembler {
   void SafeMove(Register dst, Smi* src);
   void SafePush(Smi* src);
 
-  void InitializeSmiConstantRegister() {
-    Move(kSmiConstantRegister, Smi::FromInt(kSmiConstantRegisterValue),
-         Assembler::RelocInfoNone());
-  }
-
   // Conversions between tagged smi values and non-tagged integer values.
 
   // Tag an integer value. The result must be known to be a valid smi value.
@@ -473,11 +465,6 @@ class MacroAssembler: public Assembler {
   Condition CheckEitherSmi(Register first,
                            Register second,
                            Register scratch = kScratchRegister);
-
-  // Is the value the minimum smi value (since we are using
-  // two's complement numbers, negating the value is known to yield
-  // a non-smi value).
-  Condition CheckIsMinSmi(Register src);
 
   // Checks whether an 32-bit integer value is a valid for conversion
   // to a smi.
@@ -846,6 +833,8 @@ class MacroAssembler: public Assembler {
   // Compare the given value and the value of weak cell.
   void CmpWeakValue(Register value, Handle<WeakCell> cell, Register scratch);
 
+  void GetWeakValue(Register value, Handle<WeakCell> cell);
+
   // Load the value of the weak cell in the value register. Branch to the given
   // miss label if the weak cell was cleared.
   void LoadWeakValue(Register value, Handle<WeakCell> cell, Label* miss);
@@ -893,6 +882,8 @@ class MacroAssembler: public Assembler {
 
   void Move(XMMRegister dst, uint32_t src);
   void Move(XMMRegister dst, uint64_t src);
+  void Move(XMMRegister dst, float src) { Move(dst, bit_cast<uint32_t>(src)); }
+  void Move(XMMRegister dst, double src) { Move(dst, bit_cast<uint64_t>(src)); }
 
   // Control Flow
   void Jump(Address destination, RelocInfo::Mode rmode);
@@ -931,10 +922,18 @@ class MacroAssembler: public Assembler {
     Call(self, RelocInfo::CODE_TARGET);
   }
 
+  // Non-SSE2 instructions.
+  void Pextrd(Register dst, XMMRegister src, int8_t imm8);
+  void Pinsrd(XMMRegister dst, Register src, int8_t imm8);
+  void Pinsrd(XMMRegister dst, const Operand& src, int8_t imm8);
+
+  void Lzcntl(Register dst, Register src);
+  void Lzcntl(Register dst, const Operand& src);
+
   // Non-x64 instructions.
   // Push/pop all general purpose registers.
   // Does not push rsp/rbp nor any of the assembler's special purpose registers
-  // (kScratchRegister, kSmiConstantRegister, kRootRegister).
+  // (kScratchRegister, kRootRegister).
   void Pushad();
   void Popad();
   // Sets the stack as after performing Popad, without actually loading the
@@ -1044,6 +1043,8 @@ class MacroAssembler: public Assembler {
   void LoadInstanceDescriptors(Register map, Register descriptors);
   void EnumLength(Register dst, Register map);
   void NumberOfOwnDescriptors(Register dst, Register map);
+  void LoadAccessor(Register dst, Register holder, int accessor_index,
+                    AccessorComponent accessor);
 
   template<typename Field>
   void DecodeField(Register reg) {
@@ -1108,18 +1109,11 @@ class MacroAssembler: public Assembler {
   // ---------------------------------------------------------------------------
   // Exception handling
 
-  // Push a new try handler and link it into try handler chain.
-  void PushTryHandler(StackHandler::Kind kind, int handler_index);
+  // Push a new stack handler and link it into stack handler chain.
+  void PushStackHandler();
 
-  // Unlink the stack handler on top of the stack from the try handler chain.
-  void PopTryHandler();
-
-  // Activate the top handler in the try hander chain and pass the
-  // thrown value.
-  void Throw(Register value);
-
-  // Propagate an uncatchable exception out of the current JS stack.
-  void ThrowUncatchable(Register value);
+  // Unlink the stack handler on top of the stack from the stack handler chain.
+  void PopStackHandler();
 
   // ---------------------------------------------------------------------------
   // Inline caching support
@@ -1240,6 +1234,10 @@ class MacroAssembler: public Assembler {
   void NegativeZeroTest(Register result, Register op1, Register op2,
                         Register scratch, Label* then_label);
 
+  // Machine code version of Map::GetConstructor().
+  // |temp| holds |result|'s map when done.
+  void GetMapConstructor(Register result, Register map, Register temp);
+
   // Try to get function prototype of a function and puts the value in
   // the result register. Checks that the function really is a
   // function and jumps to the miss label if the fast checks fail. The
@@ -1325,24 +1323,6 @@ class MacroAssembler: public Assembler {
 
   // Jump to a runtime routine.
   void JumpToExternalReference(const ExternalReference& ext, int result_size);
-
-  // Prepares stack to put arguments (aligns and so on).  WIN64 calling
-  // convention requires to put the pointer to the return value slot into
-  // rcx (rcx must be preserverd until CallApiFunctionAndReturn).  Saves
-  // context (rsi).  Clobbers rax.  Allocates arg_stack_space * kPointerSize
-  // inside the exit frame (not GCed) accessible via StackSpaceOperand.
-  void PrepareCallApiFunction(int arg_stack_space);
-
-  // Calls an API function.  Allocates HandleScope, extracts returned value
-  // from handle and propagates exceptions.  Clobbers r14, r15, rbx and
-  // caller-save registers.  Restores context.  On return removes
-  // stack_space * kPointerSize (GCed).
-  void CallApiFunctionAndReturn(Register function_address,
-                                ExternalReference thunk_ref,
-                                Register thunk_last_arg,
-                                int stack_space,
-                                Operand return_value_operand,
-                                Operand* context_restore_operand);
 
   // Before calling a C-function from generated code, align arguments on stack.
   // After aligning the frame, arguments must be stored in rsp[0], rsp[8],
@@ -1476,9 +1456,9 @@ class MacroAssembler: public Assembler {
 
  private:
   // Order general registers are pushed by Pushad.
-  // rax, rcx, rdx, rbx, rsi, rdi, r8, r9, r11, r14, r15.
+  // rax, rcx, rdx, rbx, rsi, rdi, r8, r9, r11, r12, r14, r15.
   static const int kSafepointPushRegisterIndices[Register::kNumRegisters];
-  static const int kNumSafepointSavedRegisters = 11;
+  static const int kNumSafepointSavedRegisters = 12;
   static const int kSmiShift = kSmiTagSize + kSmiShiftSize;
 
   bool generating_stub_;
@@ -1549,10 +1529,6 @@ class MacroAssembler: public Assembler {
   inline void GetMarkBits(Register addr_reg,
                           Register bitmap_reg,
                           Register mask_reg);
-
-  // Helper for throwing exceptions.  Compute a handler address and jump to
-  // it.  See the implementation for register usage.
-  void JumpToHandlerEntry();
 
   // Compute memory operands for safepoint stack slots.
   Operand SafepointRegisterSlot(Register reg);

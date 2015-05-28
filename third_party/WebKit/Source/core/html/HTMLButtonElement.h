@@ -46,10 +46,10 @@ private:
 
     virtual const AtomicString& formControlType() const override;
 
-    virtual RenderObject* createRenderer(RenderStyle*) override;
+    virtual LayoutObject* createLayoutObject(const ComputedStyle&) override;
 
     // HTMLFormControlElement always creates one, but buttons don't need it.
-    virtual bool alwaysCreateUserAgentShadowRoot() const override { return false; }
+    virtual bool alwaysCreateClosedShadowRoot() const override { return false; }
 
     virtual Node::InsertionNotificationRequest insertedInto(ContainerNode*) override;
     virtual void attributeWillChange(const QualifiedName&, const AtomicString& oldValue, const AtomicString& newValue) override;

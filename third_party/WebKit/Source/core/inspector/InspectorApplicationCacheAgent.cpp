@@ -42,21 +42,9 @@ static const char applicationCacheAgentEnabled[] = "applicationCacheAgentEnabled
 }
 
 InspectorApplicationCacheAgent::InspectorApplicationCacheAgent(InspectorPageAgent* pageAgent)
-    : InspectorBaseAgent<InspectorApplicationCacheAgent>("ApplicationCache")
+    : InspectorBaseAgent<InspectorApplicationCacheAgent, InspectorFrontend::ApplicationCache>("ApplicationCache")
     , m_pageAgent(pageAgent)
-    , m_frontend(0)
 {
-}
-
-void InspectorApplicationCacheAgent::setFrontend(InspectorFrontend* frontend)
-{
-    m_frontend = frontend->applicationcache();
-}
-
-void InspectorApplicationCacheAgent::clearFrontend()
-{
-    m_instrumentingAgents->setInspectorApplicationCacheAgent(0);
-    m_frontend = nullptr;
 }
 
 void InspectorApplicationCacheAgent::restore()
@@ -71,9 +59,13 @@ void InspectorApplicationCacheAgent::enable(ErrorString*)
 {
     m_state->setBoolean(ApplicationCacheAgentState::applicationCacheAgentEnabled, true);
     m_instrumentingAgents->setInspectorApplicationCacheAgent(this);
+    frontend()->networkStateUpdated(networkStateNotifier().onLine());
+}
 
-    // We need to pass initial navigator.onOnline.
-    networkStateChanged(networkStateNotifier().onLine());
+void InspectorApplicationCacheAgent::disable(ErrorString*)
+{
+    m_state->setBoolean(ApplicationCacheAgentState::applicationCacheAgentEnabled, false);
+    m_instrumentingAgents->setInspectorApplicationCacheAgent(nullptr);
 }
 
 void InspectorApplicationCacheAgent::updateApplicationCacheStatus(LocalFrame* frame)
@@ -87,20 +79,21 @@ void InspectorApplicationCacheAgent::updateApplicationCacheStatus(LocalFrame* fr
     ApplicationCacheHost::CacheInfo info = host->applicationCacheInfo();
 
     String manifestURL = info.m_manifest.string();
-    m_frontend->applicationCacheStatusUpdated(m_pageAgent->frameId(frame), manifestURL, static_cast<int>(status));
+    frontend()->applicationCacheStatusUpdated(m_pageAgent->frameId(frame), manifestURL, static_cast<int>(status));
 }
 
-void InspectorApplicationCacheAgent::networkStateChanged(bool online)
+void InspectorApplicationCacheAgent::networkStateChanged(LocalFrame* frame, bool online)
 {
-    m_frontend->networkStateUpdated(online);
+    if (frame == m_pageAgent->inspectedFrame())
+        frontend()->networkStateUpdated(online);
 }
 
 void InspectorApplicationCacheAgent::getFramesWithManifests(ErrorString*, RefPtr<TypeBuilder::Array<TypeBuilder::ApplicationCache::FrameWithManifest> >& result)
 {
     result = TypeBuilder::Array<TypeBuilder::ApplicationCache::FrameWithManifest>::create();
 
-    LocalFrame* mainFrame = m_pageAgent->mainFrame();
-    for (Frame* frame = mainFrame; frame; frame = frame->tree().traverseNext(mainFrame)) {
+    LocalFrame* inspectedFrame = m_pageAgent->inspectedFrame();
+    for (Frame* frame = inspectedFrame; frame; frame = frame->tree().traverseNext(inspectedFrame)) {
         if (!frame->isLocalFrame())
             continue;
         DocumentLoader* documentLoader = toLocalFrame(frame)->loader().documentLoader();
@@ -202,7 +195,7 @@ PassRefPtr<TypeBuilder::ApplicationCache::ApplicationCacheResource> InspectorApp
     return value;
 }
 
-void InspectorApplicationCacheAgent::trace(Visitor* visitor)
+DEFINE_TRACE(InspectorApplicationCacheAgent)
 {
     visitor->trace(m_pageAgent);
     InspectorBaseAgent::trace(visitor);

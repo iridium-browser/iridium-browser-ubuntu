@@ -9,16 +9,22 @@
 
 namespace media {
 
-// Defines bitmask values that specify registered initialization data types used
+// Defines values that specify registered Initialization Data Types used
 // in Encrypted Media Extensions (EME).
-// The mask values are stored in a SupportedInitDataTypes.
-enum EmeInitDataType {
-  EME_INIT_DATA_TYPE_NONE = 0,
-  EME_INIT_DATA_TYPE_WEBM = 1 << 0,
-#if defined(USE_PROPRIETARY_CODECS)
-  EME_INIT_DATA_TYPE_CENC = 1 << 1,
-#endif  // defined(USE_PROPRIETARY_CODECS)
+// http://w3c.github.io/encrypted-media/initdata-format-registry.html#registry
+// The mask values are stored in a InitDataTypeMask.
+enum class EmeInitDataType {
+  UNKNOWN,
+  WEBM,
+  CENC,
+  KEYIDS
 };
+
+typedef uint32_t InitDataTypeMask;
+const InitDataTypeMask kInitDataTypeMaskNone = 0;
+const InitDataTypeMask kInitDataTypeMaskWebM = 1 << 0;
+const InitDataTypeMask kInitDataTypeMaskCenc = 1 << 1;
+const InitDataTypeMask kInitDataTypeMaskKeyIds = 1 << 2;
 
 // Defines bitmask values that specify codecs used in Encrypted Media Extension
 // (EME). Each value represents a codec within a specific container.
@@ -40,14 +46,99 @@ enum EmeCodec {
   EME_CODEC_MP4_AVC1 = 1 << 5,
   EME_CODEC_MP4_VIDEO_ALL = EME_CODEC_MP4_AVC1,
   EME_CODEC_MP4_ALL = (EME_CODEC_MP4_AUDIO_ALL | EME_CODEC_MP4_VIDEO_ALL),
+  EME_CODEC_AUDIO_ALL = (EME_CODEC_WEBM_AUDIO_ALL | EME_CODEC_MP4_AUDIO_ALL),
+  EME_CODEC_VIDEO_ALL = (EME_CODEC_WEBM_VIDEO_ALL | EME_CODEC_MP4_VIDEO_ALL),
   EME_CODEC_ALL = (EME_CODEC_WEBM_ALL | EME_CODEC_MP4_ALL),
 #else
+  EME_CODEC_AUDIO_ALL = EME_CODEC_WEBM_AUDIO_ALL,
+  EME_CODEC_VIDEO_ALL = EME_CODEC_WEBM_VIDEO_ALL,
   EME_CODEC_ALL = EME_CODEC_WEBM_ALL,
 #endif  // defined(USE_PROPRIETARY_CODECS)
 };
 
-typedef uint32_t SupportedInitDataTypes;
 typedef uint32_t SupportedCodecs;
+
+enum EmeSessionTypeSupport {
+  // Invalid default value.
+  EME_SESSION_TYPE_INVALID,
+  // The session type is not supported.
+  EME_SESSION_TYPE_NOT_SUPPORTED,
+  // The session type is supported if a distinctive identifier is available.
+  EME_SESSION_TYPE_SUPPORTED_WITH_IDENTIFIER,
+  // The session type is always supported.
+  EME_SESSION_TYPE_SUPPORTED,
+};
+
+// Used to declare support for distinctive identifier and persistent state.
+// These are purposefully limited to not allow one to require the other, so that
+// transitive requirements are not possible. Non-trivial refactoring would be
+// required to support transitive requirements.
+enum EmeFeatureSupport {
+  // Invalid default value.
+  EME_FEATURE_INVALID,
+  // Access to the feature is not supported at all.
+  EME_FEATURE_NOT_SUPPORTED,
+  // Access to the feature may be requested.
+  EME_FEATURE_REQUESTABLE,
+  // Access to the feature cannot be blocked.
+  EME_FEATURE_ALWAYS_ENABLED,
+};
+
+// Used to query support for distinctive identifier and persistent state.
+enum EmeFeatureRequirement {
+  EME_FEATURE_NOT_ALLOWED,
+  EME_FEATURE_OPTIONAL,
+  EME_FEATURE_REQUIRED,
+};
+
+enum class EmeMediaType {
+  AUDIO,
+  VIDEO,
+};
+
+// Robustness values understood by KeySystems.
+// Note: key_systems.cc expects this ordering in GetRobustnessConfigRule(),
+// make sure to correct that code if this list changes.
+enum class EmeRobustness {
+  INVALID,
+  EMPTY,
+  SW_SECURE_CRYPTO,
+  SW_SECURE_DECODE,
+  HW_SECURE_CRYPTO,
+  HW_SECURE_DECODE,
+  HW_SECURE_ALL,
+};
+
+// Configuration rules indicate the configuration state required to support a
+// configuration option (note: a configuration option may be disallowing a
+// feature). Configuration rules are used to answer queries about distinctive
+// identifier, persistent state, and robustness requirements, as well as to
+// describe support for different session types.
+//
+// If in the future there are reasons to request user permission other than
+// access to a distinctive identifier, then additional rules should be added.
+// Rules are implemented in ConfigState and are otherwise opaque.
+enum class EmeConfigRule {
+  // The configuration option is not supported.
+  NOT_SUPPORTED,
+  // The configuration option prevents use of a distinctive identifier.
+  IDENTIFIER_NOT_ALLOWED,
+  // The configuration option is supported if a distinctive identifier is
+  // available.
+  IDENTIFIER_REQUIRED,
+  // The configuration option is supported, but the user experience may be
+  // improved if a distinctive identifier is available.
+  IDENTIFIER_RECOMMENDED,
+  // The configuration option prevents use of persistent state.
+  PERSISTENCE_NOT_ALLOWED,
+  // The configuration option is supported if persistent state is available.
+  PERSISTENCE_REQUIRED,
+  // The configuration option is supported if both a distinctive identifier and
+  // persistent state are available.
+  IDENTIFIER_AND_PERSISTENCE_REQUIRED,
+  // The configuration option is supported without conditions.
+  SUPPORTED,
+};
 
 }  // namespace media
 

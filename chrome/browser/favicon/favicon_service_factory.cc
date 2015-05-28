@@ -7,20 +7,22 @@
 #include "base/memory/singleton.h"
 #include "base/prefs/pref_service.h"
 #include "chrome/browser/favicon/chrome_favicon_client_factory.h"
-#include "chrome/browser/favicon/favicon_service.h"
-#include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
+#include "chrome/browser/profiles/profile.h"
+#include "components/favicon/core/favicon_service.h"
+#include "components/history/core/browser/history_service.h"
 #include "components/keyed_service/content/browser_context_dependency_manager.h"
 
 // static
-FaviconService* FaviconServiceFactory::GetForProfile(
-    Profile* profile, Profile::ServiceAccessType sat) {
+favicon::FaviconService* FaviconServiceFactory::GetForProfile(
+    Profile* profile,
+    ServiceAccessType sat) {
   if (!profile->IsOffTheRecord()) {
-    return static_cast<FaviconService*>(
+    return static_cast<favicon::FaviconService*>(
         GetInstance()->GetServiceForBrowserContext(profile, true));
-  } else if (sat == Profile::EXPLICIT_ACCESS) {
+  } else if (sat == ServiceAccessType::EXPLICIT_ACCESS) {
     // Profile must be OffTheRecord in this case.
-    return static_cast<FaviconService*>(
+    return static_cast<favicon::FaviconService*>(
         GetInstance()->GetServiceForBrowserContext(
             profile->GetOriginalProfile(), true));
   }
@@ -43,13 +45,16 @@ FaviconServiceFactory::FaviconServiceFactory()
   DependsOn(ChromeFaviconClientFactory::GetInstance());
 }
 
-FaviconServiceFactory::~FaviconServiceFactory() {}
+FaviconServiceFactory::~FaviconServiceFactory() {
+}
 
 KeyedService* FaviconServiceFactory::BuildServiceInstanceFor(
-    content::BrowserContext* profile) const {
-  FaviconClient* favicon_client =
-      ChromeFaviconClientFactory::GetForProfile(static_cast<Profile*>(profile));
-  return new FaviconService(static_cast<Profile*>(profile), favicon_client);
+    content::BrowserContext* context) const {
+  Profile* profile = Profile::FromBrowserContext(context);
+  return new favicon::FaviconService(
+      ChromeFaviconClientFactory::GetForProfile(profile),
+      HistoryServiceFactory::GetForProfile(profile,
+                                           ServiceAccessType::EXPLICIT_ACCESS));
 }
 
 bool FaviconServiceFactory::ServiceIsNULLWhileTesting() const {

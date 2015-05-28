@@ -136,7 +136,8 @@ void SearchResultListView::ListItemsRemoved(size_t start, size_t count) {
   SearchResultContainerView::ListItemsRemoved(start, count);
 }
 
-void SearchResultListView::OnContainerSelected(bool from_bottom) {
+void SearchResultListView::OnContainerSelected(bool from_bottom,
+                                               bool /*directional_movement*/) {
   if (num_results() == 0)
     return;
 
@@ -153,6 +154,7 @@ int SearchResultListView::Update() {
   for (size_t i = 0; i < static_cast<size_t>(results_container_->child_count());
        ++i) {
     SearchResultView* result_view = GetResultViewAt(i);
+    result_view->set_is_last_result(i == display_results.size() - 1);
     if (i < display_results.size()) {
       result_view->SetResult(display_results[i]);
       result_view->SetVisible(true);
@@ -162,6 +164,9 @@ int SearchResultListView::Update() {
     }
   }
   UpdateAutoLaunchState();
+
+  set_container_score(
+      display_results.empty() ? 0 : display_results.front()->relevance());
 
   return display_results.size();
 }

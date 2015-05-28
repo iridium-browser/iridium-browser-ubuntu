@@ -49,7 +49,7 @@ static const size_t defaultResourceTimingBufferSize = 150;
 Performance::Performance(LocalFrame* frame)
     : DOMWindowProperty(frame)
     , m_resourceTimingBufferSize(defaultResourceTimingBufferSize)
-    , m_referenceTime(frame && frame->host() ? frame->document()->loader()->timing()->referenceMonotonicTime() : 0.0)
+    , m_referenceTime(frame && frame->host() ? frame->document()->loader()->timing().referenceMonotonicTime() : 0.0)
     , m_userTiming(nullptr)
 {
 }
@@ -162,7 +162,7 @@ void Performance::webkitSetResourceTimingBufferSize(unsigned size)
 
 static bool passesTimingAllowCheck(const ResourceResponse& response, Document* requestingDocument, const AtomicString& originalTimingAllowOrigin)
 {
-    AtomicallyInitializedStatic(AtomicString&, timingAllowOrigin = *new AtomicString("timing-allow-origin"));
+    AtomicallyInitializedStaticReference(AtomicString, timingAllowOrigin, new AtomicString("timing-allow-origin"));
 
     RefPtr<SecurityOrigin> resourceOrigin = SecurityOrigin::create(response.url());
     if (resourceOrigin->isSameSchemeHostPort(requestingDocument->securityOrigin()))
@@ -221,12 +221,12 @@ void Performance::addResourceTiming(const ResourceTimingInfo& info, Document* in
         ResourceLoadTiming* finalTiming = finalResponse.resourceLoadTiming();
         ASSERT(finalTiming);
         if (finalTiming)
-            startTime = finalTiming->requestTime;
+            startTime = finalTiming->requestTime();
     }
 
     ResourceLoadTiming* lastRedirectTiming = redirectChain.last().resourceLoadTiming();
     ASSERT(lastRedirectTiming);
-    double lastRedirectEndTime = lastRedirectTiming->receiveHeadersEnd;
+    double lastRedirectEndTime = lastRedirectTiming->receiveHeadersEnd();
 
     RefPtrWillBeRawPtr<PerformanceEntry> entry = PerformanceResourceTiming::create(info, initiatorDocument, startTime, lastRedirectEndTime, allowTimingDetails, allowRedirectDetails);
     addResourceTimingBuffer(entry);
@@ -278,7 +278,7 @@ double Performance::now() const
     return 1000.0 * (monotonicallyIncreasingTime() - m_referenceTime);
 }
 
-void Performance::trace(Visitor* visitor)
+DEFINE_TRACE(Performance)
 {
     visitor->trace(m_navigation);
     visitor->trace(m_timing);

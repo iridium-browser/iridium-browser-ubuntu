@@ -22,15 +22,16 @@ struct BeginFrameArgs;
 
 class LayerTreeHostClient {
  public:
-  virtual void WillBeginMainFrame(int frame_id) = 0;
+  virtual void WillBeginMainFrame() = 0;
   // Marks finishing compositing-related tasks on the main thread. In threaded
   // mode, this corresponds to DidCommit().
   virtual void BeginMainFrame(const BeginFrameArgs& args) = 0;
+  virtual void BeginMainFrameNotExpectedSoon() = 0;
   virtual void DidBeginMainFrame() = 0;
   virtual void Layout() = 0;
   virtual void ApplyViewportDeltas(
-      const gfx::Vector2d& inner_delta,
-      const gfx::Vector2d& outer_delta,
+      const gfx::Vector2dF& inner_delta,
+      const gfx::Vector2dF& outer_delta,
       const gfx::Vector2dF& elastic_overscroll_delta,
       float page_scale,
       float top_controls_delta) = 0;
@@ -48,6 +49,9 @@ class LayerTreeHostClient {
   virtual void DidCommit() = 0;
   virtual void DidCommitAndDrawFrame() = 0;
   virtual void DidCompleteSwapBuffers() = 0;
+
+  // Called when page scale animation has completed.
+  virtual void DidCompletePageScaleAnimation() = 0;
 
   // TODO(simonhong): Makes this to pure virtual function when client
   // implementation is ready.

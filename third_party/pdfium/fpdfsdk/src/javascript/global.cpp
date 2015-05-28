@@ -4,15 +4,16 @@
  
 // Original code copyright 2014 Foxit Software Inc. http://www.foxitsoftware.com
 
-#include "../../include/javascript/JavaScript.h"
 #include "../../include/javascript/IJavaScript.h"
+#include "../../include/javascript/JS_Context.h"
 #include "../../include/javascript/JS_Define.h"
+#include "../../include/javascript/JS_EventHandler.h"
+#include "../../include/javascript/JS_GlobalData.h"
 #include "../../include/javascript/JS_Object.h"
 #include "../../include/javascript/JS_Value.h"
-#include "../../include/javascript/JS_GlobalData.h"
+#include "../../include/javascript/JavaScript.h"
 #include "../../include/javascript/global.h"
-#include "../../include/javascript/JS_EventHandler.h"
-#include "../../include/javascript/JS_Context.h"
+#include "../../include/javascript/resource.h"
 
 /* ---------------------------- global ---------------------------- */
 
@@ -142,7 +143,7 @@ FX_BOOL	global_alternate::QueryProperty(FX_LPCWSTR propname)
 	return CFX_WideString(propname) != L"setPersistent";
 }
 
-FX_BOOL	global_alternate::DelProperty(IFXJS_Context* cc, FX_LPCWSTR propname, JS_ErrorString& sError)
+FX_BOOL	global_alternate::DelProperty(IFXJS_Context* cc, FX_LPCWSTR propname, CFX_WideString& sError)
 {
 	js_global_data* pData = NULL;
 	CFX_ByteString sPropName = CFX_ByteString::FromUnicode(propname);
@@ -156,7 +157,7 @@ FX_BOOL	global_alternate::DelProperty(IFXJS_Context* cc, FX_LPCWSTR propname, JS
 	return FALSE;
 }
 
-FX_BOOL global_alternate::DoProperty(IFXJS_Context* cc, FX_LPCWSTR propname, CJS_PropValue& vp, JS_ErrorString& sError)
+FX_BOOL global_alternate::DoProperty(IFXJS_Context* cc, FX_LPCWSTR propname, CJS_PropValue& vp, CFX_WideString& sError)
 {
 	if (vp.IsSetting())
 	{
@@ -268,11 +269,12 @@ FX_BOOL global_alternate::DoProperty(IFXJS_Context* cc, FX_LPCWSTR propname, CJS
 	return FALSE;
 }
 
-FX_BOOL global_alternate::setPersistent(OBJ_METHOD_PARAMS)
+FX_BOOL global_alternate::setPersistent(IFXJS_Context* cc, const CJS_Parameters& params, CJS_Value& vRet, CFX_WideString& sError)
 {
+	CJS_Context* pContext = static_cast<CJS_Context*>(cc);
 	if (params.size() != 2)
 	{
-		//sError = JSGetStringFromID(IDS_STRING_JSPARAMERROR);	
+		sError = JSGetStringFromID(pContext, IDS_STRING_JSPARAMERROR);
 		return FALSE;
 	}
 
@@ -288,7 +290,7 @@ FX_BOOL global_alternate::setPersistent(OBJ_METHOD_PARAMS)
 		}
 	}
 
-	//sError = JSGetStringFromID(IDS_JSPARAM_INCORRECT);	
+	sError = JSGetStringFromID(pContext, IDS_STRING_JSNOGLOBAL);
 	return FALSE;
 }
 
@@ -615,3 +617,28 @@ FX_BOOL global_alternate::SetGlobalVariables(FX_LPCSTR propname, int nType,
 
 	return TRUE;
 }
+
+FXJSVALUETYPE GET_VALUE_TYPE(v8::Handle<v8::Value> p)
+{
+  const unsigned int nHash = JS_CalcHash(JS_GetTypeof(p));
+
+  if (nHash == JSCONST_nUndefHash)
+    return VT_undefined;
+  if (nHash == JSCONST_nNullHash)
+    return VT_null;
+  if (nHash == JSCONST_nStringHash)
+    return VT_string;
+  if (nHash == JSCONST_nNumberHash)
+    return VT_number;
+  if (nHash == JSCONST_nBoolHash)
+    return VT_boolean;
+  if (nHash == JSCONST_nDateHash)
+    return VT_date;
+  if (nHash == JSCONST_nObjectHash)
+    return VT_object;
+  if (nHash == JSCONST_nFXobjHash)
+    return VT_fxobject;
+
+  return VT_unknown;
+}
+

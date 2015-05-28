@@ -179,7 +179,7 @@ class LoadingStateChangedDelegate : public WebContentsDelegate {
 };
 
 // See: http://crbug.com/298193
-#if defined(OS_WIN)
+#if defined(OS_WIN) || defined(OS_LINUX)
 #define MAYBE_DidStopLoadingDetails DISABLED_DidStopLoadingDetails
 #else
 #define MAYBE_DidStopLoadingDetails DidStopLoadingDetails
@@ -202,7 +202,7 @@ IN_PROC_BROWSER_TEST_F(WebContentsImplBrowserTest,
 }
 
 // See: http://crbug.com/298193
-#if defined(OS_WIN)
+#if defined(OS_WIN) || defined(OS_LINUX)
 #define MAYBE_DidStopLoadingDetailsWithPending \
   DISABLED_DidStopLoadingDetailsWithPending
 #else
@@ -402,7 +402,7 @@ class RenderFrameCreatedObserver : public WebContentsObserver {
 // to the WebContentObservers. See http://crbug.com/347339.
 IN_PROC_BROWSER_TEST_F(WebContentsImplBrowserTest,
                        RenderFrameCreatedCorrectProcessForObservers) {
-  std::string foo_com("foo.com");
+  static const char kFooCom[] = "foo.com";
   GURL::Replacements replace_host;
   net::HostPortPair foo_host_port;
   GURL cross_site_url;
@@ -413,12 +413,12 @@ IN_PROC_BROWSER_TEST_F(WebContentsImplBrowserTest,
   ASSERT_TRUE(test_server()->Start());
 
   foo_host_port = test_server()->host_port_pair();
-  foo_host_port.set_host(foo_com);
+  foo_host_port.set_host(kFooCom);
 
   GURL initial_url(test_server()->GetURL("/title1.html"));
 
   cross_site_url = test_server()->GetURL("/title2.html");
-  replace_host.SetHostStr(foo_com);
+  replace_host.SetHostStr(kFooCom);
   cross_site_url = cross_site_url.ReplaceComponents(replace_host);
 
   // Navigate to the initial URL and capture the RenderFrameHost for later
@@ -456,7 +456,7 @@ IN_PROC_BROWSER_TEST_F(WebContentsImplBrowserTest,
   // initial load of push_state.html, and start and stop for the "navigation"
   // triggered by history.pushState(). However, the start notification for the
   // history.pushState() navigation should set to_different_document to false.
-  EXPECT_EQ("pushState", shell()->web_contents()->GetURL().ref());
+  EXPECT_EQ("pushState", shell()->web_contents()->GetLastCommittedURL().ref());
   EXPECT_EQ(4, delegate->loadingStateChangedCount());
   EXPECT_EQ(3, delegate->loadingStateToDifferentDocumentCount());
 }
@@ -497,14 +497,14 @@ struct LoadProgressDelegateAndObserver : public WebContentsDelegate,
   }
 
   // WebContentsObserver:
-  void DidStartLoading(RenderViewHost* render_view_host) override {
+  void DidStartLoading() override {
     EXPECT_FALSE(did_start_loading);
     EXPECT_EQ(0U, progresses.size());
     EXPECT_FALSE(did_stop_loading);
     did_start_loading = true;
   }
 
-  void DidStopLoading(RenderViewHost* render_view_host) override {
+  void DidStopLoading() override {
     EXPECT_TRUE(did_start_loading);
     EXPECT_GE(progresses.size(), 1U);
     EXPECT_FALSE(did_stop_loading);
@@ -642,4 +642,3 @@ IN_PROC_BROWSER_TEST_F(WebContentsImplBrowserTest,
 }
 
 }  // namespace content
-

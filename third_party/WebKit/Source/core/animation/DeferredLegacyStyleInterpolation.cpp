@@ -5,7 +5,8 @@
 #include "config.h"
 #include "core/animation/DeferredLegacyStyleInterpolation.h"
 
-#include "core/animation/LegacyStyleInterpolation.h"
+#include "core/animation/ElementAnimations.h"
+#include "core/animation/css/CSSAnimatableValueFactory.h"
 #include "core/css/CSSImageValue.h"
 #include "core/css/CSSPrimitiveValue.h"
 #include "core/css/CSSSVGDocumentValue.h"
@@ -20,12 +21,25 @@ namespace blink {
 
 void DeferredLegacyStyleInterpolation::apply(StyleResolverState& state) const
 {
-    RefPtrWillBeRawPtr<LegacyStyleInterpolation> innerInterpolation = LegacyStyleInterpolation::create(
-        StyleResolver::createAnimatableValueSnapshot(state, m_id, *m_startCSSValue),
-        StyleResolver::createAnimatableValueSnapshot(state, m_id, *m_endCSSValue),
-        m_id);
-    innerInterpolation->interpolate(m_cachedIteration, m_cachedFraction);
-    innerInterpolation->apply(state);
+    if (m_outdated || !state.element()->elementAnimations() || !state.element()->elementAnimations()->isAnimationStyleChange()) {
+        RefPtrWillBeRawPtr<AnimatableValue> startAnimatableValue;
+        RefPtrWillBeRawPtr<AnimatableValue> endAnimatableValue;
+
+        // Snapshot underlying values for neutral keyframes first because non-neutral keyframes will mutate the StyleResolverState.
+        if (!m_endCSSValue) {
+            endAnimatableValue = StyleResolver::createAnimatableValueSnapshot(state, m_id, m_endCSSValue.get());
+            startAnimatableValue = StyleResolver::createAnimatableValueSnapshot(state, m_id, m_startCSSValue.get());
+        } else {
+            startAnimatableValue = StyleResolver::createAnimatableValueSnapshot(state, m_id, m_startCSSValue.get());
+            endAnimatableValue = StyleResolver::createAnimatableValueSnapshot(state, m_id, m_endCSSValue.get());
+        }
+
+        m_innerInterpolation = LegacyStyleInterpolation::create(startAnimatableValue, endAnimatableValue, m_id);
+        m_outdated = false;
+    }
+
+    m_innerInterpolation->interpolate(m_cachedIteration, m_cachedFraction);
+    m_innerInterpolation->apply(state);
 }
 
 bool DeferredLegacyStyleInterpolation::interpolationRequiresStyleResolve(const CSSValue& value)
@@ -134,10 +148,11 @@ bool DeferredLegacyStyleInterpolation::interpolationRequiresStyleResolve(const C
     return false;
 }
 
-void DeferredLegacyStyleInterpolation::trace(Visitor* visitor)
+DEFINE_TRACE(DeferredLegacyStyleInterpolation)
 {
     visitor->trace(m_startCSSValue);
     visitor->trace(m_endCSSValue);
+    visitor->trace(m_innerInterpolation);
     StyleInterpolation::trace(visitor);
 }
 

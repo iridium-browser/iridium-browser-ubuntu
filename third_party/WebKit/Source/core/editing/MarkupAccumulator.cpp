@@ -97,12 +97,14 @@ void MarkupAccumulator::appendCharactersReplacingEntities(StringBuilder& result,
         appendCharactersReplacingEntitiesInternal(result, source.characters16() + offset, length, entityMaps, WTF_ARRAY_LENGTH(entityMaps), entityMask);
 }
 
-MarkupAccumulator::MarkupAccumulator(WillBeHeapVector<RawPtrWillBeMember<Node>>* nodes, EAbsoluteURLs resolveUrlsMethod, const Range* range, SerializationType serializationType)
+MarkupAccumulator::MarkupAccumulator(WillBeHeapVector<RawPtrWillBeMember<Node>>* nodes, EAbsoluteURLs resolveUrlsMethod, const Position& start, const Position& end, SerializationType serializationType)
     : m_nodes(nodes)
-    , m_range(range)
     , m_resolveURLsMethod(resolveUrlsMethod)
     , m_serializationType(serializationType)
+    , m_start(start.parentAnchoredEquivalent())
+    , m_end(end.parentAnchoredEquivalent())
 {
+    ASSERT(m_start.isNull() == m_end.isNull());
 }
 
 MarkupAccumulator::~MarkupAccumulator()
@@ -207,6 +209,9 @@ void MarkupAccumulator::appendQuotedURLAttributeValue(StringBuilder& result, con
     String strippedURLString = resolvedURLString.stripWhiteSpace();
     if (protocolIsJavaScript(strippedURLString)) {
         // minimal escaping for javascript urls
+        if (strippedURLString.contains('&'))
+            strippedURLString.replaceWithLiteral('&', "&amp;");
+
         if (strippedURLString.contains('"')) {
             if (strippedURLString.contains('\''))
                 strippedURLString.replaceWithLiteral('"', "&quot;");
@@ -298,11 +303,11 @@ void MarkupAccumulator::appendText(StringBuilder& result, Text& text)
     unsigned length = str.length();
     unsigned start = 0;
 
-    if (m_range) {
-        if (text == m_range->endContainer())
-            length = m_range->endOffset();
-        if (text == m_range->startContainer()) {
-            start = m_range->startOffset();
+    if (m_start.isNotNull() && m_end.isNotNull()) {
+        if (text == m_end.containerNode())
+            length = m_end.offsetInContainerNode();
+        if (text == m_start.containerNode()) {
+            start = m_start.offsetInContainerNode();
             length -= start;
         }
     }
@@ -554,6 +559,30 @@ bool MarkupAccumulator::serializeAsHTMLDocument(const Node& node) const
     if (m_serializationType == ForcedXML)
         return false;
     return node.document().isHTMLDocument();
+}
+
+String MarkupAccumulator::renderedText(Text& textNode)
+{
+    int startOffset = 0;
+    int endOffset = textNode.length();
+    if (startPosition().containerNode() == textNode)
+        startOffset = startPosition().offsetInContainerNode();
+    if (endPosition().containerNode() == textNode)
+        endOffset = endPosition().offsetInContainerNode();
+    return plainText(Position(&textNode, startOffset), Position(&textNode, endOffset));
+}
+
+String MarkupAccumulator::stringValueForRange(const Node& node)
+{
+    if (startPosition().isNull())
+        return node.nodeValue();
+
+    String str = node.nodeValue();
+    if (startPosition().containerNode() == node)
+        str.truncate(endPosition().offsetInContainerNode());
+    if (endPosition().containerNode() == node)
+        str.remove(0, startPosition().offsetInContainerNode());
+    return str;
 }
 
 }

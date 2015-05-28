@@ -98,6 +98,7 @@
           'msvs_disabled_warnings': [ 4267, ],
         },
         {
+          # GN version: //media/cdm/ppapi:clearkeycdmadapter_resources
           'target_name': 'clearkeycdmadapter_resources',
           'type': 'none',
           'conditions': [
@@ -145,6 +146,7 @@
               # Because clearkeycdm has type 'loadable_module' (see comments),
               # we must explicitly specify this dependency.
               'libraries': [
+               '-lrt',
                 # Built by clearkeycdm.
                 '<(PRODUCT_DIR)/libclearkeycdm.so',
               ],

@@ -5,12 +5,10 @@
   LICENSE file.
 -->
 
-<!-- Please keep this in sync with the downstream android_webview manifest.
--->
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
-    package="com.android.webview">
-    <uses-sdk android:minSdkVersion="21"
-              android:targetSdkVersion="21">
+    package="{{package|default('com.android.webview')}}">
+    <uses-sdk android:minSdkVersion="{{minsdk|default(21)}}"
+              android:targetSdkVersion="{{targetsdk|default(21)}}">
     </uses-sdk>
 
     <uses-feature android:name="android.hardware.touchscreen"
@@ -32,5 +30,7 @@
         <provider android:name="com.android.webview.chromium.LicenseContentProvider"
                   android:exported="true"
                   android:authorities="com.android.webview.chromium.LicenseContentProvider" />
+        <meta-data android:name="com.android.webview.WebViewLibrary"
+                   android:value="libwebviewchromium.so" />
     </application>
 </manifest>

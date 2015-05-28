@@ -36,6 +36,19 @@ static bool MaybePrintResultsForAudioReceive(
   perf_test::PrintResult(
       "audio_misc", modifier, "packets_lost", value, "frames", false);
 
+  EXPECT_TRUE(pc_dict.GetString(Statistic("googExpandRate", ssrc), &value));
+  perf_test::PrintResult(
+      "audio_rates", modifier, "goog_expand_rate", value, "%", false);
+  EXPECT_TRUE(
+      pc_dict.GetString(Statistic("googSpeechExpandRate", ssrc), &value));
+  perf_test::PrintResult(
+      "audio_rates", modifier, "goog_speech_expand_rate", value, "%", false);
+  EXPECT_TRUE(
+      pc_dict.GetString(Statistic("googSecondaryDecodedRate", ssrc), &value));
+  perf_test::PrintResult(
+      "audio_rates", modifier, "goog_secondary_decoded_rate", value, "%",
+      false);
+
   return true;
 }
 
@@ -97,15 +110,6 @@ static bool MaybePrintResultsForVideoSend(
   perf_test::PrintResult("video_resolution", modifier, "goog_frame_height_sent",
                          value, "pixels", false);
 
-  EXPECT_TRUE(pc_dict.GetString(
-      Statistic("googCaptureJitterMs", ssrc), &value));
-  perf_test::PrintResult(
-      "video_tx", modifier, "goog_capture_jitter_ms", value, "ms", false);
-  EXPECT_TRUE(pc_dict.GetString(
-      Statistic("googCaptureQueueDelayMsPerS", ssrc), &value));
-  perf_test::PrintResult(
-      "video_tx", modifier, "goog_capture_queue_delay_ms_per_s",
-       value, "ms/s", false);
   EXPECT_TRUE(pc_dict.GetString(Statistic("googAvgEncodeMs", ssrc), &value));
   perf_test::PrintResult(
       "video_tx", modifier, "goog_avg_encode_ms", value, "ms", false);

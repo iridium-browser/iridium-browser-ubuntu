@@ -1,5 +1,5 @@
 {
-  'TOOLS': ['newlib', 'glibc', 'bionic', 'pnacl', 'linux'],
+  'TOOLS': ['newlib', 'glibc', 'bionic', 'pnacl', 'linux', 'mac', 'clang-newlib'],
   'SEARCH': [
     '.',
     'pepper',
@@ -40,7 +40,6 @@
         "kernel_wrap_bionic.cc",
         "kernel_wrap_dummy.cc",
         "kernel_wrap_glibc.cc",
-        "kernel_wrap_irt_ext.c",
         "kernel_wrap_newlib.cc",
         "kernel_wrap_win.cc",
         "log.c",
@@ -72,7 +71,6 @@
         "syscalls/fcntl.c",
         "syscalls/ftruncate.c",
         "syscalls/futimes.c",
-        "syscalls/getcwd.c",
         "syscalls/getwd.c",
         "syscalls/ioctl.c",
         "syscalls/isatty.c",
@@ -260,6 +258,12 @@
         "utime.h",
       ],
       'DEST': 'include/pnacl',
+    },
+    {
+      'FILES': [
+        "sys/mount.h",
+      ],
+      'DEST': 'include/mac',
     },
     {
       'FILES': [

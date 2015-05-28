@@ -5,16 +5,15 @@
 #include "content/renderer/pepper/content_decryptor_delegate.h"
 
 #include "base/callback_helpers.h"
-#include "base/debug/trace_event.h"
 #include "base/message_loop/message_loop_proxy.h"
 #include "base/metrics/sparse_histogram.h"
 #include "base/numerics/safe_conversions.h"
+#include "base/trace_event/trace_event.h"
 #include "content/renderer/pepper/ppb_buffer_impl.h"
 #include "media/base/audio_buffer.h"
 #include "media/base/audio_decoder_config.h"
 #include "media/base/bind_to_current_loop.h"
 #include "media/base/cdm_key_information.h"
-#include "media/base/cdm_promise.h"
 #include "media/base/channel_layout.h"
 #include "media/base/data_buffer.h"
 #include "media/base/decoder_buffer.h"
@@ -33,7 +32,6 @@
 #include "ppapi/thunk/ppb_buffer_api.h"
 #include "ui/gfx/geometry/rect.h"
 
-using media::CdmPromise;
 using media::Decryptor;
 using media::MediaKeys;
 using media::NewSessionCdmPromise;
@@ -270,6 +268,22 @@ PP_SessionType MediaSessionTypeToPpSessionType(
   }
 }
 
+PP_InitDataType MediaInitDataTypeToPpInitDataType(
+    media::EmeInitDataType init_data_type) {
+  switch (init_data_type) {
+    case media::EmeInitDataType::CENC:
+      return PP_INITDATATYPE_CENC;
+    case media::EmeInitDataType::KEYIDS:
+      return PP_INITDATATYPE_KEYIDS;
+    case media::EmeInitDataType::WEBM:
+      return PP_INITDATATYPE_WEBM;
+    case media::EmeInitDataType::UNKNOWN:
+      break;
+  }
+  NOTREACHED();
+  return PP_INITDATATYPE_KEYIDS;
+}
+
 MediaKeys::Exception PpExceptionTypeToMediaException(
     PP_CdmExceptionCode exception_code) {
   switch (exception_code) {
@@ -304,6 +318,10 @@ media::CdmKeyInformation::KeyStatus PpCdmKeyStatusToCdmKeyInformationKeyStatus(
       return media::CdmKeyInformation::EXPIRED;
     case PP_CDMKEYSTATUS_OUTPUTNOTALLOWED:
       return media::CdmKeyInformation::OUTPUT_NOT_ALLOWED;
+    case PP_CDMKEYSTATUS_OUTPUTDOWNSCALED:
+      return media::CdmKeyInformation::OUTPUT_DOWNSCALED;
+    case PP_CDMKEYSTATUS_STATUSPENDING:
+      return media::CdmKeyInformation::KEY_STATUS_PENDING;
     default:
       NOTREACHED();
       return media::CdmKeyInformation::INTERNAL_ERROR;
@@ -354,12 +372,13 @@ ContentDecryptorDelegate::~ContentDecryptorDelegate() {
   SatisfyAllPendingCallbacksOnError();
 }
 
-// TODO(jrummell): Remove |session_ready_cb| and |session_keys_change_cb|.
 void ContentDecryptorDelegate::Initialize(
     const std::string& key_system,
+    bool allow_distinctive_identifier,
+    bool allow_persistent_state,
     const media::SessionMessageCB& session_message_cb,
     const media::SessionClosedCB& session_closed_cb,
-    const media::SessionErrorCB& session_error_cb,
+    const media::LegacySessionErrorCB& legacy_session_error_cb,
     const media::SessionKeysChangeCB& session_keys_change_cb,
     const media::SessionExpirationUpdateCB& session_expiration_update_cb,
     const base::Closure& fatal_plugin_error_cb) {
@@ -369,13 +388,15 @@ void ContentDecryptorDelegate::Initialize(
 
   session_message_cb_ = session_message_cb;
   session_closed_cb_ = session_closed_cb;
-  session_error_cb_ = session_error_cb;
+  legacy_session_error_cb_ = legacy_session_error_cb;
   session_keys_change_cb_ = session_keys_change_cb;
   session_expiration_update_cb_ = session_expiration_update_cb;
   fatal_plugin_error_cb_ = fatal_plugin_error_cb;
 
   plugin_decryption_interface_->Initialize(
-      pp_instance_, StringVar::StringToPPVar(key_system_));
+      pp_instance_, StringVar::StringToPPVar(key_system_),
+      PP_FromBool(allow_distinctive_identifier),
+      PP_FromBool(allow_persistent_state));
 }
 
 void ContentDecryptorDelegate::InstanceCrashed() {
@@ -405,7 +426,7 @@ void ContentDecryptorDelegate::SetServerCertificate(
 
 void ContentDecryptorDelegate::CreateSessionAndGenerateRequest(
     MediaKeys::SessionType session_type,
-    const std::string& init_data_type,
+    media::EmeInitDataType init_data_type,
     const uint8* init_data,
     int init_data_length,
     scoped_ptr<NewSessionCdmPromise> promise) {
@@ -415,21 +436,21 @@ void ContentDecryptorDelegate::CreateSessionAndGenerateRequest(
           init_data_length, init_data);
   plugin_decryption_interface_->CreateSessionAndGenerateRequest(
       pp_instance_, promise_id, MediaSessionTypeToPpSessionType(session_type),
-      StringVar::StringToPPVar(init_data_type), init_data_array);
+      MediaInitDataTypeToPpInitDataType(init_data_type), init_data_array);
 }
 
 void ContentDecryptorDelegate::LoadSession(
     media::MediaKeys::SessionType session_type,
-    const std::string& web_session_id,
+    const std::string& session_id,
     scoped_ptr<NewSessionCdmPromise> promise) {
   uint32_t promise_id = cdm_promise_adapter_.SavePromise(promise.Pass());
   plugin_decryption_interface_->LoadSession(
       pp_instance_, promise_id, MediaSessionTypeToPpSessionType(session_type),
-      StringVar::StringToPPVar(web_session_id));
+      StringVar::StringToPPVar(session_id));
 }
 
 void ContentDecryptorDelegate::UpdateSession(
-    const std::string& web_session_id,
+    const std::string& session_id,
     const uint8* response,
     int response_length,
     scoped_ptr<SimpleCdmPromise> promise) {
@@ -438,16 +459,14 @@ void ContentDecryptorDelegate::UpdateSession(
       PpapiGlobals::Get()->GetVarTracker()->MakeArrayBufferPPVar(
           response_length, response);
   plugin_decryption_interface_->UpdateSession(
-      pp_instance_,
-      promise_id,
-      StringVar::StringToPPVar(web_session_id),
+      pp_instance_, promise_id, StringVar::StringToPPVar(session_id),
       response_array);
 }
 
 void ContentDecryptorDelegate::CloseSession(
-    const std::string& web_session_id,
+    const std::string& session_id,
     scoped_ptr<SimpleCdmPromise> promise) {
-  if (web_session_id.length() > media::limits::kMaxWebSessionIdLength) {
+  if (session_id.length() > media::limits::kMaxSessionIdLength) {
     promise->reject(
         media::MediaKeys::INVALID_ACCESS_ERROR, 0, "Incorrect session.");
     return;
@@ -455,13 +474,13 @@ void ContentDecryptorDelegate::CloseSession(
 
   uint32_t promise_id = cdm_promise_adapter_.SavePromise(promise.Pass());
   plugin_decryption_interface_->CloseSession(
-      pp_instance_, promise_id, StringVar::StringToPPVar(web_session_id));
+      pp_instance_, promise_id, StringVar::StringToPPVar(session_id));
 }
 
 void ContentDecryptorDelegate::RemoveSession(
-    const std::string& web_session_id,
+    const std::string& session_id,
     scoped_ptr<SimpleCdmPromise> promise) {
-  if (web_session_id.length() > media::limits::kMaxWebSessionIdLength) {
+  if (session_id.length() > media::limits::kMaxSessionIdLength) {
     promise->reject(
         media::MediaKeys::INVALID_ACCESS_ERROR, 0, "Incorrect session.");
     return;
@@ -469,7 +488,7 @@ void ContentDecryptorDelegate::RemoveSession(
 
   uint32_t promise_id = cdm_promise_adapter_.SavePromise(promise.Pass());
   plugin_decryption_interface_->RemoveSession(
-      pp_instance_, promise_id, StringVar::StringToPPVar(web_session_id));
+      pp_instance_, promise_id, StringVar::StringToPPVar(session_id));
 }
 
 // TODO(xhwang): Remove duplication of code in Decrypt(),
@@ -716,34 +735,14 @@ bool ContentDecryptorDelegate::DecryptAndDecodeVideo(
 }
 
 void ContentDecryptorDelegate::OnPromiseResolved(uint32 promise_id) {
-  scoped_ptr<CdmPromise> promise = cdm_promise_adapter_.TakePromise(promise_id);
-  if (!promise ||
-      promise->GetResolveParameterType() != media::CdmPromise::VOID_TYPE) {
-    NOTREACHED();
-    return;
-  }
-
-  SimpleCdmPromise* simple_promise =
-      static_cast<SimpleCdmPromise*>(promise.get());
-  simple_promise->resolve();
+  cdm_promise_adapter_.ResolvePromise(promise_id);
 }
 
-void ContentDecryptorDelegate::OnPromiseResolvedWithSession(
-    uint32 promise_id,
-    PP_Var web_session_id) {
-  scoped_ptr<CdmPromise> promise = cdm_promise_adapter_.TakePromise(promise_id);
-  if (!promise ||
-      promise->GetResolveParameterType() != media::CdmPromise::STRING_TYPE) {
-    NOTREACHED();
-    return;
-  }
-
-  StringVar* web_session_id_string = StringVar::FromPPVar(web_session_id);
-  DCHECK(web_session_id_string);
-
-  NewSessionCdmPromise* session_promise =
-      static_cast<NewSessionCdmPromise*>(promise.get());
-  session_promise->resolve(web_session_id_string->value());
+void ContentDecryptorDelegate::OnPromiseResolvedWithSession(uint32 promise_id,
+                                                            PP_Var session_id) {
+  StringVar* session_id_string = StringVar::FromPPVar(session_id);
+  DCHECK(session_id_string);
+  cdm_promise_adapter_.ResolvePromise(promise_id, session_id_string->value());
 }
 
 void ContentDecryptorDelegate::OnPromiseRejected(
@@ -755,25 +754,20 @@ void ContentDecryptorDelegate::OnPromiseRejected(
 
   StringVar* error_description_string = StringVar::FromPPVar(error_description);
   DCHECK(error_description_string);
-
-  scoped_ptr<CdmPromise> promise = cdm_promise_adapter_.TakePromise(promise_id);
-  DCHECK(promise);
-  if (promise) {
-    promise->reject(PpExceptionTypeToMediaException(exception_code),
-                    system_code,
-                    error_description_string->value());
-  }
+  cdm_promise_adapter_.RejectPromise(
+      promise_id, PpExceptionTypeToMediaException(exception_code), system_code,
+      error_description_string->value());
 }
 
-void ContentDecryptorDelegate::OnSessionMessage(PP_Var web_session_id,
+void ContentDecryptorDelegate::OnSessionMessage(PP_Var session_id,
                                                 PP_CdmMessageType message_type,
                                                 PP_Var message,
                                                 PP_Var legacy_destination_url) {
   if (session_message_cb_.is_null())
     return;
 
-  StringVar* web_session_id_string = StringVar::FromPPVar(web_session_id);
-  DCHECK(web_session_id_string);
+  StringVar* session_id_string = StringVar::FromPPVar(session_id);
+  DCHECK(session_id_string);
 
   ArrayBufferVar* message_array_buffer = ArrayBufferVar::FromPPVar(message);
   std::vector<uint8> message_vector;
@@ -796,21 +790,21 @@ void ContentDecryptorDelegate::OnSessionMessage(PP_Var web_session_id,
     verified_gurl = GURL::EmptyGURL();  // Replace invalid destination_url.
   }
 
-  session_message_cb_.Run(web_session_id_string->value(),
+  session_message_cb_.Run(session_id_string->value(),
                           PpCdmMessageTypeToMediaMessageType(message_type),
                           message_vector, verified_gurl);
 }
 
 void ContentDecryptorDelegate::OnSessionKeysChange(
-    PP_Var web_session_id,
+    PP_Var session_id,
     PP_Bool has_additional_usable_key,
     uint32_t key_count,
     const struct PP_KeyInformation key_information[]) {
   if (session_keys_change_cb_.is_null())
     return;
 
-  StringVar* web_session_id_string = StringVar::FromPPVar(web_session_id);
-  DCHECK(web_session_id_string);
+  StringVar* session_id_string = StringVar::FromPPVar(session_id);
+  DCHECK(session_id_string);
 
   media::CdmKeysInfo keys_info;
   keys_info.reserve(key_count);
@@ -824,54 +818,53 @@ void ContentDecryptorDelegate::OnSessionKeysChange(
     keys_info.push_back(key_info.release());
   }
 
-  session_keys_change_cb_.Run(web_session_id_string->value(),
+  session_keys_change_cb_.Run(session_id_string->value(),
                               PP_ToBool(has_additional_usable_key),
                               keys_info.Pass());
 }
 
 void ContentDecryptorDelegate::OnSessionExpirationChange(
-    PP_Var web_session_id,
+    PP_Var session_id,
     PP_Time new_expiry_time) {
   if (session_expiration_update_cb_.is_null())
     return;
 
-  StringVar* web_session_id_string = StringVar::FromPPVar(web_session_id);
-  DCHECK(web_session_id_string);
+  StringVar* session_id_string = StringVar::FromPPVar(session_id);
+  DCHECK(session_id_string);
 
-  session_expiration_update_cb_.Run(web_session_id_string->value(),
+  session_expiration_update_cb_.Run(session_id_string->value(),
                                     ppapi::PPTimeToTime(new_expiry_time));
 }
 
-void ContentDecryptorDelegate::OnSessionClosed(PP_Var web_session_id) {
+void ContentDecryptorDelegate::OnSessionClosed(PP_Var session_id) {
   if (session_closed_cb_.is_null())
     return;
 
-  StringVar* web_session_id_string = StringVar::FromPPVar(web_session_id);
-  DCHECK(web_session_id_string);
+  StringVar* session_id_string = StringVar::FromPPVar(session_id);
+  DCHECK(session_id_string);
 
-  session_closed_cb_.Run(web_session_id_string->value());
+  session_closed_cb_.Run(session_id_string->value());
 }
 
-void ContentDecryptorDelegate::OnSessionError(
-    PP_Var web_session_id,
+void ContentDecryptorDelegate::OnLegacySessionError(
+    PP_Var session_id,
     PP_CdmExceptionCode exception_code,
     uint32 system_code,
     PP_Var error_description) {
   ReportSystemCodeUMA(key_system_, system_code);
 
-  if (session_error_cb_.is_null())
+  if (legacy_session_error_cb_.is_null())
     return;
 
-  StringVar* web_session_id_string = StringVar::FromPPVar(web_session_id);
-  DCHECK(web_session_id_string);
+  StringVar* session_id_string = StringVar::FromPPVar(session_id);
+  DCHECK(session_id_string);
 
   StringVar* error_description_string = StringVar::FromPPVar(error_description);
   DCHECK(error_description_string);
 
-  session_error_cb_.Run(web_session_id_string->value(),
-                        PpExceptionTypeToMediaException(exception_code),
-                        system_code,
-                        error_description_string->value());
+  legacy_session_error_cb_.Run(session_id_string->value(),
+                               PpExceptionTypeToMediaException(exception_code),
+                               system_code, error_description_string->value());
 }
 
 void ContentDecryptorDelegate::DecoderInitializeDone(

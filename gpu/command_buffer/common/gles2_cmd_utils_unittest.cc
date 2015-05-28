@@ -232,8 +232,8 @@ TEST_F(GLES2UtilTest, ComputeImageDataSizeTypes) {
   EXPECT_TRUE(GLES2Util::ComputeImageDataSizes(
       kWidth, kHeight, 1, GL_DEPTH_STENCIL, GL_FLOAT_32_UNSIGNED_INT_24_8_REV,
       1, &size, &unpadded_row_size, &padded_row_size));
-  EXPECT_EQ(kWidth * kHeight * 4, size);
-  EXPECT_EQ(kWidth * 4, padded_row_size);
+  EXPECT_EQ(kWidth * kHeight * 8, size);
+  EXPECT_EQ(kWidth * 8, padded_row_size);
   EXPECT_EQ(padded_row_size, unpadded_row_size);
 }
 
@@ -390,6 +390,7 @@ TEST_F(GLES2UtilTest, ParseUniformName) {
   CheckParseUniformName("u_name[03][02]", true, 10u, 2, true);
   CheckParseUniformName("u_name[30][20]", true, 10u, 20, true);
   CheckParseUniformName("u_name[030][020]", true, 11u, 20, true);
+  CheckParseUniformName("", false, std::string::npos, 0, false);
 }
 
 }  // namespace gles2

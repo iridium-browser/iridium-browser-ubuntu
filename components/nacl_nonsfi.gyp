@@ -39,6 +39,7 @@
             # Rename the output binary file to nacl_helper_nonsfi and put it
             # directly under out/{Debug,Release}/.
             'out_newlib32_nonsfi': '<(PRODUCT_DIR)/nacl_helper_nonsfi',
+            'out_newlib_arm_nonsfi': '<(PRODUCT_DIR)/nacl_helper_nonsfi',
 
             'build_glibc': 0,
             'build_newlib': 0,
@@ -48,16 +49,17 @@
 
             'sources': [
               'nacl/common/nacl_messages.cc',
+              'nacl/common/nacl_switches.cc',
               'nacl/common/nacl_types.cc',
               'nacl/common/nacl_types_param_traits.cc',
               'nacl/loader/nacl_helper_linux.cc',
               'nacl/loader/nacl_trusted_listener.cc',
               'nacl/loader/nonsfi/nonsfi_listener.cc',
               'nacl/loader/nonsfi/nonsfi_main.cc',
+              'nacl/loader/sandbox_linux/nacl_sandbox_linux.cc',
             ],
 
             'link_flags': [
-              '-Wl,--start-group',
               '-lbase_nacl_nonsfi',
               '-lcommand_buffer_client_nacl',
               '-lcommand_buffer_common_nacl',
@@ -75,9 +77,9 @@
               '-lppapi_ipc_nacl',
               '-lppapi_proxy_nacl',
               '-lppapi_shared_nacl',
+              '-lsandbox_nacl_nonsfi',
               '-lshared_memory_support_nacl',
               '-ltracing_nacl',
-              '-Wl,--end-group',
             ],
 
             'conditions': [
@@ -100,6 +102,7 @@
                   '>(tc_lib_dir_nonsfi_helper32)/libppapi_ipc_nacl.a',
                   '>(tc_lib_dir_nonsfi_helper32)/libppapi_proxy_nacl.a',
                   '>(tc_lib_dir_nonsfi_helper32)/libppapi_shared_nacl.a',
+                  '>(tc_lib_dir_nonsfi_helper32)/libsandbox_nacl_nonsfi.a',
                   '>(tc_lib_dir_nonsfi_helper32)/libshared_memory_support_nacl.a',
                   '>(tc_lib_dir_nonsfi_helper32)/libtracing_nacl.a',
                 ],
@@ -123,6 +126,7 @@
                   '>(tc_lib_dir_nonsfi_helper_arm)/libppapi_ipc_nacl.a',
                   '>(tc_lib_dir_nonsfi_helper_arm)/libppapi_proxy_nacl.a',
                   '>(tc_lib_dir_nonsfi_helper_arm)/libppapi_shared_nacl.a',
+                  '>(tc_lib_dir_nonsfi_helper_arm)/libsandbox_nacl_nonsfi.a',
                   '>(tc_lib_dir_nonsfi_helper_arm)/libshared_memory_support_nacl.a',
                   '>(tc_lib_dir_nonsfi_helper_arm)/libtracing_nacl.a',
                 ],
@@ -138,6 +142,7 @@
             '../native_client/src/untrusted/nacl/nacl.gyp:nacl_lib_newlib',
             '../native_client/tools.gyp:prep_toolchain',
             '../ppapi/ppapi_proxy_nacl.gyp:ppapi_proxy_nacl',
+            '../sandbox/sandbox_nacl_nonsfi.gyp:sandbox_nacl_nonsfi',
           ],
         },
         # TODO(hidehiko): Add Non-SFI version of nacl_loader_unittests.

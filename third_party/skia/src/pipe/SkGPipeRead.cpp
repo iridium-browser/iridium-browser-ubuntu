@@ -162,7 +162,7 @@ public:
      * these SkBitmaps for bitmap shaders. Used only in cross process mode
      * without a shared heap.
      */
-    virtual SkBitmap* getBitmap(int32_t index) const SK_OVERRIDE {
+    SkBitmap* getBitmap(int32_t index) const override {
         SkASSERT(shouldFlattenBitmaps(fFlags));
         return fBitmaps[index];
     }
@@ -170,7 +170,7 @@ public:
     /**
      * Needed to be a non-abstract subclass of SkBitmapHeapReader.
      */
-    virtual void releaseRef(int32_t) SK_OVERRIDE {}
+    void releaseRef(int32_t) override {}
 
     void setSharedHeap(SkBitmapHeap* heap) {
         SkASSERT(!shouldFlattenBitmaps(fFlags) || NULL == heap);
@@ -344,15 +344,6 @@ static void restore_rp(SkCanvas* canvas, SkReader32* reader, uint32_t op32,
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-
-static void drawClear_rp(SkCanvas* canvas, SkReader32* reader, uint32_t op32,
-                         SkGPipeState* state) {
-    SkColor color = 0;
-    if (DrawOp_unpackFlags(op32) & kClear_HasColor_DrawOpFlag) {
-        color = reader->readU32();
-    }
-    canvas->clear(color);
-}
 
 static void drawPaint_rp(SkCanvas* canvas, SkReader32* reader, uint32_t op32,
                          SkGPipeState* state) {
@@ -691,7 +682,7 @@ static void paintOp_rp(SkCanvas*, SkReader32* reader, uint32_t op32,
             case kReset_PaintOp: p->reset(); break;
             case kFlags_PaintOp: p->setFlags(data); break;
             case kColor_PaintOp: p->setColor(reader->readU32()); break;
-            case kFilterLevel_PaintOp: p->setFilterLevel((SkPaint::FilterLevel)data); break;
+            case kFilterLevel_PaintOp: p->setFilterQuality((SkFilterQuality)data); break;
             case kStyle_PaintOp: p->setStyle((SkPaint::Style)data); break;
             case kJoin_PaintOp: p->setStrokeJoin((SkPaint::Join)data); break;
             case kCap_PaintOp: p->setStrokeCap((SkPaint::Cap)data); break;
@@ -801,7 +792,6 @@ static const ReadProc gReadTable[] = {
     drawBitmap_rp,
     drawBitmapNine_rp,
     drawBitmapRect_rp,
-    drawClear_rp,
     drawDRRect_rp,
     drawOval_rp,
     drawPaint_rp,

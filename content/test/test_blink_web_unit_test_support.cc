@@ -4,14 +4,14 @@
 
 #include "content/test/test_blink_web_unit_test_support.h"
 
-#include "base/command_line.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
 #include "base/files/scoped_temp_dir.h"
-#include "base/metrics/stats_counters.h"
 #include "base/path_service.h"
 #include "base/strings/utf_string_conversions.h"
-#include "content/public/common/content_switches.h"
+#include "content/renderer/scheduler/renderer_scheduler.h"
+#include "content/renderer/scheduler/web_scheduler_impl.h"
+#include "content/renderer/scheduler/webthread_impl_for_scheduler.h"
 #include "content/test/mock_webclipboard_impl.h"
 #include "content/test/web_gesture_curve_mock.h"
 #include "content/test/web_layer_tree_view_impl_for_testing.h"
@@ -52,19 +52,17 @@ TestBlinkWebUnitTestSupport::TestBlinkWebUnitTestSupport() {
   url_loader_factory_.reset(new WebURLLoaderMockFactory());
   mock_clipboard_.reset(new MockWebClipboardImpl());
 
-  // Create an anonymous stats table since we don't need to share between
-  // processes.
-  stats_table_.reset(
-      new base::StatsTable(base::StatsTable::TableIdentifier(), 20, 200));
-  base::StatsTable::set_current(stats_table_.get());
-
 #ifdef V8_USE_EXTERNAL_STARTUP_DATA
   gin::IsolateHolder::LoadV8Snapshot();
 #endif
 
+  if (base::MessageLoopProxy::current()) {
+    renderer_scheduler_ = RendererScheduler::Create();
+    web_scheduler_.reset(new WebSchedulerImpl(renderer_scheduler_.get()));
+    web_thread_.reset(new WebThreadImplForScheduler(renderer_scheduler_.get()));
+  }
+
   blink::initialize(this);
-  blink::mainThreadIsolate()->SetCounterFunction(
-      base::StatsTable::FindLocation);
   blink::setLayoutTestMode(true);
   blink::WebSecurityPolicy::registerURLSchemeAsLocal(
       blink::WebString::fromUTF8("test-shell-resource"));
@@ -106,9 +104,6 @@ TestBlinkWebUnitTestSupport::TestBlinkWebUnitTestSupport() {
   SetThemeEngine(NULL);
 #endif
 
-  base::CommandLine::ForCurrentProcess()->AppendSwitch(
-      switches::kEnableFileCookies);
-
   // Test shell always exposes the GC.
   std::string flags("--expose-gc");
   v8::V8::SetFlagsFromString(flags.c_str(), static_cast<int>(flags.size()));
@@ -117,9 +112,9 @@ TestBlinkWebUnitTestSupport::TestBlinkWebUnitTestSupport() {
 TestBlinkWebUnitTestSupport::~TestBlinkWebUnitTestSupport() {
   url_loader_factory_.reset();
   mock_clipboard_.reset();
+  if (renderer_scheduler_)
+    renderer_scheduler_->Shutdown();
   blink::shutdown();
-  base::StatsTable::set_current(NULL);
-  stats_table_.reset();
 }
 
 blink::WebBlobRegistry* TestBlinkWebUnitTestSupport::blobRegistry() {
@@ -317,6 +312,16 @@ bool TestBlinkWebUnitTestSupport::getBlobItems(
     const blink::WebString& uuid,
     blink::WebVector<blink::WebBlobData::Item*>* items) {
   return blob_registry_.GetBlobItems(uuid, items);
+}
+
+blink::WebScheduler* TestBlinkWebUnitTestSupport::scheduler() {
+  return web_scheduler_.get();
+}
+
+blink::WebThread* TestBlinkWebUnitTestSupport::currentThread() {
+  if (web_thread_ && web_thread_->isCurrentThread())
+    return web_thread_.get();
+  return BlinkPlatformImpl::currentThread();
 }
 
 }  // namespace content

@@ -19,25 +19,23 @@ class MIDIOptions;
 class ScriptState;
 
 class MIDIAccessInitializer : public ScriptPromiseResolver, public MIDIAccessorClient {
-#if ENABLE(OILPAN)
-    USING_PRE_FINALIZER(MIDIAccessInitializer, dispose);
-#endif
+    WILL_BE_USING_PRE_FINALIZER(MIDIAccessInitializer, dispose);
 public:
     struct PortDescriptor {
         String id;
         String manufacturer;
         String name;
-        MIDIPort::MIDIPortTypeCode type;
+        MIDIPort::TypeCode type;
         String version;
-        bool isActive;
+        MIDIAccessor::MIDIPortState state;
 
-        PortDescriptor(const String& id, const String& manufacturer, const String& name, MIDIPort::MIDIPortTypeCode type, const String& version, bool isActive)
+        PortDescriptor(const String& id, const String& manufacturer, const String& name, MIDIPort::TypeCode type, const String& version, MIDIAccessor::MIDIPortState state)
             : id(id)
             , manufacturer(manufacturer)
             , name(name)
             , type(type)
             , version(version)
-            , isActive(isActive) { }
+            , state(state) { }
     };
 
     static ScriptPromise start(ScriptState* scriptState, const MIDIOptions& options)
@@ -48,15 +46,15 @@ public:
         return resolver->start();
     }
 
-    virtual ~MIDIAccessInitializer();
+    ~MIDIAccessInitializer() override;
 
     // MIDIAccessorClient
-    virtual void didAddInputPort(const String& id, const String& manufacturer, const String& name, const String& version, bool isActive) override;
-    virtual void didAddOutputPort(const String& id, const String& manufacturer, const String& name, const String& version, bool isActive) override;
-    virtual void didSetInputPortState(unsigned portIndex, bool isActive) override;
-    virtual void didSetOutputPortState(unsigned portIndex, bool isActive) override;
-    virtual void didStartSession(bool success, const String& error, const String& message) override;
-    virtual void didReceiveMIDIData(unsigned portIndex, const unsigned char* data, size_t length, double timeStamp) override { }
+    void didAddInputPort(const String& id, const String& manufacturer, const String& name, const String& version, MIDIAccessor::MIDIPortState) override;
+    void didAddOutputPort(const String& id, const String& manufacturer, const String& name, const String& version, MIDIAccessor::MIDIPortState) override;
+    void didSetInputPortState(unsigned portIndex, MIDIAccessor::MIDIPortState) override;
+    void didSetOutputPortState(unsigned portIndex, MIDIAccessor::MIDIPortState) override;
+    void didStartSession(bool success, const String& error, const String& message) override;
+    void didReceiveMIDIData(unsigned portIndex, const unsigned char* data, size_t length, double timeStamp) override { }
 
     void resolveSysexPermission(bool allowed);
     SecurityOrigin* securityOrigin() const;
@@ -68,12 +66,15 @@ private:
     ScriptPromise start();
     void dispose();
 
+    virtual void contextDestroyed() override;
+
     OwnPtr<MIDIAccessor> m_accessor;
     Vector<PortDescriptor> m_portDescriptors;
     bool m_requestSysex;
+    bool m_hasBeenDisposed;
+    bool m_sysexPermissionResolved;
 };
 
 } // namespace blink
-
 
 #endif // MIDIAccessInitializer_h

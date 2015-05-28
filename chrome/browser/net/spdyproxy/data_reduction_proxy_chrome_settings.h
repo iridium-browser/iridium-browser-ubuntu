@@ -5,25 +5,21 @@
 #ifndef CHROME_BROWSER_NET_SPDYPROXY_DATA_REDUCTION_PROXY_CHROME_SETTINGS_H_
 #define CHROME_BROWSER_NET_SPDYPROXY_DATA_REDUCTION_PROXY_CHROME_SETTINGS_H_
 
-#include "base/memory/scoped_ptr.h"
-#include "base/memory/weak_ptr.h"
-#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_auth_request_handler.h"
+#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_request_options.h"
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_settings.h"
 #include "components/keyed_service/core/keyed_service.h"
 
-namespace base {
 class PrefService;
+
+namespace base {
+class SingleThreadTaskRunner;
 }
 
 namespace data_reduction_proxy {
-class DataReductionProxyConfigurator;
-class DataReductionProxyEventStore;
-class DataReductionProxyParams;
-class DataReductionProxyStatisticsPrefs;
+class DataReductionProxyIOData;
 }
 
 namespace net {
-class NetLog;
 class URLRequestContextGetter;
 }
 
@@ -35,35 +31,31 @@ class DataReductionProxyChromeSettings
     : public data_reduction_proxy::DataReductionProxySettings,
       public KeyedService {
  public:
-  // Constructs a settings object with the given configuration parameters.
-  // Construction and destruction must happen on the UI thread.
-  explicit DataReductionProxyChromeSettings(
-      data_reduction_proxy::DataReductionProxyParams* params);
+  // Constructs a settings object. Construction and destruction must happen on
+  // the UI thread.
+  DataReductionProxyChromeSettings();
 
   // Destructs the settings object.
   ~DataReductionProxyChromeSettings() override;
 
-  // Initialize the settings object with the given configurator, prefs services,
-  // and request context. Settings takes ownership of statistics prefs from
-  // |io_data|.
+  // Overrides KeyedService::Shutdown:
+  void Shutdown() override;
+
+  // Initialize the settings object with the given io_data, prefs services,
+  // request context getter, and task runner.
   void InitDataReductionProxySettings(
-      data_reduction_proxy::DataReductionProxyConfigurator* configurator,
+      data_reduction_proxy::DataReductionProxyIOData* io_data,
       PrefService* profile_prefs,
-      PrefService* local_state_prefs,
-      scoped_ptr<data_reduction_proxy::DataReductionProxyStatisticsPrefs>
-          statistics_prefs,
-      net::URLRequestContextGetter* request_context,
-      net::NetLog* net_log,
-      data_reduction_proxy::DataReductionProxyEventStore* event_store);
+      net::URLRequestContextGetter* request_context_getter,
+      const scoped_refptr<base::SingleThreadTaskRunner>& ui_task_runner);
 
   // Gets the client type for the data reduction proxy.
   static data_reduction_proxy::Client GetClient();
 
- private:
-  // Registers the DataReductionProxyEnabled synthetic field trial with
-  // the group |data_reduction_proxy_enabled|.
-  void RegisterSyntheticFieldTrial(bool data_reduction_proxy_enabled);
+  // Public for testing.
+  void MigrateDataReductionProxyOffProxyPrefs(PrefService* prefs);
 
+ private:
   DISALLOW_COPY_AND_ASSIGN(DataReductionProxyChromeSettings);
 };
 

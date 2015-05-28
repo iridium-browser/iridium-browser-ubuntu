@@ -49,10 +49,8 @@ public:
 #ifdef SK_GAMMA_APPLY_TO_A8
     static GrGeometryProcessor* Create(GrColor color, const SkMatrix& viewMatrix, GrTexture* tex,
                                        const GrTextureParams& params,
-                                       GrTexture* gamma, const GrTextureParams& gammaParams,
                                        float lum, uint32_t flags, bool opaqueVertexColors) {
-       return SkNEW_ARGS(GrDistanceFieldTextureEffect, (color, viewMatrix, tex, params, gamma,
-                                                        gammaParams, lum,
+       return SkNEW_ARGS(GrDistanceFieldTextureEffect, (color, viewMatrix, tex, params, lum,
                                                         flags, opaqueVertexColors));
     }
 #else
@@ -66,49 +64,49 @@ public:
 
     virtual ~GrDistanceFieldTextureEffect() {}
 
-    virtual const char* name() const SK_OVERRIDE { return "DistanceFieldTexture"; }
+    const char* name() const override { return "DistanceFieldTexture"; }
 
-    const GrAttribute* inPosition() const { return fInPosition; }
-    const GrAttribute* inColor() const { return fInColor; }
-    const GrAttribute* inTextureCoords() const { return fInTextureCoords; }
+    const Attribute* inPosition() const { return fInPosition; }
+    const Attribute* inColor() const { return fInColor; }
+    const Attribute* inTextureCoords() const { return fInTextureCoords; }
 #ifdef SK_GAMMA_APPLY_TO_A8
-    float getLuminance() const { return fLuminance; }
+    float getDistanceAdjust() const { return fDistanceAdjust; }
 #endif
     uint32_t getFlags() const { return fFlags; }
 
     virtual void getGLProcessorKey(const GrBatchTracker& bt,
                                    const GrGLCaps& caps,
-                                   GrProcessorKeyBuilder* b) const SK_OVERRIDE;
+                                   GrProcessorKeyBuilder* b) const override;
 
-    virtual GrGLGeometryProcessor* createGLInstance(const GrBatchTracker& bt) const SK_OVERRIDE;
+    virtual GrGLPrimitiveProcessor* createGLInstance(const GrBatchTracker& bt,
+                                                     const GrGLCaps&) const override;
 
-    void initBatchTracker(GrBatchTracker* bt, const InitBT& init) const SK_OVERRIDE;
+    void initBatchTracker(GrBatchTracker* bt, const GrPipelineInfo& init) const override;
 
     bool onCanMakeEqual(const GrBatchTracker&,
                         const GrGeometryProcessor&,
-                        const GrBatchTracker&) const SK_OVERRIDE;
+                        const GrBatchTracker&) const override;
 
 private:
     GrDistanceFieldTextureEffect(GrColor, const SkMatrix& viewMatrix, GrTexture* texture,
                                  const GrTextureParams& params,
 #ifdef SK_GAMMA_APPLY_TO_A8
-                                 GrTexture* gamma, const GrTextureParams& gammaParams, float lum,
+                                 float distanceAdjust,
 #endif
                                  uint32_t flags, bool opaqueVertexColors);
 
-    virtual bool onIsEqual(const GrGeometryProcessor& other) const SK_OVERRIDE;
+    bool onIsEqual(const GrGeometryProcessor& other) const override;
 
-    virtual void onGetInvariantOutputCoverage(GrInitInvariantOutput*) const SK_OVERRIDE;
+    void onGetInvariantOutputCoverage(GrInitInvariantOutput*) const override;
 
-    GrTextureAccess    fTextureAccess;
+    GrTextureAccess  fTextureAccess;
 #ifdef SK_GAMMA_APPLY_TO_A8
-    GrTextureAccess    fGammaTextureAccess;
-    float              fLuminance;
+    float            fDistanceAdjust;
 #endif
-    uint32_t           fFlags;
-    const GrAttribute* fInPosition;
-    const GrAttribute* fInColor;
-    const GrAttribute* fInTextureCoords;
+    uint32_t         fFlags;
+    const Attribute* fInPosition;
+    const Attribute* fInColor;
+    const Attribute* fInTextureCoords;
 
     GR_DECLARE_GEOMETRY_PROCESSOR_TEST;
 
@@ -133,39 +131,40 @@ public:
 
     virtual ~GrDistanceFieldNoGammaTextureEffect() {}
 
-    virtual const char* name() const SK_OVERRIDE { return "DistanceFieldTexture"; }
+    const char* name() const override { return "DistanceFieldTexture"; }
 
-    const GrAttribute* inPosition() const { return fInPosition; }
-    const GrAttribute* inColor() const { return fInColor; }
-    const GrAttribute* inTextureCoords() const { return fInTextureCoords; }
+    const Attribute* inPosition() const { return fInPosition; }
+    const Attribute* inColor() const { return fInColor; }
+    const Attribute* inTextureCoords() const { return fInTextureCoords; }
     uint32_t getFlags() const { return fFlags; }
 
     virtual void getGLProcessorKey(const GrBatchTracker& bt,
                                    const GrGLCaps& caps,
-                                   GrProcessorKeyBuilder* b) const SK_OVERRIDE;
+                                   GrProcessorKeyBuilder* b) const override;
 
-    virtual GrGLGeometryProcessor* createGLInstance(const GrBatchTracker& bt) const SK_OVERRIDE;
+    virtual GrGLPrimitiveProcessor* createGLInstance(const GrBatchTracker& bt,
+                                                     const GrGLCaps&) const override;
 
-    void initBatchTracker(GrBatchTracker* bt, const InitBT& init) const SK_OVERRIDE;
+    void initBatchTracker(GrBatchTracker* bt, const GrPipelineInfo& init) const override;
 
     bool onCanMakeEqual(const GrBatchTracker&,
                         const GrGeometryProcessor&,
-                        const GrBatchTracker&) const SK_OVERRIDE;
+                        const GrBatchTracker&) const override;
 
 private:
     GrDistanceFieldNoGammaTextureEffect(GrColor, const SkMatrix& viewMatrix, GrTexture* texture,
                                         const GrTextureParams& params, uint32_t flags,
                                         bool opaqueVertexColors);
 
-    virtual bool onIsEqual(const GrGeometryProcessor& other) const SK_OVERRIDE;
+    bool onIsEqual(const GrGeometryProcessor& other) const override;
 
-    virtual void onGetInvariantOutputCoverage(GrInitInvariantOutput*) const SK_OVERRIDE;
+    void onGetInvariantOutputCoverage(GrInitInvariantOutput*) const override;
 
     GrTextureAccess    fTextureAccess;
     uint32_t           fFlags;
-    const GrAttribute* fInPosition;
-    const GrAttribute* fInColor;
-    const GrAttribute* fInTextureCoords;
+    const Attribute* fInPosition;
+    const Attribute* fInColor;
+    const Attribute* fInTextureCoords;
 
     GR_DECLARE_GEOMETRY_PROCESSOR_TEST;
 
@@ -180,51 +179,64 @@ private:
  */
 class GrDistanceFieldLCDTextureEffect : public GrGeometryProcessor {
 public:
+    struct DistanceAdjust {
+        SkScalar fR, fG, fB;
+        static DistanceAdjust Make(SkScalar r, SkScalar g, SkScalar b) {
+            DistanceAdjust result;
+            result.fR = r; result.fG = g; result.fB = b;
+            return result;
+        }
+        bool operator==(const DistanceAdjust& wa) const {
+            return (fR == wa.fR && fG == wa.fG && fB == wa.fB);
+        }
+        bool operator!=(const DistanceAdjust& wa) const {
+            return !(*this == wa);
+        }
+    };
+
     static GrGeometryProcessor* Create(GrColor color, const SkMatrix& viewMatrix, GrTexture* tex,
-                                       const GrTextureParams& params, GrTexture* gamma,
-                                       const GrTextureParams& gammaParams,
-                                       SkColor textColor, uint32_t flags) {
+                                       const GrTextureParams& params, 
+                                       DistanceAdjust distanceAdjust, uint32_t flags) {
         return SkNEW_ARGS(GrDistanceFieldLCDTextureEffect,
-                          (color, viewMatrix, tex, params, gamma, gammaParams, textColor, flags));
+                          (color, viewMatrix, tex, params, distanceAdjust, flags));
     }
 
     virtual ~GrDistanceFieldLCDTextureEffect() {}
 
-    virtual const char* name() const SK_OVERRIDE { return "DistanceFieldLCDTexture"; }
+    const char* name() const override { return "DistanceFieldLCDTexture"; }
 
-    const GrAttribute* inPosition() const { return fInPosition; }
-    const GrAttribute* inTextureCoords() const { return fInTextureCoords; }
-    GrColor getTextColor() const { return fTextColor; }
+    const Attribute* inPosition() const { return fInPosition; }
+    const Attribute* inTextureCoords() const { return fInTextureCoords; }
+    DistanceAdjust getDistanceAdjust() const { return fDistanceAdjust; }
     uint32_t getFlags() const { return fFlags; }
 
     virtual void getGLProcessorKey(const GrBatchTracker& bt,
                                    const GrGLCaps& caps,
-                                   GrProcessorKeyBuilder* b) const SK_OVERRIDE;
+                                   GrProcessorKeyBuilder* b) const override;
 
-    virtual GrGLGeometryProcessor* createGLInstance(const GrBatchTracker& bt) const SK_OVERRIDE;
+    virtual GrGLPrimitiveProcessor* createGLInstance(const GrBatchTracker& bt,
+                                                     const GrGLCaps&) const override;
 
-    void initBatchTracker(GrBatchTracker* bt, const InitBT& init) const SK_OVERRIDE;
+    void initBatchTracker(GrBatchTracker* bt, const GrPipelineInfo& init) const override;
 
     bool onCanMakeEqual(const GrBatchTracker&,
                         const GrGeometryProcessor&,
-                        const GrBatchTracker&) const SK_OVERRIDE;
+                        const GrBatchTracker&) const override;
 
 private:
     GrDistanceFieldLCDTextureEffect(GrColor, const SkMatrix& viewMatrix, GrTexture* texture,
                                     const GrTextureParams& params,
-                                    GrTexture* gamma, const GrTextureParams& gammaParams,
-                                    SkColor textColor, uint32_t flags);
+                                    DistanceAdjust wa, uint32_t flags);
 
-    virtual bool onIsEqual(const GrGeometryProcessor& other) const SK_OVERRIDE;
+    bool onIsEqual(const GrGeometryProcessor& other) const override;
 
-    virtual void onGetInvariantOutputCoverage(GrInitInvariantOutput*) const SK_OVERRIDE;
+    void onGetInvariantOutputCoverage(GrInitInvariantOutput*) const override;
 
-    GrTextureAccess    fTextureAccess;
-    GrTextureAccess    fGammaTextureAccess;
-    GrColor            fTextColor;
-    uint32_t           fFlags;
-    const GrAttribute* fInPosition;
-    const GrAttribute* fInTextureCoords;
+    GrTextureAccess  fTextureAccess;
+    DistanceAdjust   fDistanceAdjust;
+    uint32_t         fFlags;
+    const Attribute* fInPosition;
+    const Attribute* fInTextureCoords;
 
     GR_DECLARE_GEOMETRY_PROCESSOR_TEST;
 

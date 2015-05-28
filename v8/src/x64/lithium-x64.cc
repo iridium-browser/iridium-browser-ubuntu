@@ -268,6 +268,20 @@ void LInnerAllocatedObject::PrintDataTo(StringStream* stream) {
 }
 
 
+void LCallFunction::PrintDataTo(StringStream* stream) {
+  context()->PrintTo(stream);
+  stream->Add(" ");
+  function()->PrintTo(stream);
+  if (hydrogen()->HasVectorAndSlot()) {
+    stream->Add(" (type-feedback-vector ");
+    temp_vector()->PrintTo(stream);
+    stream->Add(" ");
+    temp_slot()->PrintTo(stream);
+    stream->Add(")");
+  }
+}
+
+
 void LCallJSFunction::PrintDataTo(StringStream* stream) {
   stream->Add("= ");
   function()->PrintTo(stream);
@@ -748,7 +762,8 @@ LInstruction* LChunkBuilder::DoArithmeticD(Token::Value op,
     LOperand* left = UseRegisterAtStart(instr->BetterLeftOperand());
     LOperand* right = UseRegisterAtStart(instr->BetterRightOperand());
     LArithmeticD* result = new(zone()) LArithmeticD(op, left, right);
-    return DefineSameAsFirst(result);
+    return CpuFeatures::IsSupported(AVX) ? DefineAsRegister(result)
+                                         : DefineSameAsFirst(result);
   }
 }
 
@@ -1259,7 +1274,14 @@ LInstruction* LChunkBuilder::DoCallNewArray(HCallNewArray* instr) {
 LInstruction* LChunkBuilder::DoCallFunction(HCallFunction* instr) {
   LOperand* context = UseFixed(instr->context(), rsi);
   LOperand* function = UseFixed(instr->function(), rdi);
-  LCallFunction* call = new(zone()) LCallFunction(context, function);
+  LOperand* slot = NULL;
+  LOperand* vector = NULL;
+  if (instr->HasVectorAndSlot()) {
+    slot = FixedTemp(rdx);
+    vector = FixedTemp(rbx);
+  }
+  LCallFunction* call =
+      new (zone()) LCallFunction(context, function, slot, vector);
   return MarkAsCall(DefineFixed(call, rax), instr);
 }
 
@@ -2049,8 +2071,7 @@ LInstruction* LChunkBuilder::DoConstant(HConstant* instr) {
   } else if (r.IsInteger32()) {
     return DefineAsRegister(new(zone()) LConstantI);
   } else if (r.IsDouble()) {
-    LOperand* temp = TempRegister();
-    return DefineAsRegister(new(zone()) LConstantD(temp));
+    return DefineAsRegister(new (zone()) LConstantD);
   } else if (r.IsExternal()) {
     return DefineAsRegister(new(zone()) LConstantE);
   } else if (r.IsTagged()) {
@@ -2059,14 +2080,6 @@ LInstruction* LChunkBuilder::DoConstant(HConstant* instr) {
     UNREACHABLE();
     return NULL;
   }
-}
-
-
-LInstruction* LChunkBuilder::DoLoadGlobalCell(HLoadGlobalCell* instr) {
-  LLoadGlobalCell* result = new(zone()) LLoadGlobalCell;
-  return instr->RequiresHoleCheck()
-      ? AssignEnvironment(DefineAsRegister(result))
-      : DefineAsRegister(result);
 }
 
 
@@ -2082,16 +2095,6 @@ LInstruction* LChunkBuilder::DoLoadGlobalGeneric(HLoadGlobalGeneric* instr) {
   LLoadGlobalGeneric* result =
       new(zone()) LLoadGlobalGeneric(context, global_object, vector);
   return MarkAsCall(DefineFixed(result, rax), instr);
-}
-
-
-LInstruction* LChunkBuilder::DoStoreGlobalCell(HStoreGlobalCell* instr) {
-  LOperand* value = UseRegister(instr->value());
-  // Use a temp to avoid reloading the cell value address in the case where
-  // we perform a hole check.
-  return instr->RequiresHoleCheck()
-      ? AssignEnvironment(new(zone()) LStoreGlobalCell(value, TempRegister()))
-      : new(zone()) LStoreGlobalCell(value, NULL);
 }
 
 

@@ -188,13 +188,20 @@ message ClientDownloadRequest {
   }
 
   message SignatureInfo {
-    // All of the certificate chains for the binary's signing certificate.
-    // If no chains are present, the binary is not signed.  Multiple chains
-    // may be present if any certificate has multiple signers.
+    // All certificate chains for each of the binary's signers.  Multiple chains
+    // may be present if the binary or any certificate has multiple signers.
+    // Absence of certificate chains does not imply that the binary is not
+    // signed (in that case, SignedData blobs extracted from the binary may be
+    // preset), but does mean that trust has not been verified.
     repeated CertificateChain certificate_chain = 1;
 
     // True if the signature was trusted on the client.
     optional bool trusted = 2;
+
+    // PKCS#7 SignedData blobs extracted from a portable executable image's
+    // attribute certificate table. The presence of these does not imply that
+    // the signatures were deemed trusted by the client.
+    repeated bytes signed_data = 3;
   }
 
   // This field will only be set if the binary is signed.
@@ -256,6 +263,21 @@ message ClientDownloadRequest {
   // client.
 
   optional ImageHeaders image_headers = 18;
+
+  // Fields 19-21 are reserved for server-side use and are never sent by the
+  // client.
+
+  // A binary contained in an archive (e.g., a .zip archive).
+  message ArchivedBinary {
+    optional string file_basename = 1;
+    optional DownloadType download_type = 2;
+    optional Digests digests = 3;
+    optional int64 length = 4;
+    optional SignatureInfo signature = 5;
+    optional ImageHeaders image_headers = 6;
+  }
+
+  repeated ArchivedBinary archived_binary = 22;
 }
 
 message ClientDownloadResponse {
@@ -367,12 +389,17 @@ message ClientIncidentReport {
     message VariationsSeedSignatureIncident {
       optional string variations_seed_signature = 1;
     }
+    message ScriptRequestIncident {
+      optional bytes script_digest = 1;
+      optional string inclusion_origin = 2;
+    }
     optional int64 incident_time_msec = 1;
     optional TrackedPreferenceIncident tracked_preference = 2;
     optional BinaryIntegrityIncident binary_integrity = 3;
     optional BlacklistLoadIncident blacklist_load = 4;
     // Note: skip tag 5 because it was previously used.
     optional VariationsSeedSignatureIncident variations_seed_signature = 6;
+    optional ScriptRequestIncident script_request = 7;
   }
 
   repeated IncidentData incident = 1;
@@ -428,6 +455,7 @@ message ClientIncidentReport {
         optional uint64 base_address = 2;
         optional uint32 length = 3;
         repeated Feature feature = 4;
+        optional ClientDownloadRequest.ImageHeaders image_headers = 5;
       }
       repeated Dll dll = 9;
       repeated string blacklisted_dll = 10;
@@ -441,6 +469,14 @@ message ClientIncidentReport {
         optional string name = 1;
         optional ModifiedState modified_state = 2;
         repeated string modified_export = 3;
+
+        message Modification {
+          optional uint32 file_offset = 1;
+          optional int32 byte_count = 2;
+          optional bytes modified_bytes = 3;
+          optional string export_name = 4;
+        }
+        repeated Modification modification = 4;
       }
       repeated ModuleState module_state = 11;
     }

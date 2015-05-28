@@ -35,6 +35,25 @@ config("sdk") {
   }
 }
 
+pkg_config("atk") {
+  packages = [ "atk" ]
+  atk_lib_dir = exec_script(pkg_config_script,
+                            [
+                              "--libdir",
+                              "atk",
+                            ],
+                            "string")
+  defines = [ "ATK_LIB_DIR=\"$atk_lib_dir\"" ]
+}
+
+# gn orders flags on a target before flags from configs. The default config
+# adds -Wall, and these flags have to be after -Wall -- so they need to come
+# from a config and can't be on the target directly.
+config("atk_warnings") {
+  # glib uses the pre-c++11 typedef-as-static_assert hack.
+  cflags = [ "-Wno-unused-local-typedef" ]
+}
+
 config("fontconfig") {
   libs = [ "fontconfig" ]
 }
@@ -180,15 +199,17 @@ pkg_config("gio_config") {
   #ignore_libs = true  # Loader generated below.
 }
 
-# This generates a target named "gio".
-generate_library_loader("gio") {
-  name = "LibGioLoader"
-  output_h = "libgio.h"
-  output_cc = "libgio_loader.cc"
-  header = "<gio/gio.h>"
-  config = ":gio_config"
+if (is_desktop_linux) {
+  # This generates a target named "gio".
+  generate_library_loader("gio") {
+    name = "LibGioLoader"
+    output_h = "libgio.h"
+    output_cc = "libgio_loader.cc"
+    header = "<gio/gio.h>"
+    config = ":gio_config"
 
-  functions = gypi_values.libgio_functions
+    functions = gypi_values.libgio_functions
+  }
 }
 
 # This generates a target named "libpci".

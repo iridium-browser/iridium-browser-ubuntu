@@ -34,6 +34,8 @@ namespace {
 
 const DWORD kMaxPathBufLen = MAX_PATH + 1;
 
+const char kDeviceInfoTaskRunnerName[] = "device-info-task-runner";
+
 enum DeviceType {
   FLOPPY,
   REMOVABLE,
@@ -324,18 +326,12 @@ void EjectDeviceInThreadPool(
 
 }  // namespace
 
-const int kWorkerPoolNumThreads = 3;
-const char* kWorkerPoolNamePrefix = "DeviceInfoPool";
-
 VolumeMountWatcherWin::VolumeMountWatcherWin()
-    : device_info_worker_pool_(new base::SequencedWorkerPool(
-          kWorkerPoolNumThreads, kWorkerPoolNamePrefix)),
-      notifications_(NULL),
-      weak_factory_(this) {
-  task_runner_ =
-      device_info_worker_pool_->GetSequencedTaskRunnerWithShutdownBehavior(
-          device_info_worker_pool_->GetSequenceToken(),
-          base::SequencedWorkerPool::CONTINUE_ON_SHUTDOWN);
+    : notifications_(NULL), weak_factory_(this) {
+  base::SequencedWorkerPool* pool = content::BrowserThread::GetBlockingPool();
+  device_info_task_runner_ = pool->GetSequencedTaskRunnerWithShutdownBehavior(
+      pool->GetNamedSequenceToken(kDeviceInfoTaskRunnerName),
+      base::SequencedWorkerPool::CONTINUE_ON_SHUTDOWN);
 }
 
 // static
@@ -355,26 +351,26 @@ base::FilePath VolumeMountWatcherWin::DriveNumberToFilePath(int drive_number) {
 // c) Retrieve metadata on the volumes and then
 // d) Notify that metadata to listeners.
 void VolumeMountWatcherWin::Init() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   // When VolumeMountWatcherWin is created, the message pumps are not running
   // so a posted task from the constructor would never run. Therefore, do all
   // the initializations here.
   base::PostTaskAndReplyWithResult(
-      task_runner_.get(), FROM_HERE, GetAttachedDevicesCallback(),
+      device_info_task_runner_.get(), FROM_HERE, GetAttachedDevicesCallback(),
       base::Bind(&VolumeMountWatcherWin::AddDevicesOnUIThread,
                  weak_factory_.GetWeakPtr()));
 }
 
 void VolumeMountWatcherWin::AddDevicesOnUIThread(
     std::vector<base::FilePath> removable_devices) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   for (size_t i = 0; i < removable_devices.size(); i++) {
     if (ContainsKey(pending_device_checks_, removable_devices[i]))
       continue;
     pending_device_checks_.insert(removable_devices[i]);
-    task_runner_->PostTask(
+    device_info_task_runner_->PostTask(
         FROM_HERE,
         base::Bind(&VolumeMountWatcherWin::RetrieveInfoForDeviceAndAdd,
                    removable_devices[i], GetDeviceDetailsCallback(),
@@ -404,7 +400,7 @@ void VolumeMountWatcherWin::RetrieveInfoForDeviceAndAdd(
 
 void VolumeMountWatcherWin::DeviceCheckComplete(
     const base::FilePath& device_path) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   pending_device_checks_.erase(device_path);
 
   if (pending_device_checks_.size() == 0) {
@@ -425,7 +421,7 @@ VolumeMountWatcherWin::GetDeviceDetailsCallbackType
 
 bool VolumeMountWatcherWin::GetDeviceInfo(const base::FilePath& device_path,
                                           StorageInfo* info) const {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(info);
   base::FilePath path(device_path);
   MountPointDeviceMetadataMap::const_iterator iter =
@@ -443,7 +439,7 @@ bool VolumeMountWatcherWin::GetDeviceInfo(const base::FilePath& device_path,
 }
 
 void VolumeMountWatcherWin::OnWindowMessage(UINT event_type, LPARAM data) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   switch (event_type) {
     case DBT_DEVICEARRIVAL: {
       if (IsLogicalVolumeStructure(data)) {
@@ -503,13 +499,12 @@ void VolumeMountWatcherWin::SetNotifications(
 
 VolumeMountWatcherWin::~VolumeMountWatcherWin() {
   weak_factory_.InvalidateWeakPtrs();
-  device_info_worker_pool_->Shutdown();
 }
 
 void VolumeMountWatcherWin::HandleDeviceAttachEventOnUIThread(
     const base::FilePath& device_path,
     const StorageInfo& info) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   device_metadata_[device_path] = info;
 
@@ -521,7 +516,7 @@ void VolumeMountWatcherWin::HandleDeviceAttachEventOnUIThread(
 
 void VolumeMountWatcherWin::HandleDeviceDetachEventOnUIThread(
     const base::string16& device_location) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   MountPointDeviceMetadataMap::const_iterator device_info =
       device_metadata_.find(base::FilePath(device_location));
@@ -537,7 +532,7 @@ void VolumeMountWatcherWin::HandleDeviceDetachEventOnUIThread(
 void VolumeMountWatcherWin::EjectDevice(
     const std::string& device_id,
     base::Callback<void(StorageMonitor::EjectStatus)> callback) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   base::FilePath device = MediaStorageUtil::FindDevicePathById(device_id);
   if (device.empty()) {
     callback.Run(StorageMonitor::EJECT_FAILURE);
@@ -548,9 +543,9 @@ void VolumeMountWatcherWin::EjectDevice(
     return;
   }
 
-  task_runner_->PostTask(
-      FROM_HERE,
-      base::Bind(&EjectDeviceInThreadPool, device, callback, task_runner_, 0));
+  device_info_task_runner_->PostTask(
+      FROM_HERE, base::Bind(&EjectDeviceInThreadPool, device, callback,
+                            device_info_task_runner_, 0));
 }
 
 }  // namespace storage_monitor

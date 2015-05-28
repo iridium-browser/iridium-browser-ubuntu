@@ -4,6 +4,7 @@
 
 #include "ash/wm/maximize_mode/maximize_mode_window_manager.h"
 
+#include "ash/ash_switches.h"
 #include "ash/root_window_controller.h"
 #include "ash/shell.h"
 #include "ash/shell_window_ids.h"
@@ -15,6 +16,7 @@
 #include "ash/wm/window_util.h"
 #include "ash/wm/wm_event.h"
 #include "ash/wm/workspace_controller.h"
+#include "base/command_line.h"
 #include "ui/aura/window.h"
 #include "ui/gfx/screen.h"
 
@@ -85,7 +87,7 @@ void MaximizeModeWindowManager::OnOverviewModeStarting() {
   backdrops_hidden_ = true;
 }
 
-void MaximizeModeWindowManager::OnOverviewModeEnding() {
+void MaximizeModeWindowManager::OnOverviewModeEnded() {
   if (!backdrops_hidden_)
     return;
 
@@ -95,9 +97,15 @@ void MaximizeModeWindowManager::OnOverviewModeEnding() {
 }
 
 void MaximizeModeWindowManager::OnWindowDestroying(aura::Window* window) {
-  // If a known window gets destroyed we need to remove all knowledge about it.
-  if (!IsContainerWindow(window))
+  if (IsContainerWindow(window)) {
+    // container window can be removed on display destruction.
+    window->RemoveObserver(this);
+    observed_container_windows_.erase(window);
+  } else {
+    // If a known window gets destroyed we need to remove all knowledge about
+    // it.
     ForgetWindow(window);
+  }
 }
 
 void MaximizeModeWindowManager::OnWindowAdded(aura::Window* window) {
@@ -124,7 +132,7 @@ void MaximizeModeWindowManager::OnWindowBoundsChanged(
   for (WindowToState::iterator it = window_state_map_.begin();
        it != window_state_map_.end();
        ++it) {
-    it->second->UpdateWindowPosition(wm::GetWindowState(it->first), false);
+    it->second->UpdateWindowPosition(wm::GetWindowState(it->first));
   }
 }
 
@@ -182,7 +190,8 @@ MaximizeModeWindowManager::MaximizeModeWindowManager()
 }
 
 void MaximizeModeWindowManager::MaximizeAllWindows() {
-  MruWindowTracker::WindowList windows = MruWindowTracker::BuildWindowList();
+  MruWindowTracker::WindowList windows = ash::Shell::GetInstance()->
+      mru_window_tracker()->BuildWindowListIgnoreModal();
   // Add all existing Mru windows.
   for (MruWindowTracker::WindowList::iterator window = windows.begin();
       window != windows.end(); ++window) {
@@ -276,8 +285,15 @@ bool MaximizeModeWindowManager::IsContainerWindow(aura::Window* window) {
 
 void MaximizeModeWindowManager::EnableBackdropBehindTopWindowOnEachDisplay(
     bool enable) {
+  // This function should be a no-op if backdrops have been disabled.
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kAshDisableMaximizeModeWindowBackdrop)) {
+    return;
+  }
+
   if (backdrops_hidden_)
     return;
+
   // Inform the WorkspaceLayoutManager that we want to show a backdrop behind
   // the topmost window of its container.
   Shell::RootWindowControllerList controllers =

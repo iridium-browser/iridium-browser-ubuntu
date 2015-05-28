@@ -46,14 +46,14 @@ public:
 
     SVGStringListTearOff* viewTarget() { return m_viewTarget->tearOff(); }
 
-    virtual void trace(Visitor*) override;
+    DECLARE_VIRTUAL_TRACE();
 
 private:
     explicit SVGViewElement(Document&);
 
     virtual void parseAttribute(const QualifiedName&, const AtomicString&) override;
 
-    virtual bool rendererIsNeeded(const RenderStyle&) override { return false; }
+    virtual bool layoutObjectIsNeeded(const ComputedStyle&) override { return false; }
 
     RefPtrWillBeMember<SVGStaticStringList> m_viewTarget;
 };

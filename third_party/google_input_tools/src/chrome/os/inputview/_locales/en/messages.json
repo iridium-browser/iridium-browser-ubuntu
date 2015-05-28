@@ -1,4 +1,18 @@
 {
+  "add_to_dictionary": {
+    "message": "Add to dictionary"
+  },
+  "add_to_personal_dictionary": {
+    "message": "Add to personal dictionary"
+  },
+  "add_word_to_dictionary": {
+    "message": "Add \"$1\" to dictionary",
+    "placeholders": {
+      "1": {
+        "content": "$1"
+      }
+    }
+  },
   "advanced": {
     "message": "Advanced"
   },
@@ -235,6 +249,9 @@
   },
   "ctrl": {
     "message": "ctrl"
+  },
+  "current_keyboard_prefix": {
+    "message": "current selected keyboard "
   },
   "current_lang": {
     "message": "Input language is Chinese"
@@ -2561,6 +2578,12 @@
   "es_spa_settings_page": {
     "message": "Spanish Keyboard Settings Page"
   },
+  "expand": {
+    "message": "Expand"
+  },
+  "expand_candidates": {
+    "message": "expand candidate list"
+  },
   "fi_fin_settings_page": {
     "message": "Finnish Keyboard Settings Page"
   },
@@ -2604,7 +2627,7 @@
     "message": "Sorry, you can not use handwriting, because network is unavailable."
   },
   "handwriting_privacy_info": {
-    "message": "Your input will be sent to a Google server to recognize text"
+    "message": "Your input will be sent to Google servers to recognize text."
   },
   "hide_keyboard": {
     "message": "hide keyboard"
@@ -2617,6 +2640,12 @@
   },
   "ie_ga_settings_page": {
     "message": "Irish Keyboard Settings Page"
+  },
+  "ignore_correction": {
+    "message": "Ignore correction for"
+  },
+  "ignore_correction_short": {
+    "message": "Ignore correction"
   },
   "il_heb_settings_page": {
     "message": "Hebrew Keyboard Settings Page"
@@ -2644,6 +2673,9 @@
   },
   "inputmethod_dayi": {
     "message": "Dayi input method"
+  },
+  "inputmethod_hangul": {
+    "message": "Korean input method"
   },
   "inputmethod_pinyin": {
     "message": "Pinyin input method"
@@ -2813,6 +2845,9 @@
   "keyboard_nepali_phonetic": {
     "message": "Nepali keyboard (Phonetic)"
   },
+  "keyboard_netherlands": {
+    "message": "Netherlands keyboard"
+  },
   "keyboard_none": {
     "message": "Keyboard"
   },
@@ -2836,6 +2871,9 @@
   },
   "keyboard_romanian": {
     "message": "Romanian keyboard"
+  },
+  "keyboard_romanian_standard": {
+    "message": "Romanian standard keyboard"
   },
   "keyboard_russian": {
     "message": "Russian keyboard"
@@ -2973,10 +3011,10 @@
     "message": "Korean Keyboard Layout"
   },
   "korean_settings_page": {
-    "message": "Korean Settings Page"
+    "message": "Korean Input Method Settings Page"
   },
   "korean_syllable_input": {
-    "message": "Whether input hangul one by one"
+    "message": "Input a syllable at a time"
   },
   "latam_spa_settings_page": {
     "message": "Latin American Keyboard (Spanish) Settings Page"
@@ -3021,7 +3059,7 @@
     "message": "Auto-capitalization"
   },
   "physical_keyboard": {
-    "message": "Physical Keyboard"
+    "message": "Physical keyboard"
   },
   "pinyin_settings_page": {
     "message": "Pinyin Settings Page"
@@ -3050,6 +3088,9 @@
   "se_swe_settings_page": {
     "message": "Swedish Keyboard Settings Page"
   },
+  "settings": {
+    "message": "Settings"
+  },
   "shift": {
     "message": "shift"
   },
@@ -3075,13 +3116,19 @@
     "message": "Show suggestion dropdown by Backspace"
   },
   "show_hangul_candidate": {
-    "message": "Show Hangul suggestions"
+    "message": "Show candidates in Hangul mode"
+  },
+  "shrink_candidates": {
+    "message": "shrink candidate list"
   },
   "si_slv_settings_page": {
     "message": "Slovenian Keyboard Settings Page"
   },
   "sk_slo_settings_page": {
     "message": "Slovakian Keyboard Settings Page"
+  },
+  "smiley": {
+    "message": "smiley"
   },
   "sometimes_auto_correct": {
     "message": "Modest"
@@ -3111,7 +3158,7 @@
     "message": "tab"
   },
   "touch_keyboard": {
-    "message": "Touch Keyboard"
+    "message": "On-screen keyboard"
   },
   "tr_tur_settings_page": {
     "message": "Turkish Keyboard Settings Page"
@@ -3239,9 +3286,6 @@
   "user_dict_clear": {
     "message": "Clear All"
   },
-  "user_dict_done": {
-    "message": "Done"
-  },
   "user_dict_manage": {
     "message": "Manage personal dictionary..."
   },
@@ -3251,11 +3295,29 @@
   "user_dict_remove": {
     "message": "Remove Selected"
   },
+  "user_dict_reset": {
+    "message": "Reset All Dictionary Entries"
+  },
+  "user_dict_save": {
+    "message": "Save"
+  },
   "user_dict_sync": {
     "message": "Sync personal dictionary"
   },
   "user_dict_title": {
     "message": "Personal Dictionary"
+  },
+  "voice": {
+    "message": "Voice"
+  },
+  "voice_privacy_info": {
+    "message": "Your voice input will be sent to Google servers to recognize text."
+  },
+  "voice_turn_off": {
+    "message": "turn off voice input tool"
+  },
+  "voice_turn_on": {
+    "message": "turn on voice input tool"
   },
   "wait": {
     "message": "Wait"

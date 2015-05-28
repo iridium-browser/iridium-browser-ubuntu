@@ -15,9 +15,14 @@
 
 class ManagePasswordsIconController;
 class ManagePasswordsUIController;
+class Profile;
 
 namespace content {
 class WebContents;
+}
+
+namespace password_manager {
+enum class CredentialType : unsigned int;
 }
 
 // This model provides data for the ManagePasswordsBubble and controls the
@@ -43,11 +48,6 @@ class ManagePasswordsBubbleModel : public content::WebContentsObserver {
   // Called by the view code when the "Never for this site." button in clicked
   // by the user and user gets confirmation bubble.
   void OnConfirmationForNeverForThisSite();
-  // Call by the view code when user agreed to |url| collection.
-  void OnCollectURLClicked(const std::string& url);
-
-  // Called by the view code when user didn't allow to collect URL.
-  void OnDoNotCollectURLClicked();
 
   // Called by the view code when the "Nope" button in clicked by the user.
   void OnNopeClicked();
@@ -75,13 +75,22 @@ class ManagePasswordsBubbleModel : public content::WebContentsObserver {
   // Called by the view code when the manage link is clicked by the user.
   void OnManageLinkClicked();
 
+  // Called by the view code when the auto-signin toast is about to close due to
+  // timeout.
+  void OnAutoSignInToastTimeout();
+
+  // Called by the view code when user clicks on the auto sign-in toast in order
+  // to manage credentials.
+  void OnAutoSignInClicked();
+
   // Called by the view code to delete or add a password form to the
   // PasswordStore.
   void OnPasswordAction(const autofill::PasswordForm& password_form,
                         PasswordAction action);
 
   // Called by the view code to notify about chosen credential.
-  void OnChooseCredentials(const autofill::PasswordForm& password_form);
+  void OnChooseCredentials(const autofill::PasswordForm& password_form,
+                           password_manager::CredentialType credential_type_);
 
   GURL origin() const { return origin_; }
 
@@ -91,11 +100,15 @@ class ManagePasswordsBubbleModel : public content::WebContentsObserver {
   const autofill::PasswordForm& pending_password() const {
     return pending_password_;
   }
-  const autofill::ConstPasswordFormMap& best_matches() const {
-    return best_matches_;
+  // Returns the available credentials which match the current site.
+  const ScopedVector<const autofill::PasswordForm>& local_credentials() const {
+    return local_credentials_;
   }
-  const ScopedVector<autofill::PasswordForm>& pending_credentials() const {
-    return pending_credentials_;
+  // Return the federated logins which may be used for logging in to the current
+  // site.
+  const ScopedVector<const autofill::PasswordForm>& federated_credentials()
+      const {
+    return federated_credentials_;
   }
   const base::string16& manage_link() const { return manage_link_; }
   bool never_save_passwords() const { return never_save_passwords_; }
@@ -105,6 +118,12 @@ class ManagePasswordsBubbleModel : public content::WebContentsObserver {
   const gfx::Range& save_confirmation_link_range() const {
     return save_confirmation_link_range_;
   }
+
+  Profile* GetProfile() const;
+
+  // Returns true iff the new UI should be presented to user for managing and
+  // saving the passwords.
+  bool IsNewUIActive() const;
 
 #if defined(UNIT_TEST)
   // Gets and sets the reason the bubble was displayed.
@@ -122,18 +141,20 @@ class ManagePasswordsBubbleModel : public content::WebContentsObserver {
   void set_state(password_manager::ui::State state) { state_ = state; }
 #endif
 
-// Upper limits on the size of the username and password fields.
+  // Upper limits on the size of the username and password fields.
   static int UsernameFieldWidth();
   static int PasswordFieldWidth();
 
  private:
+  // Returns the title for the PENDING_PASSWORD_STATE.
+  base::string16 PendingStateTitleBasedOnSavePasswordPref() const;
   // URL of the page from where this bubble was triggered.
   GURL origin_;
   password_manager::ui::State state_;
   base::string16 title_;
   autofill::PasswordForm pending_password_;
-  autofill::ConstPasswordFormMap best_matches_;
-  ScopedVector<autofill::PasswordForm> pending_credentials_;
+  ScopedVector<const autofill::PasswordForm> local_credentials_;
+  ScopedVector<const autofill::PasswordForm> federated_credentials_;
   base::string16 manage_link_;
   base::string16 save_confirmation_text_;
   gfx::Range save_confirmation_link_range_;

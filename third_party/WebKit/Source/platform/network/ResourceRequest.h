@@ -56,7 +56,7 @@ enum InputToLoadPerfMetricReportPolicy {
 struct CrossThreadResourceRequestData;
 
 class PLATFORM_EXPORT ResourceRequest {
-    WTF_MAKE_FAST_ALLOCATED;
+    WTF_MAKE_FAST_ALLOCATED(ResourceRequest);
 public:
     class ExtraData : public RefCounted<ExtraData> {
     public:
@@ -117,6 +117,7 @@ public:
     const AtomicString& httpContentType() const { return httpHeaderField("Content-Type");  }
     void setHTTPContentType(const AtomicString& httpContentType) { setHTTPHeaderField("Content-Type", httpContentType); }
 
+    bool didSetHTTPReferrer() const { return m_didSetHTTPReferrer; }
     const AtomicString& httpReferrer() const { return httpHeaderField("Referer"); }
     ReferrerPolicy referrerPolicy() const { return m_referrerPolicy; }
     void setHTTPReferrer(const Referrer&);
@@ -171,7 +172,7 @@ public:
 
     // True if request was user initiated.
     bool hasUserGesture() const { return m_hasUserGesture; }
-    void setHasUserGesture(bool hasUserGesture) { m_hasUserGesture = hasUserGesture; }
+    void setHasUserGesture(bool);
 
     // True if request should be downloaded to file.
     bool downloadToFile() const { return m_downloadToFile; }
@@ -221,8 +222,14 @@ public:
     double uiStartTime() const { return m_uiStartTime; }
     void setUIStartTime(double uiStartTime) { m_uiStartTime = uiStartTime; }
 
+    bool originatesFromReservedIPRange() const { return m_originatesFromReservedIPRange; }
+    void setOriginatesFromReservedIPRange(bool value) { m_originatesFromReservedIPRange = value; }
+
     InputToLoadPerfMetricReportPolicy inputPerfMetricReportPolicy() const { return m_inputPerfMetricReportPolicy; }
     void setInputPerfMetricReportPolicy(InputToLoadPerfMetricReportPolicy inputPerfMetricReportPolicy) { m_inputPerfMetricReportPolicy = inputPerfMetricReportPolicy; }
+
+    void setFollowedRedirect(bool followed) { m_followedRedirect = followed; };
+    bool followedRedirect() const { return m_followedRedirect; };
 
 private:
     void initialize(const KURL&);
@@ -255,13 +262,17 @@ private:
     WebURLRequest::FetchRequestMode m_fetchRequestMode;
     WebURLRequest::FetchCredentialsMode m_fetchCredentialsMode;
     ReferrerPolicy m_referrerPolicy;
+    bool m_didSetHTTPReferrer;
     bool m_checkForBrowserSideNavigation;
     double m_uiStartTime;
+    bool m_originatesFromReservedIPRange;
     InputToLoadPerfMetricReportPolicy m_inputPerfMetricReportPolicy;
 
     mutable CacheControlHeader m_cacheControlHeaderCache;
 
     static double s_defaultTimeoutInterval;
+
+    bool m_followedRedirect;
 };
 
 bool equalIgnoringHeaderFields(const ResourceRequest&, const ResourceRequest&);
@@ -270,7 +281,7 @@ inline bool operator==(const ResourceRequest& a, const ResourceRequest& b) { ret
 inline bool operator!=(ResourceRequest& a, const ResourceRequest& b) { return !(a == b); }
 
 struct CrossThreadResourceRequestData {
-    WTF_MAKE_NONCOPYABLE(CrossThreadResourceRequestData); WTF_MAKE_FAST_ALLOCATED;
+    WTF_MAKE_NONCOPYABLE(CrossThreadResourceRequestData); WTF_MAKE_FAST_ALLOCATED(CrossThreadResourceRequestData);
 public:
     CrossThreadResourceRequestData() { }
     KURL m_url;
@@ -299,9 +310,12 @@ public:
     WebURLRequest::FetchRequestMode m_fetchRequestMode;
     WebURLRequest::FetchCredentialsMode m_fetchCredentialsMode;
     ReferrerPolicy m_referrerPolicy;
+    bool m_didSetHTTPReferrer;
     bool m_checkForBrowserSideNavigation;
     double m_uiStartTime;
+    bool m_originatesFromReservedIPRange;
     InputToLoadPerfMetricReportPolicy m_inputPerfMetricReportPolicy;
+    bool m_followedRedirect;
 };
 
 unsigned initializeMaximumHTTPConnectionCountPerHost();

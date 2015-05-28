@@ -18,17 +18,14 @@
 #include "base/task/cancelable_task_tracker.h"
 #include "base/time/time.h"
 #include "base/values.h"
-#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/extensions/activity_log/activity_log.h"
-#include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_switches.h"
 #include "chrome/common/extensions/api/history.h"
 #include "chrome/common/pref_names.h"
+#include "components/history/core/browser/history_service.h"
 #include "components/history/core/browser/history_types.h"
-#include "content/public/browser/notification_details.h"
-#include "content/public/browser/notification_source.h"
 #include "extensions/browser/event_router.h"
 #include "extensions/browser/extension_system_provider.h"
 #include "extensions/browser/extensions_browser_client.h"
@@ -132,28 +129,16 @@ scoped_ptr<VisitItem> GetVisitItem(const history::VisitRow& row) {
 }  // namespace
 
 HistoryEventRouter::HistoryEventRouter(Profile* profile,
-                                       HistoryService* history_service)
+                                       history::HistoryService* history_service)
     : profile_(profile), history_service_observer_(this) {
   DCHECK(profile);
-  registrar_.Add(this,
-                 chrome::NOTIFICATION_HISTORY_URLS_DELETED,
-                 content::Source<Profile>(profile));
   history_service_observer_.Add(history_service);
 }
 
 HistoryEventRouter::~HistoryEventRouter() {
 }
 
-void HistoryEventRouter::Observe(int type,
-                                 const content::NotificationSource& source,
-                                 const content::NotificationDetails& details) {
-  DCHECK_EQ(type, chrome::NOTIFICATION_HISTORY_URLS_DELETED);
-  HistoryUrlsRemoved(
-      content::Source<Profile>(source).ptr(),
-      content::Details<const history::URLsDeletedDetails>(details).ptr());
-}
-
-void HistoryEventRouter::OnURLVisited(HistoryService* history_service,
+void HistoryEventRouter::OnURLVisited(history::HistoryService* history_service,
                                       ui::PageTransition transition,
                                       const history::URLRow& row,
                                       const history::RedirectList& redirects,
@@ -163,21 +148,22 @@ void HistoryEventRouter::OnURLVisited(HistoryService* history_service,
   DispatchEvent(profile_, api::history::OnVisited::kEventName, args.Pass());
 }
 
-void HistoryEventRouter::HistoryUrlsRemoved(
-    Profile* profile,
-    const history::URLsDeletedDetails* details) {
+void HistoryEventRouter::OnURLsDeleted(history::HistoryService* history_service,
+                                       bool all_history,
+                                       bool expired,
+                                       const history::URLRows& deleted_rows,
+                                       const std::set<GURL>& favicon_urls) {
   OnVisitRemoved::Removed removed;
-  removed.all_history = details->all_history;
+  removed.all_history = all_history;
 
   std::vector<std::string>* urls = new std::vector<std::string>();
-  for (history::URLRows::const_iterator iterator = details->rows.begin();
-      iterator != details->rows.end(); ++iterator) {
-    urls->push_back(iterator->url().spec());
-  }
+  for (const auto& row : deleted_rows)
+    urls->push_back(row.url().spec());
   removed.urls.reset(urls);
 
   scoped_ptr<base::ListValue> args = OnVisitRemoved::Create(removed);
-  DispatchEvent(profile, api::history::OnVisitRemoved::kEventName, args.Pass());
+  DispatchEvent(profile_, api::history::OnVisitRemoved::kEventName,
+                args.Pass());
 }
 
 void HistoryEventRouter::DispatchEvent(
@@ -226,8 +212,8 @@ void BrowserContextKeyedAPIFactory<HistoryAPI>::DeclareFactoryDependencies() {
 void HistoryAPI::OnListenerAdded(const EventListenerInfo& details) {
   Profile* profile = Profile::FromBrowserContext(browser_context_);
   history_event_router_.reset(new HistoryEventRouter(
-      profile,
-      HistoryServiceFactory::GetForProfile(profile, Profile::EXPLICIT_ACCESS)));
+      profile, HistoryServiceFactory::GetForProfile(
+                   profile, ServiceAccessType::EXPLICIT_ACCESS)));
   EventRouter::Get(browser_context_)->UnregisterObserver(this);
 }
 
@@ -293,8 +279,8 @@ bool HistoryGetVisitsFunction::RunAsyncImpl() {
   if (!ValidateUrl(params->details.url, &url))
     return false;
 
-  HistoryService* hs = HistoryServiceFactory::GetForProfile(
-      GetProfile(), Profile::EXPLICIT_ACCESS);
+  history::HistoryService* hs = HistoryServiceFactory::GetForProfile(
+      GetProfile(), ServiceAccessType::EXPLICIT_ACCESS);
   hs->QueryURL(url,
                true,  // Retrieve full history of a URL.
                base::Bind(&HistoryGetVisitsFunction::QueryComplete,
@@ -338,8 +324,8 @@ bool HistorySearchFunction::RunAsyncImpl() {
   if (params->query.max_results.get())
     options.max_count = *params->query.max_results;
 
-  HistoryService* hs = HistoryServiceFactory::GetForProfile(
-      GetProfile(), Profile::EXPLICIT_ACCESS);
+  history::HistoryService* hs = HistoryServiceFactory::GetForProfile(
+      GetProfile(), ServiceAccessType::EXPLICIT_ACCESS);
   hs->QueryHistory(search_text,
                    options,
                    base::Bind(&HistorySearchFunction::SearchComplete,
@@ -372,8 +358,8 @@ bool HistoryAddUrlFunction::RunAsync() {
   if (!ValidateUrl(params->details.url, &url))
     return false;
 
-  HistoryService* hs = HistoryServiceFactory::GetForProfile(
-      GetProfile(), Profile::EXPLICIT_ACCESS);
+  history::HistoryService* hs = HistoryServiceFactory::GetForProfile(
+      GetProfile(), ServiceAccessType::EXPLICIT_ACCESS);
   hs->AddPage(url, base::Time::Now(), history::SOURCE_EXTENSION);
 
   SendResponse(true);
@@ -391,8 +377,8 @@ bool HistoryDeleteUrlFunction::RunAsync() {
   if (!ValidateUrl(params->details.url, &url))
     return false;
 
-  HistoryService* hs = HistoryServiceFactory::GetForProfile(
-      GetProfile(), Profile::EXPLICIT_ACCESS);
+  history::HistoryService* hs = HistoryServiceFactory::GetForProfile(
+      GetProfile(), ServiceAccessType::EXPLICIT_ACCESS);
   hs->DeleteURL(url);
 
   // Also clean out from the activity log. If the activity log testing flag is
@@ -420,8 +406,8 @@ bool HistoryDeleteRangeFunction::RunAsyncImpl() {
   base::Time end_time = GetTime(params->range.end_time);
 
   std::set<GURL> restrict_urls;
-  HistoryService* hs = HistoryServiceFactory::GetForProfile(
-      GetProfile(), Profile::EXPLICIT_ACCESS);
+  history::HistoryService* hs = HistoryServiceFactory::GetForProfile(
+      GetProfile(), ServiceAccessType::EXPLICIT_ACCESS);
   hs->ExpireHistoryBetween(
       restrict_urls,
       start_time,
@@ -450,8 +436,8 @@ bool HistoryDeleteAllFunction::RunAsyncImpl() {
     return false;
 
   std::set<GURL> restrict_urls;
-  HistoryService* hs = HistoryServiceFactory::GetForProfile(
-      GetProfile(), Profile::EXPLICIT_ACCESS);
+  history::HistoryService* hs = HistoryServiceFactory::GetForProfile(
+      GetProfile(), ServiceAccessType::EXPLICIT_ACCESS);
   hs->ExpireHistoryBetween(
       restrict_urls,
       base::Time(),      // Unbounded beginning...

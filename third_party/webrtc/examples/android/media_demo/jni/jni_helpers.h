@@ -34,7 +34,7 @@
 
 // Abort the process if |jni| has a Java exception pending, emitting |msg| to
 // logcat.
-#define CHECK_EXCEPTION(jni, msg) \
+#define CHECK_JNI_EXCEPTION(jni, msg) \
   if (0) {                        \
   } else {                        \
     if (jni->ExceptionCheck()) {  \
@@ -43,9 +43,6 @@
       CHECK(0, msg);              \
     }                             \
   }
-
-#define ARRAYSIZE(instance)                                     \
-  static_cast<int>(sizeof(instance) / sizeof(instance[0]))
 
 // JNIEnv-helper methods that CHECK success: no Java exception thrown and found
 // object/class/method/field is non-null.

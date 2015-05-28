@@ -7,14 +7,10 @@ Exception classes raised by AdbWrapper and DeviceUtils.
 """
 
 from pylib import cmd_helper
+from pylib.utils import base_error
 
 
-class BaseError(Exception):
-  """Base exception for all device and command errors."""
-  pass
-
-
-class CommandFailedError(BaseError):
+class CommandFailedError(base_error.BaseError):
   """Exception for command failures."""
 
   def __init__(self, message, device_serial=None):
@@ -46,6 +42,13 @@ class AdbCommandFailedError(CommandFailedError):
     super(AdbCommandFailedError, self).__init__(message, device_serial)
 
 
+class DeviceVersionError(CommandFailedError):
+  """Exception for device version failures."""
+
+  def __init__(self, message, device_serial=None):
+    super(DeviceVersionError, self).__init__(message, device_serial)
+
+
 class AdbShellCommandFailedError(AdbCommandFailedError):
   """Exception for shell command failures run via adb."""
 
@@ -64,19 +67,18 @@ class AdbShellCommandFailedError(AdbCommandFailedError):
       ['shell', command], output, status, device_serial, message)
 
 
-class CommandTimeoutError(BaseError):
+class CommandTimeoutError(base_error.BaseError):
   """Exception for command timeouts."""
   pass
 
 
-class DeviceUnreachableError(BaseError):
+class DeviceUnreachableError(base_error.BaseError):
   """Exception for device unreachable failures."""
   pass
 
 
-class NoDevicesError(BaseError):
+class NoDevicesError(base_error.BaseError):
   """Exception for having no devices attached."""
 
   def __init__(self):
     super(NoDevicesError, self).__init__('No devices attached.')
-

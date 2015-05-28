@@ -21,8 +21,6 @@
 #include "storage/browser/fileapi/watcher_manager.h"
 #include "url/gurl.h"
 
-class EventRouter;
-
 namespace base {
 class Time;
 }  // namespace base
@@ -53,18 +51,30 @@ struct EntryMetadata {
   DISALLOW_COPY_AND_ASSIGN(EntryMetadata);
 };
 
+// Mode of opening a file. Used by OpenFile().
+enum OpenFileMode { OPEN_FILE_MODE_READ, OPEN_FILE_MODE_WRITE };
+
+// Contains information about an opened file.
+struct OpenedFile {
+  OpenedFile(const base::FilePath& file_path, OpenFileMode& mode);
+  OpenedFile();
+  ~OpenedFile();
+
+  base::FilePath file_path;
+  OpenFileMode mode;
+};
+
+// Map from a file handle to an OpenedFile struct.
+typedef std::map<int, OpenedFile> OpenedFiles;
+
 // Interface for a provided file system. Acts as a proxy between providers
 // and clients. All of the request methods return an abort callback in order to
 // terminate it while running. They must be called on the same thread as the
 // request methods. The cancellation callback may be null if the operation
-// fails synchronously.
+// fails synchronously. It must not be called once the operation is completed
+// with either a success or an error.
 class ProvidedFileSystemInterface {
  public:
-  struct Change;
-
-  // Mode of opening a file. Used by OpenFile().
-  enum OpenFileMode { OPEN_FILE_MODE_READ, OPEN_FILE_MODE_WRITE };
-
   // Extra fields to be fetched with metadata.
   enum MetadataField {
     METADATA_FIELD_DEFAULT = 0,
@@ -213,6 +223,9 @@ class ProvidedFileSystemInterface {
 
   // Returns a mutable list of watchers.
   virtual Watchers* GetWatchers() = 0;
+
+  // Returns a list of opened files.
+  virtual const OpenedFiles& GetOpenedFiles() const = 0;
 
   // Returns a request manager for the file system.
   virtual RequestManager* GetRequestManager() = 0;

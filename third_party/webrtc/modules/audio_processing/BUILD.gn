@@ -72,12 +72,13 @@ source_set("audio_processing") {
     "audio_buffer.h",
     "audio_processing_impl.cc",
     "audio_processing_impl.h",
+    "beamformer/beamformer.h",
     "beamformer/complex_matrix.h",
     "beamformer/covariance_matrix_generator.cc",
     "beamformer/covariance_matrix_generator.h",
     "beamformer/matrix.h",
-    "channel_buffer.cc",
-    "channel_buffer.h",
+    "beamformer/nonlinear_beamformer.cc",
+    "beamformer/nonlinear_beamformer.h",
     "common.h",
     "echo_cancellation_impl.cc",
     "echo_cancellation_impl.h",
@@ -118,10 +119,6 @@ source_set("audio_processing") {
     "utility/delay_estimator_internal.h",
     "utility/delay_estimator_wrapper.c",
     "utility/delay_estimator_wrapper.h",
-    "utility/fft4g.c",
-    "utility/fft4g.h",
-    "utility/ring_buffer.c",
-    "utility/ring_buffer.h",
     "voice_detection_impl.cc",
     "voice_detection_impl.h",
   ]
@@ -130,7 +127,7 @@ source_set("audio_processing") {
   public_configs = [ "../..:common_inherited_config" ]
 
   defines = []
-  deps = []
+  deps = [ "../..:webrtc_common" ]
 
   if (aec_debug_dump) {
     defines += [ "WEBRTC_AEC_DEBUG_DUMP" ]
@@ -154,7 +151,7 @@ source_set("audio_processing") {
       "ns/nsx_core.h",
       "ns/nsx_defines.h",
     ]
-    if (cpu_arch == "mipsel") {
+    if (current_cpu == "mipsel") {
       sources += [ "ns/nsx_core_mips.c" ]
     } else {
       sources += [ "ns/nsx_core_c.c" ]
@@ -171,24 +168,17 @@ source_set("audio_processing") {
     ]
   }
 
-  if (rtc_use_openmax_dl) {
-    sources += [
-      "beamformer/beamformer.cc",
-      "beamformer/beamformer.h",
-    ]
-  }
-
-  if (cpu_arch == "x86" || cpu_arch == "x64") {
+  if (current_cpu == "x86" || current_cpu == "x64") {
     deps += [ ":audio_processing_sse2" ]
   }
 
-  if (rtc_build_armv7_neon || cpu_arch == "arm64") {
+  if (rtc_build_armv7_neon || current_cpu == "arm64") {
     deps += [ ":audio_processing_neon" ]
   }
 
-  if (cpu_arch == "mipsel") {
+  if (current_cpu == "mipsel") {
     sources += [ "aecm/aecm_core_mips.c" ]
-    if (mips_fpu)  {
+    if (mips_float_abi == "hard") {
       sources += [
         "aec/aec_core_mips.c",
         "aec/aec_rdft_mips.c",
@@ -226,7 +216,7 @@ if (rtc_enable_protobuf) {
   }
 }
 
-if (cpu_arch == "x86" || cpu_arch == "x64") {
+if (current_cpu == "x86" || current_cpu == "x64") {
   source_set("audio_processing_sse2") {
     sources = [
       "aec/aec_core_sse2.c",
@@ -240,7 +230,7 @@ if (cpu_arch == "x86" || cpu_arch == "x64") {
   }
 }
 
-if (rtc_build_armv7_neon || cpu_arch == "arm64") {
+if (rtc_build_armv7_neon || current_cpu == "arm64") {
   source_set("audio_processing_neon") {
     sources = [
       "aec/aec_core_neon.c",
@@ -263,7 +253,7 @@ if (rtc_build_armv7_neon || cpu_arch == "arm64") {
     configs -= [ "//build/config/compiler:compiler_arm_fpu" ]
 
     # "-mfpu=neon" is not requried for arm64 in GCC.
-    if (cpu_arch != "arm64") {
+    if (current_cpu != "arm64") {
        cflags = [ "-mfpu=neon" ]
     }
 

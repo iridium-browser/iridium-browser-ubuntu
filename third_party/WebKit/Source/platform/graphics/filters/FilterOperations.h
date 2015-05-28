@@ -40,7 +40,7 @@ class PLATFORM_EXPORT FilterOperations {
 #if ENABLE(OILPAN)
     DISALLOW_ALLOCATION();
 #else
-    WTF_MAKE_FAST_ALLOCATED;
+    WTF_MAKE_FAST_ALLOCATED(FilterOperations);
 #endif
 public:
     FilterOperations();
@@ -59,7 +59,7 @@ public:
         m_operations.clear();
     }
 
-    typedef WillBeHeapVector<RefPtrWillBeMember<FilterOperation> > FilterOperationVector;
+    typedef WillBeHeapVector<RefPtrWillBeMember<FilterOperation>> FilterOperationVector;
 
     FilterOperationVector& operations() { return m_operations; }
     const FilterOperationVector& operations() const { return m_operations; }
@@ -78,7 +78,7 @@ public:
 
     bool hasReferenceFilter() const;
 
-    void trace(Visitor*);
+    DECLARE_TRACE();
 
 private:
     FilterOperationVector m_operations;
@@ -95,7 +95,7 @@ public:
 
     const FilterOperations& operations() const { return m_operations; }
 
-    void trace(Visitor* visitor) { visitor->trace(m_operations); }
+    DEFINE_INLINE_TRACE() { visitor->trace(m_operations); }
 
 private:
     FilterOperationsWrapper()

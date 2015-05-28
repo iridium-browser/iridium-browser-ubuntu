@@ -1,4 +1,3 @@
-#!/usr/bin/python
 # Copyright (c) 2011-2012 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -13,17 +12,15 @@ import copy
 import functools
 import httplib
 import itertools
+import mock
 import mox
 import os
 import pickle
 import random
-import sys
 import tempfile
 import time
 
-import constants
-sys.path.insert(0, constants.SOURCE_ROOT)
-
+from chromite.cbuildbot import constants
 from chromite.cbuildbot import metadata_lib
 from chromite.cbuildbot import repository
 from chromite.cbuildbot import tree_status
@@ -41,8 +38,6 @@ from chromite.lib import parallel_unittest
 from chromite.lib import partial_mock
 from chromite.lib import patch as cros_patch
 from chromite.lib import patch_unittest
-
-import mock
 
 
 _GetNumber = iter(itertools.count()).next
@@ -114,7 +109,6 @@ class MoxBase(patch_unittest.MockPatchBase, cros_test_lib.MoxTestCase):
   def setUp(self):
     self.build_root = 'fakebuildroot'
     self.manager = parallel.Manager()
-    self.mox.StubOutWithMock(validation_pool, '_RunCommand')
     self.PatchObject(gob_util, 'CreateHttpConn',
                      side_effect=AssertionError('Test should not contact GoB'))
     self.PatchObject(tree_status, 'IsTreeOpen', return_value=True)
@@ -146,13 +140,15 @@ class MoxBase(patch_unittest.MockPatchBase, cros_test_lib.MoxTestCase):
     return validation_pool.HelperPool(cros_internal=cros_internal,
                                       cros=cros)
 
-
-class TestPatchSeries(MoxBase):
-  """Tests resolution and applying logic of validation_pool.ValidationPool."""
+class PatchSeriesTestCase(MoxBase):
+  """Base class for tests that need to test PatchSeries."""
 
   @contextlib.contextmanager
   def _ValidateTransactionCall(self, _changes):
     yield
+
+  def setUp(self):
+    self.StartPatcher(parallel_unittest.ParallelMock())
 
   def GetPatchSeries(self, helper_pool=None):
     if helper_pool is None:
@@ -218,6 +214,32 @@ class TestPatchSeries(MoxBase):
     self.assertItemsEqual(failed_inflight, failed_inflight_result)
     self.assertItemsEqual(failed_tot, failed_tot_result)
     return result
+
+
+# pylint:disable=too-many-ancestors
+class TestUploadedLocalPatch(patch_unittest.UploadedLocalPatchTestCase,
+                             PatchSeriesTestCase):
+  """Test the interaction between uploaded local git patches and PatchSeries."""
+
+  def testFetchChanges(self):
+    """Test fetching uploaded local patches."""
+    git1, git2, patch1 = self._CommonGitSetup()
+    patch2 = self.CommitFile(git1, 'monkeys2', 'foon2')
+    patch3 = self._MkPatch(git1, None, original_sha1=patch1.sha1)
+    patch4 = self._MkPatch(git1, None, original_sha1=patch2.sha1)
+    self.assertEqual(patch3.id, patch1.id)
+    self.assertEqual(patch4.id, patch2.id)
+    self.assertNotEqual(patch3.id, patch4.id)
+    series = self.GetPatchSeries()
+    series.GetGitRepoForChange = lambda change, **kwargs: git2
+    patches = series.FetchChanges([patch3, patch4])
+    self.assertEqual(len(patches), 2)
+    self.assertEqual(patches[0].id, patch3.id)
+    self.assertEqual(patches[1].id, patch4.id)
+
+
+class TestPatchSeries(PatchSeriesTestCase):
+  """Tests resolution and applying logic of validation_pool.ValidationPool."""
 
   def testApplyWithDeps(self):
     """Test that we can apply changes correctly and respect deps.
@@ -666,11 +688,8 @@ class ValidationFailureOrTimeout(MoxBase):
     self.PatchObject(
         triage_lib.CalculateSuspects, 'FindSuspects',
         return_value=self._patches)
-    self.PatchObject(
-        validation_pool.ValidationPool, '_CreateValidationFailureMessage',
-        return_value=self._PATCH_MESSAGE)
     self.PatchObject(validation_pool.ValidationPool, 'SendNotification')
-    self.PatchObject(validation_pool.ValidationPool, 'RemoveReady')
+    self.remove = self.PatchObject(gerrit.GerritHelper, 'RemoveReady')
     self.PatchObject(gerrit, 'GetGerritPatchInfoWithPatchQueries',
                      lambda x: x)
     self.PatchObject(triage_lib.CalculateSuspects, 'OnlyLabFailures',
@@ -678,33 +697,52 @@ class ValidationFailureOrTimeout(MoxBase):
     self.PatchObject(triage_lib.CalculateSuspects, 'OnlyInfraFailures',
                      return_value=False)
     self.StartPatcher(parallel_unittest.ParallelMock())
+    self._AssertActions(self._patches, [])
+
+  def _AssertActions(self, changes, actions):
+    """Assert that each change in |changes| has |actions|."""
+    for change in changes:
+      action_history = self.fake_db.GetActionsForChanges([change])
+      self.assertEqual([x.action for x in action_history], actions)
 
   def testPatchesWereRejectedByFailure(self):
     """Tests that all patches are rejected by failure."""
     self._pool.HandleValidationFailure([self._BUILD_MESSAGE])
-    self.assertEqual(len(self._patches), self._pool.RemoveReady.call_count)
+    self.assertEqual(len(self._patches), self.remove.call_count)
+    self._AssertActions(self._patches, [constants.CL_ACTION_KICKED_OUT])
 
   def testPatchesWereRejectedByTimeout(self):
     self._pool.HandleValidationTimeout()
-    self.assertEqual(len(self._patches), self._pool.RemoveReady.call_count)
+    self.assertEqual(len(self._patches), self.remove.call_count)
+    self._AssertActions(self._patches, [constants.CL_ACTION_KICKED_OUT])
+
+  def testOnlyChromitePatchesWereRejectedByTimeout(self):
+    self._patches[-1].project = 'chromiumos/tacos'
+    self._pool.HandleValidationTimeout()
+    self.assertEqual(len(self._patches) - 1, self.remove.call_count)
+    self._AssertActions(self._patches[:-1], [constants.CL_ACTION_KICKED_OUT])
+    self._AssertActions(self._patches[-1:], [constants.CL_ACTION_FORGIVEN])
 
   def testNoSuspectsWithFailure(self):
     """Tests no change is blamed when there is no suspect."""
     self.PatchObject(triage_lib.CalculateSuspects, 'FindSuspects',
                      return_value=[])
     self._pool.HandleValidationFailure([self._BUILD_MESSAGE])
-    self.assertEqual(0, self._pool.RemoveReady.call_count)
+    self.assertEqual(0, self.remove.call_count)
+    self._AssertActions(self._patches, [constants.CL_ACTION_FORGIVEN])
 
   def testPreCQ(self):
     for change in self._patches:
       self._pool.UpdateCLPreCQStatus(change, constants.CL_STATUS_PASSED)
     self._pool.pre_cq_trybot = True
     self._pool.HandleValidationFailure([self._BUILD_MESSAGE])
-    self.assertEqual(0, self._pool.RemoveReady.call_count)
+    self.assertEqual(0, self.remove.call_count)
+    self._AssertActions(self._patches, [constants.CL_ACTION_PRE_CQ_PASSED])
 
   def testPatchesWereNotRejectedByInsaneFailure(self):
     self._pool.HandleValidationFailure([self._BUILD_MESSAGE], sanity=False)
-    self.assertEqual(0, self._pool.RemoveReady.call_count)
+    self.assertEqual(0, self.remove.call_count)
+    self._AssertActions(self._patches, [constants.CL_ACTION_FORGIVEN])
 
 
 class TestCoreLogic(MoxBase):
@@ -1011,8 +1049,6 @@ class TestCoreLogic(MoxBase):
     repo = repository.RepoRepository(directory, directory, 'master', depth=1)
     self.mox.StubOutWithMock(repo, 'Sync')
     self.mox.StubOutWithMock(validation_pool.ValidationPool, 'AcquireChanges')
-    self.mox.StubOutWithMock(validation_pool.ValidationPool,
-                             'RecordPatchesInMetadataAndDatabase')
     self.mox.StubOutWithMock(time, 'sleep')
     self.mox.StubOutWithMock(tree_status, 'WaitForTreeStatus')
 
@@ -1025,7 +1061,6 @@ class TestCoreLogic(MoxBase):
     # pylint: disable=no-value-for-parameter
     validation_pool.ValidationPool.AcquireChanges(
         mox.IgnoreArg(), mox.IgnoreArg(), mox.IgnoreArg()).AndReturn(True)
-    validation_pool.ValidationPool.RecordPatchesInMetadataAndDatabase()
 
     self.mox.ReplayAll()
 
@@ -1054,7 +1089,6 @@ class TestCoreLogic(MoxBase):
     repo.Sync()
     validation_pool.ValidationPool.AcquireChanges(
         mox.IgnoreArg(), mox.IgnoreArg(), mox.IgnoreArg()).AndReturn(True)
-    validation_pool.ValidationPool.RecordPatchesInMetadataAndDatabase()
     self.mox.ReplayAll()
 
     query = constants.CQ_READY_QUERY
@@ -1074,7 +1108,6 @@ class TestCoreLogic(MoxBase):
     repo.Sync()
     validation_pool.ValidationPool.AcquireChanges(
         mox.IgnoreArg(), mox.IgnoreArg(), mox.IgnoreArg()).AndReturn(True)
-    validation_pool.ValidationPool.RecordPatchesInMetadataAndDatabase()
 
     self.mox.ReplayAll()
     query = constants.CQ_READY_QUERY
@@ -1096,7 +1129,6 @@ class TestCoreLogic(MoxBase):
     repo.Sync()
     validation_pool.ValidationPool.AcquireChanges(
         mox.IgnoreArg(), mox.IgnoreArg(), mox.IgnoreArg()).AndReturn(True)
-    validation_pool.ValidationPool.RecordPatchesInMetadataAndDatabase()
 
     self.mox.ReplayAll()
 
@@ -1111,13 +1143,19 @@ class TestCoreLogic(MoxBase):
 
   def testGetFailStreak(self):
     """Tests that we're correctly able to calculate a fail streak."""
+    # Leave first build as inflight.
     builder_name = 'master-paladin'
+    slave_pool = self.MakePool(builder_name=builder_name, fake_db=self.fake_db)
+    self.fake_db.buildTable[0]['status'] = constants.BUILDER_STATUS_INFLIGHT
+    self.fake_db.buildTable[0]['build_config'] = builder_name
+    self.assertEqual(slave_pool._GetFailStreak(), 0)
+
+    # Create a passing build.
     for i in range(2):
       self.fake_db.InsertBuild(
-          builder_name, None, i, builder_name, 'abcdelicious')
+          builder_name, None, i, builder_name, 'abcdelicious',
+          status=constants.BUILDER_STATUS_PASSED)
 
-    # Just one success.
-    slave_pool = self.MakePool(fake_db=self.fake_db)
     self.assertEqual(slave_pool._GetFailStreak(), 0)
 
     # Add a fail streak.
@@ -1128,7 +1166,7 @@ class TestCoreLogic(MoxBase):
 
     self.assertEqual(slave_pool._GetFailStreak(), 3)
 
-    # Add another success and failure
+    # Add another success and failure.
     self.fake_db.InsertBuild(
         builder_name, None, 6, builder_name, 'abcdelicious',
         status=constants.BUILDER_STATUS_PASSED)
@@ -1219,13 +1257,13 @@ sys.stdout.write(validation_pool_unittest.TestPickling.%s)
 
     # Verify ToT can take our pickle.
     cros_build_lib.RunCommand(
-        ['python', '-c', code % '_CheckTestData(sys.stdin.read())'],
+        ['python2', '-c', code % '_CheckTestData(sys.stdin.read())'],
         cwd=self.tempdir, print_cmd=False, capture_output=True,
         input=self._GetTestData())
 
     # Verify we can handle ToT's pickle.
     ret = cros_build_lib.RunCommand(
-        ['python', '-c', code % '_GetTestData()'],
+        ['python2', '-c', code % '_GetTestData()'],
         cwd=self.tempdir, print_cmd=False, capture_output=True)
 
     self._CheckTestData(ret.output)
@@ -1289,7 +1327,8 @@ class TestCreateValidationFailureMessage(MoxBase):
   """Tests validation_pool.ValidationPool._CreateValidationFailureMessage"""
 
   def _AssertMessage(self, change, suspects, messages, sanity=True,
-                     infra_fail=False, lab_fail=False, no_stat=None):
+                     infra_fail=False, lab_fail=False, no_stat=None,
+                     xretry=False):
     """Call the _CreateValidationFailureMessage method.
 
     Args:
@@ -1300,12 +1339,15 @@ class TestCreateValidationFailureMessage(MoxBase):
       infra_fail: True if build failed due to infrastructure issues.
       lab_fail: True if build failed due to lab infrastructure issues.
       no_stat: List of builders that did not start.
+      xretry: Whether we expect the change to be retried.
     """
     msg = validation_pool.ValidationPool._CreateValidationFailureMessage(
         False, change, set(suspects), [], sanity=sanity,
-        infra_fail=infra_fail, lab_fail=lab_fail, no_stat=no_stat)
+        infra_fail=infra_fail, lab_fail=lab_fail, no_stat=no_stat,
+        retry=xretry)
     for x in messages:
       self.assertTrue(x in msg)
+    self.assertEqual(xretry, 'retry your change automatically' in msg)
     return msg
 
   def testSuspectChange(self):
@@ -1318,7 +1360,8 @@ class TestCreateValidationFailureMessage(MoxBase):
     patch1, patch2 = self.GetPatches(2)
     self._AssertMessage(patch1, [patch2],
                         ['This failure was probably caused by',
-                         'retry your change automatically'])
+                         'retry your change automatically'],
+                        xretry=True)
 
   def testSuspectChanges(self):
     """Test case where 1 is suspected, but so is 2."""
@@ -1330,7 +1373,8 @@ class TestCreateValidationFailureMessage(MoxBase):
     """Test case where 2 and 3 are suspected."""
     patches = self.GetPatches(3)
     self._AssertMessage(patches[0], patches[1:],
-                        ['One of the following changes is probably'])
+                        ['One of the following changes is probably'],
+                        xretry=True)
 
   def testNoMessages(self):
     """Test case where there are no messages."""
@@ -1343,7 +1387,7 @@ class TestCreateValidationFailureMessage(MoxBase):
     self._AssertMessage(
         patches[0], patches, ['The build was consider not sane',
                               'retry your change automatically'],
-        sanity=False)
+        sanity=False, xretry=True)
 
   def testLabFailMessage(self):
     """Test case where the build failed due to lab failures."""
@@ -1351,7 +1395,7 @@ class TestCreateValidationFailureMessage(MoxBase):
     self._AssertMessage(
         patches[0], patches, ['Lab infrastructure',
                               'retry your change automatically'],
-        lab_fail=True)
+        lab_fail=True, xretry=True)
 
   def testInfraFailMessage(self):
     """Test case where the build failed due to infrastructure failures."""
@@ -1364,7 +1408,7 @@ class TestCreateValidationFailureMessage(MoxBase):
     self._AssertMessage(
         patches[1], [patches[0]], ['may have been caused by infrastructure',
                                    'retry your change automatically'],
-        infra_fail=True)
+        infra_fail=True, xretry=True)
 
 
 class TestCreateDisjointTransactions(MoxBase):
@@ -1645,13 +1689,17 @@ class SubmitPoolTest(BaseSubmitPoolTestCase):
     """Test that a CL is rejected if its approvals were pulled."""
     def _ReloadPatches(patches):
       reloaded = copy.deepcopy(patches)
-      self.PatchObject(reloaded[1], 'HasApproval', return_value=False)
+      approvals = {('VRIF', '1'): False}
+      backup = reloaded[1].HasApproval
+      self.PatchObject(
+          reloaded[1], 'HasApproval',
+          side_effect=lambda *args: approvals.get(args, backup(*args)))
       return reloaded
     self.PatchObject(gerrit, 'GetGerritPatchInfoWithPatchQueries',
                      _ReloadPatches)
     self.SubmitPool(submitted=self.patches[:1], rejected=self.patches[1:])
-    error = validation_pool.PatchNotCommitReady(self.patches[1])
-    self.assertEqualNotifyArg(error, self.patches[1], 'error')
+    message = 'CL:2 is not marked Verified=+1.'
+    self.assertEqualNotifyArg(message, self.patches[1], 'error')
 
   def testAlreadyMerged(self):
     """Test that a CL that was chumped during the run was not rejected."""
@@ -1667,7 +1715,8 @@ class SubmitPoolTest(BaseSubmitPoolTestCase):
     self.PatchObject(gerrit, 'GetGerritPatchInfoWithPatchQueries',
                      _ReloadPatches)
     self.SubmitPool(submitted=self.patches[:1], rejected=self.patches[1:])
-    error = validation_pool.PatchModified(self.patches[1])
+    error = validation_pool.PatchModified(self.patches[1],
+                                          self.patches[1].patch_number + 1)
     self.assertEqualNotifyArg(error, self.patches[1], 'error')
 
 
@@ -1687,7 +1736,6 @@ class SubmitPartialPoolTest(BaseSubmitPoolTestCase):
     self.verified_mock = self.PatchObject(
         triage_lib.CalculateSuspects, 'GetFullyVerifiedChanges',
         return_value=[])
-    self.PatchObject(validation_pool.ValidationPool, '_GetShouldSubmitChanges')
 
   def _MarkPatchesVerified(self, patches):
     """Set up to mark |patches| as verified."""
@@ -1757,7 +1805,3 @@ class LoadManifestTest(cros_test_lib.TempDirTestCase):
     self.assertEqual(self.pool.changes[0].fail_count, 2)
     self.assertEqual(self.pool.changes[0].pass_count, 0)
     self.assertEqual(self.pool.changes[0].total_fail_count, 3)
-
-
-if __name__ == '__main__':
-  cros_test_lib.main()

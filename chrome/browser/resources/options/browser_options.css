@@ -182,13 +182,13 @@ input[type='range'] {
   padding-bottom: 0;
 }
 
-.hotword-settings {
-  -webkit-margin-start: 22px;
+.setting-extra-description {
+  -webkit-margin-start: 1.8em;
+  color: #999;
 }
 
-.hotword-description {
-  -webkit-margin-start: 1.8em;
-  color: gray;
+.hotword-settings {
+  -webkit-margin-start: 22px;
 }
 
 .hotword-audio-history {
@@ -199,12 +199,7 @@ input[type='range'] {
   margin-top: 1.5em;
 }
 
-.hotword-link {
-  -webkit-margin-start: 8px;
-}
-
 #hotword-retrain-link {
-  -webkit-margin-start: 8px;
   text-decoration: none;
 }
 
@@ -244,17 +239,19 @@ list:not([disabled]) > .network-group[selected] {
   padding-top: 3px;
 }
 
-.network-icon,
-.network-menu-item-icon {
+.network-icon {
   -webkit-margin-end: 8px;
   background-position: left top;
   background-size: 25px;
   height: 25px;
+  line-height: normal;
+  white-space: normal;
   width: 25px;
 }
 
-.other-cellulars > .network-menu-item-icon {
-  background-position: left top;
+.network-icon cr-network-icon {
+  height: 100%;
+  width: 100%;
 }
 
 @-webkit-keyframes connecting-animation {

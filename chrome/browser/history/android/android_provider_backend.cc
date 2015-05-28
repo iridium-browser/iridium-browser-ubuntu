@@ -5,17 +5,16 @@
 #include "chrome/browser/history/android/android_provider_backend.h"
 
 #include "base/i18n/case_conversion.h"
-#include "chrome/browser/chrome_notification_types.h"
-#include "chrome/browser/history/android/android_urls_sql_handler.h"
 #include "chrome/browser/history/android/bookmark_model_sql_handler.h"
-#include "chrome/browser/history/android/urls_sql_handler.h"
-#include "chrome/browser/history/android/visit_sql_handler.h"
-#include "chrome/browser/history/history_backend.h"
-#include "chrome/browser/history/history_database.h"
-#include "components/history/core/android/android_time.h"
-#include "components/history/core/android/favicon_sql_handler.h"
+#include "components/history/core/browser/android/android_time.h"
+#include "components/history/core/browser/android/android_urls_sql_handler.h"
+#include "components/history/core/browser/android/favicon_sql_handler.h"
+#include "components/history/core/browser/android/urls_sql_handler.h"
+#include "components/history/core/browser/android/visit_sql_handler.h"
+#include "components/history/core/browser/history_backend.h"
 #include "components/history/core/browser/history_backend_notifier.h"
 #include "components/history/core/browser/history_client.h"
+#include "components/history/core/browser/history_database.h"
 #include "components/history/core/browser/keyword_search_term.h"
 #include "components/history/core/browser/thumbnail_database.h"
 #include "sql/connection.h"
@@ -27,6 +26,8 @@ namespace history {
 // Helpers --------------------------------------------------------------------
 
 namespace {
+
+const char kAndroidProviderBackendUserDataKey[] = "AndroidProviderBackendKey";
 
 const char kVirtualHistoryAndBookmarkTable[] =
     "SELECT android_urls.id AS _id, "
@@ -213,6 +214,19 @@ AndroidProviderBackend::AndroidProviderBackend(
 }
 
 AndroidProviderBackend::~AndroidProviderBackend() {
+}
+
+// static
+const void* AndroidProviderBackend::GetUserDataKey() {
+  return kAndroidProviderBackendUserDataKey;
+}
+
+// static
+AndroidProviderBackend* AndroidProviderBackend::FromHistoryBackend(
+    HistoryBackend* history_backend) {
+  DCHECK(history_backend);
+  return static_cast<AndroidProviderBackend*>(
+      history_backend->GetUserData(GetUserDataKey()));
 }
 
 AndroidStatement* AndroidProviderBackend::QueryHistoryAndBookmarks(

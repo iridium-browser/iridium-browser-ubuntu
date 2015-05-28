@@ -3,6 +3,38 @@
 // found in the LICENSE file.
 
 /**
+ * Turn a dictionary received from postMessage into a key event.
+ * @param {Object} dict A dictionary representing the key event.
+ * @return {Event} A key event.
+ */
+function DeserializeKeyEvent(dict) {
+  var e = document.createEvent('Event');
+  e.initEvent('keydown');
+  e.keyCode = dict.keyCode;
+  e.shiftKey = dict.shiftKey;
+  e.ctrlKey = dict.ctrlKey;
+  e.altKey = dict.altKey;
+  e.metaKey = dict.metaKey;
+  e.fromScriptingAPI = true;
+  return e;
+}
+
+/**
+ * Turn a key event into a dictionary which can be sent over postMessage.
+ * @param {Event} event A key event.
+ * @return {Object} A dictionary representing the key event.
+ */
+function SerializeKeyEvent(event) {
+  return {
+    keyCode: event.keyCode,
+    shiftKey: event.shiftKey,
+    ctrlKey: event.ctrlKey,
+    altKey: event.altKey,
+    metaKey: event.metaKey
+  };
+}
+
+/**
  * Create a new PDFScriptingAPI. This provides a scripting interface to
  * the PDF viewer so that it can be customized by things like print preview.
  * @param {Window} window the window of the page containing the pdf viewer.
@@ -39,6 +71,16 @@ function PDFScriptingAPI(window, plugin) {
           this.accessibilityCallback_ = null;
         }
         break;
+      case 'getSelectedTextReply':
+        if (this.selectedTextCallback_) {
+          this.selectedTextCallback_(event.data.selectedText);
+          this.selectedTextCallback_ = null;
+        }
+        break;
+      case 'sendKeyEvent':
+        if (this.keyEventCallback_)
+          this.keyEventCallback_(DeserializeKeyEvent(event.data.keyEvent));
+        break;
     }
   }.bind(this), false);
 }
@@ -66,14 +108,13 @@ PDFScriptingAPI.prototype = {
   setPlugin: function(plugin) {
     this.plugin_ = plugin;
 
-    // Send an initialization message to the plugin indicating the window to
-    // respond to.
     if (this.plugin_) {
+      // Send a message to ensure the postMessage channel is initialized which
+      // allows us to receive messages.
       this.sendMessage_({
-        type: 'setParentWindow'
+        type: 'initialize'
       });
-
-      // Now we can flush pending messages
+      // Flush pending messages.
       while (this.pendingScriptingMessages_.length > 0)
         this.sendMessage_(this.pendingScriptingMessages_.shift());
     }
@@ -94,18 +135,27 @@ PDFScriptingAPI.prototype = {
    */
   setLoadCallback: function(callback) {
     this.loadCallback_ = callback;
-    if (this.loaded_ && callback)
-      callback();
+    if (this.loaded_ && this.loadCallback_)
+      this.loadCallback_();
+  },
+
+  /**
+   * Sets a callback that gets run when a key event is fired in the PDF viewer.
+   * @param {Function} callback the callback to be called with a key event.
+   */
+  setKeyEventCallback: function(callback) {
+    this.keyEventCallback_ = callback;
   },
 
   /**
    * Resets the PDF viewer into print preview mode.
    * @param {string} url the url of the PDF to load.
    * @param {boolean} grayscale whether or not to display the PDF in grayscale.
-   * @param {Array.<number>} pageNumbers an array of the page numbers.
+   * @param {Array<number>} pageNumbers an array of the page numbers.
    * @param {boolean} modifiable whether or not the document is modifiable.
    */
   resetPrintPreviewMode: function(url, grayscale, pageNumbers, modifiable) {
+    this.loaded_ = false;
     this.sendMessage_({
       type: 'resetPrintPreviewMode',
       url: url,
@@ -129,7 +179,8 @@ PDFScriptingAPI.prototype = {
   },
 
   /**
-   * Get accessibility JSON for the document.
+   * Get accessibility JSON for the document. May only be called after document
+   * load.
    * @param {Function} callback a callback to be called with the accessibility
    *     json that has been retrieved.
    * @param {number} [page] the 0-indexed page number to get accessibility data
@@ -152,13 +203,49 @@ PDFScriptingAPI.prototype = {
   },
 
   /**
-   * Send a key event to the extension.
-   * @param {number} keyCode the key code to send to the extension.
+   * Select all the text in the document. May only be called after document
+   * load.
    */
-  sendKeyEvent: function(keyCode) {
+  selectAll: function() {
+    this.sendMessage_({
+      type: 'selectAll'
+    });
+  },
+
+  /**
+   * Get the selected text in the document. The callback will be called with the
+   * text that is selected. May only be called after document load.
+   * @param {Function} callback a callback to be called with the selected text.
+   * @return {boolean} true if the function is successful, false if there is an
+   *     outstanding request for selected text that has not been answered.
+   */
+  getSelectedText: function(callback) {
+    if (this.selectedTextCallback_)
+      return false;
+    this.selectedTextCallback_ = callback;
+    this.sendMessage_({
+      type: 'getSelectedText'
+    });
+    return true;
+  },
+
+  /**
+   * Print the document. May only be called after document load.
+   */
+  print: function() {
+    this.sendMessage_({
+      type: 'print'
+    });
+  },
+
+  /**
+   * Send a key event to the extension.
+   * @param {Event} keyEvent the key event to send to the extension.
+   */
+  sendKeyEvent: function(keyEvent) {
     this.sendMessage_({
       type: 'sendKeyEvent',
-      keyCode: keyCode
+      keyEvent: SerializeKeyEvent(keyEvent)
     });
   },
 };
@@ -176,6 +263,8 @@ function PDFCreateOutOfProcessPlugin(src) {
   iframe.setAttribute(
       'src',
       'chrome-extension://mhjfbmdgcfjbbpaeojofohoefgiehjai/index.html?' + src);
+  // Prevent the frame from being tab-focusable.
+  iframe.setAttribute('tabindex', '-1');
   var client = new PDFScriptingAPI(window);
   iframe.onload = function() {
     client.setPlugin(iframe.contentWindow);
@@ -184,6 +273,7 @@ function PDFCreateOutOfProcessPlugin(src) {
   iframe.setViewportChangedCallback =
       client.setViewportChangedCallback.bind(client);
   iframe.setLoadCallback = client.setLoadCallback.bind(client);
+  iframe.setKeyEventCallback = client.setKeyEventCallback.bind(client);
   iframe.resetPrintPreviewMode = client.resetPrintPreviewMode.bind(client);
   iframe.loadPreviewPage = client.loadPreviewPage.bind(client);
   iframe.sendKeyEvent = client.sendKeyEvent.bind(client);

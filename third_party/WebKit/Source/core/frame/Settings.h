@@ -27,7 +27,6 @@
 #ifndef Settings_h
 #define Settings_h
 
-#include "bindings/core/v8/ScriptStreamingMode.h"
 #include "bindings/core/v8/V8CacheOptions.h"
 #include "core/SettingsMacros.h"
 #include "core/css/PointerProperties.h"
@@ -38,13 +37,14 @@
 #include "platform/geometry/IntSize.h"
 #include "platform/graphics/ImageAnimationPolicy.h"
 #include "platform/weborigin/KURL.h"
+#include "public/platform/WebDisplayMode.h"
 #include "wtf/HashSet.h"
 #include "wtf/RefCounted.h"
 
 namespace blink {
 
 class Settings {
-    WTF_MAKE_NONCOPYABLE(Settings); WTF_MAKE_FAST_ALLOCATED;
+    WTF_MAKE_NONCOPYABLE(Settings); WTF_MAKE_FAST_ALLOCATED(Settings);
 public:
     static PassOwnPtr<Settings> create();
 

@@ -28,7 +28,7 @@
 #define PseudoElement_h
 
 #include "core/dom/Element.h"
-#include "core/rendering/style/RenderStyle.h"
+#include "core/style/ComputedStyle.h"
 
 namespace blink {
 
@@ -36,9 +36,9 @@ class PseudoElement : public Element {
 public:
     static PassRefPtrWillBeRawPtr<PseudoElement> create(Element* parent, PseudoId);
 
-    virtual PassRefPtr<RenderStyle> customStyleForRenderer() override;
+    virtual PassRefPtr<ComputedStyle> customStyleForLayoutObject() override;
     virtual void attach(const AttachContext& = AttachContext()) override;
-    virtual bool rendererIsNeeded(const RenderStyle&) override;
+    virtual bool layoutObjectIsNeeded(const ComputedStyle&) override;
 
     virtual bool canStartSelection() const override { return false; }
     virtual bool canContainRangeEndPoint() const override { return false; }
@@ -59,7 +59,7 @@ private:
 
 const QualifiedName& pseudoElementTagName();
 
-inline bool pseudoElementRendererIsNeeded(const RenderStyle* style)
+inline bool pseudoElementRendererIsNeeded(const ComputedStyle* style)
 {
     if (!style)
         return false;

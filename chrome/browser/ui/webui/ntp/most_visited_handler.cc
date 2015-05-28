@@ -20,25 +20,31 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/threading/thread.h"
 #include "base/values.h"
-#include "chrome/browser/chrome_notification_types.h"
-#include "chrome/browser/history/top_sites.h"
+#include "chrome/browser/favicon/fallback_icon_service_factory.h"
+#include "chrome/browser/favicon/favicon_service_factory.h"
+#include "chrome/browser/history/top_sites_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/thumbnails/thumbnail_list_source.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_finder.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/tabs/tab_strip_model_utils.h"
+#include "chrome/browser/ui/webui/fallback_icon_source.h"
 #include "chrome/browser/ui/webui/favicon_source.h"
+#include "chrome/browser/ui/webui/large_icon_source.h"
 #include "chrome/browser/ui/webui/ntp/new_tab_ui.h"
 #include "chrome/browser/ui/webui/ntp/ntp_stats.h"
 #include "chrome/browser/ui/webui/ntp/thumbnail_source.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/url_constants.h"
+#include "components/favicon/core/fallback_icon_service.h"
+#include "components/favicon/core/favicon_service.h"
 #include "components/history/core/browser/page_usage_data.h"
+#include "components/history/core/browser/top_sites.h"
+#include "components/keyed_service/core/service_access_type.h"
 #include "components/pref_registry/pref_registry_syncable.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
-#include "content/public/browser/notification_source.h"
 #include "content/public/browser/url_data_source.h"
 #include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
@@ -48,7 +54,8 @@
 using base::UserMetricsAction;
 
 MostVisitedHandler::MostVisitedHandler()
-    : got_first_most_visited_request_(false),
+    : scoped_observer_(this),
+      got_first_most_visited_request_(false),
       most_visited_viewed_(false),
       user_action_logged_(false),
       weak_ptr_factory_(this) {
@@ -79,21 +86,33 @@ void MostVisitedHandler::RegisterMessages() {
   // Set up our sources for top-sites data.
   content::URLDataSource::Add(profile, new ThumbnailListSource(profile));
 
+  favicon::FaviconService* favicon_service =
+      FaviconServiceFactory::GetForProfile(profile,
+                                           ServiceAccessType::EXPLICIT_ACCESS);
+  favicon::FallbackIconService* fallback_icon_service =
+      FallbackIconServiceFactory::GetForBrowserContext(profile);
+
+  // Register chrome://large-icon as a data source for large icons.
+  content::URLDataSource::Add(profile,
+      new LargeIconSource(favicon_service, fallback_icon_service));
+  content::URLDataSource::Add(profile,
+                              new FallbackIconSource(fallback_icon_service));
+
   // Register chrome://favicon as a data source for favicons.
   content::URLDataSource::Add(
       profile, new FaviconSource(profile, FaviconSource::FAVICON));
 
-  history::TopSites* ts = profile->GetTopSites();
-  if (ts) {
+  scoped_refptr<history::TopSites> top_sites =
+      TopSitesFactory::GetForProfile(profile);
+  if (top_sites) {
     // TopSites updates itself after a delay. This is especially noticable when
     // your profile is empty. Ask TopSites to update itself when we're about to
     // show the new tab page.
-    ts->SyncWithHistory();
+    top_sites->SyncWithHistory();
 
-    // Register for notification when TopSites changes so that we can update
-    // ourself.
-    registrar_.Add(this, chrome::NOTIFICATION_TOP_SITES_CHANGED,
-                   content::Source<history::TopSites>(ts));
+    // Register as TopSitesObserver so that we can update ourselves when the
+    // TopSites changes.
+    scoped_observer_.Add(top_sites.get());
   }
 
   // We pre-emptively make a fetch for the most visited pages so we have the
@@ -138,7 +157,8 @@ void MostVisitedHandler::SendPagesValue() {
     const base::DictionaryValue* url_blacklist =
         profile->GetPrefs()->GetDictionary(prefs::kNtpMostVisitedURLsBlacklist);
     bool has_blacklisted_urls = !url_blacklist->empty();
-    history::TopSites* ts = profile->GetTopSites();
+    scoped_refptr<history::TopSites> ts =
+        TopSitesFactory::GetForProfile(profile);
     if (ts)
       has_blacklisted_urls = ts->HasBlacklistedItems();
 
@@ -151,7 +171,8 @@ void MostVisitedHandler::SendPagesValue() {
 }
 
 void MostVisitedHandler::StartQueryForMostVisited() {
-  history::TopSites* ts = Profile::FromWebUI(web_ui())->GetTopSites();
+  scoped_refptr<history::TopSites> ts =
+      TopSitesFactory::GetForProfile(Profile::FromWebUI(web_ui()));
   if (ts) {
     ts->GetMostVisitedURLs(
         base::Bind(&MostVisitedHandler::OnMostVisitedUrlsAvailable,
@@ -177,7 +198,8 @@ void MostVisitedHandler::HandleRemoveUrlsFromBlacklist(
       return;
     }
     content::RecordAction(UserMetricsAction("MostVisited_UrlRemoved"));
-    history::TopSites* ts = Profile::FromWebUI(web_ui())->GetTopSites();
+    scoped_refptr<history::TopSites> ts =
+        TopSitesFactory::GetForProfile(Profile::FromWebUI(web_ui()));
     if (ts)
       ts->RemoveBlacklistedURL(GURL(url));
   }
@@ -186,7 +208,8 @@ void MostVisitedHandler::HandleRemoveUrlsFromBlacklist(
 void MostVisitedHandler::HandleClearBlacklist(const base::ListValue* args) {
   content::RecordAction(UserMetricsAction("MostVisited_BlacklistCleared"));
 
-  history::TopSites* ts = Profile::FromWebUI(web_ui())->GetTopSites();
+  scoped_refptr<history::TopSites> ts =
+      TopSitesFactory::GetForProfile(Profile::FromWebUI(web_ui()));
   if (ts)
     ts->ClearBlacklistedURLs();
 }
@@ -243,17 +266,17 @@ void MostVisitedHandler::OnMostVisitedUrlsAvailable(
   }
 }
 
-void MostVisitedHandler::Observe(int type,
-                                 const content::NotificationSource& source,
-                                 const content::NotificationDetails& details) {
-  DCHECK_EQ(type, chrome::NOTIFICATION_TOP_SITES_CHANGED);
+void MostVisitedHandler::TopSitesLoaded(history::TopSites* top_sites) {
+}
 
+void MostVisitedHandler::TopSitesChanged(history::TopSites* top_sites) {
   // Most visited urls changed, query again.
   StartQueryForMostVisited();
 }
 
 void MostVisitedHandler::BlacklistUrl(const GURL& url) {
-  history::TopSites* ts = Profile::FromWebUI(web_ui())->GetTopSites();
+  scoped_refptr<history::TopSites> ts =
+      TopSitesFactory::GetForProfile(Profile::FromWebUI(web_ui()));
   if (ts)
     ts->AddBlacklistedURL(url);
   content::RecordAction(UserMetricsAction("MostVisited_UrlBlacklisted"));

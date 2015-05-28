@@ -25,6 +25,8 @@ static std::string PermissionTypeToString(WebViewPermissionType type) {
       return webview::kPermissionTypeDownload;
     case WEB_VIEW_PERMISSION_TYPE_FILESYSTEM:
       return webview::kPermissionTypeFileSystem;
+    case WEB_VIEW_PERMISSION_TYPE_FULLSCREEN:
+      return webview::kPermissionTypeFullscreen;
     case WEB_VIEW_PERMISSION_TYPE_GEOLOCATION:
       return webview::kPermissionTypeGeolocation;
     case WEB_VIEW_PERMISSION_TYPE_JAVASCRIPT_DIALOG:
@@ -61,6 +63,10 @@ void RecordUserInitiatedUMA(
         content::RecordAction(
             UserMetricsAction("WebView.PermissionAllow.FileSystem"));
         break;
+      case WEB_VIEW_PERMISSION_TYPE_FULLSCREEN:
+        content::RecordAction(
+            UserMetricsAction("WebView.PermissionAllow.Fullscreen"));
+        break;
       case WEB_VIEW_PERMISSION_TYPE_GEOLOCATION:
         content::RecordAction(
             UserMetricsAction("WebView.PermissionAllow.Geolocation"));
@@ -96,6 +102,10 @@ void RecordUserInitiatedUMA(
       case WEB_VIEW_PERMISSION_TYPE_FILESYSTEM:
         content::RecordAction(
             UserMetricsAction("WebView.PermissionDeny.FileSystem"));
+        break;
+      case WEB_VIEW_PERMISSION_TYPE_FULLSCREEN:
+        content::RecordAction(
+            UserMetricsAction("WebView.PermissionDeny.Fullscreen"));
         break;
       case WEB_VIEW_PERMISSION_TYPE_GEOLOCATION:
         content::RecordAction(
@@ -319,21 +329,20 @@ int WebViewPermissionHelper::RequestPermission(
   args->SetInteger(webview::kRequestId, request_id);
   switch (permission_type) {
     case WEB_VIEW_PERMISSION_TYPE_NEW_WINDOW: {
-      web_view_guest_->DispatchEventToEmbedder(
+      web_view_guest_->DispatchEventToView(
           new GuestViewBase::Event(webview::kEventNewWindow, args.Pass()));
       break;
     }
     case WEB_VIEW_PERMISSION_TYPE_JAVASCRIPT_DIALOG: {
-      web_view_guest_->DispatchEventToEmbedder(
+      web_view_guest_->DispatchEventToView(
           new GuestViewBase::Event(webview::kEventDialog, args.Pass()));
       break;
     }
     default: {
       args->SetString(webview::kPermission,
                       PermissionTypeToString(permission_type));
-      web_view_guest_->DispatchEventToEmbedder(new GuestViewBase::Event(
-          webview::kEventPermissionRequest,
-          args.Pass()));
+      web_view_guest_->DispatchEventToView(new GuestViewBase::Event(
+          webview::kEventPermissionRequest, args.Pass()));
       break;
     }
   }

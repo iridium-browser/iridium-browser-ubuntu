@@ -8,7 +8,7 @@
 #include "core/frame/FrameView.h"
 #include "core/html/HTMLDocument.h"
 #include "core/html/HTMLElement.h"
-#include "core/rendering/RenderObject.h"
+#include "core/layout/LayoutObject.h"
 #include "core/testing/DummyPageHolder.h"
 #include <gtest/gtest.h>
 
@@ -32,12 +32,12 @@ TEST(DragUpdateTest, AffectedByDragUpdate)
         "</div>", ASSERT_NO_EXCEPTION);
 
     document.view()->updateLayoutAndStyleIfNeededRecursive();
-    unsigned startCount = document.styleEngine()->resolverAccessCount();
+    unsigned startCount = document.styleEngine().resolverAccessCount();
 
-    document.documentElement()->renderer()->updateDragState(true);
+    document.documentElement()->layoutObject()->updateDragState(true);
     document.view()->updateLayoutAndStyleIfNeededRecursive();
 
-    unsigned accessCount = document.styleEngine()->resolverAccessCount() - startCount;
+    unsigned accessCount = document.styleEngine().resolverAccessCount() - startCount;
 
     ASSERT_EQ(1U, accessCount);
 }
@@ -58,12 +58,12 @@ TEST(DragUpdateTest, ChildrenOrSiblingsAffectedByDragUpdate)
         "</div>", ASSERT_NO_EXCEPTION);
 
     document.updateLayout();
-    unsigned startCount = document.styleEngine()->resolverAccessCount();
+    unsigned startCount = document.styleEngine().resolverAccessCount();
 
-    document.documentElement()->renderer()->updateDragState(true);
+    document.documentElement()->layoutObject()->updateDragState(true);
     document.updateLayout();
 
-    unsigned accessCount = document.styleEngine()->resolverAccessCount() - startCount;
+    unsigned accessCount = document.styleEngine().resolverAccessCount() - startCount;
 
     ASSERT_EQ(5U, accessCount);
 }

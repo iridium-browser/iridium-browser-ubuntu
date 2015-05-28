@@ -10,7 +10,6 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/extensions/extension_service_test_base.h"
 #include "chrome/browser/extensions/test_extension_service.h"
-#include "chrome/browser/history/web_history_service.h"
 #include "chrome/browser/search/hotword_audio_history_handler.h"
 #include "chrome/browser/search/hotword_service.h"
 #include "chrome/browser/search/hotword_service_factory.h"
@@ -18,6 +17,7 @@
 #include "chrome/common/extensions/extension_constants.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/test/base/testing_profile.h"
+#include "components/history/core/browser/web_history_service.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/common/extension.h"
@@ -133,10 +133,6 @@ class HotwordServiceTest :
 
   void SetUp() override {
     extension_id_ = GetParam();
-    if (extension_id_ == extension_misc::kHotwordExtensionId) {
-      base::CommandLine::ForCurrentProcess()->AppendSwitch(
-          switches::kDisableExperimentalHotwording);
-    }
 #if defined(OS_CHROMEOS)
     // Tests on chromeos need to have the handler initialized.
     chromeos::CrasAudioHandler::InitializeForTesting();
@@ -159,10 +155,9 @@ class HotwordServiceTest :
 INSTANTIATE_TEST_CASE_P(HotwordServiceTests,
                         HotwordServiceTest,
                         ::testing::Values(
-                            extension_misc::kHotwordExtensionId,
                             extension_misc::kHotwordSharedModuleId));
 
-TEST_P(HotwordServiceTest, IsHotwordAllowedBadFieldTrial) {
+TEST_P(HotwordServiceTest, IsHotwordAllowedDisabledFieldTrial) {
   TestingProfile::Builder profile_builder;
   scoped_ptr<TestingProfile> profile = profile_builder.Build();
 
@@ -172,12 +167,13 @@ TEST_P(HotwordServiceTest, IsHotwordAllowedBadFieldTrial) {
       HotwordServiceFactory::GetForProfile(profile.get());
   EXPECT_TRUE(hotword_service != NULL);
 
-  // When the field trial is empty or Disabled, it should not be allowed.
+  // When the field trial is empty, it should be allowed.
   std::string group = base::FieldTrialList::FindFullName(
       hotword_internal::kHotwordFieldTrialName);
   EXPECT_TRUE(group.empty());
-  EXPECT_FALSE(HotwordServiceFactory::IsHotwordAllowed(profile.get()));
+  EXPECT_TRUE(HotwordServiceFactory::IsHotwordAllowed(profile.get()));
 
+  // When the field trial is 'Disabled', it should not be allowed.
   ASSERT_TRUE(base::FieldTrialList::CreateFieldTrial(
      hotword_internal::kHotwordFieldTrialName,
      hotword_internal::kHotwordFieldTrialDisabledGroupName));
@@ -196,7 +192,7 @@ TEST_P(HotwordServiceTest, IsHotwordAllowedBadFieldTrial) {
       profile->GetOffTheRecordProfile()));
 }
 
-TEST_P(HotwordServiceTest, IsHotwordAllowedLocale) {
+TEST_P(HotwordServiceTest, IsHotwordAllowedInvalidFieldTrial) {
   TestingProfile::Builder profile_builder;
   scoped_ptr<TestingProfile> profile = profile_builder.Build();
 
@@ -206,9 +202,28 @@ TEST_P(HotwordServiceTest, IsHotwordAllowedLocale) {
       HotwordServiceFactory::GetForProfile(profile.get());
   EXPECT_TRUE(hotword_service != NULL);
 
-  // Set the field trial to a valid one.
+  // When the field trial is set, but not 'Disabled', it should be allowed.
   ASSERT_TRUE(base::FieldTrialList::CreateFieldTrial(
-      hotword_internal::kHotwordFieldTrialName, "Good"));
+     hotword_internal::kHotwordFieldTrialName, "foo"));
+  std::string group = base::FieldTrialList::FindFullName(
+      hotword_internal::kHotwordFieldTrialName);
+  EXPECT_TRUE(group == "foo");
+  EXPECT_TRUE(HotwordServiceFactory::IsHotwordAllowed(profile.get()));
+
+  // Test that incognito returns false as well.
+  EXPECT_FALSE(HotwordServiceFactory::IsHotwordAllowed(
+      profile->GetOffTheRecordProfile()));
+}
+
+TEST_P(HotwordServiceTest, IsHotwordAllowedLocale) {
+  TestingProfile::Builder profile_builder;
+  scoped_ptr<TestingProfile> profile = profile_builder.Build();
+
+  // Check that the service exists so that a NULL service be ruled out in
+  // following tests.
+  HotwordService* hotword_service =
+      HotwordServiceFactory::GetForProfile(profile.get());
+  EXPECT_TRUE(hotword_service != NULL);
 
   // Set the language to an invalid one.
   SetApplicationLocale(static_cast<Profile*>(profile.get()), "non-valid");
@@ -234,10 +249,6 @@ TEST_P(HotwordServiceTest, IsHotwordAllowedLocale) {
 }
 
 TEST_P(HotwordServiceTest, ShouldReinstallExtension) {
-  // Set the field trial to a valid one.
-  ASSERT_TRUE(base::FieldTrialList::CreateFieldTrial(
-      hotword_internal::kHotwordFieldTrialName, "Install"));
-
   InitializeEmptyExtensionService();
 
   HotwordServiceFactory* hotword_service_factory =
@@ -246,7 +257,7 @@ TEST_P(HotwordServiceTest, ShouldReinstallExtension) {
   MockHotwordService* hotword_service = static_cast<MockHotwordService*>(
       hotword_service_factory->SetTestingFactoryAndUse(
           profile(), BuildMockHotwordService));
-  EXPECT_TRUE(hotword_service != NULL);
+  ASSERT_TRUE(hotword_service != NULL);
   hotword_service->SetExtensionId(extension_id_);
 
   // If no locale has been set, no reason to uninstall.
@@ -265,10 +276,6 @@ TEST_P(HotwordServiceTest, ShouldReinstallExtension) {
 }
 
 TEST_P(HotwordServiceTest, PreviousLanguageSetOnInstall) {
-  // Set the field trial to a valid one.
-  ASSERT_TRUE(base::FieldTrialList::CreateFieldTrial(
-      hotword_internal::kHotwordFieldTrialName, "Install"));
-
   InitializeEmptyExtensionService();
   service_->Init();
 
@@ -278,7 +285,7 @@ TEST_P(HotwordServiceTest, PreviousLanguageSetOnInstall) {
   MockHotwordService* hotword_service = static_cast<MockHotwordService*>(
       hotword_service_factory->SetTestingFactoryAndUse(
           profile(), BuildMockHotwordService));
-  EXPECT_TRUE(hotword_service != NULL);
+  ASSERT_TRUE(hotword_service != NULL);
   hotword_service->SetExtensionService(service());
   hotword_service->SetExtensionId(extension_id_);
 
@@ -295,10 +302,6 @@ TEST_P(HotwordServiceTest, PreviousLanguageSetOnInstall) {
 }
 
 TEST_P(HotwordServiceTest, UninstallReinstallTriggeredCorrectly) {
-  // Set the field trial to a valid one.
-  ASSERT_TRUE(base::FieldTrialList::CreateFieldTrial(
-      hotword_internal::kHotwordFieldTrialName, "Install"));
-
   InitializeEmptyExtensionService();
   service_->Init();
 
@@ -308,7 +311,7 @@ TEST_P(HotwordServiceTest, UninstallReinstallTriggeredCorrectly) {
   MockHotwordService* hotword_service = static_cast<MockHotwordService*>(
       hotword_service_factory->SetTestingFactoryAndUse(
           profile(), BuildMockHotwordService));
-  EXPECT_TRUE(hotword_service != NULL);
+  ASSERT_TRUE(hotword_service != NULL);
   hotword_service->SetExtensionService(service());
   hotword_service->SetExtensionId(extension_id_);
 
@@ -380,10 +383,6 @@ TEST_P(HotwordServiceTest, DisableAlwaysOnOnLanguageChange) {
   base::CommandLine::ForCurrentProcess()->AppendSwitch(
       switches::kEnableExperimentalHotwordHardware);
 
-  // Set the field trial to a valid one.
-  ASSERT_TRUE(base::FieldTrialList::CreateFieldTrial(
-      hotword_internal::kHotwordFieldTrialName, "Install"));
-
   InitializeEmptyExtensionService();
   service_->Init();
 
@@ -396,12 +395,12 @@ TEST_P(HotwordServiceTest, DisableAlwaysOnOnLanguageChange) {
   MockHotwordService* hotword_service = static_cast<MockHotwordService*>(
       hotword_service_factory->SetTestingFactoryAndUse(
           profile(), BuildMockHotwordService));
-  EXPECT_TRUE(hotword_service != NULL);
+  ASSERT_TRUE(hotword_service != NULL);
   hotword_service->SetExtensionService(service());
   hotword_service->SetExtensionId(extension_id_);
 
-  // Initialize the locale to "en".
-  SetApplicationLocale(profile(), "en");
+  // Initialize the locale to "en_us".
+  SetApplicationLocale(profile(), "en_us");
 
   // The previous locale should not be set. No reason to uninstall.
   EXPECT_FALSE(hotword_service->MaybeReinstallHotwordExtension());
@@ -416,13 +415,15 @@ TEST_P(HotwordServiceTest, DisableAlwaysOnOnLanguageChange) {
   EXPECT_FALSE(hotword_service->MaybeReinstallHotwordExtension());
   EXPECT_TRUE(hotword_service->IsAlwaysOnEnabled());
 
-  // Switch the locale to a valid but different one.
-  SetApplicationLocale(profile(), "fr_fr");
-  EXPECT_TRUE(HotwordServiceFactory::IsHotwordAllowed(profile()));
+  // TODO(kcarattini): Uncomment this sectione once we launch always-on
+  // in more languages.
+  // // Switch the locale to a valid but different one.
+  // SetApplicationLocale(profile(), "fr_fr");
+  // EXPECT_TRUE(HotwordServiceFactory::IsHotwordAllowed(profile()));
 
-  // Different but valid locale so expect uninstall.
-  EXPECT_TRUE(hotword_service->MaybeReinstallHotwordExtension());
-  EXPECT_FALSE(hotword_service->IsAlwaysOnEnabled());
+  // // Different but valid locale so expect uninstall.
+  // EXPECT_TRUE(hotword_service->MaybeReinstallHotwordExtension());
+  // EXPECT_FALSE(hotword_service->IsAlwaysOnEnabled());
 
   // Re-enable always-on.
   profile()->GetPrefs()->SetBoolean(prefs::kHotwordAlwaysOnSearchEnabled, true);
@@ -433,22 +434,20 @@ TEST_P(HotwordServiceTest, DisableAlwaysOnOnLanguageChange) {
   EXPECT_FALSE(hotword_service->MaybeReinstallHotwordExtension());
   EXPECT_TRUE(hotword_service->IsAlwaysOnEnabled());
 
-  // If the locale is set back to the last valid one, then an uninstall-install
-  // shouldn't be needed.
-  SetApplicationLocale(profile(), "fr_fr");
-  EXPECT_TRUE(HotwordServiceFactory::IsHotwordAllowed(profile()));
-  EXPECT_FALSE(hotword_service->MaybeReinstallHotwordExtension());
-  EXPECT_TRUE(hotword_service->IsAlwaysOnEnabled());
+  // TODO(kcarattini): Uncomment this sectione once we launch always-on
+  // in more languages.
+  // // If the locale is set back to the last valid one, then an
+  // // uninstall-install shouldn't be needed.
+  // SetApplicationLocale(profile(), "fr_fr");
+  // EXPECT_TRUE(HotwordServiceFactory::IsHotwordAllowed(profile()));
+  // EXPECT_FALSE(hotword_service->MaybeReinstallHotwordExtension());
+  // EXPECT_TRUE(hotword_service->IsAlwaysOnEnabled());
 }
 
 TEST_P(HotwordServiceTest, IsAlwaysOnEnabled) {
   // Bypass test for old hotwording.
   if (extension_id_ != extension_misc::kHotwordSharedModuleId)
     return;
-
-  // Set the field trial to a valid one.
-  ASSERT_TRUE(base::FieldTrialList::CreateFieldTrial(
-      hotword_internal::kHotwordFieldTrialName, "Install"));
 
   InitializeEmptyExtensionService();
   service_->Init();
@@ -458,7 +457,7 @@ TEST_P(HotwordServiceTest, IsAlwaysOnEnabled) {
   MockHotwordService* hotword_service = static_cast<MockHotwordService*>(
       hotword_service_factory->SetTestingFactoryAndUse(
           profile(), BuildMockHotwordService));
-  EXPECT_TRUE(hotword_service != NULL);
+  ASSERT_TRUE(hotword_service != NULL);
   hotword_service->SetExtensionService(service());
   hotword_service->SetExtensionId(extension_id_);
 
@@ -485,10 +484,6 @@ TEST_P(HotwordServiceTest, IsAlwaysOnEnabled) {
 }
 
 TEST_P(HotwordServiceTest, IsSometimesOnEnabled) {
-  // Set the field trial to a valid one.
-  ASSERT_TRUE(base::FieldTrialList::CreateFieldTrial(
-      hotword_internal::kHotwordFieldTrialName, "Install"));
-
   InitializeEmptyExtensionService();
   service_->Init();
   HotwordServiceFactory* hotword_service_factory =
@@ -497,7 +492,7 @@ TEST_P(HotwordServiceTest, IsSometimesOnEnabled) {
   MockHotwordService* hotword_service = static_cast<MockHotwordService*>(
       hotword_service_factory->SetTestingFactoryAndUse(
           profile(), BuildMockHotwordService));
-  EXPECT_TRUE(hotword_service != NULL);
+  ASSERT_TRUE(hotword_service != NULL);
   hotword_service->SetExtensionService(service());
   hotword_service->SetExtensionId(extension_id_);
 
@@ -538,10 +533,6 @@ TEST_P(HotwordServiceTest, IsSometimesOnEnabled) {
 }
 
 TEST_P(HotwordServiceTest, AudioHistorySyncOccurs) {
-  // Set the field trial to a valid one.
-  ASSERT_TRUE(base::FieldTrialList::CreateFieldTrial(
-    hotword_internal::kHotwordFieldTrialName, "Install"));
-
   InitializeEmptyExtensionService();
   service_->Init();
 
@@ -551,7 +542,7 @@ TEST_P(HotwordServiceTest, AudioHistorySyncOccurs) {
   MockHotwordService* hotword_service = static_cast<MockHotwordService*>(
     hotword_service_factory->SetTestingFactoryAndUse(
     profile(), BuildMockHotwordService));
-  EXPECT_TRUE(hotword_service != NULL);
+  ASSERT_TRUE(hotword_service != NULL);
   hotword_service->SetExtensionService(service());
   hotword_service->SetExtensionId(extension_id_);
 

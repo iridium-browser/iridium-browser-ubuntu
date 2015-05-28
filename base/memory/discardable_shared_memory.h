@@ -15,6 +15,12 @@
 #include <set>
 #endif
 
+// Define DISCARDABLE_SHARED_MEMORY_SHRINKING if platform supports shrinking
+// of discardable shared memory segments.
+#if defined(OS_POSIX) && !defined(OS_ANDROID)
+#define DISCARDABLE_SHARED_MEMORY_SHRINKING
+#endif
+
 namespace base {
 
 // Platform abstraction for discardable shared memory.
@@ -23,6 +29,8 @@ namespace base {
 // access to an instance of this class.
 class BASE_EXPORT DiscardableSharedMemory {
  public:
+  enum LockResult { SUCCESS, PURGED, FAILED };
+
   DiscardableSharedMemory();
 
   // Create a new DiscardableSharedMemory object from an existing, open shared
@@ -47,16 +55,18 @@ class BASE_EXPORT DiscardableSharedMemory {
   SharedMemoryHandle handle() const { return shared_memory_.handle(); }
 
   // Locks a range of memory so that it will not be purged by the system.
-  // Returns true if successful and the memory is still resident. Locking can
-  // fail for three reasons; object might have been purged, our last known usage
-  // timestamp might be out of date or memory might already be locked. Last
-  // know usage time is updated to the actual last usage timestamp if memory
-  // is still resident or 0 if not. The range of memory must be unlocked. The
-  // result of trying to lock an already locked range is undefined.
-  // |offset| and |length| must both be a multiple of the page size as returned
-  // by GetPageSize().
+  // The range of memory must be unlocked. The result of trying to lock an
+  // already locked range is undefined. |offset| and |length| must both be
+  // a multiple of the page size as returned by GetPageSize().
   // Passing 0 for |length| means "everything onward".
-  bool Lock(size_t offset, size_t length);
+  // Returns SUCCESS if range was successfully locked and the memory is still
+  // resident, PURGED if range was successfully locked but has been purged
+  // since last time it was locked and FAILED if range could not be locked.
+  // Locking can fail for two reasons; object might have been purged, our
+  // last known usage timestamp might be out of date. Last known usage time
+  // is updated to the actual last usage timestamp if memory is still resident
+  // or 0 if not.
+  LockResult Lock(size_t offset, size_t length);
 
   // Unlock a previously successfully locked range of memory. The range of
   // memory must be locked. The result of trying to unlock a not
@@ -70,7 +80,7 @@ class BASE_EXPORT DiscardableSharedMemory {
   // must have been mapped via Map().
   void* memory() const;
 
-  // Returns the last know usage time for DiscardableSharedMemory object. This
+  // Returns the last known usage time for DiscardableSharedMemory object. This
   // may be earlier than the "true" usage time when memory has been used by a
   // different process. Returns NULL time if purged.
   Time last_known_usage() const { return last_known_usage_; }
@@ -80,7 +90,7 @@ class BASE_EXPORT DiscardableSharedMemory {
   // for two reasons; object might be locked or our last known usage timestamp
   // might be out of date. Last known usage time is updated to |current_time|
   // if locked or the actual last usage timestamp if unlocked. It is often
-  // neccesary to call this function twice for the object to successfully be
+  // necessary to call this function twice for the object to successfully be
   // purged. First call, updates |last_known_usage_|. Second call, successfully
   // purges the object using the updated |last_known_usage_|.
   // Note: there is no guarantee that multiple calls to this function will
@@ -88,12 +98,6 @@ class BASE_EXPORT DiscardableSharedMemory {
   // or another thread/process might be able to lock and unlock it in between
   // each call.
   bool Purge(Time current_time);
-
-  // Purge and release as much memory as possible to the OS.
-  // Note: The amount of memory that can be released to the OS is platform
-  // specific. Best case, all but one page is released. Worst case, nothing
-  // is released.
-  bool PurgeAndTruncate(Time current_time);
 
   // Returns true if memory is still resident.
   bool IsMemoryResident() const;
@@ -111,6 +115,12 @@ class BASE_EXPORT DiscardableSharedMemory {
                       SharedMemoryHandle* new_handle) {
     return shared_memory_.ShareToProcess(process_handle, new_handle);
   }
+
+#if defined(DISCARDABLE_SHARED_MEMORY_SHRINKING)
+  // Release as much memory as possible to the OS. The change in size will
+  // be reflected by the return value of mapped_size().
+  void Shrink();
+#endif
 
  private:
   // Virtual for tests.

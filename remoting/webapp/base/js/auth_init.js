@@ -8,62 +8,43 @@
 var remoting = remoting || {};
 
 /**
- * Get the user's email address and full name.
+ * Initialize the identity and authentication components.
  *
- * @param {function(string,string):void} onUserInfoAvailable Callback invoked
- *     when the user's email address and full name are available.
  * @return {void} Nothing.
  */
-remoting.initIdentity = function(onUserInfoAvailable) {
-
-  /**
-   * Show the authorization consent UI and register a one-shot event handler to
-   * continue the authorization process.
-   *
-   * @param {function():void} authContinue Callback to invoke when the user
-   *     clicks "Continue".
-   */
-  function promptForConsent(authContinue) {
-    /** @type {HTMLElement} */
-    var dialog = document.getElementById('auth-dialog');
-    /** @type {HTMLElement} */
-    var button = document.getElementById('auth-button');
-    var consentGranted = function(event) {
-      dialog.hidden = true;
-      button.removeEventListener('click', consentGranted, false);
-      authContinue();
-      remoting.windowShape.updateClientWindowShape();
-    };
-    dialog.hidden = false;
-
-    /** @type {HTMLElement} */
-    var dialog_border = document.getElementById('auth-dialog-border');
-    remoting.authDialog = new remoting.AuthDialog(dialog_border);
-    remoting.windowShape.addCallback(remoting.authDialog);
-
-    button.addEventListener('click', consentGranted, false);
-  }
-
-  /** @param {remoting.Error} error */
-  function onGetIdentityInfoError(error) {
-    // No need to show the error message for NOT_AUTHENTICATED
-    // because we will show "auth-dialog".
-    if (error != remoting.Error.NOT_AUTHENTICATED) {
-      remoting.showErrorMessage(error);
-    }
-  }
-
+remoting.initIdentity = function() {
   if (base.isAppsV2()) {
-    remoting.identity = new remoting.Identity(promptForConsent);
+    // TODO(jamiewalch): Add a getAuthDialog method to Application.Delegate
+    // to allow this behaviour to be customized.
+    remoting.identity =
+        new remoting.Identity(remoting.AuthDialog.getInstance());
   } else {
     // TODO(garykac) Remove this and replace with identity.
     remoting.oauth2 = new remoting.OAuth2();
-    if (!remoting.oauth2.isAuthenticated()) {
-      document.getElementById('auth-dialog').hidden = false;
+    var oauth2 = /** @type {*} */ (remoting.oauth2);
+    remoting.identity = /** @type {remoting.Identity} */ (oauth2);
+    if (!remoting.identity.isAuthenticated()) {
+      remoting.AuthDialog.getInstance().show().then(function() {
+        remoting.oauth2.doAuthRedirect(function(){
+          window.location.reload();
+        });
+      });
     }
-    remoting.identity = remoting.oauth2;
   }
+};
 
-  remoting.identity.getUserInfo(onUserInfoAvailable,
-                                onGetIdentityInfoError);
-}
+/**
+ * Removes the cached token and restarts the app.
+ *
+ * @return {void}  Nothing.
+ */
+remoting.handleAuthFailureAndRelaunch = function() {
+  remoting.identity.removeCachedAuthToken().then(function(){
+    if (base.isAppsV2()) {
+      base.Ipc.invoke('remoting.ActivationHandler.restart',
+                      chrome.app.window.current().id);
+    } else {
+      window.location.reload();
+    }
+  });
+};

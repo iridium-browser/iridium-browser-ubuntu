@@ -12,7 +12,6 @@
 #include "chrome/browser/drive/drive_app_registry_observer.h"
 #include "chrome/browser/drive/fake_drive_service.h"
 #include "google_apis/drive/drive_api_parser.h"
-#include "google_apis/drive/gdata_wapi_parser.h"
 #include "google_apis/drive/test_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -198,7 +197,7 @@ TEST_F(DriveAppRegistryTest, UninstallDriveApp) {
   size_t original_count = apps.size();
 
   // Uninstall an existing app.
-  google_apis::GDataErrorCode error = google_apis::GDATA_OTHER_ERROR;
+  google_apis::DriveApiErrorCode error = google_apis::DRIVE_OTHER_ERROR;
   apps_registry_->UninstallApp(
       "123456788192",
       google_apis::test_util::CreateCopyResultCallback(&error));
@@ -210,7 +209,7 @@ TEST_F(DriveAppRegistryTest, UninstallDriveApp) {
   EXPECT_EQ(original_count - 1, apps.size());
 
   // Try to uninstall a non-existing app.
-  error = google_apis::GDATA_OTHER_ERROR;
+  error = google_apis::DRIVE_OTHER_ERROR;
   apps_registry_->UninstallApp(
       "non-existing-app-id",
       google_apis::test_util::CreateCopyResultCallback(&error));

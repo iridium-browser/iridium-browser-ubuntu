@@ -5,6 +5,7 @@
 #ifndef UI_COMPOSITOR_COMPOSITOR_H_
 #define UI_COMPOSITOR_COMPOSITOR_H_
 
+#include <list>
 #include <string>
 
 #include "base/containers/hash_tables.h"
@@ -13,6 +14,7 @@
 #include "base/observer_list.h"
 #include "base/single_thread_task_runner.h"
 #include "base/time/time.h"
+#include "cc/output/begin_frame_args.h"
 #include "cc/surfaces/surface_sequence.h"
 #include "cc/trees/layer_tree_host_client.h"
 #include "cc/trees/layer_tree_host_single_thread_client.h"
@@ -24,8 +26,6 @@
 #include "ui/gfx/geometry/size.h"
 #include "ui/gfx/geometry/vector2d.h"
 #include "ui/gfx/native_widget_types.h"
-
-class SkBitmap;
 
 namespace base {
 class MessageLoopProxy;
@@ -40,6 +40,7 @@ class LayerTreeHost;
 class RendererSettings;
 class SharedBitmapManager;
 class SurfaceIdAllocator;
+class TaskGraphRunner;
 }
 
 namespace gfx {
@@ -70,16 +71,14 @@ class COMPOSITOR_EXPORT ContextFactory {
   // Creates an output surface for the given compositor. The factory may keep
   // per-compositor data (e.g. a shared context), that needs to be cleaned up
   // by calling RemoveCompositor when the compositor gets destroyed.
-  virtual void CreateOutputSurface(base::WeakPtr<Compositor> compositor,
-                                   bool software_fallback) = 0;
+  virtual void CreateOutputSurface(base::WeakPtr<Compositor> compositor) = 0;
 
   // Creates a reflector that copies the content of the |mirrored_compositor|
   // onto |mirroring_layer|.
-  virtual scoped_refptr<Reflector> CreateReflector(
-      Compositor* mirrored_compositor,
-      Layer* mirroring_layer) = 0;
+  virtual scoped_ptr<Reflector> CreateReflector(Compositor* mirrored_compositor,
+                                                Layer* mirroring_layer) = 0;
   // Removes the reflector, which stops the mirroring.
-  virtual void RemoveReflector(scoped_refptr<Reflector> reflector) = 0;
+  virtual void RemoveReflector(Reflector* reflector) = 0;
 
   // Return a reference to a shared offscreen context provider usable from the
   // main thread.
@@ -93,15 +92,17 @@ class COMPOSITOR_EXPORT ContextFactory {
   // operations.
   virtual bool DoesCreateTestContexts() = 0;
 
+  // Returns the OpenGL target to use for image textures.
+  virtual uint32 GetImageTextureTarget() = 0;
+
   // Gets the shared bitmap manager for software mode.
   virtual cc::SharedBitmapManager* GetSharedBitmapManager() = 0;
 
   // Gets the GPU memory buffer manager.
   virtual gpu::GpuMemoryBufferManager* GetGpuMemoryBufferManager() = 0;
 
-  // Gets the compositor message loop, or NULL if not using threaded
-  // compositing.
-  virtual base::MessageLoopProxy* GetCompositorMessageLoop() = 0;
+  // Gets the task graph runner.
+  virtual cc::TaskGraphRunner* GetTaskGraphRunner() = 0;
 
   // Creates a Surface ID allocator with a new namespace.
   virtual scoped_ptr<cc::SurfaceIdAllocator> CreateSurfaceIdAllocator() = 0;
@@ -116,9 +117,10 @@ class COMPOSITOR_EXPORT ContextFactory {
 // event. The typical use case is when waiting for a renderer to produce a frame
 // at the right size. The caller keeps a reference on this object, and drops the
 // reference once it desires to release the lock.
-// Note however that the lock is cancelled after a short timeout to ensure
+// By default, the lock will be cancelled after a short timeout to ensure
 // responsiveness of the UI, so the compositor tree should be kept in a
-// "reasonable" state while the lock is held.
+// "reasonable" state while the lock is held. If the compositor sets
+// locks to not time out, then the lock will remain in effect until destroyed.
 // Don't instantiate this class directly, use Compositor::GetCompositorLock.
 class COMPOSITOR_EXPORT CompositorLock
     : public base::RefCounted<CompositorLock>,
@@ -134,6 +136,13 @@ class COMPOSITOR_EXPORT CompositorLock
 
   Compositor* compositor_;
   DISALLOW_COPY_AND_ASSIGN(CompositorLock);
+};
+
+// This class observes BeginFrame notification from LayerTreeHost.
+class COMPOSITOR_EXPORT CompositorBeginFrameObserver {
+ public:
+  virtual ~CompositorBeginFrameObserver() {}
+  virtual void OnSendBeginFrame(const cc::BeginFrameArgs& args) = 0;
 };
 
 // Compositor object to take care of GPU painting.
@@ -175,9 +184,6 @@ class COMPOSITOR_EXPORT Compositor
   // compositing layers on.
   float device_scale_factor() const { return device_scale_factor_; }
 
-  // Draws the scene created by the layer tree and any visual effects.
-  void Draw();
-
   // Where possible, draws are scissored to a damage region calculated from
   // changes to layer properties.  This bypasses that and indicates that
   // the whole frame needs to be drawn.
@@ -186,6 +192,9 @@ class COMPOSITOR_EXPORT Compositor
   // Schedule redraw and append damage_rect to the damage region calculated
   // from changes to layer properties.
   void ScheduleRedrawRect(const gfx::Rect& damage_rect);
+
+  // Finishes all outstanding rendering and disables swapping on this surface.
+  void FinishAllRendering();
 
   // Finishes all outstanding rendering and disables swapping on this surface
   // until it is resized.
@@ -203,8 +212,11 @@ class COMPOSITOR_EXPORT Compositor
   // the |root_layer|.
   void SetBackgroundColor(SkColor color);
 
-  // Set the visibility of the underlying compositor.
+  // Sets the visibility of the underlying compositor.
   void SetVisible(bool visible);
+
+  // Gets the visibility of the underlying compositor.
+  bool IsVisible();
 
   // Returns the widget for this compositor.
   gfx::AcceleratedWidget widget() const { return widget_; }
@@ -228,6 +240,16 @@ class COMPOSITOR_EXPORT Compositor
   void RemoveAnimationObserver(CompositorAnimationObserver* observer);
   bool HasAnimationObserver(const CompositorAnimationObserver* observer) const;
 
+  void AddBeginFrameObserver(CompositorBeginFrameObserver* observer);
+  void RemoveBeginFrameObserver(CompositorBeginFrameObserver* observer);
+
+  // Change the timeout behavior for all future locks that are created. Locks
+  // should time out if there is an expectation that the compositor will be
+  // responsive.
+  void SetLocksWillTimeOut(bool locks_will_time_out) {
+    locks_will_time_out_ = locks_will_time_out;
+  }
+
   // Creates a compositor lock. Returns NULL if it is not possible to lock at
   // this time (i.e. we're waiting to complete a previous unlock).
   scoped_refptr<CompositorLock> GetCompositorLock();
@@ -245,12 +267,13 @@ class COMPOSITOR_EXPORT Compositor
   void OnSwapBuffersAborted();
 
   // LayerTreeHostClient implementation.
-  void WillBeginMainFrame(int frame_id) override {}
+  void WillBeginMainFrame() override {}
   void DidBeginMainFrame() override {}
   void BeginMainFrame(const cc::BeginFrameArgs& args) override;
+  void BeginMainFrameNotExpectedSoon() override;
   void Layout() override;
-  void ApplyViewportDeltas(const gfx::Vector2d& inner_delta,
-                           const gfx::Vector2d& outer_delta,
+  void ApplyViewportDeltas(const gfx::Vector2dF& inner_delta,
+                           const gfx::Vector2dF& outer_delta,
                            const gfx::Vector2dF& elastic_overscroll_delta,
                            float page_scale,
                            float top_controls_delta) override {}
@@ -264,15 +287,12 @@ class COMPOSITOR_EXPORT Compositor
   void DidCommit() override;
   void DidCommitAndDrawFrame() override;
   void DidCompleteSwapBuffers() override;
+  void DidCompletePageScaleAnimation() override {}
+  void SendBeginFramesToChildren(const cc::BeginFrameArgs& args) override;
 
   // cc::LayerTreeHostSingleThreadClient implementation.
-  void ScheduleComposite() override;
-  void ScheduleAnimation() override;
   void DidPostSwapBuffers() override;
   void DidAbortSwapBuffers() override;
-
-  int last_started_frame() { return last_started_frame_; }
-  int last_ended_frame() { return last_ended_frame_; }
 
   bool IsLocked() { return compositor_lock_ != NULL; }
 
@@ -292,19 +312,11 @@ class COMPOSITOR_EXPORT Compositor
   friend class base::RefCounted<Compositor>;
   friend class CompositorLock;
 
-  enum {
-   OUTPUT_SURFACE_RETRIES_BEFORE_FALLBACK = 4,
-   MAX_OUTPUT_SURFACE_RETRIES = 5,
-  };
-
   // Called by CompositorLock.
   void UnlockCompositor();
 
   // Called to release any pending CompositorLock
   void CancelCompositorLock();
-
-  // Notifies the compositor that compositing is complete.
-  void NotifyEnd();
 
   gfx::Size size_;
 
@@ -313,14 +325,14 @@ class COMPOSITOR_EXPORT Compositor
   // The root of the Layer tree drawn by this compositor.
   Layer* root_layer_;
 
-  ObserverList<CompositorObserver> observer_list_;
+  ObserverList<CompositorObserver, true> observer_list_;
   ObserverList<CompositorAnimationObserver> animation_observer_list_;
+  std::list<CompositorBeginFrameObserver*> begin_frame_observer_list_;
 
   gfx::AcceleratedWidget widget_;
   scoped_ptr<cc::SurfaceIdAllocator> surface_id_allocator_;
   scoped_refptr<cc::Layer> root_web_layer_;
   scoped_ptr<cc::LayerTreeHost> host_;
-  scoped_refptr<base::MessageLoopProxy> compositor_thread_loop_;
   scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
 
   // The manager of vsync parameters for this compositor.
@@ -333,22 +345,13 @@ class COMPOSITOR_EXPORT Compositor
   int last_started_frame_;
   int last_ended_frame_;
 
-  int num_failed_recreate_attempts_;
-
-  bool disable_schedule_composite_;
-
+  bool locks_will_time_out_;
   CompositorLock* compositor_lock_;
 
-  // Prevent more than one draw from being scheduled.
-  bool defer_draw_scheduling_;
-
-  // Used to prevent Draw()s while a composite is in progress.
-  bool waiting_on_compositing_end_;
-  bool draw_on_compositing_end_;
-  enum SwapState { SWAP_NONE, SWAP_POSTED, SWAP_COMPLETED };
-  SwapState swap_state_;
-
   LayerAnimatorCollection layer_animator_collection_;
+
+  // Used to send to any new CompositorBeginFrameObserver immediately.
+  cc::BeginFrameArgs missed_begin_frame_args_;
 
   base::WeakPtrFactory<Compositor> weak_ptr_factory_;
 

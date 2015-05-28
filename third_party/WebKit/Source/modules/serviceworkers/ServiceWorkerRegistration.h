@@ -31,6 +31,7 @@ class ServiceWorkerRegistration final
     DEFINE_WRAPPERTYPEINFO();
     DEFINE_EVENT_TARGET_REFCOUNTING_WILL_BE_REMOVED(RefCountedGarbageCollected<ServiceWorkerRegistration>);
     USING_GARBAGE_COLLECTED_MIXIN(ServiceWorkerRegistration);
+    USING_PRE_FINALIZER(ServiceWorkerRegistration, dispose);
 public:
     // EventTarget overrides.
     virtual const AtomicString& interfaceName() const override;
@@ -60,7 +61,8 @@ public:
 
     DEFINE_ATTRIBUTE_EVENT_LISTENER(updatefound);
 
-    virtual void trace(Visitor*) override;
+    virtual ~ServiceWorkerRegistration() override;
+    DECLARE_VIRTUAL_TRACE();
 
 private:
     static ServiceWorkerRegistration* getOrCreate(ExecutionContext*, WebServiceWorkerRegistration*);
@@ -69,6 +71,8 @@ private:
     // ActiveDOMObject overrides.
     virtual bool hasPendingActivity() const override;
     virtual void stop() override;
+
+    void dispose();
 
     OwnPtr<WebServiceWorkerRegistration> m_outerRegistration;
     WebServiceWorkerProvider* m_provider;

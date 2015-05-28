@@ -16,12 +16,11 @@
 #include "chrome/browser/download/download_request_limiter.h"
 #include "chrome/browser/download/download_resource_throttle.h"
 #include "chrome/browser/net/resource_prefetch_predictor_observer.h"
+#include "chrome/browser/plugins/plugin_prefs.h"
 #include "chrome/browser/prefetch/prefetch.h"
 #include "chrome/browser/prerender/prerender_manager.h"
 #include "chrome/browser/prerender/prerender_manager_factory.h"
-#include "chrome/browser/prerender/prerender_pending_swap_throttle.h"
 #include "chrome/browser/prerender/prerender_resource_throttle.h"
-#include "chrome/browser/prerender/prerender_tracker.h"
 #include "chrome/browser/prerender/prerender_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_io_data.h"
@@ -30,6 +29,7 @@
 #include "chrome/browser/signin/signin_header_helper.h"
 #include "chrome/browser/tab_contents/tab_util.h"
 #include "chrome/browser/ui/login/login_prompt.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/url_constants.h"
 #include "components/content_settings/core/browser/host_content_settings_map.h"
@@ -37,6 +37,8 @@
 #include "components/variations/net/variations_http_header_provider.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/notification_service.h"
+#include "content/public/browser/plugin_service.h"
+#include "content/public/browser/plugin_service_filter.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/resource_context.h"
@@ -65,20 +67,16 @@
 #include "chrome/browser/apps/ephemeral_app_throttle.h"
 #include "chrome/browser/extensions/api/streams_private/streams_private_api.h"
 #include "chrome/browser/extensions/user_script_listener.h"
-#include "chrome/common/extensions/manifest_handlers/mime_types_handler.h"
 #include "extensions/browser/guest_view/web_view/web_view_renderer_state.h"
 #include "extensions/browser/info_map.h"
 #include "extensions/common/constants.h"
 #include "extensions/common/extension_urls.h"
+#include "extensions/common/manifest_handlers/mime_types_handler.h"
 #include "extensions/common/user_script.h"
 #endif
 
 #if defined(ENABLE_SUPERVISED_USERS)
 #include "chrome/browser/supervised_user/supervised_user_resource_throttle.h"
-#endif
-
-#if defined(ENABLE_ONE_CLICK_SIGNIN)
-#include "chrome/browser/ui/sync/one_click_signin_helper.h"
 #endif
 
 #if defined(USE_SYSTEM_PROTOBUF)
@@ -90,6 +88,10 @@
 #if defined(OS_ANDROID)
 #include "chrome/browser/android/intercept_download_resource_throttle.h"
 #include "components/navigation_interception/intercept_navigation_delegate.h"
+#endif
+
+#if defined(ENABLE_DATA_REDUCTION_PROXY_DEBUGGING)
+#include "components/data_reduction_proxy/content/browser/data_reduction_proxy_debug_resource_throttle.h"
 #endif
 
 #if defined(OS_CHROMEOS)
@@ -173,14 +175,14 @@ void UpdatePrerenderNetworkBytesCallback(int render_process_id,
 void SendExecuteMimeTypeHandlerEvent(scoped_ptr<content::StreamInfo> stream,
                                      int64 expected_content_size,
                                      int render_process_id,
-                                     int render_view_id,
+                                     int render_frame_id,
                                      const std::string& extension_id,
                                      const std::string& view_id,
                                      bool embedded) {
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
 
   content::WebContents* web_contents =
-      tab_util::GetWebContentsByID(render_process_id, render_view_id);
+      tab_util::GetWebContentsByFrameID(render_process_id, render_frame_id);
   if (!web_contents)
     return;
 
@@ -199,9 +201,39 @@ void SendExecuteMimeTypeHandlerEvent(scoped_ptr<content::StreamInfo> stream,
   StreamsPrivateAPI* streams_private = StreamsPrivateAPI::Get(profile);
   if (!streams_private)
     return;
-  streams_private->ExecuteMimeTypeHandler(extension_id, web_contents,
-                                          stream.Pass(), view_id,
-                                          expected_content_size, embedded);
+  streams_private->ExecuteMimeTypeHandler(
+      extension_id, web_contents, stream.Pass(), view_id, expected_content_size,
+      embedded, render_process_id, render_frame_id);
+}
+
+// TODO(raymes): This won't return the right result if plugins haven't been
+// loaded yet. Fixing this properly really requires fixing crbug.com/443466.
+bool IsPluginEnabledForExtension(const Extension* extension,
+                                 const ResourceRequestInfo* info,
+                                 const std::string& mime_type,
+                                 const GURL& url) {
+  content::PluginService* service = content::PluginService::GetInstance();
+  std::vector<content::WebPluginInfo> plugins;
+  service->GetPluginInfoArray(url, mime_type, true, &plugins, nullptr);
+  content::PluginServiceFilter* filter = service->GetFilter();
+
+  for (auto& plugin : plugins) {
+    // Check that the plugin is running the extension.
+    if (plugin.path !=
+        base::FilePath::FromUTF8Unsafe(extension->url().spec())) {
+      continue;
+    }
+    // Check that the plugin is actually enabled.
+    if (!filter || filter->IsPluginAvailable(info->GetChildID(),
+                                             info->GetRenderFrameID(),
+                                             info->GetContext(),
+                                             url,
+                                             GURL(),
+                                             &plugin)) {
+      return true;
+    }
+  }
+  return false;
 }
 #endif  // !defined(ENABLE_EXTENSIONS)
 
@@ -264,14 +296,13 @@ void AppendComponentUpdaterThrottles(
 
 }  // namespace
 
-ChromeResourceDispatcherHostDelegate::ChromeResourceDispatcherHostDelegate(
-    prerender::PrerenderTracker* prerender_tracker)
+ChromeResourceDispatcherHostDelegate::ChromeResourceDispatcherHostDelegate()
     : download_request_limiter_(g_browser_process->download_request_limiter()),
-      safe_browsing_(g_browser_process->safe_browsing_service()),
+      safe_browsing_(g_browser_process->safe_browsing_service())
 #if defined(ENABLE_EXTENSIONS)
-      user_script_listener_(new extensions::UserScriptListener()),
+      , user_script_listener_(new extensions::UserScriptListener())
 #endif
-      prerender_tracker_(prerender_tracker) {
+      {
   BrowserThread::PostTask(
       BrowserThread::IO,
       FROM_HERE,
@@ -336,9 +367,13 @@ void ChromeResourceDispatcherHostDelegate::RequestBeginning(
 #if defined(OS_ANDROID)
   // TODO(davidben): This is insufficient to integrate with prerender properly.
   // https://crbug.com/370595
-  if (resource_type == content::RESOURCE_TYPE_MAIN_FRAME && !is_prerendering) {
-    throttles->push_back(
-        InterceptNavigationDelegate::CreateThrottleFor(request));
+  if (!is_prerendering) {
+    if (resource_type == content::RESOURCE_TYPE_MAIN_FRAME) {
+      throttles->push_back(
+          InterceptNavigationDelegate::CreateThrottleFor(request));
+    } else {
+      InterceptNavigationDelegate::UpdateUserGestureCarryoverInfo(request);
+    }
   }
 #else
   if (resource_type == content::RESOURCE_TYPE_MAIN_FRAME) {
@@ -363,7 +398,11 @@ void ChromeResourceDispatcherHostDelegate::RequestBeginning(
 #if defined(OS_CHROMEOS)
   // Check if we need to add offline throttle. This should be done only
   // for main frames.
-  if (resource_type == content::RESOURCE_TYPE_MAIN_FRAME) {
+  // We will fall back to the old ChromeOS offline error page if the
+  // --disable-new-offline-error-page command-line switch is defined.
+  bool new_error_page_enabled = switches::NewOfflineErrorPageEnabled();
+  if (!new_error_page_enabled &&
+      resource_type == content::RESOURCE_TYPE_MAIN_FRAME) {
     // We check offline first, then check safe browsing so that we still can
     // block unsafe site after we remove offline page.
     throttles->push_back(new OfflineResourceThrottle(request,
@@ -399,10 +438,6 @@ void ChromeResourceDispatcherHostDelegate::RequestBeginning(
                       &headers);
     request->SetExtraRequestHeaders(headers);
   }
-
-#if defined(ENABLE_ONE_CLICK_SIGNIN)
-  AppendChromeSyncGaiaHeader(request, resource_context);
-#endif
 
 #if defined(ENABLE_CONFIGURATION_POLICY)
   if (io_data->policy_header_helper())
@@ -523,6 +558,15 @@ void ChromeResourceDispatcherHostDelegate::AppendStandardResourceThrottles(
   }
 #endif
 
+#if defined(ENABLE_DATA_REDUCTION_PROXY_DEBUGGING)
+  scoped_ptr<content::ResourceThrottle> data_reduction_proxy_throttle =
+      data_reduction_proxy::DataReductionProxyDebugResourceThrottle::
+          MaybeCreate(
+              request, resource_type, io_data->data_reduction_proxy_io_data());
+  if (data_reduction_proxy_throttle)
+    throttles->push_back(data_reduction_proxy_throttle.release());
+#endif
+
 #if defined(ENABLE_SUPERVISED_USERS)
   bool is_subresource_request =
       resource_type != content::RESOURCE_TYPE_MAIN_FRAME;
@@ -543,34 +587,7 @@ void ChromeResourceDispatcherHostDelegate::AppendStandardResourceThrottles(
   if (info->GetVisibilityState() == blink::WebPageVisibilityStatePrerender) {
     throttles->push_back(new prerender::PrerenderResourceThrottle(request));
   }
-  if (prerender_tracker_->IsPendingSwapRequestOnIOThread(
-          info->GetChildID(), info->GetRenderFrameID(), request->url())) {
-    throttles->push_back(new prerender::PrerenderPendingSwapThrottle(
-        request, prerender_tracker_));
-  }
 }
-
-#if defined(ENABLE_ONE_CLICK_SIGNIN)
-void ChromeResourceDispatcherHostDelegate::AppendChromeSyncGaiaHeader(
-    net::URLRequest* request,
-    content::ResourceContext* resource_context) {
-  static const char kAllowChromeSignIn[] = "Allow-Chrome-SignIn";
-
-  ProfileIOData* io_data = ProfileIOData::FromResourceContext(resource_context);
-  OneClickSigninHelper::Offer offer =
-      OneClickSigninHelper::CanOfferOnIOThread(request, io_data);
-  switch (offer) {
-    case OneClickSigninHelper::CAN_OFFER:
-      request->SetExtraRequestHeaderByName(kAllowChromeSignIn, "1", false);
-      break;
-    case OneClickSigninHelper::DONT_OFFER:
-      request->RemoveRequestHeaderByName(kAllowChromeSignIn);
-      break;
-    case OneClickSigninHelper::IGNORE_REQUEST:
-      break;
-  }
-}
-#endif
 
 bool ChromeResourceDispatcherHostDelegate::ShouldForceDownloadResource(
     const GURL& url, const std::string& mime_type) {
@@ -597,8 +614,7 @@ bool ChromeResourceDispatcherHostDelegate::ShouldInterceptResourceAsStream(
   std::vector<std::string> whitelist = MimeTypesHandler::GetMIMETypeWhitelist();
   // Go through the white-listed extensions and try to use them to intercept
   // the URL request.
-  for (size_t i = 0; i < whitelist.size(); ++i) {
-    const char* extension_id = whitelist[i].c_str();
+  for (const std::string& extension_id : whitelist) {
     const Extension* extension =
         extension_info_map->extensions().GetByID(extension_id);
     // The white-listed extension may not be installed, so we have to NULL check
@@ -615,9 +631,15 @@ bool ChromeResourceDispatcherHostDelegate::ShouldInterceptResourceAsStream(
       *origin = Extension::GetBaseURLFromExtensionId(extension_id);
       target_info.extension_id = extension_id;
       if (!handler->handler_url().empty()) {
+        // This is reached in the case of MimeHandlerViews. If the
+        // MimeHandlerView plugin is disabled, then we shouldn't intercept the
+        // stream.
+        if (!IsPluginEnabledForExtension(extension, info, mime_type,
+                                         request->url())) {
+          continue;
+        }
         target_info.view_id = base::GenerateGUID();
-        *payload = origin->spec() + handler->handler_url() +
-            "?id=" + target_info.view_id;
+        *payload = target_info.view_id;
       }
       stream_target_info_[request] = target_info;
       return true;
@@ -640,7 +662,7 @@ void ChromeResourceDispatcherHostDelegate::OnStreamCreated(
       content::BrowserThread::UI, FROM_HERE,
       base::Bind(&SendExecuteMimeTypeHandlerEvent, base::Passed(&stream),
                  request->GetExpectedContentSize(), info->GetChildID(),
-                 info->GetRouteID(), ix->second.extension_id,
+                 info->GetRenderFrameID(), ix->second.extension_id,
                  ix->second.view_id, embedded));
   stream_target_info_.erase(request);
 #endif
@@ -653,15 +675,6 @@ void ChromeResourceDispatcherHostDelegate::OnResponseStarted(
     IPC::Sender* sender) {
   const ResourceRequestInfo* info = ResourceRequestInfo::ForRequest(request);
   ProfileIOData* io_data = ProfileIOData::FromResourceContext(resource_context);
-
-#if defined(ENABLE_ONE_CLICK_SIGNIN)
-  // See if the response contains the Google-Accounts-SignIn header.  If so,
-  // then the user has just finished signing in, and the server is allowing the
-  // browser to suggest connecting the user's profile to the account.
-  OneClickSigninHelper::ShowInfoBarIfPossible(request, io_data,
-                                              info->GetChildID(),
-                                              info->GetRouteID());
-#endif
 
   // See if the response contains the X-Chrome-Manage-Accounts header. If so
   // show the profile avatar bubble so that user can complete signin/out action
@@ -711,16 +724,6 @@ void ChromeResourceDispatcherHostDelegate::OnRequestRedirected(
   ProfileIOData* io_data = ProfileIOData::FromResourceContext(resource_context);
 
   const ResourceRequestInfo* info = ResourceRequestInfo::ForRequest(request);
-
-#if defined(ENABLE_ONE_CLICK_SIGNIN)
-  // See if the response contains the Google-Accounts-SignIn header.  If so,
-  // then the user has just finished signing in, and the server is allowing the
-  // browser to suggest connecting the user's profile to the account.
-  OneClickSigninHelper::ShowInfoBarIfPossible(request, io_data,
-                                              info->GetChildID(),
-                                              info->GetRouteID());
-  AppendChromeSyncGaiaHeader(request, resource_context);
-#endif
 
   // In the Mirror world, Chrome should append a X-Chrome-Connected header to
   // all Gaia requests from a connected profile so Gaia could return a 204

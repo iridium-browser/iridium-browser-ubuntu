@@ -13,6 +13,7 @@
 #include "cc/base/cc_export.h"
 #include "cc/debug/rendering_stats_instrumentation.h"
 #include "cc/resources/picture_pile.h"
+#include "cc/resources/pixel_ref_map.h"
 #include "cc/resources/raster_source.h"
 #include "skia/ext/analysis_canvas.h"
 #include "skia/ext/refptr.h"
@@ -30,7 +31,8 @@ namespace cc {
 class CC_EXPORT PicturePileImpl : public RasterSource {
  public:
   static scoped_refptr<PicturePileImpl> CreateFromPicturePile(
-      const PicturePile* other);
+      const PicturePile* other,
+      bool can_use_lcd_text);
 
   // RasterSource overrides. See RasterSource header for full description.
   // When slow-down-raster-scale-factor is set to a value greater than 1, the
@@ -52,18 +54,17 @@ class CC_EXPORT PicturePileImpl : public RasterSource {
   bool CoversRect(const gfx::Rect& content_rect,
                   float contents_scale) const override;
   void SetShouldAttemptToUseDistanceFieldText() override;
-  void SetBackgoundColor(SkColor background_color) override;
-  void SetRequiresClear(bool requires_clear) override;
   bool ShouldAttemptToUseDistanceFieldText() const override;
   gfx::Size GetSize() const override;
   bool IsSolidColor() const override;
   SkColor GetSolidColor() const override;
   bool HasRecordings() const override;
   bool CanUseLCDText() const override;
+  scoped_refptr<RasterSource> CreateCloneWithoutLCDText() const override;
 
   // Tracing functionality.
   void DidBeginTracing() override;
-  void AsValueInto(base::debug::TracedValue* array) const override;
+  void AsValueInto(base::trace_event::TracedValue* array) const override;
   skia::RefPtr<SkPicture> GetFlattenedPicture() override;
   size_t GetPictureMemoryUsage() const override;
 
@@ -87,7 +88,7 @@ class CC_EXPORT PicturePileImpl : public RasterSource {
     const PicturePileImpl* picture_pile_;
     gfx::Rect layer_rect_;
     TilingData::Iterator tile_iterator_;
-    Picture::PixelRefIterator pixel_ref_iterator_;
+    PixelRefMap::Iterator pixel_ref_iterator_;
     std::set<const void*> processed_pictures_;
   };
 
@@ -101,23 +102,29 @@ class CC_EXPORT PicturePileImpl : public RasterSource {
   using PictureInfo = PicturePile::PictureInfo;
 
   PicturePileImpl();
-  explicit PicturePileImpl(const PicturePile* other);
+  explicit PicturePileImpl(const PicturePile* other, bool can_use_lcd_text);
+  explicit PicturePileImpl(const PicturePileImpl* other, bool can_use_lcd_text);
   ~PicturePileImpl() override;
 
   int buffer_pixels() const { return tiling_.border_texels(); }
 
-  PictureMap picture_map_;
-  TilingData tiling_;
-  SkColor background_color_;
-  bool requires_clear_;
-  bool can_use_lcd_text_;
-  bool is_solid_color_;
-  SkColor solid_color_;
-  gfx::Rect recorded_viewport_;
-  bool has_any_recordings_;
-  bool clear_canvas_with_debug_color_;
-  float min_contents_scale_;
-  int slow_down_raster_scale_factor_for_debug_;
+  // These members are const as this raster source may be in use on another
+  // thread and so should not be touched after construction.
+  const PictureMap picture_map_;
+  const TilingData tiling_;
+  const SkColor background_color_;
+  const bool requires_clear_;
+  const bool can_use_lcd_text_;
+  const bool is_solid_color_;
+  const SkColor solid_color_;
+  const gfx::Rect recorded_viewport_;
+  const bool has_any_recordings_;
+  const bool clear_canvas_with_debug_color_;
+  const float min_contents_scale_;
+  const int slow_down_raster_scale_factor_for_debug_;
+  // TODO(enne/vmiura): this has a read/write race between raster and compositor
+  // threads with multi-threaded Ganesh.  Make this const or remove it.
+  bool should_attempt_to_use_distance_field_text_;
 
  private:
   typedef std::map<const Picture*, Region> PictureRegionMap;
@@ -133,20 +140,16 @@ class CC_EXPORT PicturePileImpl : public RasterSource {
                        float contents_scale,
                        PictureRegionMap* result) const;
 
-  void RasterCommon(
-      SkCanvas* canvas,
-      SkDrawPictureCallback* callback,
-      const gfx::Rect& canvas_rect,
-      float contents_scale,
-      bool is_analysis) const;
+  void RasterCommon(SkCanvas* canvas,
+                    SkDrawPictureCallback* callback,
+                    const gfx::Rect& canvas_rect,
+                    float contents_scale) const;
 
   // An internal CanRaster check that goes to the picture_map rather than
   // using the recorded_viewport hint.
   bool CanRasterSlowTileCheck(const gfx::Rect& layer_rect) const;
 
   gfx::Rect PaddedRect(const PictureMapKey& key) const;
-
-  bool should_attempt_to_use_distance_field_text_;
 
   DISALLOW_COPY_AND_ASSIGN(PicturePileImpl);
 };

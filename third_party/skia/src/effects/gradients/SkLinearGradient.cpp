@@ -149,6 +149,7 @@ void shadeSpan_linear_clamp(TileProc proc, SkGradFixed dx, SkGradFixed fx,
                             int toggle, int count) {
     SkClampRange range;
     range.init(fx, dx, count, 0, SkGradientShaderBase::kCache32Count - 1);
+    range.validate(count);
 
     if ((count = range.fCount0) > 0) {
         sk_memset32_dither(dstC,
@@ -332,6 +333,7 @@ void shadeSpan16_linear_clamp(TileProc proc, SkGradFixed dx, SkGradFixed fx,
                               int toggle, int count) {
     SkClampRange range;
     range.init(fx, dx, count, 0, SkGradientShaderBase::kCache32Count - 1);
+    range.validate(count);
 
     if ((count = range.fCount0) > 0) {
         dither_memset16(dstC,
@@ -470,7 +472,7 @@ public:
                           const char* outputColor,
                           const char* inputColor,
                           const TransformedCoordsArray&,
-                          const TextureSamplerArray&) SK_OVERRIDE;
+                          const TextureSamplerArray&) override;
 
     static void GenKey(const GrProcessor& processor, const GrGLCaps&, GrProcessorKeyBuilder* b) {
         b->add32(GenBaseGradientKey(processor));
@@ -495,14 +497,14 @@ public:
 
     virtual ~GrLinearGradient() { }
 
-    virtual const char* name() const SK_OVERRIDE { return "Linear Gradient"; }
+    const char* name() const override { return "Linear Gradient"; }
 
     virtual void getGLProcessorKey(const GrGLCaps& caps,
-                                   GrProcessorKeyBuilder* b) const SK_OVERRIDE {
+                                   GrProcessorKeyBuilder* b) const override {
         GrGLLinearGradient::GenKey(*this, caps, b);
     }
 
-    virtual GrGLFragmentProcessor* createGLInstance() const SK_OVERRIDE {
+    GrGLFragmentProcessor* createGLInstance() const override {
         return SkNEW_ARGS(GrGLLinearGradient, (*this));
     }
 

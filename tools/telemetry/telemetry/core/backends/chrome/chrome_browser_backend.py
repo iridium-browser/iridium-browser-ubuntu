@@ -12,19 +12,19 @@ import socket
 import sys
 import urllib2
 
-from telemetry import decorators
-from telemetry.core import exceptions
-from telemetry.core import forwarders
-from telemetry.core import user_agent
-from telemetry.core import util
-from telemetry.core import web_contents
-from telemetry.core import wpr_modes
 from telemetry.core.backends import browser_backend
 from telemetry.core.backends.chrome import extension_backend
 from telemetry.core.backends.chrome import system_info_backend
 from telemetry.core.backends.chrome import tab_list_backend
 from telemetry.core.backends.chrome_inspector import devtools_client_backend
 from telemetry.core.backends.chrome_inspector import devtools_http
+from telemetry.core import exceptions
+from telemetry.core import forwarders
+from telemetry.core import user_agent
+from telemetry.core import util
+from telemetry.core import web_contents
+from telemetry.core import wpr_modes
+from telemetry import decorators
 from telemetry.unittest_util import options_for_unittests
 
 
@@ -70,10 +70,6 @@ class ChromeBrowserBackend(browser_backend.BrowserBackend):
 
   @property
   def devtools_client(self):
-    if not self._devtools_client:
-      assert self._port, 'No DevTools port info available.'
-      self._devtools_client = devtools_client_backend.DevToolsClientBackend(
-          self._port, self)
     return self._devtools_client
 
   @property
@@ -138,7 +134,7 @@ class ChromeBrowserBackend(browser_backend.BrowserBackend):
 
   def _UseHostResolverRules(self):
     """Returns True to add --host-resolver-rules to send requests to replay."""
-    if self.forwarder_factory.does_forwarder_override_dns:
+    if self._platform_backend.forwarder_factory.does_forwarder_override_dns:
       # Avoid --host-resolver-rules when the forwarder will map DNS requests
       # from the target platform to replay (on the host platform).
       # This allows the browser to exercise DNS requests.
@@ -159,8 +155,9 @@ class ChromeBrowserBackend(browser_backend.BrowserBackend):
       # and installed a root certificate.
       replay_args.append('--ignore-certificate-errors')
     if self._UseHostResolverRules():
+      # Force hostnames to resolve to the replay's host_ip.
       replay_args.append('--host-resolver-rules=MAP * %s,EXCLUDE localhost' %
-                         self.forwarder_factory.host_ip)  # replay's host_ip
+                         self._platform_backend.forwarder_factory.host_ip)
     # Force the browser to send HTTP/HTTPS requests to fixed ports if they
     # are not the standard HTTP/HTTPS ports.
     http_port = self.platform_backend.wpr_http_device_port
@@ -172,68 +169,82 @@ class ChromeBrowserBackend(browser_backend.BrowserBackend):
     return replay_args
 
   def HasBrowserFinishedLaunching(self):
-    return self.devtools_client.IsAlive()
+    assert self._port, 'No DevTools port info available.'
+    return devtools_client_backend.IsDevToolsAgentAvailable(self._port)
 
-  def _WaitForBrowserToComeUp(self, wait_for_extensions=True):
+  def _InitDevtoolsClientBackend(self, remote_devtools_port=None):
+    """ Initiate the devtool client backend which allow browser connection
+    through browser' devtool.
+
+    Args:
+      remote_devtools_port: The remote devtools port, if
+          any. Otherwise assumed to be the same as self._port.
+    """
+    assert not self._devtools_client, (
+        'Devtool client backend cannot be init twice')
+    self._devtools_client = devtools_client_backend.DevToolsClientBackend(
+        self._port, remote_devtools_port or self._port, self)
+
+  def _WaitForBrowserToComeUp(self):
+    """ Wait for browser to come up. """
     try:
       util.WaitFor(self.HasBrowserFinishedLaunching, timeout=30)
-    except (util.TimeoutException, exceptions.ProcessGoneException) as e:
+    except (exceptions.TimeoutException, exceptions.ProcessGoneException) as e:
       if not self.IsBrowserRunning():
         raise exceptions.BrowserGoneException(self.browser, e)
       raise exceptions.BrowserConnectionGoneException(self.browser, e)
 
-    def AllExtensionsLoaded():
-      # Extension pages are loaded from an about:blank page,
-      # so we need to check that the document URL is the extension
-      # page in addition to the ready state.
-      extension_ready_js = """
-          document.URL.lastIndexOf('chrome-extension://%s/', 0) == 0 &&
-          (document.readyState == 'complete' ||
-           document.readyState == 'interactive')
-      """
-      for e in self._extensions_to_load:
-        try:
-          extension_objects = self.extension_backend[e.extension_id]
-        except KeyError:
-          return False
-        for extension_object in extension_objects:
-          try:
-            res = extension_object.EvaluateJavaScript(
-                extension_ready_js % e.extension_id)
-          except exceptions.EvaluateException:
-            # If the inspected page is not ready, we will get an error
-            # when we evaluate a JS expression, but we can just keep polling
-            # until the page is ready (crbug.com/251913).
-            res = None
-
-          # TODO(tengs): We don't have full support for getting the Chrome
-          # version before launch, so for now we use a generic workaround to
-          # check for an extension binding bug in old versions of Chrome.
-          # See crbug.com/263162 for details.
-          if res and extension_object.EvaluateJavaScript(
-              'chrome.runtime == null'):
-            extension_object.Reload()
-          if not res:
-            return False
-      return True
-
-    if wait_for_extensions and self._supports_extensions:
-      try:
-        util.WaitFor(AllExtensionsLoaded, timeout=60)
-      except util.TimeoutException:
-        logging.error('ExtensionsToLoad: ' +
-            repr([e.extension_id for e in self._extensions_to_load]))
-        logging.error('Extension list: ' +
-            pprint.pformat(self.extension_backend, indent=4))
-        raise
-
-  def ListInspectableContexts(self):
+  def _WaitForExtensionsToLoad(self):
+    """ Wait for all extensions to load.
+    Be sure to check whether the browser_backend supports_extensions before
+    calling this method.
+    """
+    assert self._supports_extensions
+    assert self._devtools_client, (
+        'Waiting for extensions required devtool client to be initiated first')
     try:
-      return self._devtools_client.ListInspectableContexts()
-    except devtools_http.DevToolsClientConnectionError as e:
-      if not self.IsBrowserRunning():
-        raise exceptions.BrowserGoneException(self.browser, e)
-      raise exceptions.BrowserConnectionGoneException(self.browser, e)
+      util.WaitFor(self._AllExtensionsLoaded, timeout=60)
+    except exceptions.TimeoutException:
+      logging.error('ExtensionsToLoad: ' +
+          repr([e.extension_id for e in self._extensions_to_load]))
+      logging.error('Extension list: ' +
+          pprint.pformat(self.extension_backend, indent=4))
+      raise
+
+  def _AllExtensionsLoaded(self):
+    # Extension pages are loaded from an about:blank page,
+    # so we need to check that the document URL is the extension
+    # page in addition to the ready state.
+    extension_ready_js = """
+        document.URL.lastIndexOf('chrome-extension://%s/', 0) == 0 &&
+        (document.readyState == 'complete' ||
+         document.readyState == 'interactive')
+    """
+    for e in self._extensions_to_load:
+      try:
+        extension_objects = self.extension_backend[e.extension_id]
+      except KeyError:
+        return False
+      for extension_object in extension_objects:
+        try:
+          res = extension_object.EvaluateJavaScript(
+              extension_ready_js % e.extension_id)
+        except exceptions.EvaluateException:
+          # If the inspected page is not ready, we will get an error
+          # when we evaluate a JS expression, but we can just keep polling
+          # until the page is ready (crbug.com/251913).
+          res = None
+
+        # TODO(tengs): We don't have full support for getting the Chrome
+        # version before launch, so for now we use a generic workaround to
+        # check for an extension binding bug in old versions of Chrome.
+        # See crbug.com/263162 for details.
+        if res and extension_object.EvaluateJavaScript(
+            'chrome.runtime == null'):
+          extension_object.Reload()
+        if not res:
+          return False
+    return True
 
   @property
   def browser_directory(self):

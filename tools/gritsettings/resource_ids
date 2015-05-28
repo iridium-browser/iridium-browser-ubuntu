@@ -45,6 +45,9 @@
   "content/app/resources/content_resources.grd": {
     "structures": [4700],
   },
+  "third_party/WebKit/public/blink_image_resources.grd": {
+    "structures": [4750],
+  },
   "ui/resources/ui_resources.grd": {
     "structures": [5500],
   },
@@ -215,6 +218,9 @@
   "ui/login/login_resources.grd": {
     "includes": [28300],
   },
+  "ui/oobe/oobe_resources.grd": {
+    "includes": [28310],
+  },
   "chrome/browser/resources/translate_internals_resources.grd": {
     "includes": [28500],
   },
@@ -231,16 +237,20 @@
     "messages": [30000],
   },
   "components/resources/components_resources.grd": {
-    "includes": [30250],
+    "includes": [30225],
   },
   "components/resources/components_scaled_resources.grd": {
-    "structures": [30350],
+    "structures": [30280],
   },
   "third_party/WebKit/public/blink_resources.grd": {
-    "includes": [30500],
+    "includes": [30350],
+    "structures": [30650],
   },
   "chrome/browser/devtools/device/webrtc/resources.grd": {
     "includes": [30800],
+  },
+  "chrome/browser/resources/settings/settings_resources.grd": {
+    "structures": [30900],
   },
 
   # These files don't need to reserve resource ids, but are listed here so that

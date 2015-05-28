@@ -13,7 +13,7 @@
 #include "wtf/Functional.h"
 
 namespace blink {
-
+class AnimationPlayer;
 class CSSStyleSheetResource;
 class DescendantInvalidationSet;
 class Document;
@@ -24,14 +24,14 @@ class FrameView;
 class GraphicsLayer;
 class ImageResource;
 class KURL;
+class DeprecatedPaintLayer;
 class LayoutRect;
 class LocalFrame;
 class Node;
 class QualifiedName;
 class Page;
-class RenderImage;
-class RenderLayer;
-class RenderObject;
+class LayoutImage;
+class LayoutObject;
 class ResourceRequest;
 class ResourceResponse;
 class StyleChangeReasonForTracing;
@@ -43,7 +43,7 @@ class XMLHttpRequest;
 class InspectorLayoutEvent {
 public:
     static PassRefPtr<TraceEvent::ConvertableToTraceFormat> beginData(FrameView*);
-    static PassRefPtr<TraceEvent::ConvertableToTraceFormat> endData(RenderObject* rootForThisLayout);
+    static PassRefPtr<TraceEvent::ConvertableToTraceFormat> endData(LayoutObject* rootForThisLayout);
 };
 
 class InspectorScheduleStyleInvalidationTrackingEvent {
@@ -108,14 +108,62 @@ private:
         "data", \
         InspectorStyleInvalidatorInvalidateEvent::selectorPart((element), (InspectorStyleInvalidatorInvalidateEvent::reason), (invalidationSet), (singleSelectorPart)))
 
+// From a web developer's perspective: what caused this layout? This is strictly
+// for tracing. Blink logic must not depend on these.
+namespace LayoutInvalidationReason {
+extern const char Unknown[];
+extern const char SizeChanged[];
+extern const char AncestorMoved[];
+extern const char StyleChange[];
+extern const char DomChanged[];
+extern const char TextChanged[];
+extern const char PrintingChanged[];
+extern const char AttributeChanged[];
+extern const char ColumnsChanged[];
+extern const char ChildAnonymousBlockChanged[];
+extern const char AnonymousBlockChange[];
+extern const char Fullscreen[];
+extern const char ChildChanged[];
+extern const char ListValueChange[];
+extern const char ImageChanged[];
+extern const char LineBoxesChanged[];
+extern const char SliderValueChanged[];
+extern const char AncestorMarginCollapsing[];
+extern const char FieldsetChanged[];
+extern const char TextAutosizing[];
+extern const char SvgResourceInvalidated[];
+extern const char FloatDescendantChanged[];
+extern const char CountersChanged[];
+extern const char GridChanged[];
+extern const char MenuWidthChanged[];
+extern const char RemovedFromLayout[];
+extern const char AddedToLayout[];
+extern const char TableChanged[];
+extern const char PaddingChanged[];
+extern const char TextControlChanged[];
+// FIXME: This is too generic, we should be able to split out transform and
+// size related invalidations.
+extern const char SvgChanged[];
+extern const char ScrollbarChanged[];
+}
+
+// LayoutInvalidationReasonForTracing is strictly for tracing. Blink logic must
+// not depend on this value.
+typedef const char LayoutInvalidationReasonForTracing[];
+
 class InspectorLayoutInvalidationTrackingEvent {
 public:
-    static PassRefPtr<TraceEvent::ConvertableToTraceFormat> data(const RenderObject*);
+    static PassRefPtr<TraceEvent::ConvertableToTraceFormat> data(const LayoutObject*, LayoutInvalidationReasonForTracing);
 };
 
 class InspectorPaintInvalidationTrackingEvent {
 public:
-    static PassRefPtr<TraceEvent::ConvertableToTraceFormat> data(const RenderObject* renderer, const RenderObject* paintContainer);
+    static PassRefPtr<TraceEvent::ConvertableToTraceFormat> data(const LayoutObject* renderer, const LayoutObject* paintContainer);
+};
+
+class InspectorScrollInvalidationTrackingEvent {
+public:
+    static PassRefPtr<TraceEvent::ConvertableToTraceFormat> data(const LayoutObject&);
 };
 
 class InspectorSendRequestEvent {
@@ -155,7 +203,7 @@ public:
 
 class InspectorAnimationFrameEvent {
 public:
-    static PassRefPtr<TraceEvent::ConvertableToTraceFormat> data(Document*, int callbackId);
+    static PassRefPtr<TraceEvent::ConvertableToTraceFormat> data(ExecutionContext*, int callbackId);
 };
 
 class InspectorWebSocketCreateEvent {
@@ -196,7 +244,7 @@ public:
     static const char ReflectionLayerChanged[];
     static const char NewCompositedLayer[];
 
-    static PassRefPtr<TraceEvent::ConvertableToTraceFormat> data(const RenderLayer*, const char* reason);
+    static PassRefPtr<TraceEvent::ConvertableToTraceFormat> data(const DeprecatedPaintLayer*, const char* reason);
 };
 #define TRACE_LAYER_INVALIDATION(LAYER, REASON) \
     TRACE_EVENT_INSTANT1( \
@@ -207,14 +255,14 @@ public:
 
 class InspectorPaintEvent {
 public:
-    static PassRefPtr<TraceEvent::ConvertableToTraceFormat> data(RenderObject*, const LayoutRect& clipRect, const GraphicsLayer*);
+    static PassRefPtr<TraceEvent::ConvertableToTraceFormat> data(LayoutObject*, const LayoutRect& clipRect, const GraphicsLayer*);
 };
 
 class InspectorPaintImageEvent {
 public:
-    static PassRefPtr<TraceEvent::ConvertableToTraceFormat> data(const RenderImage&);
-    static PassRefPtr<TraceEvent::ConvertableToTraceFormat> data(const RenderObject&, const StyleImage&);
-    static PassRefPtr<TraceEvent::ConvertableToTraceFormat> data(const RenderObject*, const ImageResource&);
+    static PassRefPtr<TraceEvent::ConvertableToTraceFormat> data(const LayoutImage&);
+    static PassRefPtr<TraceEvent::ConvertableToTraceFormat> data(const LayoutObject&, const StyleImage&);
+    static PassRefPtr<TraceEvent::ConvertableToTraceFormat> data(const LayoutObject*, const ImageResource&);
 };
 
 class InspectorCommitLoadEvent {
@@ -229,7 +277,7 @@ public:
 
 class InspectorScrollLayerEvent {
 public:
-    static PassRefPtr<TraceEvent::ConvertableToTraceFormat> data(RenderObject*);
+    static PassRefPtr<TraceEvent::ConvertableToTraceFormat> data(LayoutObject*);
 };
 
 class InspectorUpdateLayerTreeEvent {
@@ -274,12 +322,12 @@ public:
 
 class InspectorTracingSessionIdForWorkerEvent {
 public:
-    static PassRefPtr<TraceEvent::ConvertableToTraceFormat> data(const String& sessionId, int workerId, WorkerThread*);
+    static PassRefPtr<TraceEvent::ConvertableToTraceFormat> data(const String& sessionId, const String& workerId, WorkerThread*);
 };
 
-class InspectorTracingStartedInPage {
+class InspectorTracingStartedInFrame {
 public:
-    static PassRefPtr<TraceEvent::ConvertableToTraceFormat> data(const String& sessionId, Page*);
+    static PassRefPtr<TraceEvent::ConvertableToTraceFormat> data(const String& sessionId, LocalFrame*);
 };
 
 class InspectorSetLayerTreeId {
@@ -287,9 +335,14 @@ public:
     static PassRefPtr<TraceEvent::ConvertableToTraceFormat> data(const String& sessionId, int layerTreeId);
 };
 
-class InspectorBeginFrameEvent {
+class InspectorAnimationEvent {
 public:
-    static PassRefPtr<TraceEvent::ConvertableToTraceFormat> data(int frameId);
+    static PassRefPtr<TraceEvent::ConvertableToTraceFormat> data(const AnimationPlayer&);
+};
+
+class InspectorAnimationStateEvent {
+public:
+    static PassRefPtr<TraceEvent::ConvertableToTraceFormat> data(const AnimationPlayer&);
 };
 
 } // namespace blink

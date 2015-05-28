@@ -11,38 +11,42 @@
 
 namespace blink {
 
-class PLATFORM_EXPORT BeginTransformDisplayItem : public DisplayItem {
+class PLATFORM_EXPORT BeginTransformDisplayItem : public PairedBeginDisplayItem {
+    WTF_MAKE_FAST_ALLOCATED(BeginTransformDisplayItem);
 public:
-    static PassOwnPtr<BeginTransformDisplayItem> create(DisplayItemClient client, const AffineTransform& transform) { return adoptPtr(new BeginTransformDisplayItem(client, transform)); }
+    static PassOwnPtr<BeginTransformDisplayItem> create(const DisplayItemClientWrapper& client, const AffineTransform& transform)
+    {
+        return adoptPtr(new BeginTransformDisplayItem(client, transform));
+    }
 
-    virtual void replay(GraphicsContext*) override;
+    BeginTransformDisplayItem(const DisplayItemClientWrapper& client, const AffineTransform& transform)
+        : PairedBeginDisplayItem(client, BeginTransform)
+        , m_transform(transform) { }
+
+    virtual void replay(GraphicsContext&) override;
     virtual void appendToWebDisplayItemList(WebDisplayItemList*) const override;
 
-protected:
-    BeginTransformDisplayItem(DisplayItemClient, const AffineTransform&);
-
 private:
-#ifndef NDEBUG
-    virtual const char* name() const override { return "BeginTransform"; }
-#endif
-
     const AffineTransform m_transform;
 };
 
-class PLATFORM_EXPORT EndTransformDisplayItem : public DisplayItem {
+class PLATFORM_EXPORT EndTransformDisplayItem : public PairedEndDisplayItem {
+    WTF_MAKE_FAST_ALLOCATED(EndTransformDisplayItem);
 public:
-    static PassOwnPtr<EndTransformDisplayItem> create(DisplayItemClient client) { return adoptPtr(new EndTransformDisplayItem(client)); }
+    static PassOwnPtr<EndTransformDisplayItem> create(const DisplayItemClientWrapper& client)
+    {
+        return adoptPtr(new EndTransformDisplayItem(client));
+    }
 
-    virtual void replay(GraphicsContext*) override;
+    EndTransformDisplayItem(const DisplayItemClientWrapper& client)
+        : PairedEndDisplayItem(client, EndTransform) { }
+
+    virtual void replay(GraphicsContext&) override;
     virtual void appendToWebDisplayItemList(WebDisplayItemList*) const override;
 
-protected:
-    EndTransformDisplayItem(DisplayItemClient client)
-        : DisplayItem(client, EndTransform) { }
-
 private:
-#ifndef NDEBUG
-    virtual const char* name() const override { return "EndTransform"; }
+#if ENABLE(ASSERT)
+    virtual bool isEndAndPairedWith(const DisplayItem& other) const override final { return other.type() == BeginTransform; }
 #endif
 };
 

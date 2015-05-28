@@ -50,9 +50,6 @@ class CONTENT_EXPORT FrameTree {
             RenderFrameHostManager::Delegate* manager_delegate);
   ~FrameTree();
 
-  // Returns the FrameTreeNode with the given |frame_tree_node_id|.
-  static FrameTreeNode* GloballyFindByID(int64 frame_tree_node_id);
-
   FrameTreeNode* root() const { return root_.get(); }
 
   // Returns the FrameTreeNode with the given |frame_tree_node_id| if it is part
@@ -60,7 +57,7 @@ class CONTENT_EXPORT FrameTree {
   FrameTreeNode* FindByID(int64 frame_tree_node_id);
 
   // Returns the FrameTreeNode with the given renderer-specific |routing_id|.
-  FrameTreeNode* FindByRoutingID(int routing_id, int process_id);
+  FrameTreeNode* FindByRoutingID(int process_id, int routing_id);
 
   // Executes |on_node| on each node in the frame tree.  If |on_node| returns
   // false, terminates the iteration immediately. Returning false is useful
@@ -70,6 +67,10 @@ class CONTENT_EXPORT FrameTree {
   void ForEach(const base::Callback<bool(FrameTreeNode*)>& on_node) const;
 
   // Frame tree manipulation routines.
+  // |process_id| is required to disambiguate |new_routing_id|, and it must
+  // match the process of the |parent| node.  Otherwise this method returns
+  // nullptr.  Passing MSG_ROUTING_NONE for |new_routing_id| will allocate a new
+  // routing ID for the new frame.
   RenderFrameHostImpl* AddFrame(FrameTreeNode* parent,
                                 int process_id,
                                 int new_routing_id,
@@ -90,13 +91,6 @@ class CONTENT_EXPORT FrameTree {
   // support bookkeeping for top-level navigations.
   // TODO(creis): Look into how we can remove the need for this method.
   void ResetForMainFrameSwap();
-
-  // Update the frame tree after a process exits.  Any nodes currently using the
-  // given |render_view_host| will lose all their children.
-  // TODO(creis): This should take a RenderProcessHost once RenderFrameHost
-  // knows its process.  Until then, we would just be asking the RenderViewHost
-  // for its process, so we'll skip that step.
-  void RenderProcessGone(RenderViewHost* render_view_host);
 
   // Convenience accessor for the main frame's RenderFrameHostImpl.
   RenderFrameHostImpl* GetMainFrame() const;
@@ -131,6 +125,19 @@ class CONTENT_EXPORT FrameTree {
   // the number drops to zero, we call Shutdown on the RenderViewHost.
   void RegisterRenderFrameHost(RenderFrameHostImpl* render_frame_host);
   void UnregisterRenderFrameHost(RenderFrameHostImpl* render_frame_host);
+
+  // This is only meant to be called by FrameTreeNode. Triggers calling
+  // the listener installed by SetFrameRemoveListener.
+  void FrameRemoved(FrameTreeNode* frame);
+
+  // Returns this FrameTree's total load progress.
+  double GetLoadProgress();
+
+  // Resets the load progress on all nodes in this FrameTree.
+  void ResetLoadProgress();
+
+  // Returns true if at least one of the nodes in this FrameTree is loading.
+  bool IsLoading();
 
  private:
   typedef base::hash_map<int, RenderViewHostImpl*> RenderViewHostMap;

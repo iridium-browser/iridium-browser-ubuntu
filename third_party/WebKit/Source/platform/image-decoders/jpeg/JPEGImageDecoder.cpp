@@ -74,19 +74,9 @@ inline J_COLOR_SPACE rgbOutputColorSpace() { return JCS_RGB; }
 inline bool colorSpaceHasAlpha(J_COLOR_SPACE) { return false; }
 #endif
 
-#if USE(LOW_QUALITY_IMAGE_NO_JPEG_DITHERING)
-inline J_DCT_METHOD dctMethod() { return JDCT_IFAST; }
-inline J_DITHER_MODE ditherMode() { return JDITHER_NONE; }
-#else
 inline J_DCT_METHOD dctMethod() { return JDCT_ISLOW; }
 inline J_DITHER_MODE ditherMode() { return JDITHER_FS; }
-#endif
-
-#if USE(LOW_QUALITY_IMAGE_NO_JPEG_FANCY_UPSAMPLING)
-inline bool doFancyUpsampling() { return false; }
-#else
 inline bool doFancyUpsampling() { return true; }
-#endif
 
 namespace {
 
@@ -310,7 +300,7 @@ static yuv_subsampling yuvSubsampling(const jpeg_decompress_struct& info)
 }
 
 class JPEGImageReader {
-    WTF_MAKE_FAST_ALLOCATED;
+    WTF_MAKE_FAST_ALLOCATED(JPEGImageReader);
 public:
     JPEGImageReader(JPEGImageDecoder* decoder)
         : m_decoder(decoder)
@@ -451,6 +441,12 @@ public:
             // Calculate and set decoded size.
             m_info.scale_num = m_decoder->desiredScaleNumerator();
             m_info.scale_denom = scaleDenominator;
+            // Scaling caused by running low on memory isn't supported by YUV decoding since
+            // YUV decoding is performed on full sized images. At this point, buffers and various
+            // image info structs have already been setup to the scaled size after reading the
+            // image header using this decoder, so using the full size is no longer possible.
+            if (m_info.scale_num != m_info.scale_denom)
+                overrideColorSpace = JCS_UNKNOWN;
             jpeg_calc_output_dimensions(&m_info);
             m_decoder->setDecodedSize(m_info.output_width, m_info.output_height);
 

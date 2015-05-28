@@ -17,6 +17,7 @@
 #include "ppapi/utility/completion_callback_factory.h"
 #include "remoting/client/chromoting_stats.h"
 #include "remoting/client/plugin/pepper_video_renderer.h"
+#include "remoting/protocol/video_stub.h"
 #include "third_party/webrtc/modules/desktop_capture/desktop_geometry.h"
 #include "third_party/webrtc/modules/desktop_capture/desktop_region.h"
 
@@ -26,7 +27,8 @@ namespace remoting {
 
 // PepperVideoRenderer that uses the PPB_VideoDecoder interface for video
 // decoding and Graphics3D for rendering.
-class PepperVideoRenderer3D : public PepperVideoRenderer {
+class PepperVideoRenderer3D : public PepperVideoRenderer,
+                              public protocol::VideoStub {
  public:
   PepperVideoRenderer3D();
   ~PepperVideoRenderer3D() override;
@@ -36,8 +38,14 @@ class PepperVideoRenderer3D : public PepperVideoRenderer {
                   const ClientContext& context,
                   EventHandler* event_handler) override;
   void OnViewChanged(const pp::View& view) override;
+  void EnableDebugDirtyRegion(bool enable) override;
+
+  // VideoRenderer interface.
   void OnSessionConfig(const protocol::SessionConfig& config) override;
   ChromotingStats* GetStats() override;
+  protocol::VideoStub* GetVideoStub() override;
+
+  // protocol::VideoStub interface.
   void ProcessVideoPacket(scoped_ptr<VideoPacket> packet,
                           const base::Closure& done) override;
 
@@ -141,6 +149,9 @@ class PepperVideoRenderer3D : public PepperVideoRenderer {
 
   // Location of the scale value to be passed to the |shader_program_|.
   int shader_texcoord_scale_location_;
+
+  // True if dirty regions are to be sent to |event_handler_| for debugging.
+  bool debug_dirty_region_;
 
   pp::CompletionCallbackFactory<PepperVideoRenderer3D> callback_factory_;
 

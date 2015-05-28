@@ -10,9 +10,9 @@
 #include "base/task/cancelable_task_tracker.h"
 #include "base/time/time.h"
 #include "chrome/browser/content_settings/tab_specific_content_settings.h"
-#include "chrome/browser/history/history_service.h"
 #include "components/content_settings/core/common/content_settings.h"
 #include "components/content_settings/core/common/content_settings_types.h"
+#include "components/history/core/browser/history_service.h"
 #include "content/public/common/signed_certificate_timestamp_id_and_status.h"
 #include "ui/gfx/native_widget_types.h"
 #include "url/gurl.h"
@@ -35,6 +35,9 @@ class WebsiteSettingsUI;
 // closed.
 class WebsiteSettings : public TabSpecificContentSettings::SiteDataObserver {
  public:
+  // TODO(palmer): Figure out if it is possible to unify SiteConnectionStatus
+  // and SiteIdentityStatus.
+  //
   // Status of a connection to a website.
   enum SiteConnectionStatus {
     SITE_CONNECTION_STATUS_UNKNOWN = 0,      // No status available.
@@ -83,6 +86,7 @@ class WebsiteSettings : public TabSpecificContentSettings::SiteDataObserver {
     WEBSITE_SETTINGS_CERTIFICATE_DIALOG_OPENED,
     WEBSITE_SETTINGS_TRANSPARENCY_VIEWER_OPENED,
     WEBSITE_SETTINGS_CONNECTION_HELP_OPENED,
+    WEBSITE_SETTINGS_SITE_SETTINGS_OPENED,
     WEBSITE_SETTINGS_COUNT
   };
 

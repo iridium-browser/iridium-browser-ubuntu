@@ -10,7 +10,7 @@
 #include "base/callback_forward.h"
 #include "base/memory/scoped_ptr.h"
 #include "content/common/content_export.h"
-#include "third_party/WebKit/public/platform/WebNotificationPermission.h"
+#include "third_party/WebKit/public/platform/modules/notifications/WebNotificationPermission.h"
 
 class GURL;
 class SkBitmap;
@@ -29,9 +29,19 @@ class CONTENT_EXPORT PlatformNotificationService {
  public:
   virtual ~PlatformNotificationService() {}
 
+  // Checks if |origin| has permission to display Web Notifications.
+  // This method must only be called on the UI thread.
+  virtual blink::WebNotificationPermission CheckPermissionOnUIThread(
+      BrowserContext* browser_context,
+      const GURL& origin,
+      int render_process_id) = 0;
+
   // Checks if |origin| has permission to display Web Notifications. This method
-  // must be called on the IO thread.
-  virtual blink::WebNotificationPermission CheckPermission(
+  // exists to serve the synchronous IPC required by the Notification.permission
+  // JavaScript getter, and should not be used for other purposes. See
+  // https://crbug.com/446497 for the plan to deprecate this method.
+  // This method must only be called on the IO thread.
+  virtual blink::WebNotificationPermission CheckPermissionOnIOThread(
       ResourceContext* resource_context,
       const GURL& origin,
       int render_process_id) = 0;
@@ -45,7 +55,6 @@ class CONTENT_EXPORT PlatformNotificationService {
       const SkBitmap& icon,
       const PlatformNotificationData& notification_data,
       scoped_ptr<DesktopNotificationDelegate> delegate,
-      int render_process_id,
       base::Closure* cancel_callback) = 0;
 
   // Displays the persistent notification described in |notification_data| to
@@ -55,8 +64,7 @@ class CONTENT_EXPORT PlatformNotificationService {
       int64 service_worker_registration_id,
       const GURL& origin,
       const SkBitmap& icon,
-      const PlatformNotificationData& notification_data,
-      int render_process_id) = 0;
+      const PlatformNotificationData& notification_data) = 0;
 
   // Closes the persistent notification identified by
   // |persistent_notification_id|. This method must be called on the UI thread.

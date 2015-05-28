@@ -38,6 +38,9 @@
 #include "extensions/common/extension_set.h"
 #endif
 
+using bookmarks::BookmarkModel;
+using bookmarks::BookmarkNode;
+
 namespace chrome {
 
 int num_bookmark_urls_before_prompting = 15;

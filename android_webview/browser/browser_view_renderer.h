@@ -9,30 +9,40 @@
 #include "android_webview/browser/shared_renderer_state.h"
 #include "base/callback.h"
 #include "base/cancelable_callback.h"
-#include "base/debug/trace_event.h"
+#include "base/trace_event/trace_event.h"
 #include "content/public/browser/android/synchronous_compositor.h"
 #include "content/public/browser/android/synchronous_compositor_client.h"
+#include "skia/ext/refptr.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gfx/geometry/vector2d_f.h"
 
 class SkCanvas;
 class SkPicture;
 
+namespace content {
+class WebContents;
+}
+
 namespace android_webview {
 
 class BrowserViewRendererClient;
+class ChildFrame;
 
 // Interface for all the WebView-specific content rendering operations.
 // Provides software and hardware rendering and the Capture Picture API.
 class BrowserViewRenderer : public content::SynchronousCompositorClient {
  public:
   static void CalculateTileMemoryPolicy();
+  static BrowserViewRenderer* FromWebContents(
+      content::WebContents* web_contents);
 
   BrowserViewRenderer(
       BrowserViewRendererClient* client,
       const scoped_refptr<base::SingleThreadTaskRunner>& ui_task_runner);
 
-  virtual ~BrowserViewRenderer();
+  ~BrowserViewRenderer() override;
+
+  void RegisterWithWebContents(content::WebContents* web_contents);
 
   SharedRendererState* GetAwDrawGLViewContext();
   bool RequestDrawGL(bool wait_for_completion);
@@ -55,6 +65,8 @@ class BrowserViewRenderer : public content::SynchronousCompositorClient {
 
   void ClearView();
 
+  void SetOffscreenPreRaster(bool enabled);
+
   // View update notifications.
   void SetIsPaused(bool paused);
   void SetViewVisibility(bool visible);
@@ -65,6 +77,7 @@ class BrowserViewRenderer : public content::SynchronousCompositorClient {
 
   // Sets the scale for logical<->physical pixel conversions.
   void SetDipScale(float dip_scale);
+  float dip_scale() const { return dip_scale_; }
 
   // Set the root layer scroll offset to |new_value|.
   void ScrollTo(gfx::Vector2d new_value);
@@ -80,48 +93,43 @@ class BrowserViewRenderer : public content::SynchronousCompositorClient {
   void TrimMemory(const int level, const bool visible);
 
   // SynchronousCompositorClient overrides.
-  virtual void DidInitializeCompositor(
+  void DidInitializeCompositor(
       content::SynchronousCompositor* compositor) override;
-  virtual void DidDestroyCompositor(content::SynchronousCompositor* compositor)
-      override;
-  virtual void SetContinuousInvalidate(bool invalidate) override;
-  virtual void DidUpdateContent() override;
-  virtual gfx::Vector2dF GetTotalRootLayerScrollOffset() override;
-  virtual void UpdateRootLayerState(
-      const gfx::Vector2dF& total_scroll_offset_dip,
-      const gfx::Vector2dF& max_scroll_offset_dip,
-      const gfx::SizeF& scrollable_size_dip,
-      float page_scale_factor,
-      float min_page_scale_factor,
-      float max_page_scale_factor) override;
-  virtual bool IsExternalFlingActive() const override;
-  virtual void DidOverscroll(gfx::Vector2dF accumulated_overscroll,
-                             gfx::Vector2dF latest_overscroll_delta,
-                             gfx::Vector2dF current_fling_velocity) override;
+  void DidDestroyCompositor(
+      content::SynchronousCompositor* compositor) override;
+  void PostInvalidate() override;
+  void DidUpdateContent() override;
+  gfx::Vector2dF GetTotalRootLayerScrollOffset() override;
+  void UpdateRootLayerState(const gfx::Vector2dF& total_scroll_offset_dip,
+                            const gfx::Vector2dF& max_scroll_offset_dip,
+                            const gfx::SizeF& scrollable_size_dip,
+                            float page_scale_factor,
+                            float min_page_scale_factor,
+                            float max_page_scale_factor) override;
+  bool IsExternalFlingActive() const override;
+  void DidOverscroll(gfx::Vector2dF accumulated_overscroll,
+                     gfx::Vector2dF latest_overscroll_delta,
+                     gfx::Vector2dF current_fling_velocity) override;
 
   void UpdateParentDrawConstraints();
-  void DidSkipCommitFrame();
-  void InvalidateOnFunctorDestroy();
+  void DetachFunctorFromView();
 
  private:
   void SetTotalRootLayerScrollOffset(gfx::Vector2dF new_value_dip);
   bool CanOnDraw();
-  // Checks the continuous invalidate and block invalidate state, and schedule
-  // invalidates appropriately. If |force_invalidate| is true, then send a view
-  // invalidate regardless of compositor expectation. If |skip_reschedule_tick|
-  // is true and if there is already a pending fallback tick, don't reschedule
-  // them.
-  void EnsureContinuousInvalidation(bool force_invalidate,
-                                    bool skip_reschedule_tick);
+  // Posts an invalidate with fallback tick. All invalidates posted while an
+  // invalidate is pending will be posted as a single invalidate after the
+  // pending invalidate is done.
+  void PostInvalidateWithFallback();
+  void CancelFallbackTick();
+  void UpdateCompositorIsActive();
   bool CompositeSW(SkCanvas* canvas);
-  void DidComposite();
-  void DidSkipCompositeInDraw();
-  scoped_refptr<base::debug::ConvertableToTraceFormat> RootLayerStateAsValue(
-      const gfx::Vector2dF& total_scroll_offset_dip,
-      const gfx::SizeF& scrollable_size_dip);
+  scoped_refptr<base::trace_event::ConvertableToTraceFormat>
+  RootLayerStateAsValue(const gfx::Vector2dF& total_scroll_offset_dip,
+                        const gfx::SizeF& scrollable_size_dip);
 
-  scoped_ptr<cc::CompositorFrame> CompositeHw();
-  void ReturnUnusedResource(scoped_ptr<cc::CompositorFrame> frame);
+  bool CompositeHw();
+  void ReturnUnusedResource(scoped_ptr<ChildFrame> frame);
   void ReturnResourceFromParent();
 
   // If we call up view invalidate and OnDraw is not called before a deadline,
@@ -139,6 +147,7 @@ class BrowserViewRenderer : public content::SynchronousCompositorClient {
   gfx::Vector2d max_scroll_offset() const;
 
   size_t CalculateDesiredMemoryPolicy();
+
   // For debug tracing or logging. Return the string representation of this
   // view renderer's state.
   std::string ToString() const;
@@ -159,23 +168,11 @@ class BrowserViewRenderer : public content::SynchronousCompositorClient {
   bool on_new_picture_enable_;
   bool clear_view_;
 
+  bool offscreen_pre_raster_;
+
   gfx::Vector2d last_on_draw_scroll_offset_;
   gfx::Rect last_on_draw_global_visible_rect_;
 
-  // The draw constraints from the parent compositor. These are only used for
-  // tiling priority.
-  ParentCompositorDrawConstraints parent_draw_constraints_;
-
-  // When true, we should continuously invalidate and keep drawing, for example
-  // to drive animation. This value is set by the compositor and should always
-  // reflect the expectation of the compositor and not be reused for other
-  // states.
-  bool compositor_needs_continuous_invalidate_;
-
-  bool invalidate_after_composite_;
-
-  // Used to block additional invalidates while one is already pending.
-  bool block_invalidates_;
 
   base::CancelableClosure post_fallback_tick_;
   base::CancelableClosure fallback_tick_fired_;

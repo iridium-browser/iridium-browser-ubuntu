@@ -19,8 +19,6 @@
 #include "base/stl_util.h"
 #include "base/timer/timer.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/history/history_database.h"
-#include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/prerender/prerender_field_trial.h"
 #include "chrome/browser/prerender/prerender_handle.h"
@@ -32,7 +30,9 @@
 #include "chrome/browser/safe_browsing/safe_browsing_service.h"
 #include "chrome/browser/ui/tab_contents/tab_contents_iterator.h"
 #include "chrome/common/prefetch_messages.h"
+#include "components/history/core/browser/history_database.h"
 #include "components/history/core/browser/history_db_task.h"
+#include "components/history/core/browser/history_service.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/navigation_controller.h"
 #include "content/public/browser/navigation_entry.h"
@@ -292,7 +292,7 @@ bool IsExtendedRootURL(const GURL& url) {
 }
 
 bool IsRootPageURL(const GURL& url) {
-  return (url.path() == "/" || url.path() == "" || IsExtendedRootURL(url)) &&
+  return (url.path() == "/" || url.path().empty() || IsExtendedRootURL(url)) &&
       (!url.has_query()) && (!url.has_ref());
 }
 
@@ -586,8 +586,9 @@ void PrerenderLocalPredictor::Shutdown() {
   history_service_observer_.RemoveAll();
 }
 
-void PrerenderLocalPredictor::OnAddVisit(HistoryService* history_service,
-                                         const history::BriefVisitInfo& info) {
+void PrerenderLocalPredictor::OnAddVisit(
+    history::HistoryService* history_service,
+    const history::BriefVisitInfo& info) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
   RecordEvent(EVENT_ADD_VISIT);
   if (!visit_history_.get())
@@ -679,7 +680,7 @@ void PrerenderLocalPredictor::OnAddVisit(HistoryService* history_service,
   }
 
   RecordEvent(EVENT_START_URL_LOOKUP);
-  HistoryService* history = GetHistoryIfExists();
+  history::HistoryService* history = GetHistoryIfExists();
   if (history) {
     RecordEvent(EVENT_GOT_HISTORY_ISSUING_LOOKUP);
     CandidatePrerenderInfo* lookup_info_ptr = lookup_info.get();
@@ -1116,7 +1117,7 @@ void PrerenderLocalPredictor::OnGetInitialVisitHistory(
       visit_history->rbegin(), visit_history->rend()));
 }
 
-HistoryService* PrerenderLocalPredictor::GetHistoryIfExists() const {
+history::HistoryService* PrerenderLocalPredictor::GetHistoryIfExists() const {
   Profile* profile = prerender_manager_->profile();
   if (!profile)
     return NULL;
@@ -1132,7 +1133,7 @@ void PrerenderLocalPredictor::Init() {
     RecordEvent(EVENT_INIT_FAILED_UNENCRYPTED_SYNC_NOT_ENABLED);
     return;
   }
-  HistoryService* history = GetHistoryIfExists();
+  history::HistoryService* history = GetHistoryIfExists();
   if (history) {
     CHECK(!history_service_observer_.IsObserving(history));
     history->ScheduleDBTask(
@@ -1524,52 +1525,7 @@ void PrerenderLocalPredictor::OnTabHelperURLSeen(
         RecordEvent(EVENT_TAB_HELPER_URL_SEEN_NAMESPACE_MATCH_ENTRY);
       if (browser_navigate_initiated)
         RecordEvent(EVENT_TAB_HELPER_URL_SEEN_NAMESPACE_MATCH_BROWSER_NAVIGATE);
-    } else {
-      SessionStorageNamespace* prerender_session_storage_namespace =
-          best_matched_prerender->prerender_handle->
-          GetSessionStorageNamespace();
-      if (!prerender_session_storage_namespace) {
-        RecordEvent(EVENT_TAB_HELPER_URL_SEEN_NAMESPACE_MISMATCH_NO_NAMESPACE);
-      } else {
-        RecordEvent(EVENT_TAB_HELPER_URL_SEEN_NAMESPACE_MISMATCH_MERGE_ISSUED);
-        prerender_session_storage_namespace->Merge(
-            false,
-            best_matched_prerender->prerender_handle->GetChildId(),
-            tab_session_storage_namespace,
-            base::Bind(&PrerenderLocalPredictor::ProcessNamespaceMergeResult,
-                       weak_factory_.GetWeakPtr()));
-      }
     }
-  }
-}
-
-void PrerenderLocalPredictor::ProcessNamespaceMergeResult(
-    content::SessionStorageNamespace::MergeResult result) {
-  RecordEvent(EVENT_NAMESPACE_MISMATCH_MERGE_RESULT_RECEIVED);
-  switch (result) {
-    case content::SessionStorageNamespace::MERGE_RESULT_NAMESPACE_NOT_FOUND:
-      RecordEvent(EVENT_NAMESPACE_MISMATCH_MERGE_RESULT_NAMESPACE_NOT_FOUND);
-      break;
-    case content::SessionStorageNamespace::MERGE_RESULT_NAMESPACE_NOT_ALIAS:
-      RecordEvent(EVENT_NAMESPACE_MISMATCH_MERGE_RESULT_NAMESPACE_NOT_ALIAS);
-      break;
-    case content::SessionStorageNamespace::MERGE_RESULT_NOT_LOGGING:
-      RecordEvent(EVENT_NAMESPACE_MISMATCH_MERGE_RESULT_NOT_LOGGING);
-      break;
-    case content::SessionStorageNamespace::MERGE_RESULT_NO_TRANSACTIONS:
-      RecordEvent(EVENT_NAMESPACE_MISMATCH_MERGE_RESULT_NO_TRANSACTIONS);
-      break;
-    case content::SessionStorageNamespace::MERGE_RESULT_TOO_MANY_TRANSACTIONS:
-      RecordEvent(EVENT_NAMESPACE_MISMATCH_MERGE_RESULT_TOO_MANY_TRANSACTIONS);
-      break;
-    case content::SessionStorageNamespace::MERGE_RESULT_NOT_MERGEABLE:
-      RecordEvent(EVENT_NAMESPACE_MISMATCH_MERGE_RESULT_NOT_MERGEABLE);
-      break;
-    case content::SessionStorageNamespace::MERGE_RESULT_MERGEABLE:
-      RecordEvent(EVENT_NAMESPACE_MISMATCH_MERGE_RESULT_MERGEABLE);
-      break;
-    default:
-      NOTREACHED();
   }
 }
 

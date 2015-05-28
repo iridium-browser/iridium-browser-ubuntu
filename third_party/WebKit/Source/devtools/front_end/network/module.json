@@ -33,15 +33,18 @@
             "settingType": "checkbox"
         }
     ],
-    "dependencies": ["source_frame"],
+    "dependencies": ["source_frame", "components_lazy", "ui_lazy"],
     "scripts": [
+        "EventSourceMessagesView.js",
         "FilterSuggestionBuilder.js",
         "HARWriter.js",
         "RequestView.js",
         "NetworkDataGridNode.js",
         "NetworkItemView.js",
+        "NetworkFilmStripView.js",
         "NetworkTimeCalculator.js",
         "NetworkLogView.js",
+        "NetworkOverview.js",
         "RequestCookiesView.js",
         "RequestHeadersView.js",
         "RequestHTMLView.js",
@@ -50,13 +53,17 @@
         "RequestResponseView.js",
         "RequestTimingView.js",
         "ResourceWebSocketFrameView.js",
-        "NetworkPanel.js"
+        "NetworkPanel.js",
+        "XMLView.js"
     ],
     "stylesheets": [
+        "eventSourceMessagesView.css",
+        "networkFilmStripView.css",
         "networkLogView.css",
         "networkPanel.css",
         "requestCookiesView.css",
         "requestHeadersView.css",
-        "webSocketFrameView.css"
+        "webSocketFrameView.css",
+        "xmlView.css"
     ]
 }

@@ -23,7 +23,6 @@ class FakeGCMDriver : public GCMDriver {
   void RemoveAppHandler(const std::string& app_id) override;
   void OnSignedIn() override;
   void OnSignedOut() override;
-  void Purge() override;
   void AddConnectionObserver(GCMConnectionObserver* observer) override;
   void RemoveConnectionObserver(GCMConnectionObserver* observer) override;
   void Enable() override;
@@ -45,7 +44,8 @@ class FakeGCMDriver : public GCMDriver {
 
  protected:
   // GCMDriver implementation:
-  GCMClient::Result EnsureStarted() override;
+  GCMClient::Result EnsureStarted(
+      GCMClient::StartMode start_mode) override;
   void RegisterImpl(const std::string& app_id,
                     const std::vector<std::string>& sender_ids) override;
   void UnregisterImpl(const std::string& app_id) override;

@@ -8,6 +8,7 @@
 #include "base/process/kill.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
+#include "chrome/browser/ui/browser_commands.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
 #include "chrome/browser/ui/webui/signin/login_ui_test_utils.h"
 #include "chrome/browser/ui/zoom/chrome_zoom_level_prefs.h"
@@ -41,8 +42,7 @@ class ZoomChangedWatcher : public ZoomObserver {
   ZoomChangedWatcher(
       content::WebContents* web_contents,
       const ZoomController::ZoomChangedEventData& expected_event_data)
-      : web_contents_(web_contents),
-        expected_event_data_(expected_event_data),
+      : expected_event_data_(expected_event_data),
         message_loop_runner_(new content::MessageLoopRunner) {
     ZoomController::FromWebContents(web_contents)->AddObserver(this);
   }
@@ -57,14 +57,41 @@ class ZoomChangedWatcher : public ZoomObserver {
   }
 
  private:
-  content::WebContents* web_contents_;
   ZoomController::ZoomChangedEventData expected_event_data_;
   scoped_refptr<content::MessageLoopRunner> message_loop_runner_;
 
   DISALLOW_COPY_AND_ASSIGN(ZoomChangedWatcher);
 };
 
-typedef InProcessBrowserTest ZoomControllerBrowserTest;
+class ZoomControllerBrowserTest : public InProcessBrowserTest {
+ public:
+  ZoomControllerBrowserTest() {}
+  ~ZoomControllerBrowserTest() override {}
+
+  void TestResetOnNavigation(ZoomController::ZoomMode zoom_mode) {
+    DCHECK(zoom_mode == ZoomController::ZOOM_MODE_ISOLATED ||
+           zoom_mode == ZoomController::ZOOM_MODE_MANUAL);
+    content::WebContents* web_contents =
+        browser()->tab_strip_model()->GetActiveWebContents();
+    ui_test_utils::NavigateToURLBlockUntilNavigationsComplete(
+        browser(), GURL("about:blank"), 1);
+    ZoomController* zoom_controller =
+        ZoomController::FromWebContents(web_contents);
+    double zoom_level = zoom_controller->GetDefaultZoomLevel();
+    zoom_controller->SetZoomMode(zoom_mode);
+
+    // When the navigation occurs, the zoom_mode will be reset to
+    // ZOOM_MODE_DEFAULT, and this will be reflected in the event that
+    // is generated.
+    ZoomController::ZoomChangedEventData zoom_change_data(
+        web_contents, zoom_level, zoom_level, ZoomController::ZOOM_MODE_DEFAULT,
+        false);
+    ZoomChangedWatcher zoom_change_watcher(web_contents, zoom_change_data);
+
+    ui_test_utils::NavigateToURL(browser(), GURL(chrome::kChromeUISettingsURL));
+    zoom_change_watcher.Wait();
+  }
+};  // ZoomControllerBrowserTest
 
 #if defined(OS_ANDROID)
 #define MAYBE_CrashedTabsDoNotChangeZoom DISABLED_CrashedTabsDoNotChangeZoom
@@ -109,7 +136,7 @@ IN_PROC_BROWSER_TEST_F(ZoomControllerBrowserTest, OnPreferenceChanged) {
       new_default_zoom_level,
       new_default_zoom_level,
       ZoomController::ZOOM_MODE_DEFAULT,
-      true);
+      false);
   ZoomChangedWatcher zoom_change_watcher(web_contents, zoom_change_data);
   // TODO(wjmaclean): Convert this to call partition-specific zoom level prefs
   // when they become available.
@@ -140,6 +167,57 @@ IN_PROC_BROWSER_TEST_F(ZoomControllerBrowserTest, ErrorPagesCanZoom) {
   EXPECT_FLOAT_EQ(new_zoom_level, zoom_controller->GetZoomLevel());
 }
 
+IN_PROC_BROWSER_TEST_F(ZoomControllerBrowserTest,
+                       ErrorPagesCanZoomAfterTabRestore) {
+  // This url is meant to cause a network error page to be loaded.
+  // Tests can't reach the network, so this test should continue
+  // to work even if the domain listed is someday registered.
+  GURL url("http://kjfhkjsdf.com");
+
+  TabStripModel* tab_strip = browser()->tab_strip_model();
+  ASSERT_TRUE(tab_strip);
+
+  ui_test_utils::NavigateToURLWithDisposition(
+      browser(), url, NEW_FOREGROUND_TAB,
+      ui_test_utils::BROWSER_TEST_WAIT_FOR_NAVIGATION);
+  {
+    content::WebContents* web_contents = tab_strip->GetActiveWebContents();
+
+    EXPECT_EQ(
+        content::PAGE_TYPE_ERROR,
+        web_contents->GetController().GetLastCommittedEntry()->GetPageType());
+
+    content::WebContentsDestroyedWatcher destroyed_watcher(web_contents);
+    tab_strip->CloseWebContentsAt(tab_strip->active_index(),
+                                  TabStripModel::CLOSE_CREATE_HISTORICAL_TAB);
+    destroyed_watcher.Wait();
+  }
+  EXPECT_EQ(1, tab_strip->count());
+
+  content::WebContentsAddedObserver new_web_contents_observer;
+  chrome::RestoreTab(browser());
+  content::WebContents* web_contents =
+      new_web_contents_observer.GetWebContents();
+  content::WaitForLoadStop(web_contents);
+
+  EXPECT_EQ(2, tab_strip->count());
+
+  EXPECT_EQ(
+      content::PAGE_TYPE_ERROR,
+      web_contents->GetController().GetLastCommittedEntry()->GetPageType());
+
+  ZoomController* zoom_controller =
+      ZoomController::FromWebContents(web_contents);
+
+  double old_zoom_level = zoom_controller->GetZoomLevel();
+  double new_zoom_level = old_zoom_level + 0.5;
+
+  // The following attempt to change the zoom level for an error page should
+  // fail.
+  zoom_controller->SetZoomLevel(new_zoom_level);
+  EXPECT_FLOAT_EQ(new_zoom_level, zoom_controller->GetZoomLevel());
+}
+
 IN_PROC_BROWSER_TEST_F(ZoomControllerBrowserTest, Observe) {
   content::WebContents* web_contents =
       browser()->tab_strip_model()->GetActiveWebContents();
@@ -152,7 +230,7 @@ IN_PROC_BROWSER_TEST_F(ZoomControllerBrowserTest, Observe) {
       new_zoom_level,
       new_zoom_level,
       ZoomController::ZOOM_MODE_DEFAULT,
-      true);  // We have a non-empty host, so this will be 'true'.
+      false);  // The ZoomController did not initiate, so this will be 'false'.
   ZoomChangedWatcher zoom_change_watcher(web_contents, zoom_change_data);
 
   content::HostZoomMap* host_zoom_map =
@@ -163,26 +241,35 @@ IN_PROC_BROWSER_TEST_F(ZoomControllerBrowserTest, Observe) {
   zoom_change_watcher.Wait();
 }
 
-IN_PROC_BROWSER_TEST_F(ZoomControllerBrowserTest, PerTabModeResetSendsEvent) {
+IN_PROC_BROWSER_TEST_F(ZoomControllerBrowserTest, ObserveDisabledModeEvent) {
   content::WebContents* web_contents =
       browser()->tab_strip_model()->GetActiveWebContents();
-  ui_test_utils::NavigateToURLBlockUntilNavigationsComplete(
-      browser(), GURL("about:blank"), 1);
+
   ZoomController* zoom_controller =
       ZoomController::FromWebContents(web_contents);
-  double zoom_level = zoom_controller->GetDefaultZoomLevel();
-  zoom_controller->SetZoomMode(ZoomController::ZOOM_MODE_ISOLATED);
 
-  // When the navigation occurs, the ZOOM_MODE_ISOLATED will be reset to
-  // ZOOM_MODE_DEFAULT, and this will be reflected in the event that
-  // is generated.
+  double default_zoom_level = zoom_controller->GetDefaultZoomLevel();
+  double new_zoom_level = default_zoom_level + 1.0;
+  zoom_controller->SetZoomLevel(new_zoom_level);
+
   ZoomController::ZoomChangedEventData zoom_change_data(
-      web_contents, zoom_level, zoom_level, ZoomController::ZOOM_MODE_DEFAULT,
-      false);
+      web_contents,
+      new_zoom_level,
+      default_zoom_level,
+      ZoomController::ZOOM_MODE_DISABLED,
+      true);
   ZoomChangedWatcher zoom_change_watcher(web_contents, zoom_change_data);
-
-  ui_test_utils::NavigateToURL(browser(), GURL(chrome::kChromeUISettingsURL));
+  zoom_controller->SetZoomMode(ZoomController::ZOOM_MODE_DISABLED);
   zoom_change_watcher.Wait();
+}
+
+IN_PROC_BROWSER_TEST_F(ZoomControllerBrowserTest, PerTabModeResetSendsEvent) {
+  TestResetOnNavigation(ZoomController::ZOOM_MODE_ISOLATED);
+}
+
+// Regression test: crbug.com/450909.
+IN_PROC_BROWSER_TEST_F(ZoomControllerBrowserTest, NavigationResetsManualMode) {
+  TestResetOnNavigation(ZoomController::ZOOM_MODE_MANUAL);
 }
 
 #if !defined(OS_CHROMEOS)

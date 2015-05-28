@@ -28,22 +28,23 @@
 namespace blink {
 
 class Document;
-class ExceptionState;
 
 class DOMParser final : public RefCountedWillBeGarbageCollected<DOMParser>, public ScriptWrappable {
     DEFINE_WRAPPERTYPEINFO();
 public:
-    static PassRefPtrWillBeRawPtr<DOMParser> create()
+    static PassRefPtrWillBeRawPtr<DOMParser> create(Document& document)
     {
-        return adoptRefWillBeNoop(new DOMParser);
+        return adoptRefWillBeNoop(new DOMParser(document));
     }
 
-    PassRefPtrWillBeRawPtr<Document> parseFromString(const String&, const String& contentType, ExceptionState&);
+    PassRefPtrWillBeRawPtr<Document> parseFromString(const String&, const String& type);
 
-    void trace(Visitor*) { }
+    DECLARE_TRACE();
 
 private:
-    DOMParser() { }
+    DOMParser(Document&);
+
+    WeakPtrWillBeWeakMember<Document> m_contextDocument;
 };
 
 } // namespace blink

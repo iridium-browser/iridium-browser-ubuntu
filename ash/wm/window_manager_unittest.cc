@@ -255,6 +255,10 @@ TEST_F(WindowManagerTest, Focus) {
   keyev = ui::KeyEvent(ui::ET_KEY_PRESSED, ui::VKEY_E, ui::EF_NONE);
   details = dispatcher->OnEventFromSource(&keyev);
   EXPECT_FALSE(keyev.handled() || details.dispatcher_destroyed);
+
+  // Must set to NULL since the activation delegate will be destroyed before
+  // the windows.
+  aura::client::SetActivationDelegate(w1.get(), NULL);
 }
 
 // Various assertion testing for activating windows.
@@ -513,7 +517,8 @@ TEST_F(WindowManagerTest, MouseEventCursors) {
   {
     // Resize edges and corners show proper cursors.
     window_delegate.set_hittest_code(HTBOTTOM);
-    ui::MouseEvent move1(ui::ET_MOUSE_MOVED, point1, point1, 0, 0);
+    ui::MouseEvent move1(ui::ET_MOUSE_MOVED, point1, point1,
+                         ui::EventTimeForNow(), 0, 0);
     ui::EventDispatchDetails details = dispatcher->OnEventFromSource(&move1);
     ASSERT_FALSE(details.dispatcher_destroyed);
     EXPECT_EQ(ui::kCursorSouthResize, host->last_cursor().native_type());
@@ -521,7 +526,8 @@ TEST_F(WindowManagerTest, MouseEventCursors) {
 
   {
     window_delegate.set_hittest_code(HTBOTTOMLEFT);
-    ui::MouseEvent move2(ui::ET_MOUSE_MOVED, point2, point2, 0, 0);
+    ui::MouseEvent move2(ui::ET_MOUSE_MOVED, point2, point2,
+                         ui::EventTimeForNow(), 0, 0);
     ui::EventDispatchDetails details = dispatcher->OnEventFromSource(&move2);
     ASSERT_FALSE(details.dispatcher_destroyed);
     EXPECT_EQ(ui::kCursorSouthWestResize, host->last_cursor().native_type());
@@ -529,7 +535,8 @@ TEST_F(WindowManagerTest, MouseEventCursors) {
 
   {
     window_delegate.set_hittest_code(HTBOTTOMRIGHT);
-    ui::MouseEvent move1(ui::ET_MOUSE_MOVED, point1, point1, 0, 0);
+    ui::MouseEvent move1(ui::ET_MOUSE_MOVED, point1, point1,
+                         ui::EventTimeForNow(), 0, 0);
     ui::EventDispatchDetails details = dispatcher->OnEventFromSource(&move1);
     ASSERT_FALSE(details.dispatcher_destroyed);
     EXPECT_EQ(ui::kCursorSouthEastResize, host->last_cursor().native_type());
@@ -537,7 +544,8 @@ TEST_F(WindowManagerTest, MouseEventCursors) {
 
   {
     window_delegate.set_hittest_code(HTLEFT);
-    ui::MouseEvent move2(ui::ET_MOUSE_MOVED, point2, point2, 0, 0);
+    ui::MouseEvent move2(ui::ET_MOUSE_MOVED, point2, point2,
+                         ui::EventTimeForNow(), 0, 0);
     ui::EventDispatchDetails details = dispatcher->OnEventFromSource(&move2);
     ASSERT_FALSE(details.dispatcher_destroyed);
     EXPECT_EQ(ui::kCursorWestResize, host->last_cursor().native_type());
@@ -545,7 +553,8 @@ TEST_F(WindowManagerTest, MouseEventCursors) {
 
   {
     window_delegate.set_hittest_code(HTRIGHT);
-    ui::MouseEvent move1(ui::ET_MOUSE_MOVED, point1, point1, 0, 0);
+    ui::MouseEvent move1(ui::ET_MOUSE_MOVED, point1, point1,
+                         ui::EventTimeForNow(), 0, 0);
     ui::EventDispatchDetails details = dispatcher->OnEventFromSource(&move1);
     ASSERT_FALSE(details.dispatcher_destroyed);
     EXPECT_EQ(ui::kCursorEastResize, host->last_cursor().native_type());
@@ -553,7 +562,8 @@ TEST_F(WindowManagerTest, MouseEventCursors) {
 
   {
     window_delegate.set_hittest_code(HTTOP);
-    ui::MouseEvent move2(ui::ET_MOUSE_MOVED, point2, point2, 0, 0);
+    ui::MouseEvent move2(ui::ET_MOUSE_MOVED, point2, point2,
+                         ui::EventTimeForNow(), 0, 0);
     ui::EventDispatchDetails details = dispatcher->OnEventFromSource(&move2);
     ASSERT_FALSE(details.dispatcher_destroyed);
     EXPECT_EQ(ui::kCursorNorthResize, host->last_cursor().native_type());
@@ -561,7 +571,8 @@ TEST_F(WindowManagerTest, MouseEventCursors) {
 
   {
     window_delegate.set_hittest_code(HTTOPLEFT);
-    ui::MouseEvent move1(ui::ET_MOUSE_MOVED, point1, point1, 0, 0);
+    ui::MouseEvent move1(ui::ET_MOUSE_MOVED, point1, point1,
+                         ui::EventTimeForNow(), 0, 0);
     ui::EventDispatchDetails details = dispatcher->OnEventFromSource(&move1);
     ASSERT_FALSE(details.dispatcher_destroyed);
     EXPECT_EQ(ui::kCursorNorthWestResize, host->last_cursor().native_type());
@@ -569,7 +580,8 @@ TEST_F(WindowManagerTest, MouseEventCursors) {
 
   {
     window_delegate.set_hittest_code(HTTOPRIGHT);
-    ui::MouseEvent move2(ui::ET_MOUSE_MOVED, point2, point2, 0, 0);
+    ui::MouseEvent move2(ui::ET_MOUSE_MOVED, point2, point2,
+                         ui::EventTimeForNow(), 0, 0);
     ui::EventDispatchDetails details = dispatcher->OnEventFromSource(&move2);
     ASSERT_FALSE(details.dispatcher_destroyed);
     EXPECT_EQ(ui::kCursorNorthEastResize, host->last_cursor().native_type());
@@ -578,7 +590,8 @@ TEST_F(WindowManagerTest, MouseEventCursors) {
   {
     // Client area uses null cursor.
     window_delegate.set_hittest_code(HTCLIENT);
-    ui::MouseEvent move1(ui::ET_MOUSE_MOVED, point1, point1, 0, 0);
+    ui::MouseEvent move1(ui::ET_MOUSE_MOVED, point1, point1,
+                         ui::EventTimeForNow(), 0, 0);
     ui::EventDispatchDetails details = dispatcher->OnEventFromSource(&move1);
     ASSERT_FALSE(details.dispatcher_destroyed);
     EXPECT_EQ(ui::kCursorNull, host->last_cursor().native_type());
@@ -612,29 +625,23 @@ TEST_F(WindowManagerTest, MAYBE_TransformActivate) {
 
   gfx::Point miss_point(5, 5);
   transform.TransformPoint(&miss_point);
-  ui::MouseEvent mouseev1(ui::ET_MOUSE_PRESSED,
-                          miss_point,
-                          miss_point,
-                          ui::EF_LEFT_MOUSE_BUTTON,
+  ui::MouseEvent mouseev1(ui::ET_MOUSE_PRESSED, miss_point, miss_point,
+                          ui::EventTimeForNow(), ui::EF_LEFT_MOUSE_BUTTON,
                           ui::EF_LEFT_MOUSE_BUTTON);
   ui::EventProcessor* dispatcher = root_window->GetHost()->event_processor();
   ui::EventDispatchDetails details = dispatcher->OnEventFromSource(&mouseev1);
   ASSERT_FALSE(details.dispatcher_destroyed);
   EXPECT_EQ(NULL, aura::client::GetFocusClient(w1.get())->GetFocusedWindow());
-  ui::MouseEvent mouseup(ui::ET_MOUSE_RELEASED,
-                         miss_point,
-                         miss_point,
-                         ui::EF_LEFT_MOUSE_BUTTON,
+  ui::MouseEvent mouseup(ui::ET_MOUSE_RELEASED, miss_point, miss_point,
+                         ui::EventTimeForNow(), ui::EF_LEFT_MOUSE_BUTTON,
                          ui::EF_LEFT_MOUSE_BUTTON);
   details = dispatcher->OnEventFromSource(&mouseup);
   ASSERT_FALSE(details.dispatcher_destroyed);
 
   gfx::Point hit_point(5, 15);
   transform.TransformPoint(&hit_point);
-  ui::MouseEvent mouseev2(ui::ET_MOUSE_PRESSED,
-                          hit_point,
-                          hit_point,
-                          ui::EF_LEFT_MOUSE_BUTTON,
+  ui::MouseEvent mouseev2(ui::ET_MOUSE_PRESSED, hit_point, hit_point,
+                          ui::EventTimeForNow(), ui::EF_LEFT_MOUSE_BUTTON,
                           ui::EF_LEFT_MOUSE_BUTTON);
   details = dispatcher->OnEventFromSource(&mouseev2);
   ASSERT_FALSE(details.dispatcher_destroyed);
@@ -672,8 +679,8 @@ TEST_F(WindowManagerTest, AdditionalFilters) {
   ui::EventProcessor* dispatcher = root_window->GetHost()->event_processor();
   ui::EventDispatchDetails details = dispatcher->OnEventFromSource(&key_event);
   ASSERT_FALSE(details.dispatcher_destroyed);
-  ui::MouseEvent mouse_pressed(
-      ui::ET_MOUSE_PRESSED, gfx::Point(0, 0), gfx::Point(0, 0), 0, 0);
+  ui::MouseEvent mouse_pressed(ui::ET_MOUSE_PRESSED, gfx::Point(0, 0),
+                               gfx::Point(0, 0), ui::EventTimeForNow(), 0, 0);
   details = dispatcher->OnEventFromSource(&mouse_pressed);
   ASSERT_FALSE(details.dispatcher_destroyed);
 
@@ -693,8 +700,8 @@ TEST_F(WindowManagerTest, AdditionalFilters) {
   // Dispatches events.
   details = dispatcher->OnEventFromSource(&key_event);
   ASSERT_FALSE(details.dispatcher_destroyed);
-  ui::MouseEvent mouse_released(
-      ui::ET_MOUSE_RELEASED, gfx::Point(0, 0), gfx::Point(0, 0), 0, 0);
+  ui::MouseEvent mouse_released(ui::ET_MOUSE_RELEASED, gfx::Point(0, 0),
+                                gfx::Point(0, 0), ui::EventTimeForNow(), 0, 0);
   details = dispatcher->OnEventFromSource(&mouse_released);
   ASSERT_FALSE(details.dispatcher_destroyed);
 
@@ -763,14 +770,33 @@ TEST_F(WindowManagerTest, UpdateCursorVisibilityOnKeyEvent) {
   generator.MoveMouseTo(gfx::Point(0, 0));
   EXPECT_TRUE(cursor_manager->IsCursorVisible());
   EXPECT_TRUE(cursor_manager->IsMouseEventsEnabled());
-  // Releasing a key also hides the cursor but does not disable mouse events.
+  // Releasing a key does does not hide the cursor and does not disable mouse
+  // events.
   generator.ReleaseKey(ui::VKEY_A, ui::EF_NONE);
-  EXPECT_FALSE(cursor_manager->IsCursorVisible());
-  EXPECT_TRUE(cursor_manager->IsMouseEventsEnabled());
-  // Moving mouse shows the cursor again.
-  generator.MoveMouseTo(gfx::Point(0, 0));
   EXPECT_TRUE(cursor_manager->IsCursorVisible());
   EXPECT_TRUE(cursor_manager->IsMouseEventsEnabled());
+}
+
+// Test that pressing an accelerator does not hide the cursor.
+TEST_F(WindowManagerTest, UpdateCursorVisibilityAccelerator) {
+  ui::test::EventGenerator& generator = GetEventGenerator();
+  ::wm::CursorManager* cursor_manager = Shell::GetInstance()->cursor_manager();
+
+  ASSERT_TRUE(cursor_manager->IsCursorVisible());
+
+  // Press Ctrl+A, release A first.
+  generator.PressKey(ui::VKEY_CONTROL, ui::EF_CONTROL_DOWN);
+  generator.PressKey(ui::VKEY_A, ui::EF_CONTROL_DOWN);
+  generator.ReleaseKey(ui::VKEY_A, ui::EF_CONTROL_DOWN);
+  generator.ReleaseKey(ui::VKEY_CONTROL, ui::EF_NONE);
+  EXPECT_TRUE(cursor_manager->IsCursorVisible());
+
+  // Press Ctrl+A, release Ctrl first.
+  generator.PressKey(ui::VKEY_CONTROL, ui::EF_CONTROL_DOWN);
+  generator.PressKey(ui::VKEY_A, ui::EF_CONTROL_DOWN);
+  generator.ReleaseKey(ui::VKEY_CONTROL, ui::EF_NONE);
+  generator.ReleaseKey(ui::VKEY_A, ui::EF_NONE);
+  EXPECT_TRUE(cursor_manager->IsCursorVisible());
 }
 
 TEST_F(WindowManagerTest, TestCursorClientObserver) {

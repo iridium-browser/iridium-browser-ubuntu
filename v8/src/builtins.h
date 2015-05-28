@@ -67,6 +67,7 @@ enum BuiltinExtraArguments {
   V(ArgumentsAdaptorTrampoline, BUILTIN, UNINITIALIZED, kNoExtraICState)       \
   V(InOptimizationQueue, BUILTIN, UNINITIALIZED, kNoExtraICState)              \
   V(JSConstructStubGeneric, BUILTIN, UNINITIALIZED, kNoExtraICState)           \
+  V(JSConstructStubForDerived, BUILTIN, UNINITIALIZED, kNoExtraICState)        \
   V(JSConstructStubApi, BUILTIN, UNINITIALIZED, kNoExtraICState)               \
   V(JSEntryTrampoline, BUILTIN, UNINITIALIZED, kNoExtraICState)                \
   V(JSConstructEntryTrampoline, BUILTIN, UNINITIALIZED, kNoExtraICState)       \
@@ -87,7 +88,7 @@ enum BuiltinExtraArguments {
   V(KeyedLoadIC_Initialize, KEYED_LOAD_IC, UNINITIALIZED, kNoExtraICState)     \
   V(KeyedLoadIC_PreMonomorphic, KEYED_LOAD_IC, PREMONOMORPHIC,                 \
     kNoExtraICState)                                                           \
-  V(KeyedLoadIC_Generic, KEYED_LOAD_IC, GENERIC, kNoExtraICState)              \
+  V(KeyedLoadIC_Megamorphic, KEYED_LOAD_IC, MEGAMORPHIC, kNoExtraICState)      \
                                                                                \
   V(StoreIC_Setter_ForDeopt, STORE_IC, MONOMORPHIC, StoreIC::kStrictModeState) \
                                                                                \
@@ -95,7 +96,6 @@ enum BuiltinExtraArguments {
   V(KeyedStoreIC_PreMonomorphic, KEYED_STORE_IC, PREMONOMORPHIC,               \
     kNoExtraICState)                                                           \
   V(KeyedStoreIC_Megamorphic, KEYED_STORE_IC, MEGAMORPHIC, kNoExtraICState)    \
-  V(KeyedStoreIC_Generic, KEYED_STORE_IC, GENERIC, kNoExtraICState)            \
                                                                                \
   V(KeyedStoreIC_Initialize_Strict, KEYED_STORE_IC, UNINITIALIZED,             \
     StoreIC::kStrictModeState)                                                 \
@@ -103,14 +103,14 @@ enum BuiltinExtraArguments {
     StoreIC::kStrictModeState)                                                 \
   V(KeyedStoreIC_Megamorphic_Strict, KEYED_STORE_IC, MEGAMORPHIC,              \
     StoreIC::kStrictModeState)                                                 \
-  V(KeyedStoreIC_Generic_Strict, KEYED_STORE_IC, GENERIC,                      \
-    StoreIC::kStrictModeState)                                                 \
   V(KeyedStoreIC_SloppyArguments, KEYED_STORE_IC, MONOMORPHIC,                 \
     kNoExtraICState)                                                           \
                                                                                \
   /* Uses KeyedLoadIC_Initialize; must be after in list. */                    \
   V(FunctionCall, BUILTIN, UNINITIALIZED, kNoExtraICState)                     \
   V(FunctionApply, BUILTIN, UNINITIALIZED, kNoExtraICState)                    \
+  V(ReflectApply, BUILTIN, UNINITIALIZED, kNoExtraICState)                     \
+  V(ReflectConstruct, BUILTIN, UNINITIALIZED, kNoExtraICState)                 \
                                                                                \
   V(InternalArrayCode, BUILTIN, UNINITIALIZED, kNoExtraICState)                \
   V(ArrayCode, BUILTIN, UNINITIALIZED, kNoExtraICState)                        \
@@ -165,35 +165,38 @@ enum BuiltinExtraArguments {
                                                DEBUG_BREAK)
 
 // Define list of builtins implemented in JavaScript.
-#define BUILTINS_LIST_JS(V)              \
-  V(EQUALS, 1)                           \
-  V(STRICT_EQUALS, 1)                    \
-  V(COMPARE, 2)                          \
-  V(ADD, 1)                              \
-  V(SUB, 1)                              \
-  V(MUL, 1)                              \
-  V(DIV, 1)                              \
-  V(MOD, 1)                              \
-  V(BIT_OR, 1)                           \
-  V(BIT_AND, 1)                          \
-  V(BIT_XOR, 1)                          \
-  V(SHL, 1)                              \
-  V(SAR, 1)                              \
-  V(SHR, 1)                              \
-  V(DELETE, 2)                           \
-  V(IN, 1)                               \
-  V(INSTANCE_OF, 1)                      \
-  V(FILTER_KEY, 1)                       \
-  V(CALL_NON_FUNCTION, 0)                \
-  V(CALL_NON_FUNCTION_AS_CONSTRUCTOR, 0) \
+#define BUILTINS_LIST_JS(V)                \
+  V(EQUALS, 1)                             \
+  V(STRICT_EQUALS, 1)                      \
+  V(COMPARE, 2)                            \
+  V(ADD, 1)                                \
+  V(SUB, 1)                                \
+  V(MUL, 1)                                \
+  V(DIV, 1)                                \
+  V(MOD, 1)                                \
+  V(BIT_OR, 1)                             \
+  V(BIT_AND, 1)                            \
+  V(BIT_XOR, 1)                            \
+  V(SHL, 1)                                \
+  V(SAR, 1)                                \
+  V(SHR, 1)                                \
+  V(DELETE, 2)                             \
+  V(IN, 1)                                 \
+  V(INSTANCE_OF, 1)                        \
+  V(FILTER_KEY, 1)                         \
+  V(CALL_NON_FUNCTION, 0)                  \
+  V(CALL_NON_FUNCTION_AS_CONSTRUCTOR, 0)   \
   V(CALL_FUNCTION_PROXY, 1)                \
   V(CALL_FUNCTION_PROXY_AS_CONSTRUCTOR, 1) \
-  V(TO_OBJECT, 0)                        \
-  V(TO_NUMBER, 0)                        \
-  V(TO_STRING, 0)                        \
-  V(STRING_ADD_LEFT, 1)                  \
-  V(STRING_ADD_RIGHT, 1)                 \
-  V(APPLY_PREPARE, 1)                    \
+  V(TO_OBJECT, 0)                          \
+  V(TO_NUMBER, 0)                          \
+  V(TO_STRING, 0)                          \
+  V(TO_NAME, 0)                            \
+  V(STRING_ADD_LEFT, 1)                    \
+  V(STRING_ADD_RIGHT, 1)                   \
+  V(APPLY_PREPARE, 1)                      \
+  V(REFLECT_APPLY_PREPARE, 1)              \
+  V(REFLECT_CONSTRUCT_PREPARE, 2)          \
   V(STACK_OVERFLOW, 1)
 
 class BuiltinFunctionTable;
@@ -274,10 +277,13 @@ class Builtins {
     return names_[index];
   }
   static int GetArgumentsCount(JavaScript id) { return javascript_argc_[id]; }
-  Handle<Code> GetCode(JavaScript id, bool* resolved);
   static int NumberOfJavaScriptBuiltins() { return id_count; }
 
   bool is_initialized() const { return initialized_; }
+
+  MUST_USE_RESULT static MaybeHandle<Object> InvokeApiFunction(
+      Handle<JSFunction> function, Handle<Object> receiver, int argc,
+      Handle<Object> args[]);
 
  private:
   Builtins();
@@ -301,6 +307,7 @@ class Builtins {
   static void Generate_CompileOptimized(MacroAssembler* masm);
   static void Generate_CompileOptimizedConcurrent(MacroAssembler* masm);
   static void Generate_JSConstructStubGeneric(MacroAssembler* masm);
+  static void Generate_JSConstructStubForDerived(MacroAssembler* masm);
   static void Generate_JSConstructStubApi(MacroAssembler* masm);
   static void Generate_JSEntryTrampoline(MacroAssembler* masm);
   static void Generate_JSConstructEntryTrampoline(MacroAssembler* masm);
@@ -313,6 +320,8 @@ class Builtins {
 
   static void Generate_FunctionCall(MacroAssembler* masm);
   static void Generate_FunctionApply(MacroAssembler* masm);
+  static void Generate_ReflectApply(MacroAssembler* masm);
+  static void Generate_ReflectConstruct(MacroAssembler* masm);
 
   static void Generate_InternalArrayCode(MacroAssembler* masm);
   static void Generate_ArrayCode(MacroAssembler* masm);

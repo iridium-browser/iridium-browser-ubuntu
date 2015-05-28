@@ -39,25 +39,21 @@ tv.exportTo('tv.c.trace_model', function() {
       return this.leafStackFrame.colorId;
     },
 
+    toJSON: function() {
+      return {};
+    },
+
     get stackTrace() {
-      var stack = [];
-      var cur = this.leafStackFrame;
-      while (cur) {
-        stack.push(cur);
-        cur = cur.parentFrame;
-      }
-      stack.reverse();
-      return stack;
+      return this.leafStackFrame.stackTrace;
     },
 
     getUserFriendlyStackTrace: function() {
-      return this.stackTrace.map(function(x) {
-        return x.category + ': ' + x.title;
-      });
+      return this.leafStackFrame.getUserFriendlyStackTrace();
     },
 
-    toJSON: function() {
-      return {};
+    get userFriendlyName() {
+      return 'Sample ' + ' at ' +
+          tv.c.analysis.tsString(this.start);
     }
   };
 

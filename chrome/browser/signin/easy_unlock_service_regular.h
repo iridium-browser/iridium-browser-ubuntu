@@ -7,10 +7,13 @@
 
 #include <string>
 
+#include "base/callback.h"
 #include "base/macros.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/prefs/pref_change_registrar.h"
+#include "base/time/time.h"
 #include "chrome/browser/signin/easy_unlock_service.h"
+#include "chrome/browser/signin/screenlock_bridge.h"
 
 #if defined(OS_CHROMEOS)
 #include "chrome/browser/chromeos/login/easy_unlock/short_lived_user_context.h"
@@ -29,18 +32,20 @@ namespace proximity_auth {
 class CryptAuthClient;
 }
 
+class EasyUnlockAppManager;
 class EasyUnlockToggleFlow;
 class Profile;
 
 // EasyUnlockService instance that should be used for regular, non-signin
 // profiles.
-class EasyUnlockServiceRegular : public EasyUnlockService {
+class EasyUnlockServiceRegular : public EasyUnlockService,
+                                 public ScreenlockBridge::Observer {
  public:
   explicit EasyUnlockServiceRegular(Profile* profile);
   ~EasyUnlockServiceRegular() override;
 
  private:
-  // EasyUnlockService implementation.
+  // EasyUnlockService implementation:
   EasyUnlockService::Type GetType() const override;
   std::string GetUserEmail() const override;
   void LaunchSetup() override;
@@ -57,12 +62,21 @@ class EasyUnlockServiceRegular : public EasyUnlockService {
   void RecordEasySignInOutcome(const std::string& user_id,
                                bool success) const override;
   void RecordPasswordLoginEvent(const std::string& user_id) const override;
+  void StartAutoPairing(const AutoPairingResultCallback& callback) override;
+  void SetAutoPairingResult(bool success, const std::string& error) override;
   void InitializeInternal() override;
   void ShutdownInternal() override;
-  bool IsAllowedInternal() override;
+  bool IsAllowedInternal() const override;
+  void OnWillFinalizeUnlock(bool success) override;
+  void OnSuspendDone() override;
 
-  // Opens the component packaged app responsible for setting up Smart Lock.
-  void OpenSetupApp();
+  // ScreenlockBridge::Observer implementation:
+  void OnScreenDidLock(
+      ScreenlockBridge::LockHandler::ScreenType screen_type) override;
+  void OnScreenDidUnlock(
+      ScreenlockBridge::LockHandler::ScreenType screen_type) override;
+  void OnFocusedUserChanged(const std::string& user_id) override;
+
 
   // Callback when the controlling pref changes.
   void OnPrefsChanged();
@@ -89,10 +103,27 @@ class EasyUnlockServiceRegular : public EasyUnlockService {
   scoped_ptr<chromeos::ShortLivedUserContext> short_lived_user_context_;
 #endif
 
+  // Updates local state with the preference from the user's profile, so they
+  // can be accessed on the sign-in screen.
+  void SyncProfilePrefsToLocalState();
+
   PrefChangeRegistrar registrar_;
 
   TurnOffFlowStatus turn_off_flow_status_;
   scoped_ptr<proximity_auth::CryptAuthClient> cryptauth_client_;
+
+  AutoPairingResultCallback auto_pairing_callback_;
+
+  // True if the user just unlocked the screen using Easy Unlock. Reset once
+  // the screen unlocks. Used to distinguish Easy Unlock-powered unlocks from
+  // password-based unlocks for metrics.
+  bool will_unlock_using_easy_unlock_;
+
+  // The timestamp for the most recent time when the lock screen was shown. The
+  // lock screen is typically shown when the user awakens her computer from
+  // sleep -- e.g. by opening the lid -- but can also be shown if the screen is
+  // locked but the computer does not go to sleep.
+  base::TimeTicks lock_screen_last_shown_timestamp_;
 
   base::WeakPtrFactory<EasyUnlockServiceRegular> weak_ptr_factory_;
 

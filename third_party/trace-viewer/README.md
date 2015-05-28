@@ -17,4 +17,11 @@ We welcome contributions! To hack on this code, from toplevel:
 In any browser, navigate to
   http://localhost:8003/
 
-Make sure tests pass before sending us a PR. For more details, check out the [trace viewer wiki](https://github.com/google/trace-viewer/wiki).
+Make sure tests pass before sending us changelist. **We use rietveld for codereview**. For more details, esp on rietveld, [read our contributing guide](https://github.com/google/trace-viewer/wiki/Contributing) or check out the [trace viewer wiki](https://github.com/google/trace-viewer/wiki).
+
+Contact Us
+===========================================================================
+Join our Google Groups:
+* [trace-viewer](https://groups.google.com/forum/#!forum/trace-viewer)
+* [trace-viewer-bugs](https://groups.google.com/forum/#!forum/trace-viewer-bugs)
+* [tracing@chromium.org](https://groups.google.com/a/chromium.org/forum/#!forum/tracing) (for c++ backend code)

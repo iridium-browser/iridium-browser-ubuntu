@@ -16,19 +16,17 @@ namespace protocol {
 
 HostEventDispatcher::HostEventDispatcher()
     : ChannelDispatcherBase(kEventChannelName),
-      input_stub_(nullptr) {
+      input_stub_(nullptr),
+      parser_(base::Bind(&HostEventDispatcher::OnMessageReceived,
+                         base::Unretained(this)),
+              reader()) {
 }
 
 HostEventDispatcher::~HostEventDispatcher() {
 }
 
-void HostEventDispatcher::OnInitialized() {
-  reader_.Init(channel(), base::Bind(
-      &HostEventDispatcher::OnMessageReceived, base::Unretained(this)));
-}
-
-void HostEventDispatcher::OnMessageReceived(
-    scoped_ptr<EventMessage> message, const base::Closure& done_task) {
+void HostEventDispatcher::OnMessageReceived(scoped_ptr<EventMessage> message,
+                                            const base::Closure& done_task) {
   DCHECK(input_stub_);
 
   base::ScopedClosureRunner done_runner(done_task);
@@ -52,6 +50,8 @@ void HostEventDispatcher::OnMessageReceived(
     }
   } else if (message->has_mouse_event()) {
     input_stub_->InjectMouseEvent(message->mouse_event());
+  } else if (message->has_touch_event()) {
+    input_stub_->InjectTouchEvent(message->touch_event());
   } else {
     LOG(WARNING) << "Unknown event message received.";
   }

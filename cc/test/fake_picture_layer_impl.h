@@ -53,7 +53,6 @@ class FakePictureLayerImpl : public PictureLayerImpl {
   scoped_ptr<LayerImpl> CreateLayerImpl(LayerTreeImpl* tree_impl) override;
   void PushPropertiesTo(LayerImpl* layer_impl) override;
   void AppendQuads(RenderPass* render_pass,
-                   const Occlusion& occlusion_in_content_space,
                    AppendQuadsData* append_quads_data) override;
   gfx::Size CalculateTileSize(const gfx::Size& content_bounds) const override;
 
@@ -84,6 +83,10 @@ class FakePictureLayerImpl : public PictureLayerImpl {
   using PictureLayerImpl::UpdateIdealScales;
   using PictureLayerImpl::MaximumTilingContentsScale;
 
+  void AddTilingUntilNextDraw(float scale) {
+    last_append_quads_tilings_.push_back(AddTiling(scale));
+  }
+
   float raster_page_scale() const { return raster_page_scale_; }
   void set_raster_page_scale(float scale) { raster_page_scale_ = scale; }
 
@@ -113,6 +116,8 @@ class FakePictureLayerImpl : public PictureLayerImpl {
 
   void set_fixed_tile_size(const gfx::Size& size) { fixed_tile_size_ = size; }
 
+  void SetIsDrawnRenderSurfaceLayerListMember(bool is);
+
   void CreateAllTiles();
   void SetAllTilesVisible();
   void SetAllTilesReady();
@@ -120,6 +125,14 @@ class FakePictureLayerImpl : public PictureLayerImpl {
   void SetTileReady(Tile* tile);
   void ResetAllTilesPriorities();
   PictureLayerTilingSet* GetTilings() { return tilings_.get(); }
+
+  // Add the given tiling as a "used" tiling during AppendQuads. This ensures
+  // that future calls to UpdateTiles don't delete the tiling.
+  void MarkAllTilingsUsed() {
+    last_append_quads_tilings_.clear();
+    for (size_t i = 0; i < tilings_->num_tilings(); ++i)
+      last_append_quads_tilings_.push_back(tilings_->tiling_at(i));
+  }
 
   size_t release_resources_count() const { return release_resources_count_; }
   void reset_release_resources_count() { release_resources_count_ = 0; }
@@ -141,6 +154,11 @@ class FakePictureLayerImpl : public PictureLayerImpl {
                        bool is_mask,
                        const gfx::Size& layer_bounds);
   FakePictureLayerImpl(LayerTreeImpl* tree_impl, int id, bool is_mask);
+  FakePictureLayerImpl(
+      LayerTreeImpl* tree_impl,
+      int id,
+      bool is_mask,
+      scoped_refptr<LayerImpl::SyncedScrollOffset> synced_scroll_offset);
 
  private:
   gfx::Size fixed_tile_size_;

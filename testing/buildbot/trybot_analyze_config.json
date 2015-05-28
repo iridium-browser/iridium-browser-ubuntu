@@ -1,4 +1,9 @@
 {
+  "android_webview": {
+    "exclusions": [
+      "android_webview/.*"
+    ]
+  },
   "base": {
     "exclusions": [
       ".*isolate",
@@ -11,13 +16,9 @@
       "build/linux/sysroot_ld_path.sh",
       "DEPS",
       "testing/buildbot/.*",
+      "testing/test_env.py",
       "tools/clang/blink_gc_plugin/CMakeLists.txt",
       "tools/whitespace.txt"
-    ]
-  },
-  "android_webview": {
-    "exclusions": [
-      "android_webview/.*"
     ]
   },
   "chromium": {
@@ -34,12 +35,16 @@
       "third_party/accessibility-audit/axs_testing.js",
       "third_party/hunspell_dictionaries/.*",
       "third_party/zlib/google/test/data/.*",
-      "tools/clang/scripts/plugin_flags.sh",
       "tools/clang/scripts/update.py",
       "tools/clang/scripts/update.sh",
       "tools/metrics/histograms/histograms.xml",
       "tools/perf/.*",
       "tools/telemetry/.*"
+    ]
+  },
+  "ios": {
+    "exclusions": [
+      "ios/build/bots/.*"
     ]
   }
 }

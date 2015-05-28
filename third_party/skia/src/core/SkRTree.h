@@ -41,9 +41,9 @@ public:
     explicit SkRTree(SkScalar aspectRatio = 1);
     virtual ~SkRTree() {}
 
-    virtual void insert(SkAutoTMalloc<SkRect>* boundsArray, int N) SK_OVERRIDE;
-    virtual void search(const SkRect& query, SkTDArray<unsigned>* results) const SK_OVERRIDE;
-    virtual size_t bytesUsed() const SK_OVERRIDE;
+    void insert(const SkRect[], int N) override;
+    void search(const SkRect& query, SkTDArray<unsigned>* results) const override;
+    size_t bytesUsed() const override;
 
     // Methods and constants below here are only public for tests.
 
@@ -51,6 +51,9 @@ public:
     int getDepth() const { return fCount ? fRoot.fSubtree->fLevel + 1 : 0; }
     // Insertion count (not overall node count, which may be greater).
     int getCount() const { return fCount; }
+
+    // Get the root bound.
+    SkRect getRootBound() const override;
 
     // These values were empirically determined to produce reasonable performance in most cases.
     static const int kMinChildren = 6,

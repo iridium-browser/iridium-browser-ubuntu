@@ -58,7 +58,6 @@
 
 #include <stdint.h>
 #include <stdlib.h>
-#include <string.h>
 #include <sys/types.h>
 
 #include <openssl/opensslfeatures.h>
@@ -80,9 +79,15 @@ extern "C" {
 #elif defined(__arm) || defined(__arm__) || defined(_M_ARM)
 #define OPENSSL_32_BIT
 #define OPENSSL_ARM
-#elif defined(__mips__)
+#elif defined(__aarch64__)
+#define OPENSSL_64_BIT
+#define OPENSSL_AARCH64
+#elif defined(__mips__) && !defined(__LP64__)
 #define OPENSSL_32_BIT
 #define OPENSSL_MIPS
+#elif defined(__mips__) && defined(__LP64__)
+#define OPENSSL_64_BIT
+#define OPENSSL_MIPS64
 #elif defined(__pnacl__)
 #define OPENSSL_32_BIT
 #define OPENSSL_PNACL
@@ -193,6 +198,7 @@ typedef struct md5_state_st MD5_CTX;
 typedef struct pkcs8_priv_key_info_st PKCS8_PRIV_KEY_INFO;
 typedef struct pkcs12_st PKCS12;
 typedef struct rand_meth_st RAND_METHOD;
+typedef struct rc4_key_st RC4_KEY;
 typedef struct rsa_meth_st RSA_METHOD;
 typedef struct rsa_st RSA;
 typedef struct sha256_state_st SHA256_CTX;

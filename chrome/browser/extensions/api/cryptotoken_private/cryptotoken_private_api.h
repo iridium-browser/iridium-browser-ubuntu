@@ -15,27 +15,21 @@
 
 // Implementations for chrome.cryptotokenPrivate API functions.
 
-namespace infobars {
-class InfoBar;
-}
-
 namespace extensions {
 namespace api {
 
-class CryptotokenPrivateRequestPermissionFunction
+class CryptotokenPrivateCanOriginAssertAppIdFunction
     : public UIThreadExtensionFunction {
- public:
-  CryptotokenPrivateRequestPermissionFunction();
-  DECLARE_EXTENSION_FUNCTION("cryptotokenPrivate.requestPermission",
-                             CRYPTOTOKENPRIVATE_REQUESTPERMISSION)
- protected:
-  ~CryptotokenPrivateRequestPermissionFunction() override {}
-  ResponseAction Run() override;
+  public:
+    CryptotokenPrivateCanOriginAssertAppIdFunction();
+    DECLARE_EXTENSION_FUNCTION("cryptotokenPrivate.canOriginAssertAppId",
+                               CRYPTOTOKENPRIVATE_CANORIGINASSERTAPPID)
+  protected:
+    ~CryptotokenPrivateCanOriginAssertAppIdFunction() override {}
+    ResponseAction Run() override;
 
- private:
-  ChromeExtensionFunctionDetails chrome_details_;
-
-  void OnInfobarResponse(cryptotoken_private::PermissionResult result);
+  private:
+    ChromeExtensionFunctionDetails chrome_details_;
 };
 
 }  // namespace api

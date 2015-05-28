@@ -76,7 +76,7 @@ bool RenderWidgetHostViewGuest::OnMessageReceivedFromEmbedder(
   return handled;
 }
 
-void RenderWidgetHostViewGuest::WasShown() {
+void RenderWidgetHostViewGuest::Show() {
   // If the WebContents associated with us showed an interstitial page in the
   // beginning, the teardown path might call WasShown() while |host_| is in
   // the process of destruction. Avoid calling WasShown below in this case.
@@ -95,7 +95,7 @@ void RenderWidgetHostViewGuest::WasShown() {
   host_->WasShown(ui::LatencyInfo());
 }
 
-void RenderWidgetHostViewGuest::WasHidden() {
+void RenderWidgetHostViewGuest::Hide() {
   // |guest_| is NULL during test.
   if ((guest_ && guest_->is_in_destruction()) || host_->is_hidden())
     return;
@@ -116,7 +116,7 @@ void RenderWidgetHostViewGuest::Focus() {
   // InterstitialPages are not WebContents, and so BrowserPluginGuest does not
   // have direct access to the interstitial page's RenderWidgetHost.
   if (guest_)
-    guest_->SetFocus(host_, true);
+    guest_->SetFocus(host_, true, blink::WebFocusTypeNone);
 }
 
 bool RenderWidgetHostViewGuest::HasFocus() const {
@@ -167,7 +167,11 @@ gfx::Rect RenderWidgetHostViewGuest::GetViewBounds() const {
 void RenderWidgetHostViewGuest::RenderProcessGone(
     base::TerminationStatus status,
     int error_code) {
-  platform_view_->RenderProcessGone(status, error_code);
+  // The |platform_view_| gets destroyed before we get here if this view
+  // is for an InterstitialPage.
+  if (platform_view_)
+    platform_view_->RenderProcessGone(status, error_code);
+
   // Destroy the guest view instance only, so we don't end up calling
   // platform_view_->Destroy().
   DestroyGuestView();
@@ -209,6 +213,12 @@ void RenderWidgetHostViewGuest::OnSwapCompositorFrame(
 }
 
 bool RenderWidgetHostViewGuest::OnMessageReceived(const IPC::Message& msg) {
+  if (!platform_view_) {
+    // In theory, we can get here if there's a delay between DestroyGuestView()
+    // being called and when our destructor is invoked.
+    return false;
+  }
+
   return platform_view_->OnMessageReceived(msg);
 }
 
@@ -218,7 +228,7 @@ void RenderWidgetHostViewGuest::InitAsChild(
 }
 
 void RenderWidgetHostViewGuest::InitAsPopup(
-    RenderWidgetHostView* parent_host_view, const gfx::Rect& pos) {
+    RenderWidgetHostView* parent_host_view, const gfx::Rect& bounds) {
   // This should never get called.
   NOTREACHED();
 }

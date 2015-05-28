@@ -28,13 +28,13 @@
 #include "ipc/ipc_switches.h"
 #include "ipc/ipc_sync_channel.h"
 #include "ipc/ipc_sync_message_filter.h"
-#include "mojo/edk/embedder/embedder.h"
-#include "mojo/edk/embedder/platform_support.h"
 #include "mojo/nacl/mojo_syscall.h"
 #include "native_client/src/public/chrome_main.h"
 #include "native_client/src/public/nacl_app.h"
 #include "native_client/src/public/nacl_desc.h"
-#include "native_client/src/public/nacl_file_info.h"
+#include "third_party/mojo/src/mojo/edk/embedder/embedder.h"
+#include "third_party/mojo/src/mojo/edk/embedder/platform_support.h"
+#include "third_party/mojo/src/mojo/edk/embedder/simple_platform_support.h"
 
 #if defined(OS_POSIX)
 #include "base/file_descriptor_posix.h"
@@ -433,7 +433,8 @@ void NaClListener::OnStart(const nacl::NaClStartParams& params) {
 #if !defined(OS_MACOSX)
     // Don't call mojo::embedder::Init on Mac; it's already been called from
     // ChromeMain() (see chrome/app/chrome_exe_main_mac.cc).
-    mojo::embedder::Init(scoped_ptr<mojo::embedder::PlatformSupport>());
+    mojo::embedder::Init(make_scoped_ptr(
+        new mojo::embedder::SimplePlatformSupport()));
 #endif
     // InjectMojo adds a file descriptor to the process that allows Mojo calls
     // to use an implementation defined outside the NaCl sandbox. See
@@ -447,6 +448,8 @@ void NaClListener::OnStart(const nacl::NaClStartParams& params) {
 #else
   InjectDisabledMojo(nap);
 #endif
+  // TODO(yusukes): Support pre-opening resource files.
+  CHECK(params.prefetched_resource_files.empty());
 
   int exit_status;
   if (!NaClChromeMainStart(nap, args, &exit_status))

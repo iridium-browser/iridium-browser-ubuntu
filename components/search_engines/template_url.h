@@ -253,9 +253,22 @@ class TemplateURLRef {
   const std::string& GetHost(const SearchTermsData& search_terms_data) const;
   const std::string& GetPath(const SearchTermsData& search_terms_data) const;
 
-  // If this TemplateURLRef is valid and contains one search term, this returns
-  // the key of the search term, otherwise this returns an empty string.
+  // If this TemplateURLRef is valid and contains one search term
+  // in its query or ref, this returns the key of the search term,
+  // otherwise this returns an empty string.
   const std::string& GetSearchTermKey(
+      const SearchTermsData& search_terms_data) const;
+
+  // If this TemplateURLRef is valid and contains one search term
+  // in its path, this returns the length of the subpath before the search term,
+  // otherwise this returns std::string::npos.
+  size_t GetSearchTermPositionInPath(
+      const SearchTermsData& search_terms_data) const;
+
+  // If this TemplateURLRef is valid and contains one search term,
+  // this returns the location of the search term,
+  // otherwise this returns url::Parsed::QUERY.
+  url::Parsed::ComponentType GetSearchTermKeyLocation(
       const SearchTermsData& search_terms_data) const;
 
   // Converts the specified term in our owner's encoding to a base::string16.
@@ -285,6 +298,7 @@ class TemplateURLRef {
 
  private:
   friend class TemplateURL;
+  friend class TemplateURLTest;
   FRIEND_TEST_ALL_PREFIXES(TemplateURLTest, SetPrepopulatedAndParse);
   FRIEND_TEST_ALL_PREFIXES(TemplateURLTest, ParseParameterKnown);
   FRIEND_TEST_ALL_PREFIXES(TemplateURLTest, ParseParameterUnknown);
@@ -344,10 +358,15 @@ class TemplateURLRef {
     bool is_post_param;
   };
 
+  // Stores a single parameter for a POST.
+  struct PostParam {
+    std::string name;
+    std::string value;
+    std::string content_type;
+  };
+
   // The list of elements to replace.
   typedef std::vector<struct Replacement> Replacements;
-  // Type to store <key, value> pairs for POST URLs.
-  typedef std::pair<std::string, std::string> PostParam;
   typedef std::vector<PostParam> PostParams;
 
   // TemplateURLRef internally caches values to make replacement quick. This
@@ -445,6 +464,7 @@ class TemplateURLRef {
   mutable std::string host_;
   mutable std::string path_;
   mutable std::string search_term_key_;
+  mutable size_t search_term_position_in_path_;
   mutable url::Parsed::ComponentType search_term_key_location_;
 
   mutable PostParams post_params_;

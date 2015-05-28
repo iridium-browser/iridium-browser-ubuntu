@@ -9,6 +9,8 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 
+#include <string>
+
 #if !defined(USE_UDEV)
 #error "USE_UDEV not defined"
 #endif
@@ -42,6 +44,10 @@ const char* udev_device_get_sysattr_value(udev_device* udev_device,
 const char* udev_device_get_sysname(udev_device* udev_device);
 const char* udev_device_get_syspath(udev_device* udev_device);
 udev_device* udev_device_new_from_devnum(udev* udev, char type, dev_t devnum);
+udev_device* udev_device_new_from_subsystem_sysname(
+    udev* udev,
+    const char* subsystem,
+    const char* sysname);
 udev_device* udev_device_new_from_syspath(udev* udev, const char* syspath);
 void udev_device_unref(udev_device* udev_device);
 int udev_enumerate_add_match_subsystem(udev_enumerate* udev_enumerate,
@@ -67,6 +73,19 @@ void udev_set_log_fn(
                    const char* fn, const char* format, va_list args));
 void udev_set_log_priority(struct udev* udev, int priority);
 void udev_unref(udev* udev);
+
+// Calls udev_device_get_property_value() and replaces missing values with
+// the empty string.
+std::string UdevDeviceGetPropertyValue(udev_device* udev_device,
+                                       const char* key);
+
+// Calls udev_device_get_sysattr_value() and replaces missing values with
+// the empty string.
+std::string UdevDeviceGetSysattrValue(udev_device* udev_device,
+                                      const char* key);
+
+// Decodes udev-encoded string. Useful for decoding "*_ENC" udev properties.
+std::string UdevDecodeString(const std::string& encoded);
 
 }  // namespace device
 

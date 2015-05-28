@@ -4,6 +4,9 @@
 
 #include "chrome/browser/chromeos/extensions/wallpaper_api.h"
 
+#include <string>
+#include <vector>
+
 #include "ash/desktop_background/desktop_background_controller.h"
 #include "base/files/file_util.h"
 #include "base/lazy_instance.h"
@@ -11,6 +14,7 @@
 #include "base/strings/stringprintf.h"
 #include "base/threading/worker_pool.h"
 #include "chrome/browser/browser_process.h"
+#include "chrome/browser/chromeos/extensions/wallpaper_private_api.h"
 #include "chrome/browser/chromeos/login/users/wallpaper/wallpaper_manager.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_paths.h"
@@ -19,6 +23,7 @@
 #include "components/user_manager/user.h"
 #include "components/user_manager/user_manager.h"
 #include "components/wallpaper/wallpaper_layout.h"
+#include "extensions/browser/event_router.h"
 #include "net/base/load_flags.h"
 #include "net/http/http_status_code.h"
 #include "net/url_request/url_fetcher.h"
@@ -38,7 +43,7 @@ class WallpaperFetcher : public net::URLFetcherDelegate {
  public:
   WallpaperFetcher() {}
 
-  virtual ~WallpaperFetcher() {}
+  ~WallpaperFetcher() override {}
 
   void FetchWallpaper(const GURL& url, FetchCallback callback) {
     CancelPreviousFetch();
@@ -54,7 +59,7 @@ class WallpaperFetcher : public net::URLFetcherDelegate {
 
  private:
   // URLFetcherDelegate overrides:
-  virtual void OnURLFetchComplete(const net::URLFetcher* source) override {
+  void OnURLFetchComplete(const net::URLFetcher* source) override {
     DCHECK(url_fetcher_.get() == source);
 
     bool success = source->GetStatus().is_success() &&
@@ -70,11 +75,13 @@ class WallpaperFetcher : public net::URLFetcherDelegate {
     }
     url_fetcher_.reset();
     callback_.Run(success, response);
+    callback_.Reset();
   }
 
   void CancelPreviousFetch() {
     if (url_fetcher_.get()) {
       callback_.Run(false, wallpaper_api_util::kCancelWallpaperMessage);
+      callback_.Reset();
       url_fetcher_.reset();
     }
   }
@@ -172,6 +179,18 @@ void WallpaperSetWallpaperFunction::OnWallpaperDecoded(
     }
     SendResponse(true);
   }
+
+  // Inform the native Wallpaper Picker Application that the current wallpaper
+  // has been modified by a third party application.
+  Profile* profile = Profile::FromBrowserContext(browser_context());
+  extensions::EventRouter* event_router = extensions::EventRouter::Get(profile);
+  scoped_ptr<base::ListValue> event_args(new base::ListValue());
+  scoped_ptr<extensions::Event> event(
+      new extensions::Event(extensions::api::wallpaper_private::
+                                OnWallpaperChangedBy3rdParty::kEventName,
+                            event_args.Pass()));
+  event_router->DispatchEventToExtension(extension_misc::kWallpaperManagerId,
+                                         event.Pass());
 }
 
 void WallpaperSetWallpaperFunction::GenerateThumbnail(
@@ -205,7 +224,8 @@ void WallpaperSetWallpaperFunction::OnWallpaperFetched(
     bool success,
     const std::string& response) {
   if (success) {
-    params_->details.data.reset(new std::string(response));
+    params_->details.data.reset(
+        new std::vector<char>(response.begin(), response.end()));
     StartDecode(*params_->details.data);
   } else {
     SetError(response);

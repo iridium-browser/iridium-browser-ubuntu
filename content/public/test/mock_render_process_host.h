@@ -40,7 +40,7 @@ class MockRenderProcessHost : public RenderProcessHost {
   void RemoveRoute(int32 routing_id) override;
   void AddObserver(RenderProcessHostObserver* observer) override;
   void RemoveObserver(RenderProcessHostObserver* observer) override;
-  void ReceivedBadMessage() override;
+  void ShutdownForBadMessage() override;
   void WidgetRestored() override;
   void WidgetHidden() override;
   int VisibleWidgetCount() const override;
@@ -88,6 +88,10 @@ class MockRenderProcessHost : public RenderProcessHost {
   void OnRemoveSubscription(unsigned int target) override;
   void SendUpdateValueState(
       unsigned int target, const gpu::ValueState& state) override;
+#if defined(ENABLE_BROWSER_CDMS)
+  media::BrowserCdm* GetBrowserCdm(int render_frame_id,
+                                   int cdm_id) const override;
+#endif
 
   // IPC::Sender via RenderProcessHost.
   bool Send(IPC::Message* msg) override;
@@ -102,8 +106,6 @@ class MockRenderProcessHost : public RenderProcessHost {
     factory_ = factory;
   }
 
-  int GetActiveViewCount();
-
   void set_is_isolated_guest(bool is_isolated_guest) {
     is_isolated_guest_ = is_isolated_guest;
   }
@@ -111,6 +113,9 @@ class MockRenderProcessHost : public RenderProcessHost {
   void SetProcessHandle(scoped_ptr<base::ProcessHandle> new_handle) {
     process_handle = new_handle.Pass();
   }
+
+  void GetAudioOutputControllers(
+      const GetAudioOutputControllersCallback& callback) const override {}
 
  private:
   // Stores IPC messages that would have been sent to the renderer.

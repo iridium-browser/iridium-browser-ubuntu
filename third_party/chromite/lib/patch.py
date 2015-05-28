@@ -4,11 +4,11 @@
 
 """Module that handles the processing of patches to the source tree."""
 
-# pylint: disable=bad-continuation
-
 from __future__ import print_function
 
 import calendar
+import collections
+import logging
 import os
 import random
 import re
@@ -103,6 +103,10 @@ def ParseChangeID(text, error_ok=True):
   return text if valid else None
 
 
+FullChangeId = collections.namedtuple(
+    'FullChangeId', ('project', 'branch', 'change_id'))
+
+
 def ParseFullChangeID(text, error_ok=True):
   """Checks if |text| conforms to the full change-ID format and parses it.
 
@@ -135,7 +139,7 @@ def ParseFullChangeID(text, error_ok=True):
 
     return None
 
-  return project, branch, change_id
+  return FullChangeId(project, branch, change_id)
 
 
 class PatchException(Exception):
@@ -148,7 +152,7 @@ class PatchException(Exception):
     is_mock = mock is not None and isinstance(patch, mock.MagicMock)
     if not isinstance(patch, GitRepoPatch) and not is_mock:
       raise TypeError(
-          "Patch must be a GitRepoPatch derivative; got type %s: %r"
+          'Patch must be a GitRepoPatch derivative; got type %s: %r'
           % (type(patch), patch))
     Exception.__init__(self)
     self.patch = patch
@@ -243,7 +247,7 @@ class DependencyError(PatchException):
     PatchException.__init__(self, patch)
     self.inflight = error.inflight
     self.error = error
-    self.args = (patch, error,)
+    self.args = (patch, error)
 
   def ShortExplanation(self):
     link = self.error.patch.PatchLink()
@@ -294,6 +298,18 @@ class ChangeNotInManifest(PatchException):
     return 'could not be found in the repo manifest.'
 
 
+class PatchNotMergeable(PatchException):
+  """Raised if a patch is not mergeable."""
+
+  def __init__(self, patch, reason):
+    PatchException.__init__(self, patch)
+    self.reason = str(reason)
+    self.args = (patch, reason)
+
+  def ShortExplanation(self):
+    return self.reason
+
+
 def MakeChangeId(unusable=False):
   """Create a random Change-Id.
 
@@ -302,7 +318,7 @@ def MakeChangeId(unusable=False):
       will explicitly fail on.  This is primarily used for internal ids,
       as a fallback when a Change-Id could not be parsed.
   """
-  s = "%x" % (random.randint(0, 2 ** 160),)
+  s = '%x' % (random.randint(0, 2 ** 160),)
   s = s.rjust(_GERRIT_CHANGE_ID_LENGTH, '0')
   if unusable:
     return 'Fake-ID %s' % s
@@ -422,11 +438,11 @@ def ParsePatchDep(text, no_change_id=False, no_sha1=False,
   """
   original_text = text
   if not text:
-    raise ValueError("ParsePatchDep invoked with an empty value: %r"
+    raise ValueError('ParsePatchDep invoked with an empty value: %r'
                      % (text,))
   # Deal w/ CL: targets.
-  if text.upper().startswith("CL:"):
-    if not text.startswith("CL:"):
+  if text.upper().startswith('CL:'):
+    if not text.startswith('CL:'):
       raise ValueError(
           "ParsePatchDep: 'CL:' must be upper case: %r"
           % (original_text,))
@@ -441,9 +457,8 @@ def ParsePatchDep(text, no_change_id=False, no_sha1=False,
       raise ValueError(
           'ParsePatchDep: Full Change-ID is not allowed: %r.' % original_text)
 
-    project, branch, change_id = parsed
-    return PatchQuery(remote, project=project, tracking_branch=branch,
-                        change_id=change_id)
+    return PatchQuery(remote, project=parsed.project,
+                      tracking_branch=parsed.branch, change_id=parsed.change_id)
 
   parsed = ParseChangeID(text)
   if parsed:
@@ -502,6 +517,7 @@ class PatchQuery(object):
   non-full change id then it might match multiple patches. If a user
   specified an invalid change id then it might not match any patches.
   """
+
   def __init__(self, remote, project=None, tracking_branch=None, change_id=None,
                sha1=None, gerrit_number=None):
     """Initializes a PatchQuery instance.
@@ -611,7 +627,7 @@ class PatchQuery(object):
       return hash(self.id)
     else:
       return hash((self.remote, self.project, self.tracking_branch,
-                  self.gerrit_number, self.change_id, self.sha1))
+                   self.gerrit_number, self.change_id, self.sha1))
 
   def __eq__(self, other):
     """Defines when two PatchQuery objects are considered equal."""
@@ -636,7 +652,7 @@ class GitRepoPatch(PatchQuery):
   # ensuring CQ's internals can do the translation (almost can now,
   # but will fail in the case of a CQ-DEPEND on a change w/in the
   # same pool).
-  pattern = (r'^'+ re.escape(_GERRIT_CHANGE_ID_PREFIX) + r'[0-9a-fA-F]{' +
+  pattern = (r'^' + re.escape(_GERRIT_CHANGE_ID_PREFIX) + r'[0-9a-fA-F]{' +
              re.escape(str(_GERRIT_CHANGE_ID_LENGTH)) + r'}$')
   _STRICT_VALID_CHANGE_ID_RE = re.compile(pattern)
   _GIT_CHANGE_ID_RE = re.compile(r'^Change-Id:[\t ]*(\w+)\s*$',
@@ -713,7 +729,8 @@ class GitRepoPatch(PatchQuery):
       sha1, subject, msg = _PullData(self.sha1)
 
     if sha1 is None:
-      git.RunGit(git_repo, ['fetch', '-f', self.project_url, self.ref])
+      git.RunGit(git_repo, ['fetch', '-f', self.project_url, self.ref],
+                 print_cmd=True)
       sha1, subject, msg = _PullData(self.sha1 or 'FETCH_HEAD')
 
     sha1 = ParseSHA1(sha1, error_ok=False)
@@ -792,18 +809,18 @@ class GitRepoPatch(PatchQuery):
       ret = error.result.returncode
       if ret not in (1, 2):
         cros_build_lib.Error(
-            "Unknown cherry-pick exit code %s; %s",
+            'Unknown cherry-pick exit code %s; %s',
             ret, error)
         raise ApplyPatchException(
             self, inflight=inflight,
-            message=("Unknown exit code %s returned from cherry-pick "
-                     "command: %s" % (ret, error)))
+            message=('Unknown exit code %s returned from cherry-pick '
+                     'command: %s' % (ret, error)))
       elif ret == 1:
         # This means merge resolution was fine, but there was content conflicts.
         # If there are no conflicts, then this is caused by the change already
         # being merged.
         result = git.RunGit(git_repo,
-            ['diff', '--name-only', '--diff-filter=U'])
+                            ['diff', '--name-only', '--diff-filter=U'])
 
         # Output is one line per filename.
         conflicts = result.output.splitlines()
@@ -1147,7 +1164,8 @@ class LocalPatch(GitRepoPatch):
 
     format_string = '%n'.join([code for _, code in fields] + ['%B'])
     result = git.RunGit(self.project_url,
-        ['log', '--format=%s' % format_string, '-n1', self.sha1])
+                        ['log', '--format=%s' % format_string, '-n1',
+                         self.sha1])
     lines = result.output.splitlines()
     field_value = dict(zip([name for name, _ in fields],
                            [line.strip() for line in lines]))
@@ -1166,7 +1184,7 @@ class LocalPatch(GitRepoPatch):
     # to all occur within the same second (thus the same commit date),
     # resulting in the same sha1.
     extra_env['GIT_COMMITTER_DATE'] = str(
-        int(extra_env["GIT_COMMITER_DATE"]) - 1)
+        int(extra_env['GIT_COMMITER_DATE']) - 1)
 
     result = git.RunGit(
         self.project_url,
@@ -1254,6 +1272,8 @@ class UploadedLocalPatch(GitRepoPatch):
     self.original_branch = original_branch
     self.original_sha1 = ParseSHA1(original_sha1)
     self._original_sha1_valid = False if self.original_sha1 is None else True
+    if self._original_sha1_valid and not self.id:
+      self.id = AddPrefix(self, self.original_sha1)
 
   def LookupAliases(self):
     """Return the list of lookup keys this change is known by."""
@@ -1377,8 +1397,10 @@ class GerritPatch(GerritFetchOnlyPatch):
     self._approvals = []
     if 'currentPatchSet' in self.patch_dict:
       self._approvals = self.patch_dict['currentPatchSet'].get('approvals', [])
-    self.approval_timestamp = \
-        max(x['grantedOn'] for x in self._approvals) if self._approvals else 0
+    self.commit_timestamp = current_patch_set.get('date', 0)
+    self.approval_timestamp = max(
+        self.commit_timestamp,
+        max(x['grantedOn'] for x in self._approvals) if self._approvals else 0)
     self.commit_message = patch_dict.get('commitMessage')
 
   @staticmethod
@@ -1393,62 +1415,67 @@ class GerritPatch(GerritFetchOnlyPatch):
       http://gerrit-documentation.googlecode.com/svn/Documentation/2.6/json.html
 
     New interface:
-      # pylint: disable=C0301
       https://gerrit-review.googlesource.com/Documentation/rest-api-changes.html#json-entities
     """
-    _convert_tm = lambda tm: calendar.timegm(
-        time.strptime(tm.partition('.')[0], '%Y-%m-%d %H:%M:%S'))
-    _convert_user = lambda u: {
-        'name': u.get('name', '??unknown??'),
-        'email': u.get('email'),
-        'username': u.get('name', '??unknown??'),
-    }
-    change_id = change['change_id'].split('~')[-1]
-    patch_dict = {
-       'project': change['project'],
-       'branch': change['branch'],
-       'createdOn': _convert_tm(change['created']),
-       'lastUpdated': _convert_tm(change['updated']),
-       'id': change_id,
-       'owner': _convert_user(change['owner']),
-       'number': str(change['_number']),
-       'url': gob_util.GetChangePageUrl(host, change['_number']),
-       'status': change['status'],
-       'subject': change.get('subject'),
-    }
-    current_revision = change.get('current_revision', '')
-    current_revision_info = change.get('revisions', {}).get(current_revision)
-    if current_revision_info:
-      approvals = []
-      for label, label_data in change['labels'].iteritems():
-        # Skip unknown labels.
-        if label not in constants.GERRIT_ON_BORG_LABELS:
-          continue
-        for review_data in label_data.get('all', []):
-          granted_on = review_data.get('date', change['created'])
-          approvals.append({
-              'type': constants.GERRIT_ON_BORG_LABELS[label],
-              'description': label,
-              'value': str(review_data.get('value', '0')),
-              'grantedOn': _convert_tm(granted_on),
-              'by': _convert_user(review_data),
-          })
-
-      patch_dict['currentPatchSet'] = {
-          'approvals': approvals,
-          'ref': current_revision_info['fetch']['http']['ref'],
-          'revision': current_revision,
-          'number': str(current_revision_info['_number']),
-          'draft': current_revision_info.get('draft', False),
+    try:
+      _convert_tm = lambda tm: calendar.timegm(
+          time.strptime(tm.partition('.')[0], '%Y-%m-%d %H:%M:%S'))
+      _convert_user = lambda u: {
+          'name': u.get('name', '??unknown??'),
+          'email': u.get('email'),
+          'username': u.get('name', '??unknown??'),
       }
+      change_id = change['change_id'].split('~')[-1]
+      patch_dict = {
+          'project': change['project'],
+          'branch': change['branch'],
+          'createdOn': _convert_tm(change['created']),
+          'lastUpdated': _convert_tm(change['updated']),
+          'id': change_id,
+          'owner': _convert_user(change['owner']),
+          'number': str(change['_number']),
+          'url': gob_util.GetChangePageUrl(host, change['_number']),
+          'status': change['status'],
+          'subject': change.get('subject'),
+      }
+      current_revision = change.get('current_revision', '')
+      current_revision_info = change.get('revisions', {}).get(current_revision)
+      if current_revision_info:
+        approvals = []
+        for label, label_data in change['labels'].iteritems():
+          # Skip unknown labels.
+          if label not in constants.GERRIT_ON_BORG_LABELS:
+            continue
+          for review_data in label_data.get('all', []):
+            granted_on = review_data.get('date', change['created'])
+            approvals.append({
+                'type': constants.GERRIT_ON_BORG_LABELS[label],
+                'description': label,
+                'value': str(review_data.get('value', '0')),
+                'grantedOn': _convert_tm(granted_on),
+                'by': _convert_user(review_data),
+            })
 
-      current_commit = current_revision_info.get('commit')
-      if current_commit:
-        patch_dict['commitMessage'] = current_commit['message']
-        parents = current_commit.get('parents', [])
-        patch_dict['dependsOn'] = [{'revision': p['commit']} for p in parents]
+        date = current_revision_info['commit']['committer']['date']
+        patch_dict['currentPatchSet'] = {
+            'approvals': approvals,
+            'ref': current_revision_info['fetch']['http']['ref'],
+            'revision': current_revision,
+            'number': str(current_revision_info['_number']),
+            'date': _convert_tm(date),
+            'draft': current_revision_info.get('draft', False),
+        }
 
-    return patch_dict
+        current_commit = current_revision_info.get('commit')
+        if current_commit:
+          patch_dict['commitMessage'] = current_commit['message']
+          parents = current_commit.get('parents', [])
+          patch_dict['dependsOn'] = [{'revision': p['commit']} for p in parents]
+
+      return patch_dict
+    except:
+      logging.error('Error while converting:\n%s', change, exc_info=True)
+      raise
 
   def __reduce__(self):
     """Used for pickling to re-create patch object."""
@@ -1478,9 +1505,9 @@ class GerritPatch(GerritFetchOnlyPatch):
 
       results.append(
           PatchQuery(self.remote, project=self.project,
-                       tracking_branch=self.tracking_branch,
-                       gerrit_number=gerrit_number,
-                       change_id=change_id, sha1=sha1))
+                     tracking_branch=self.tracking_branch,
+                     gerrit_number=gerrit_number,
+                     change_id=change_id, sha1=sha1))
     return results
 
   def IsAlreadyMerged(self):
@@ -1534,13 +1561,39 @@ class GerritPatch(GerritFetchOnlyPatch):
 
   def IsMergeable(self):
     """Return true if all Gerrit approvals required for submission are set."""
-    return (self.status == 'NEW' and not self.WasVetoed() and
-            not self.IsDraft() and
-            self.HasApprovals({'CRVW': '2', 'VRIF': '1', 'COMR': ('1', '2')}))
+    return not self.GetMergeException()
 
   def HasReadyFlag(self):
     """Return true if the trybot-ready or commit-ready flag is set."""
     return self.HasApproval('COMR', ('1', '2')) or self.HasApproval('TRY', '1')
+
+  def GetMergeException(self):
+    """Return the reason why this change is not mergeable.
+
+    If the change is in fact mergeable, return None.
+    """
+    if self.IsDraft():
+      return PatchNotMergeable(self, 'is a draft.')
+
+    if self.status != 'NEW':
+      statuses = {
+          'MERGED': 'is already merged.',
+          'SUBMITTED': 'is being merged.',
+          'ABANDONED': 'is abandoned.',
+      }
+      message = statuses.get(self.status, 'has status %s.' % self.status)
+      return PatchNotMergeable(self, message)
+
+    if self.HasApproval('VRIF', '-1'):
+      return PatchNotMergeable(self, 'is marked as Verified=-1.')
+    elif self.HasApproval('CRVW', '-2'):
+      return PatchNotMergeable(self, 'is marked as Code-Review=-2.')
+    elif not self.HasApproval('CRVW', '2'):
+      return PatchNotMergeable(self, 'is not marked Code-Review=+2.')
+    elif not self.HasApproval('VRIF', '1'):
+      return PatchNotMergeable(self, 'is not marked Verified=+1.')
+    elif not self.HasApproval('COMR', ('1', '2')):
+      return PatchNotMergeable(self, 'is not marked Commit-Queue>=+1.')
 
   def GetLatestApproval(self, field):
     """Return most recent value of specific field on the current patchset.
@@ -1649,7 +1702,7 @@ def PrepareRemotePatches(patches):
       project, original_branch, ref, tracking_branch, tag = patch.split(':')
     except ValueError as e:
       raise ValueError(
-          "Unexpected tryjob format.  You may be running an "
+          'Unexpected tryjob format.  You may be running an '
           "older version of chromite.  Run 'repo sync "
           "chromiumos/chromite'.  Error was %s" % e)
 

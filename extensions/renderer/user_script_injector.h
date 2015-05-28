@@ -13,12 +13,13 @@
 #include "extensions/renderer/script_injection.h"
 #include "extensions/renderer/user_script_set.h"
 
+class InjectionHost;
+
 namespace blink {
 class WebFrame;
 }
 
 namespace extensions {
-class Extension;
 
 // A ScriptInjector for UserScripts.
 class UserScriptInjector : public ScriptInjector,
@@ -31,7 +32,7 @@ class UserScriptInjector : public ScriptInjector,
 
  private:
   // UserScriptSet::Observer implementation.
-  void OnUserScriptsUpdated(const std::set<std::string>& changed_extensions,
+  void OnUserScriptsUpdated(const std::set<HostID>& changed_hosts,
                             const std::vector<UserScript*>& scripts) override;
 
   // ScriptInjector implementation.
@@ -43,7 +44,7 @@ class UserScriptInjector : public ScriptInjector,
   bool ShouldInjectJs(UserScript::RunLocation run_location) const override;
   bool ShouldInjectCss(UserScript::RunLocation run_location) const override;
   PermissionsData::AccessType CanExecuteOnFrame(
-      const Extension* extension,
+      const InjectionHost* injection_host,
       blink::WebFrame* web_frame,
       int tab_id,
       const GURL& top_url) const override;
@@ -51,8 +52,9 @@ class UserScriptInjector : public ScriptInjector,
       UserScript::RunLocation run_location) const override;
   std::vector<std::string> GetCssSources(
       UserScript::RunLocation run_location) const override;
+  void GetRunInfo(ScriptsRunInfo* scripts_run_info,
+                  UserScript::RunLocation run_location) const override;
   void OnInjectionComplete(scoped_ptr<base::ListValue> execution_results,
-                           ScriptsRunInfo* scripts_run_info,
                            UserScript::RunLocation run_location) override;
   void OnWillNotInject(InjectFailureReason reason) override;
 
@@ -65,8 +67,8 @@ class UserScriptInjector : public ScriptInjector,
   // deleted.
   int script_id_;
 
-  // The associated extension id, preserved for the same reason as |script_id|.
-  std::string extension_id_;
+  // The associated host id, preserved for the same reason as |script_id|.
+  HostID host_id_;
 
   // Indicates whether or not this script is declarative. This influences which
   // script permissions are checked before injection.

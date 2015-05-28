@@ -45,7 +45,7 @@ public:
     SVGAnimatedEnumeration<SVGUnitTypes::SVGUnitType>* maskUnits() { return m_maskUnits.get(); }
     SVGAnimatedEnumeration<SVGUnitTypes::SVGUnitType>* maskContentUnits() { return m_maskContentUnits.get(); }
 
-    virtual void trace(Visitor*) override;
+    DECLARE_VIRTUAL_TRACE();
 
 private:
     explicit SVGMaskElement(Document&);
@@ -54,11 +54,13 @@ private:
     virtual bool needsPendingResourceHandling() const override { return false; }
 
     bool isSupportedAttribute(const QualifiedName&);
-    virtual void parseAttribute(const QualifiedName&, const AtomicString&) override;
+    virtual bool isPresentationAttribute(const QualifiedName&) const override;
+    virtual bool isPresentationAttributeWithSVGDOM(const QualifiedName&) const override;
+    virtual void collectStyleForPresentationAttribute(const QualifiedName&, const AtomicString&, MutableStylePropertySet*) override;
     virtual void svgAttributeChanged(const QualifiedName&) override;
     virtual void childrenChanged(const ChildrenChange&) override;
 
-    virtual RenderObject* createRenderer(RenderStyle*) override;
+    virtual LayoutObject* createLayoutObject(const ComputedStyle&) override;
 
     virtual bool selfHasRelativeLengths() const override;
 
@@ -66,8 +68,8 @@ private:
     RefPtrWillBeMember<SVGAnimatedLength> m_y;
     RefPtrWillBeMember<SVGAnimatedLength> m_width;
     RefPtrWillBeMember<SVGAnimatedLength> m_height;
-    RefPtrWillBeMember<SVGAnimatedEnumeration<SVGUnitTypes::SVGUnitType> > m_maskUnits;
-    RefPtrWillBeMember<SVGAnimatedEnumeration<SVGUnitTypes::SVGUnitType> > m_maskContentUnits;
+    RefPtrWillBeMember<SVGAnimatedEnumeration<SVGUnitTypes::SVGUnitType>> m_maskUnits;
+    RefPtrWillBeMember<SVGAnimatedEnumeration<SVGUnitTypes::SVGUnitType>> m_maskContentUnits;
 };
 
 } // namespace blink

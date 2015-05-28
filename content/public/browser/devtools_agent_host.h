@@ -29,6 +29,9 @@ class CONTENT_EXPORT DevToolsAgentHost
     // Agent host associated with WebContents.
     TYPE_WEB_CONTENTS,
 
+    // Agent host associated with RenderFrameHost.
+    TYPE_FRAME,
+
     // Agent host associated with shared worker.
     TYPE_SHARED_WORKER,
 
@@ -39,7 +42,7 @@ class CONTENT_EXPORT DevToolsAgentHost
     TYPE_EXTERNAL,
   };
 
-  // Returns DevToolsAgentHost with a given |id| or NULL of it does not exist.
+  // Returns DevToolsAgentHost with a given |id| or nullptr of it doesn't exist.
   static scoped_refptr<DevToolsAgentHost> GetForId(const std::string& id);
 
   // Returns DevToolsAgentHost that can be used for inspecting |web_contents|.
@@ -78,8 +81,8 @@ class CONTENT_EXPORT DevToolsAgentHost
   // Returns true if there is a client attached.
   virtual bool IsAttached() = 0;
 
-  // Sends a message to the agent.
-  virtual void DispatchProtocolMessage(const std::string& message) = 0;
+  // Sends a message to the agent. Returns true if the message is handled.
+  virtual bool DispatchProtocolMessage(const std::string& message) = 0;
 
   // Starts inspecting element at position (|x|, |y|) in the specified page.
   virtual void InspectElement(int x, int y) = 0;

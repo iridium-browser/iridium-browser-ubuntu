@@ -72,7 +72,7 @@ cr.define('hotword', function() {
 
     /**
      * Currently active hotwording sessions.
-     * @private {!Array.<Session_>}
+     * @private {!Array<Session_>}
      */
     this.sessions_ = [];
 
@@ -216,7 +216,8 @@ cr.define('hotword', function() {
      */
     isAlwaysOnEnabled: function() {
       assert(this.hotwordStatus_, 'No hotword status (isAlwaysOnEnabled)');
-      return this.hotwordStatus_.alwaysOnEnabled;
+      return this.hotwordStatus_.alwaysOnEnabled &&
+          !this.hotwordStatus_.trainingEnabled;
     },
 
     /**
@@ -266,15 +267,11 @@ cr.define('hotword', function() {
 
         // Start the detector if there's a session and the user is unlocked, and
         // stops it otherwise.
-        if (!this.hotwordStatus_.userIsActive) {
-          // If the user is no longer the active user, we need to shut down the
-          // detector so that we're no longer using the microphone. As a result,
-          // the microphone indicator in the task bar is not shown.
-          this.shutdownDetector_();
-        } else if (this.sessions_.length && !this.isLocked_) {
+        if (this.sessions_.length && !this.isLocked_ &&
+            this.hotwordStatus_.userIsActive) {
           this.startDetector_();
         } else {
-          this.stopDetector_();
+          this.shutdownDetector_();
         }
 
         if (!chrome.idle.onStateChanged.hasListener(
@@ -304,13 +301,18 @@ cr.define('hotword', function() {
 
       if (!this.pluginManager_) {
         this.state_ = State_.STARTING;
-        this.pluginManager_ = new hotword.NaClManager(this.loggingEnabled_);
+        var isHotwordStream = this.isAlwaysOnEnabled() &&
+            this.hotwordStatus_.hotwordHardwareAvailable;
+        this.pluginManager_ = new hotword.NaClManager(this.loggingEnabled_,
+                                                      isHotwordStream);
         this.pluginManager_.addEventListener(hotword.constants.Event.READY,
                                              this.onReady_.bind(this));
         this.pluginManager_.addEventListener(hotword.constants.Event.ERROR,
                                              this.onError_.bind(this));
         this.pluginManager_.addEventListener(hotword.constants.Event.TRIGGER,
                                              this.onTrigger_.bind(this));
+        this.pluginManager_.addEventListener(hotword.constants.Event.TIMEOUT,
+                                             this.onTimeout_.bind(this));
         this.pluginManager_.addEventListener(
             hotword.constants.Event.SPEAKER_MODEL_SAVED,
             this.onSpeakerModelSaved_.bind(this));
@@ -336,6 +338,13 @@ cr.define('hotword', function() {
                     hotword.constants.UmaMetrics.MEDIA_STREAM_RESULT,
                     hotword.constants.UmaMediaStreamOpenResult.SUCCESS,
                     hotword.constants.UmaMediaStreamOpenResult.MAX);
+                // The detector could have been shut down before the stream
+                // finishes opening.
+                if (this.pluginManager_ == null) {
+                  stream.getAudioTracks()[0].stop();
+                  return;
+                }
+
                 if (this.isAlwaysOnEnabled())
                   this.keepAlive_.start();
                 if (!this.pluginManager_.initialize(naclArch, stream)) {
@@ -485,6 +494,26 @@ cr.define('hotword', function() {
             UmaTriggerSources_[session.source_],
             hotword.constants.UmaTriggerSource.MAX);
       }
+
+      // If we're in always-on mode, shut down the hotword detector. The hotword
+      // stream requires that we close and re-open it after a trigger, and the
+      // only way to accomplish this is to shut everything down.
+      if (this.isAlwaysOnEnabled())
+        this.shutdownDetector_();
+    },
+
+    /**
+     * Handle hotword timeout.
+     * @private
+     */
+    onTimeout_: function() {
+      hotword.debug('Hotword timeout!');
+
+      // We get this event when the hotword detector thinks there's a false
+      // trigger. In this case, we need to shut down and restart the detector to
+      // re-arm the DSP.
+      this.shutdownDetector_();
+      this.updateStateFromStatus_();
     },
 
     /**

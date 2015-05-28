@@ -30,14 +30,13 @@
 #include "bindings/core/v8/ScriptState.h"
 #include "bindings/core/v8/ScriptValue.h"
 #include "bindings/core/v8/ScriptWrappable.h"
-#include "core/dom/ActiveDOMObject.h"
 #include "core/dom/DOMTypedArray.h"
 #include "core/html/canvas/CanvasRenderingContext.h"
 #include "core/html/canvas/WebGLContextAttributes.h"
 #include "core/html/canvas/WebGLExtensionName.h"
 #include "core/html/canvas/WebGLVertexArrayObjectOES.h"
+#include "core/layout/LayoutBoxModelObject.h"
 #include "core/page/Page.h"
-#include "core/rendering/RenderBoxModelObject.h"
 #include "platform/Timer.h"
 #include "platform/graphics/GraphicsTypes3D.h"
 #include "platform/graphics/ImageBuffer.h"
@@ -104,8 +103,8 @@ class WebGLVertexArrayObjectOES;
 class WebGLRenderingContextLostCallback;
 class WebGLRenderingContextErrorMessageCallback;
 
-class WebGLRenderingContextBase: public CanvasRenderingContext, public ActiveDOMObject, public Page::MultisamplingChangedObserver, public ScriptWrappable {
-    WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(WebGLRenderingContextBase);
+class WebGLRenderingContextBase : public CanvasRenderingContext, public Page::MultisamplingChangedObserver, public ScriptWrappable {
+    WILL_BE_USING_GARBAGE_COLLECTED_MIXIN_NESTED(WebGLRenderingContextBase, CanvasRenderingContext);
 public:
     virtual ~WebGLRenderingContextBase();
 
@@ -114,6 +113,9 @@ public:
     virtual void registerContextExtensions() = 0;
 
     static unsigned getWebGLVersion(const CanvasRenderingContext*);
+
+    static PassOwnPtr<blink::WebGraphicsContext3D> createWebGraphicsContext3D(HTMLCanvasElement*, WebGLContextAttributes, unsigned webGLVersion);
+    static void forceNextWebGLContextCreationToFail();
 
     int drawingBufferWidth() const;
     int drawingBufferHeight() const;
@@ -196,7 +198,7 @@ public:
     ScriptValue getBufferParameter(ScriptState*, GLenum target, GLenum pname);
     void getContextAttributes(Nullable<WebGLContextAttributes>&);
     GLenum getError();
-    PassRefPtrWillBeRawPtr<WebGLExtension> getExtension(const String& name);
+    ScriptValue getExtension(ScriptState*, const String& name);
     ScriptValue getFramebufferAttachmentParameter(ScriptState*, GLenum target, GLenum attachment, GLenum pname);
     ScriptValue getParameter(ScriptState*, GLenum pname);
     ScriptValue getProgramParameter(ScriptState*, WebGLProgram*, GLenum pname);
@@ -360,10 +362,6 @@ public:
 
     unsigned maxVertexAttribs() const { return m_maxVertexAttribs; }
 
-    // ActiveDOMObject notifications
-    virtual bool hasPendingActivity() const override;
-    virtual void stop() override;
-
     // GL_CHROMIUM_subscribe_uniform
     PassRefPtrWillBeRawPtr<CHROMIUMValuebuffer> createValuebufferCHROMIUM();
     void deleteValuebufferCHROMIUM(CHROMIUMValuebuffer*);
@@ -373,7 +371,7 @@ public:
     void populateSubscribedValuesCHROMIUM(GLenum target);
     void uniformValuebufferCHROMIUM(const WebGLUniformLocation*, GLenum target, GLenum subscription);
 
-    virtual void trace(Visitor*) override;
+    DECLARE_VIRTUAL_TRACE();
 
     // Returns approximate gpu memory allocated per pixel.
     int externallyAllocatedBytesPerPixel();
@@ -384,10 +382,10 @@ public:
         RefPtrWillBeMember<WebGLTexture> m_texture2DBinding;
         RefPtrWillBeMember<WebGLTexture> m_textureCubeMapBinding;
 
-        void trace(Visitor*);
+        DECLARE_TRACE();
     };
 
-    void setFilterLevel(SkPaint::FilterLevel);
+    void setFilterQuality(SkFilterQuality);
 
 protected:
     friend class WebGLDrawBuffers;
@@ -420,6 +418,9 @@ protected:
     virtual void setIsHidden(bool) override;
     bool paintRenderingResultsToCanvas(SourceDrawingBuffer) override;
     virtual blink::WebLayer* platformLayer() const override;
+    void stop() override;
+
+    bool isWebGL2OrHigher() { return version() >= 2; }
 
     void addSharedObject(WebGLSharedObject*);
     void addContextObject(WebGLContextObject*);
@@ -622,7 +623,7 @@ protected:
         virtual const char* extensionName() const = 0;
         virtual void loseExtension() = 0;
 
-        virtual void trace(Visitor*) { }
+        DEFINE_INLINE_VIRTUAL_TRACE() { }
 
     private:
         bool m_draft;
@@ -676,7 +677,7 @@ protected:
             }
         }
 
-        virtual void trace(Visitor* visitor) override
+        DEFINE_INLINE_VIRTUAL_TRACE()
         {
             visitor->trace(m_extension);
             ExtensionTracker::trace(visitor);
@@ -857,7 +858,7 @@ protected:
     bool validateStencilOrDepthFunc(const char* functionName, GLenum);
 
     // Helper function for texParameterf and texParameteri.
-    void texParameter(GLenum target, GLenum pname, GLfloat parami, GLint paramf, bool isFloat);
+    void texParameter(GLenum target, GLenum pname, GLfloat paramf, GLint parami, bool isFloat);
 
     // Helper function to print GL errors to console.
     void printGLErrorToConsole(const String&);
@@ -877,7 +878,7 @@ protected:
     bool validateBlendFuncFactors(const char* functionName, GLenum src, GLenum dst);
 
     // Helper function to validate a GL capability.
-    bool validateCapability(const char* functionName, GLenum);
+    virtual bool validateCapability(const char* functionName, GLenum);
 
     // Helper function to validate input parameters for uniform functions.
     bool validateUniformParameters(const char* functionName, const WebGLUniformLocation*, DOMFloat32Array*, GLsizei mod);
@@ -889,6 +890,8 @@ protected:
     // Helper function to validate the target for bufferData.
     // Return the current bound buffer to target, or 0 if the target is invalid.
     WebGLBuffer* validateBufferDataTarget(const char* functionName, GLenum target);
+
+    virtual bool validateAndUpdateBufferBindTarget(const char* functionName, GLenum target, WebGLBuffer*);
 
     // Helper function for tex{Sub}Image2D to make sure image is ready and wouldn't taint Origin.
     bool validateHTMLImageElement(const char* functionName, HTMLImageElement*, ExceptionState&);

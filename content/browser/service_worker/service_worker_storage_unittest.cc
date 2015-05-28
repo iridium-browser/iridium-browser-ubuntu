@@ -204,6 +204,56 @@ void WriteResponseOfSize(ServiceWorkerStorage* storage, int64 id,
   WriteResponse(storage, id, headers, buffer.get(), size);
 }
 
+int WriteResponseMetadata(ServiceWorkerStorage* storage,
+                          int64 id,
+                          const std::string& metadata) {
+  scoped_refptr<IOBuffer> body_buffer(new WrappedIOBuffer(metadata.data()));
+  scoped_ptr<ServiceWorkerResponseMetadataWriter> metadata_writer =
+      storage->CreateResponseMetadataWriter(id);
+  TestCompletionCallback cb;
+  metadata_writer->WriteMetadata(body_buffer.get(), metadata.length(),
+                                 cb.callback());
+  return cb.WaitForResult();
+}
+
+int WriteMetadata(ServiceWorkerVersion* version,
+                  const GURL& url,
+                  const std::string& metadata) {
+  const std::vector<char> data(metadata.begin(), metadata.end());
+  EXPECT_TRUE(version);
+  TestCompletionCallback cb;
+  version->script_cache_map()->WriteMetadata(url, data, cb.callback());
+  return cb.WaitForResult();
+}
+
+int ClearMetadata(ServiceWorkerVersion* version, const GURL& url) {
+  EXPECT_TRUE(version);
+  TestCompletionCallback cb;
+  version->script_cache_map()->ClearMetadata(url, cb.callback());
+  return cb.WaitForResult();
+}
+
+bool VerifyResponseMetadata(ServiceWorkerStorage* storage,
+                            int64 id,
+                            const std::string& expected_metadata) {
+  scoped_ptr<ServiceWorkerResponseReader> reader =
+      storage->CreateResponseReader(id);
+  scoped_refptr<HttpResponseInfoIOBuffer> info_buffer =
+      new HttpResponseInfoIOBuffer();
+  {
+    TestCompletionCallback cb;
+    reader->ReadInfo(info_buffer.get(), cb.callback());
+    int rv = cb.WaitForResult();
+    EXPECT_LT(0, rv);
+  }
+  const net::HttpResponseInfo* read_head = info_buffer->http_info.get();
+  if (!read_head->metadata.get())
+    return false;
+  EXPECT_EQ(0, memcmp(expected_metadata.data(), read_head->metadata->data(),
+                      expected_metadata.length()));
+  return true;
+}
+
 }  // namespace
 
 class ServiceWorkerStorageTest : public testing::Test {
@@ -218,7 +268,6 @@ class ServiceWorkerStorageTest : public testing::Test {
             base::ThreadTaskRunnerHandle::Get()));
     context_.reset(
         new ServiceWorkerContextCore(GetUserDataDirectory(),
-                                     base::ThreadTaskRunnerHandle::Get(),
                                      database_task_manager.Pass(),
                                      base::ThreadTaskRunnerHandle::Get(),
                                      NULL,
@@ -416,6 +465,18 @@ class ServiceWorkerStorageTest : public testing::Test {
     return result;
   }
 
+  ServiceWorkerStatusCode FindRegistrationForIdOnly(
+      int64 registration_id,
+      scoped_refptr<ServiceWorkerRegistration>* registration) {
+    bool was_called = false;
+    ServiceWorkerStatusCode result = SERVICE_WORKER_ERROR_FAILED;
+    storage()->FindRegistrationForIdOnly(
+        registration_id, MakeFindCallback(&was_called, &result, registration));
+    base::RunLoop().RunUntilIdle();
+    EXPECT_TRUE(was_called);
+    return result;
+  }
+
   scoped_ptr<ServiceWorkerContextCore> context_;
   base::WeakPtr<ServiceWorkerContextCore> context_ptr_;
   TestBrowserThreadBundle browser_thread_bundle_;
@@ -490,6 +551,14 @@ TEST_F(ServiceWorkerStorageTest, StoreFindUpdateDeleteRegistration) {
   EXPECT_EQ(SERVICE_WORKER_OK,
             FindRegistrationForId(
                 kRegistrationId, kScope.GetOrigin(), &found_registration));
+  ASSERT_TRUE(found_registration.get());
+  EXPECT_EQ(kRegistrationId, found_registration->id());
+  EXPECT_EQ(live_registration, found_registration);
+  found_registration = NULL;
+
+  // Can be found by just the id too.
+  EXPECT_EQ(SERVICE_WORKER_OK,
+            FindRegistrationForIdOnly(kRegistrationId, &found_registration));
   ASSERT_TRUE(found_registration.get());
   EXPECT_EQ(kRegistrationId, found_registration->id());
   EXPECT_EQ(live_registration, found_registration);
@@ -588,6 +657,9 @@ TEST_F(ServiceWorkerStorageTest, StoreFindUpdateDeleteRegistration) {
             FindRegistrationForId(
                 kRegistrationId, kScope.GetOrigin(), &found_registration));
   EXPECT_FALSE(found_registration.get());
+  EXPECT_EQ(SERVICE_WORKER_ERROR_NOT_FOUND,
+            FindRegistrationForIdOnly(kRegistrationId, &found_registration));
+  EXPECT_FALSE(found_registration.get());
 
   // Deleting an unstored registration should succeed.
   EXPECT_EQ(SERVICE_WORKER_OK,
@@ -620,6 +692,10 @@ TEST_F(ServiceWorkerStorageTest, InstallingRegistrationsAreFindable) {
   EXPECT_FALSE(found_registration.get());
 
   EXPECT_EQ(SERVICE_WORKER_ERROR_NOT_FOUND,
+            FindRegistrationForIdOnly(kRegistrationId, &found_registration));
+  EXPECT_FALSE(found_registration.get());
+
+  EXPECT_EQ(SERVICE_WORKER_ERROR_NOT_FOUND,
             FindRegistrationForDocument(kDocumentUrl, &found_registration));
   EXPECT_FALSE(found_registration.get());
 
@@ -647,6 +723,11 @@ TEST_F(ServiceWorkerStorageTest, InstallingRegistrationsAreFindable) {
   EXPECT_EQ(SERVICE_WORKER_OK,
             FindRegistrationForId(
                 kRegistrationId, kScope.GetOrigin(), &found_registration));
+  EXPECT_EQ(live_registration, found_registration);
+  found_registration = NULL;
+
+  EXPECT_EQ(SERVICE_WORKER_OK,
+            FindRegistrationForIdOnly(kRegistrationId, &found_registration));
   EXPECT_EQ(live_registration, found_registration);
   found_registration = NULL;
 
@@ -682,6 +763,10 @@ TEST_F(ServiceWorkerStorageTest, InstallingRegistrationsAreFindable) {
   EXPECT_EQ(SERVICE_WORKER_ERROR_NOT_FOUND,
             FindRegistrationForId(
                 kRegistrationId, kScope.GetOrigin(), &found_registration));
+  EXPECT_FALSE(found_registration.get());
+
+  EXPECT_EQ(SERVICE_WORKER_ERROR_NOT_FOUND,
+            FindRegistrationForIdOnly(kRegistrationId, &found_registration));
   EXPECT_FALSE(found_registration.get());
 
   EXPECT_EQ(SERVICE_WORKER_ERROR_NOT_FOUND,
@@ -873,6 +958,65 @@ class ServiceWorkerResourceStorageDiskTest
   base::ScopedTempDir user_data_directory_;
 };
 
+TEST_F(ServiceWorkerResourceStorageTest,
+       WriteMetadataWithServiceWorkerResponseMetadataWriter) {
+  const char kMetadata1[] = "Test metadata";
+  const char kMetadata2[] = "small";
+  int64 new_resource_id_ = storage()->NewResourceId();
+  // Writing metadata to nonexistent resoirce ID must fail.
+  EXPECT_GE(0, WriteResponseMetadata(storage(), new_resource_id_, kMetadata1));
+
+  // Check metadata is written.
+  EXPECT_EQ(static_cast<int>(strlen(kMetadata1)),
+            WriteResponseMetadata(storage(), resource_id1_, kMetadata1));
+  EXPECT_TRUE(VerifyResponseMetadata(storage(), resource_id1_, kMetadata1));
+  EXPECT_TRUE(VerifyBasicResponse(storage(), resource_id1_, true));
+
+  // Check metadata is written and truncated.
+  EXPECT_EQ(static_cast<int>(strlen(kMetadata2)),
+            WriteResponseMetadata(storage(), resource_id1_, kMetadata2));
+  EXPECT_TRUE(VerifyResponseMetadata(storage(), resource_id1_, kMetadata2));
+  EXPECT_TRUE(VerifyBasicResponse(storage(), resource_id1_, true));
+
+  // Check metadata is deleted.
+  EXPECT_EQ(0, WriteResponseMetadata(storage(), resource_id1_, ""));
+  EXPECT_FALSE(VerifyResponseMetadata(storage(), resource_id1_, ""));
+  EXPECT_TRUE(VerifyBasicResponse(storage(), resource_id1_, true));
+}
+
+TEST_F(ServiceWorkerResourceStorageTest,
+       WriteMetadataWithServiceWorkerScriptCacheMap) {
+  const char kMetadata1[] = "Test metadata";
+  const char kMetadata2[] = "small";
+  ServiceWorkerVersion* version = registration_->waiting_version();
+  EXPECT_TRUE(version);
+
+  // Writing metadata to nonexistent URL must fail.
+  EXPECT_GE(0,
+            WriteMetadata(version, GURL("http://www.test.not/nonexistent.js"),
+                          kMetadata1));
+  // Clearing metadata of nonexistent URL must fail.
+  EXPECT_GE(0,
+            ClearMetadata(version, GURL("http://www.test.not/nonexistent.js")));
+
+  // Check metadata is written.
+  EXPECT_EQ(static_cast<int>(strlen(kMetadata1)),
+            WriteMetadata(version, script_, kMetadata1));
+  EXPECT_TRUE(VerifyResponseMetadata(storage(), resource_id1_, kMetadata1));
+  EXPECT_TRUE(VerifyBasicResponse(storage(), resource_id1_, true));
+
+  // Check metadata is written and truncated.
+  EXPECT_EQ(static_cast<int>(strlen(kMetadata2)),
+            WriteMetadata(version, script_, kMetadata2));
+  EXPECT_TRUE(VerifyResponseMetadata(storage(), resource_id1_, kMetadata2));
+  EXPECT_TRUE(VerifyBasicResponse(storage(), resource_id1_, true));
+
+  // Check metadata is deleted.
+  EXPECT_EQ(0, ClearMetadata(version, script_));
+  EXPECT_FALSE(VerifyResponseMetadata(storage(), resource_id1_, ""));
+  EXPECT_TRUE(VerifyBasicResponse(storage(), resource_id1_, true));
+}
+
 TEST_F(ServiceWorkerResourceStorageTest, DeleteRegistration_NoLiveVersion) {
   bool was_called = false;
   ServiceWorkerStatusCode result = SERVICE_WORKER_ERROR_FAILED;
@@ -952,12 +1096,10 @@ TEST_F(ServiceWorkerResourceStorageTest, DeleteRegistration_ActiveVersion) {
   registration_->SetActiveVersion(registration_->waiting_version());
   storage()->UpdateToActiveState(
       registration_.get(), base::Bind(&ServiceWorkerUtils::NoOpStatusCallback));
-  scoped_ptr<ServiceWorkerProviderHost> host(
-      new ServiceWorkerProviderHost(33 /* dummy render process id */,
-                                    MSG_ROUTING_NONE,
-                                    1 /* dummy provider_id */,
-                                    context_->AsWeakPtr(),
-                                    NULL));
+  scoped_ptr<ServiceWorkerProviderHost> host(new ServiceWorkerProviderHost(
+      33 /* dummy render process id */, MSG_ROUTING_NONE,
+      1 /* dummy provider_id */, SERVICE_WORKER_PROVIDER_FOR_WINDOW,
+      context_->AsWeakPtr(), NULL));
   registration_->active_version()->AddControllee(host.get());
 
   bool was_called = false;
@@ -1005,12 +1147,10 @@ TEST_F(ServiceWorkerResourceStorageDiskTest, CleanupOnRestart) {
   registration_->SetWaitingVersion(NULL);
   storage()->UpdateToActiveState(
       registration_.get(), base::Bind(&ServiceWorkerUtils::NoOpStatusCallback));
-  scoped_ptr<ServiceWorkerProviderHost> host(
-      new ServiceWorkerProviderHost(33 /* dummy render process id */,
-                                    MSG_ROUTING_NONE,
-                                    1 /* dummy provider_id */,
-                                    context_->AsWeakPtr(),
-                                    NULL));
+  scoped_ptr<ServiceWorkerProviderHost> host(new ServiceWorkerProviderHost(
+      33 /* dummy render process id */, MSG_ROUTING_NONE,
+      1 /* dummy provider_id */, SERVICE_WORKER_PROVIDER_FOR_WINDOW,
+      context_->AsWeakPtr(), NULL));
   registration_->active_version()->AddControllee(host.get());
 
   bool was_called = false;
@@ -1059,7 +1199,6 @@ TEST_F(ServiceWorkerResourceStorageDiskTest, CleanupOnRestart) {
           base::ThreadTaskRunnerHandle::Get()));
   context_.reset(
       new ServiceWorkerContextCore(GetUserDataDirectory(),
-                                   base::ThreadTaskRunnerHandle::Get(),
                                    database_task_manager.Pass(),
                                    base::ThreadTaskRunnerHandle::Get(),
                                    NULL,
@@ -1103,12 +1242,10 @@ TEST_F(ServiceWorkerResourceStorageTest, UpdateRegistration) {
   registration_->SetActiveVersion(registration_->waiting_version());
   storage()->UpdateToActiveState(
       registration_.get(), base::Bind(&ServiceWorkerUtils::NoOpStatusCallback));
-  scoped_ptr<ServiceWorkerProviderHost> host(
-      new ServiceWorkerProviderHost(33 /* dummy render process id */,
-                                    MSG_ROUTING_NONE,
-                                    1 /* dummy provider_id */,
-                                    context_->AsWeakPtr(),
-                                    NULL));
+  scoped_ptr<ServiceWorkerProviderHost> host(new ServiceWorkerProviderHost(
+      33 /* dummy render process id */, MSG_ROUTING_NONE,
+      1 /* dummy provider_id */, SERVICE_WORKER_PROVIDER_FOR_WINDOW,
+      context_->AsWeakPtr(), NULL));
   registration_->active_version()->AddControllee(host.get());
 
   bool was_called = false;

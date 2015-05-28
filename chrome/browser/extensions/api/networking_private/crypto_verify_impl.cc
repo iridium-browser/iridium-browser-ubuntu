@@ -12,12 +12,12 @@
 #include "base/strings/string_util.h"
 #include "base/thread_task_runner_handle.h"
 #include "base/threading/sequenced_worker_pool.h"
-#include "chrome/browser/extensions/api/networking_private/networking_private_api.h"
 #include "chrome/browser/extensions/api/networking_private/networking_private_credentials_getter.h"
-#include "chrome/browser/extensions/api/networking_private/networking_private_service_client.h"
-#include "chrome/common/extensions/api/networking_private.h"
 #include "chrome/common/extensions/api/networking_private/networking_private_crypto.h"
 #include "content/public/browser/browser_thread.h"
+#include "extensions/browser/api/networking_private/networking_private_api.h"
+#include "extensions/browser/api/networking_private/networking_private_service_client.h"
+#include "extensions/common/api/networking_private.h"
 
 namespace extensions {
 
@@ -38,8 +38,8 @@ bool DecodeAndVerifyCredentials(
     return false;
   }
   *verified = networking_private_crypto::VerifyCredentials(
-      credentials.certificate, decoded_signed_data, credentials.unsigned_data,
-      credentials.device_bssid);
+      credentials.certificate, credentials.intermediate_certificates,
+      decoded_signed_data, credentials.unsigned_data, credentials.device_bssid);
   return true;
 }
 
@@ -158,6 +158,8 @@ void VerifyAndEncryptCredentialsCompleted(
 CryptoVerifyImpl::Credentials::Credentials(
     const VerificationProperties& properties) {
   certificate = properties.certificate;
+  if (properties.intermediate_certificates.get())
+    intermediate_certificates = *properties.intermediate_certificates;
   signed_data = properties.signed_data;
 
   std::vector<std::string> data_parts;

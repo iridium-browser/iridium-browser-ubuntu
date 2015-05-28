@@ -9,17 +9,20 @@
 
 #include "libANGLE/Context.h"
 
-#include "common/utilities.h"
+#include <iterator>
+#include <sstream>
+
 #include "common/platform.h"
-#include "libANGLE/Compiler.h"
+#include "common/utilities.h"
 #include "libANGLE/Buffer.h"
+#include "libANGLE/Compiler.h"
 #include "libANGLE/Display.h"
 #include "libANGLE/Fence.h"
 #include "libANGLE/Framebuffer.h"
 #include "libANGLE/FramebufferAttachment.h"
-#include "libANGLE/Renderbuffer.h"
 #include "libANGLE/Program.h"
 #include "libANGLE/Query.h"
+#include "libANGLE/Renderbuffer.h"
 #include "libANGLE/ResourceManager.h"
 #include "libANGLE/Sampler.h"
 #include "libANGLE/Surface.h"
@@ -30,13 +33,10 @@
 #include "libANGLE/validationES.h"
 #include "libANGLE/renderer/Renderer.h"
 
-#include <sstream>
-#include <iterator>
-
 namespace gl
 {
 
-Context::Context(int clientVersion, const Context *shareContext, rx::Renderer *renderer, bool notifyResets, bool robustAccess)
+Context::Context(const egl::Config *config, int clientVersion, const Context *shareContext, rx::Renderer *renderer, bool notifyResets, bool robustAccess)
     : mRenderer(renderer)
 {
     ASSERT(robustAccess == false);   // Unimplemented
@@ -45,6 +45,10 @@ Context::Context(int clientVersion, const Context *shareContext, rx::Renderer *r
     mState.initialize(mCaps, clientVersion);
 
     mClientVersion = clientVersion;
+
+    mConfigID = config->configID;
+    mClientType = EGL_OPENGL_ES_API;
+    mRenderBuffer = EGL_NONE;
 
     mFenceNVHandleAllocator.setBaseHandle(0);
 
@@ -64,19 +68,19 @@ Context::Context(int clientVersion, const Context *shareContext, rx::Renderer *r
     // In order that access to these initial textures not be lost, they are treated as texture
     // objects all of whose names are 0.
 
-    Texture2D *zeroTexture2D = new Texture2D(mRenderer->createTexture(GL_TEXTURE_2D), 0);
+    Texture *zeroTexture2D = new Texture(mRenderer->createTexture(GL_TEXTURE_2D), 0, GL_TEXTURE_2D);
     mZeroTextures[GL_TEXTURE_2D].set(zeroTexture2D);
 
-    TextureCubeMap *zeroTextureCube = new TextureCubeMap(mRenderer->createTexture(GL_TEXTURE_CUBE_MAP), 0);
+    Texture *zeroTextureCube = new Texture(mRenderer->createTexture(GL_TEXTURE_CUBE_MAP), 0, GL_TEXTURE_CUBE_MAP);
     mZeroTextures[GL_TEXTURE_CUBE_MAP].set(zeroTextureCube);
 
     if (mClientVersion >= 3)
     {
         // TODO: These could also be enabled via extension
-        Texture3D *zeroTexture3D = new Texture3D(mRenderer->createTexture(GL_TEXTURE_3D), 0);
+        Texture *zeroTexture3D = new Texture(mRenderer->createTexture(GL_TEXTURE_3D), 0, GL_TEXTURE_3D);
         mZeroTextures[GL_TEXTURE_3D].set(zeroTexture3D);
 
-        Texture2DArray *zeroTexture2DArray = new Texture2DArray(mRenderer->createTexture(GL_TEXTURE_2D_ARRAY), 0);
+        Texture *zeroTexture2DArray = new Texture(mRenderer->createTexture(GL_TEXTURE_2D_ARRAY), 0, GL_TEXTURE_2D_ARRAY);
         mZeroTextures[GL_TEXTURE_2D_ARRAY].set(zeroTexture2DArray);
     }
 
@@ -129,7 +133,8 @@ Context::~Context()
 
     while (!mFramebufferMap.empty())
     {
-        deleteFramebuffer(mFramebufferMap.begin()->first);
+        // Delete the framebuffer in reverse order to destroy the framebuffer zero last.
+        deleteFramebuffer(mFramebufferMap.rbegin()->first);
     }
 
     while (!mFenceNVMap.empty())
@@ -180,12 +185,12 @@ void Context::makeCurrent(egl::Surface *surface)
         mHasBeenCurrent = true;
     }
 
-    Framebuffer *framebufferZero = new DefaultFramebuffer(mRenderer->createFramebuffer(),
-                                                          mRenderer->createDefaultAttachment(GL_BACK, surface),
-                                                          mRenderer->createDefaultAttachment(GL_DEPTH, surface),
-                                                          mRenderer->createDefaultAttachment(GL_STENCIL, surface));
+    // TODO(jmadill): do not allocate new pointers here
+    Framebuffer *framebufferZero = new DefaultFramebuffer(mCaps, mRenderer, surface);
 
     setFramebufferZero(framebufferZero);
+
+    mRenderBuffer = surface->getRenderBuffer();
 }
 
 // NOTE: this function should not assume that this context is current!
@@ -230,7 +235,7 @@ GLsync Context::createFenceSync()
 {
     GLuint handle = mResourceManager->createFenceSync();
 
-    return reinterpret_cast<GLsync>(handle);
+    return reinterpret_cast<GLsync>(static_cast<uintptr_t>(handle));
 }
 
 GLuint Context::createVertexArray()
@@ -517,7 +522,7 @@ void Context::bindReadFramebuffer(GLuint framebuffer)
 {
     if (!getFramebuffer(framebuffer))
     {
-        mFramebufferMap[framebuffer] = new Framebuffer(mRenderer->createFramebuffer(), framebuffer);
+        mFramebufferMap[framebuffer] = new Framebuffer(mCaps, mRenderer, framebuffer);
     }
 
     mState.setReadFramebufferBinding(getFramebuffer(framebuffer));
@@ -527,7 +532,7 @@ void Context::bindDrawFramebuffer(GLuint framebuffer)
 {
     if (!getFramebuffer(framebuffer))
     {
-        mFramebufferMap[framebuffer] = new Framebuffer(mRenderer->createFramebuffer(), framebuffer);
+        mFramebufferMap[framebuffer] = new Framebuffer(mCaps, mRenderer, framebuffer);
     }
 
     mState.setDrawFramebufferBinding(getFramebuffer(framebuffer));
@@ -724,39 +729,9 @@ Query *Context::getQuery(unsigned int handle, bool create, GLenum type)
 
 Texture *Context::getTargetTexture(GLenum target) const
 {
-    if (!ValidTextureTarget(this, target))
-    {
-        return NULL;
-    }
+    ASSERT(ValidTextureTarget(this, target));
 
-    switch (target)
-    {
-      case GL_TEXTURE_2D:       return getTexture2D();
-      case GL_TEXTURE_CUBE_MAP: return getTextureCubeMap();
-      case GL_TEXTURE_3D:       return getTexture3D();
-      case GL_TEXTURE_2D_ARRAY: return getTexture2DArray();
-      default:                  return NULL;
-    }
-}
-
-Texture2D *Context::getTexture2D() const
-{
-    return static_cast<Texture2D*>(getSamplerTexture(mState.getActiveSampler(), GL_TEXTURE_2D));
-}
-
-TextureCubeMap *Context::getTextureCubeMap() const
-{
-    return static_cast<TextureCubeMap*>(getSamplerTexture(mState.getActiveSampler(), GL_TEXTURE_CUBE_MAP));
-}
-
-Texture3D *Context::getTexture3D() const
-{
-    return static_cast<Texture3D*>(getSamplerTexture(mState.getActiveSampler(), GL_TEXTURE_3D));
-}
-
-Texture2DArray *Context::getTexture2DArray() const
-{
-    return static_cast<Texture2DArray*>(getSamplerTexture(mState.getActiveSampler(), GL_TEXTURE_2D_ARRAY));
+    return getSamplerTexture(mState.getActiveSampler(), target);
 }
 
 Texture *Context::getSamplerTexture(unsigned int sampler, GLenum type) const
@@ -959,6 +934,7 @@ bool Context::getQueryParameterInfo(GLenum pname, GLenum *type, unsigned int *nu
             *numParams = mCaps.shaderBinaryFormats.size();
         }
         return true;
+
       case GL_MAX_VERTEX_ATTRIBS:
       case GL_MAX_VERTEX_UNIFORM_VECTORS:
       case GL_MAX_VARYING_VECTORS:
@@ -1232,10 +1208,14 @@ Error Context::drawElements(GLenum mode, GLsizei count, GLenum type,
     return mRenderer->drawElements(getData(), mode, count, type, indices, instances, indexRange);
 }
 
-// Implements glFlush when block is false, glFinish when block is true
-Error Context::sync(bool block)
+Error Context::flush()
 {
-    return mRenderer->sync(block);
+    return mRenderer->flush();
+}
+
+Error Context::finish()
+{
+    return mRenderer->finish();
 }
 
 void Context::recordError(const Error &error)
@@ -1300,6 +1280,21 @@ int Context::getClientVersion() const
     return mClientVersion;
 }
 
+EGLint Context::getConfigID() const
+{
+    return mConfigID;
+}
+
+EGLenum Context::getClientType() const
+{
+    return mClientType;
+}
+
+EGLenum Context::getRenderBuffer() const
+{
+    return mRenderBuffer;
+}
+
 const Caps &Context::getCaps() const
 {
     return mCaps;
@@ -1352,12 +1347,12 @@ void Context::detachFramebuffer(GLuint framebuffer)
     // If a framebuffer that is currently bound to the target FRAMEBUFFER is deleted, it is as though
     // BindFramebuffer had been executed with the target of FRAMEBUFFER and framebuffer of zero.
 
-    if (mState.removeReadFramebufferBinding(framebuffer))
+    if (mState.removeReadFramebufferBinding(framebuffer) && framebuffer != 0)
     {
         bindReadFramebuffer(0);
     }
 
-    if (mState.removeDrawFramebufferBinding(framebuffer))
+    if (mState.removeDrawFramebufferBinding(framebuffer) && framebuffer != 0)
     {
         bindDrawFramebuffer(0);
     }

@@ -12,37 +12,47 @@
 
 namespace blink {
 
-class PLATFORM_EXPORT BeginClipPathDisplayItem : public DisplayItem {
+class PLATFORM_EXPORT BeginClipPathDisplayItem : public PairedBeginDisplayItem {
+    WTF_MAKE_FAST_ALLOCATED(BeginClipPathDisplayItem);
 public:
-    static PassOwnPtr<BeginClipPathDisplayItem> create(DisplayItemClient client, const Path& clipPath, WindRule windRule) { return adoptPtr(new BeginClipPathDisplayItem(client, clipPath, windRule)); }
+    static PassOwnPtr<BeginClipPathDisplayItem> create(const DisplayItemClientWrapper& client, const Path& clipPath, WindRule windRule)
+    {
+        return adoptPtr(new BeginClipPathDisplayItem(client, clipPath, windRule));
+    }
 
-    virtual void replay(GraphicsContext*) override;
+    BeginClipPathDisplayItem(const DisplayItemClientWrapper& client, const Path& clipPath, WindRule windRule)
+        : PairedBeginDisplayItem(client, BeginClipPath)
+        , m_clipPath(clipPath)
+        , m_windRule(windRule) { }
 
-protected:
-    BeginClipPathDisplayItem(DisplayItemClient client, const Path& clipPath, WindRule windRule)
-        : DisplayItem(client, BeginClipPath), m_clipPath(clipPath), m_windRule(windRule) { }
+    virtual void replay(GraphicsContext&) override;
+    virtual void appendToWebDisplayItemList(WebDisplayItemList*) const override;
 
 private:
     const Path m_clipPath;
     const WindRule m_windRule;
 #ifndef NDEBUG
-    virtual const char* name() const override { return "BeginClipPath"; }
     virtual void dumpPropertiesAsDebugString(WTF::StringBuilder&) const override;
 #endif
 };
 
-class PLATFORM_EXPORT EndClipPathDisplayItem : public DisplayItem {
+class PLATFORM_EXPORT EndClipPathDisplayItem : public PairedEndDisplayItem {
+    WTF_MAKE_FAST_ALLOCATED(EndClipPathDisplayItem);
 public:
-    static PassOwnPtr<EndClipPathDisplayItem> create(DisplayItemClient client) { return adoptPtr(new EndClipPathDisplayItem(client)); }
+    static PassOwnPtr<EndClipPathDisplayItem> create(const DisplayItemClientWrapper& client)
+    {
+        return adoptPtr(new EndClipPathDisplayItem(client));
+    }
 
-    virtual void replay(GraphicsContext*) override;
+    EndClipPathDisplayItem(const DisplayItemClientWrapper& client)
+        : PairedEndDisplayItem(client, EndClipPath) { }
 
-protected:
-    EndClipPathDisplayItem(DisplayItemClient client) : DisplayItem(client, EndClipPath) { }
+    virtual void replay(GraphicsContext&) override;
+    virtual void appendToWebDisplayItemList(WebDisplayItemList*) const override;
 
 private:
-#ifndef NDEBUG
-    virtual const char* name() const override { return "EndClipPath"; }
+#if ENABLE(ASSERT)
+    virtual bool isEndAndPairedWith(const DisplayItem& other) const override final { return other.type() == BeginClipPath; }
 #endif
 };
 

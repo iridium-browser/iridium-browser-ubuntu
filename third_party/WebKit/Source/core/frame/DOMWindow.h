@@ -5,8 +5,10 @@
 #ifndef DOMWindow_h
 #define DOMWindow_h
 
+#include "core/CoreExport.h"
 #include "core/events/EventTarget.h"
 #include "core/frame/DOMWindowBase64.h"
+#include "core/frame/Location.h"
 #include "platform/heap/Handle.h"
 #include "platform/scroll/ScrollableArea.h"
 
@@ -24,13 +26,11 @@ class DOMWindowCSS;
 class Document;
 class Element;
 class Frame;
+class FrameRequestCallback;
 class History;
 class LocalDOMWindow;
-class Location;
 class MediaQueryList;
 class Navigator;
-class Performance;
-class RequestAnimationFrameCallback;
 class Screen;
 class ScrollToOptions;
 class SerializedScriptValue;
@@ -39,20 +39,26 @@ class StyleMedia;
 
 typedef WillBeHeapVector<RefPtrWillBeMember<MessagePort>, 1> MessagePortArray;
 
-class DOMWindow : public EventTargetWithInlineData, public RefCountedWillBeNoBase<DOMWindow>, public DOMWindowBase64 {
+class CORE_EXPORT DOMWindow : public EventTargetWithInlineData, public RefCountedWillBeNoBase<DOMWindow>, public DOMWindowBase64 {
     DEFINE_WRAPPERTYPEINFO();
     REFCOUNTED_EVENT_TARGET(DOMWindow);
 public:
+    virtual ~DOMWindow();
+
     // RefCountedWillBeGarbageCollectedFinalized overrides:
-    void trace(Visitor* visitor) override
-    {
-        EventTargetWithInlineData::trace(visitor);
-    }
+    DECLARE_VIRTUAL_TRACE();
 
     virtual bool isLocalDOMWindow() const { return false; }
     virtual bool isRemoteDOMWindow() const { return false; }
 
     virtual Frame* frame() const = 0;
+
+    // ScriptWrappable overrides:
+    v8::Handle<v8::Object> wrap(v8::Handle<v8::Object> creationContext, v8::Isolate*) override;
+    v8::Handle<v8::Object> associateWithWrapper(v8::Isolate*, const WrapperTypeInfo*, v8::Handle<v8::Object> wrapper) override;
+
+    // EventTarget overrides:
+    const AtomicString& interfaceName() const override;
 
     // DOM Level 0
     virtual Screen* screen() const = 0;
@@ -65,8 +71,7 @@ public:
     virtual BarProp* toolbar() const = 0;
     virtual Navigator* navigator() const = 0;
     Navigator* clientInformation() const { return navigator(); }
-    // FIXME: Temporary, until window.location is implemented for remote frames.
-    virtual Location* location() const = 0;
+    Location* location() const;
 
     virtual bool offscreenBuffering() const = 0;
 
@@ -115,9 +120,6 @@ public:
     // WebKit extensions
     virtual double devicePixelRatio() const = 0;
 
-    // HTML 5 key/value storage
-    virtual Storage* sessionStorage(ExceptionState&) const = 0;
-    virtual Storage* localStorage(ExceptionState&) const = 0;
     virtual ApplicationCache* applicationCache() const = 0;
 
     // This is the interface orientation in degrees. Some examples are:
@@ -126,8 +128,6 @@ public:
     virtual int orientation() const = 0;
 
     virtual Console* console() const  = 0;
-
-    virtual Performance* performance() const = 0;
 
     virtual DOMWindowCSS* css() const = 0;
 
@@ -151,11 +151,19 @@ public:
     virtual void scrollTo(const ScrollToOptions&) const = 0;
     void scroll(double x, double y) const { scrollTo(x, y); }
     void scroll(const ScrollToOptions& scrollToOptions) const { scrollTo(scrollToOptions); }
-    virtual void moveBy(float x, float y) const = 0;
-    virtual void moveTo(float x, float y) const = 0;
+    void moveBy() const { moveBy(0, 0, false, false); }
+    void moveBy(int x) const { moveBy(x, 0, true, false); }
+    virtual void moveBy(int x, int y, bool hasX = true, bool hasY = true) const = 0;
+    void moveTo() const { moveTo(0, 0, false, false); }
+    void moveTo(int x) const { moveTo(x, 0, true, false); }
+    virtual void moveTo(int x, int y, bool hasX = true, bool hasY = true) const = 0;
 
-    virtual void resizeBy(float x, float y) const = 0;
-    virtual void resizeTo(float width, float height) const = 0;
+    void resizeBy() const { resizeBy(0, 0, false, false); }
+    void resizeBy(int x) const { resizeBy(x, 0, true, false); }
+    virtual void resizeBy(int x, int y, bool hasX = true, bool hasY = true) const = 0;
+    void resizeTo() const { resizeTo(0, 0, false, false); }
+    void resizeTo(int x) const { resizeTo(x, 0, true, false); }
+    virtual void resizeTo(int width, int height, bool hasWidth = true, bool hasHeight = true) const = 0;
 
     virtual PassRefPtrWillBeRawPtr<MediaQueryList> matchMedia(const String&) = 0;
 
@@ -166,8 +174,8 @@ public:
     virtual PassRefPtrWillBeRawPtr<CSSRuleList> getMatchedCSSRules(Element*, const String& pseudoElt) const = 0;
 
     // WebKit animation extensions
-    virtual int requestAnimationFrame(RequestAnimationFrameCallback*) = 0;
-    virtual int webkitRequestAnimationFrame(RequestAnimationFrameCallback*) = 0;
+    virtual int requestAnimationFrame(FrameRequestCallback*) = 0;
+    virtual int webkitRequestAnimationFrame(FrameRequestCallback*) = 0;
     virtual void cancelAnimationFrame(int id) = 0;
 
     void captureEvents() { }
@@ -178,12 +186,22 @@ public:
     // window[index]...
     DOMWindow* anonymousIndexedGetter(uint32_t) const;
 
-    virtual void postMessage(PassRefPtr<SerializedScriptValue> message, const MessagePortArray*, const String& targetOrigin, LocalDOMWindow* source, ExceptionState&) = 0;
+    void postMessage(PassRefPtr<SerializedScriptValue> message, const MessagePortArray*, const String& targetOrigin, LocalDOMWindow* source, ExceptionState&);
 
     // FIXME: These should be non-virtual, but this is blocked on the security
     // origin replication work.
     virtual String sanitizedCrossDomainAccessErrorMessage(LocalDOMWindow* callingWindow) = 0;
     virtual String crossDomainAccessErrorMessage(LocalDOMWindow* callingWindow) = 0;
+    virtual bool isInsecureScriptAccess(DOMWindow& callingWindow, const String& urlString);
+
+    // FIXME: When this DOMWindow is no longer the active DOMWindow (i.e.,
+    // when its document is no longer the document that is displayed in its
+    // frame), we would like to zero out m_frame to avoid being confused
+    // by the document that is currently active in m_frame.
+    // See https://bugs.webkit.org/show_bug.cgi?id=62054
+    bool isCurrentlyDisplayedInFrame() const;
+
+    void resetLocation();
 
     DEFINE_ATTRIBUTE_EVENT_LISTENER(animationend);
     DEFINE_ATTRIBUTE_EVENT_LISTENER(animationiteration);
@@ -202,6 +220,9 @@ public:
     DEFINE_ATTRIBUTE_EVENT_LISTENER(touchmove);
     DEFINE_ATTRIBUTE_EVENT_LISTENER(touchend);
     DEFINE_ATTRIBUTE_EVENT_LISTENER(touchcancel);
+
+private:
+    mutable RefPtrWillBeMember<Location> m_location;
 };
 
 } // namespace blink

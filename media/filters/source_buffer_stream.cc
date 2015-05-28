@@ -9,8 +9,8 @@
 #include <sstream>
 
 #include "base/bind.h"
-#include "base/debug/trace_event.h"
 #include "base/logging.h"
+#include "base/trace_event/trace_event.h"
 #include "media/base/audio_splicer.h"
 #include "media/filters/source_buffer_platform.h"
 #include "media/filters/source_buffer_range.h"
@@ -220,8 +220,9 @@ bool SourceBufferStream::Append(const BufferQueue& buffers) {
            << buffers.back()->duration().InSecondsF() << ")]";
 
   // New media segments must begin with a keyframe.
+  // TODO(wolenetz): Relax this requirement. See http://crbug.com/229412.
   if (new_media_segment_ && !buffers.front()->is_key_frame()) {
-    MEDIA_LOG(log_cb_) << "Media segment did not begin with key frame.";
+    MEDIA_LOG(ERROR, log_cb_) << "Media segment did not begin with key frame.";
     return false;
   }
 
@@ -231,15 +232,16 @@ bool SourceBufferStream::Append(const BufferQueue& buffers) {
 
   if (media_segment_start_time_ < DecodeTimestamp() ||
       buffers.front()->GetDecodeTimestamp() < DecodeTimestamp()) {
-    MEDIA_LOG(log_cb_)
+    MEDIA_LOG(ERROR, log_cb_)
         << "Cannot append a media segment with negative timestamps.";
     return false;
   }
 
   if (!IsNextTimestampValid(buffers.front()->GetDecodeTimestamp(),
                             buffers.front()->is_key_frame())) {
-    MEDIA_LOG(log_cb_) << "Invalid same timestamp construct detected at time "
-                       << buffers.front()->GetDecodeTimestamp().InSecondsF();
+    const DecodeTimestamp& dts = buffers.front()->GetDecodeTimestamp();
+    MEDIA_LOG(ERROR, log_cb_) << "Invalid same timestamp construct detected at"
+                              << " time " << dts.InSecondsF();
 
     return false;
   }
@@ -385,12 +387,13 @@ void SourceBufferStream::Remove(base::TimeDelta start, base::TimeDelta end,
     SetSelectedRangeIfNeeded(deleted_buffers.front()->GetDecodeTimestamp());
 }
 
-void SourceBufferStream::RemoveInternal(
-    DecodeTimestamp start, DecodeTimestamp end, bool is_exclusive,
-    BufferQueue* deleted_buffers) {
-  DVLOG(2) << __FUNCTION__ << " " << GetStreamTypeName()
-           << " (" << start.InSecondsF() << ", " << end.InSecondsF()
-           << ", " << is_exclusive << ")";
+void SourceBufferStream::RemoveInternal(DecodeTimestamp start,
+                                        DecodeTimestamp end,
+                                        bool exclude_start,
+                                        BufferQueue* deleted_buffers) {
+  DVLOG(2) << __FUNCTION__ << " " << GetStreamTypeName() << " ("
+           << start.InSecondsF() << ", " << end.InSecondsF() << ", "
+           << exclude_start << ")";
   DVLOG(3) << __FUNCTION__ << " " << GetStreamTypeName()
            << ": before remove ranges_=" << RangesToString(ranges_);
 
@@ -406,8 +409,9 @@ void SourceBufferStream::RemoveInternal(
     if (range->GetStartTimestamp() >= end)
       break;
 
-    // Split off any remaining end piece and add it to |ranges_|.
-    SourceBufferRange* new_range = range->SplitRange(end, is_exclusive);
+    // Split off any remaining GOPs starting at or after |end| and add it to
+    // |ranges_|.
+    SourceBufferRange* new_range = range->SplitRange(end);
     if (new_range) {
       itr = ranges_.insert(++itr, new_range);
       --itr;
@@ -421,7 +425,7 @@ void SourceBufferStream::RemoveInternal(
     // Truncate the current range so that it only contains data before
     // the removal range.
     BufferQueue saved_buffers;
-    bool delete_range = range->TruncateAt(start, &saved_buffers, is_exclusive);
+    bool delete_range = range->TruncateAt(start, &saved_buffers, exclude_start);
 
     // Check to see if the current playback position was removed and
     // update the selected range appropriately.
@@ -509,16 +513,16 @@ bool SourceBufferStream::IsMonotonicallyIncreasing(
 
     if (prev_timestamp != kNoDecodeTimestamp()) {
       if (current_timestamp < prev_timestamp) {
-        MEDIA_LOG(log_cb_) << "Buffers were not monotonically increasing.";
+        MEDIA_LOG(ERROR, log_cb_) << "Buffers did not monotonically increase.";
         return false;
       }
 
       if (current_timestamp == prev_timestamp &&
           !SourceBufferRange::AllowSameTimestamp(prev_is_keyframe,
                                                  current_is_keyframe)) {
-        MEDIA_LOG(log_cb_) << "Unexpected combination of buffers with the"
-                           << " same timestamp detected at "
-                           << current_timestamp.InSecondsF();
+        MEDIA_LOG(ERROR, log_cb_) << "Unexpected combination of buffers with"
+                                  << " the same timestamp detected at "
+                                  << current_timestamp.InSecondsF();
         return false;
       }
     }
@@ -810,7 +814,7 @@ void SourceBufferStream::PrepareRangesForNextAppend(
   // because we don't generate splice frames for same timestamp situations.
   DCHECK(new_buffers.front()->splice_timestamp() !=
          new_buffers.front()->timestamp());
-  const bool is_exclusive =
+  const bool exclude_start =
       new_buffers.front()->splice_buffers().empty() &&
       prev_timestamp == next_timestamp &&
       SourceBufferRange::AllowSameTimestamp(prev_is_keyframe, next_is_keyframe);
@@ -829,7 +833,7 @@ void SourceBufferStream::PrepareRangesForNextAppend(
     end += base::TimeDelta::FromInternalValue(1);
   }
 
-  RemoveInternal(start, end, is_exclusive, deleted_buffers);
+  RemoveInternal(start, end, exclude_start, deleted_buffers);
 
   // Restore the range seek state if necessary.
   if (temporarily_select_range)
@@ -1233,12 +1237,12 @@ bool SourceBufferStream::UpdateAudioConfig(const AudioDecoderConfig& config) {
   DVLOG(3) << "UpdateAudioConfig.";
 
   if (audio_configs_[0].codec() != config.codec()) {
-    MEDIA_LOG(log_cb_) << "Audio codec changes not allowed.";
+    MEDIA_LOG(ERROR, log_cb_) << "Audio codec changes not allowed.";
     return false;
   }
 
   if (audio_configs_[0].is_encrypted() != config.is_encrypted()) {
-    MEDIA_LOG(log_cb_) << "Audio encryption changes not allowed.";
+    MEDIA_LOG(ERROR, log_cb_) << "Audio encryption changes not allowed.";
     return false;
   }
 
@@ -1264,12 +1268,12 @@ bool SourceBufferStream::UpdateVideoConfig(const VideoDecoderConfig& config) {
   DVLOG(3) << "UpdateVideoConfig.";
 
   if (video_configs_[0].codec() != config.codec()) {
-    MEDIA_LOG(log_cb_) << "Video codec changes not allowed.";
+    MEDIA_LOG(ERROR, log_cb_) << "Video codec changes not allowed.";
     return false;
   }
 
   if (video_configs_[0].is_encrypted() != config.is_encrypted()) {
-    MEDIA_LOG(log_cb_) << "Video encryption changes not allowed.";
+    MEDIA_LOG(ERROR, log_cb_) << "Video encryption changes not allowed.";
     return false;
   }
 
@@ -1532,14 +1536,16 @@ void SourceBufferStream::GenerateSpliceFrame(const BufferQueue& new_buffers) {
     }
   }
 
-  // Don't generate splice frames which represent less than two frames, since we
-  // need at least that much to generate a crossfade.  Per the spec, make this
-  // check using the sample rate of the overlapping buffers.
+  // Don't generate splice frames which represent less than a millisecond (which
+  // is frequently the extent of timestamp resolution for poorly encoded media)
+  // or less than two frames (need at least two to crossfade).
   const base::TimeDelta splice_duration =
       pre_splice_buffers.back()->timestamp() +
       pre_splice_buffers.back()->duration() - splice_timestamp;
-  const base::TimeDelta minimum_splice_duration = base::TimeDelta::FromSecondsD(
-      2.0 / audio_configs_[append_config_index_].samples_per_second());
+  const base::TimeDelta minimum_splice_duration = std::max(
+      base::TimeDelta::FromMilliseconds(1),
+      base::TimeDelta::FromSecondsD(
+          2.0 / audio_configs_[append_config_index_].samples_per_second()));
   if (splice_duration < minimum_splice_duration) {
     DVLOG(1) << "Can't generate splice: not enough samples for crossfade; have "
              << splice_duration.InMicroseconds() << " us, but need "
@@ -1547,6 +1553,9 @@ void SourceBufferStream::GenerateSpliceFrame(const BufferQueue& new_buffers) {
     return;
   }
 
+  DVLOG(1) << "Generating splice frame @ " << new_buffers.front()->timestamp()
+           << ", splice duration: " << splice_duration.InMicroseconds()
+           << " us";
   new_buffers.front()->ConvertToSpliceBuffer(pre_splice_buffers);
 }
 

@@ -212,7 +212,7 @@ class EVENTS_EXPORT Event {
   void StopPropagation();
   bool stopped_propagation() const { return !!(result_ & ER_CONSUMED); }
 
-
+  // Marks the event as having been handled. A handled event does not reach the
   // next event phase. For example, if an event is handled during the pre-target
   // phase, then the event is dispatched to all pre-target handlers, but not to
   // the target or post-target handlers.
@@ -225,9 +225,6 @@ class EVENTS_EXPORT Event {
   Event(const base::NativeEvent& native_event, EventType type, int flags);
   Event(const Event& copy);
   void SetType(EventType type);
-  void set_delete_native_event(bool delete_native_event) {
-    delete_native_event_ = delete_native_event;
-  }
   void set_cancelable(bool cancelable) { cancelable_ = cancelable; }
 
   void set_time_stamp(const base::TimeDelta& time_stamp) {
@@ -354,17 +351,17 @@ class EVENTS_EXPORT MouseEvent : public LocatedEvent {
     set_flags(flags);
   }
 
-  // Used for synthetic events in testing and by the gesture recognizer.
+  // Used for synthetic events in testing, gesture recognizer and Ozone
   MouseEvent(EventType type,
              const gfx::PointF& location,
              const gfx::PointF& root_location,
+             base::TimeDelta time_stamp,
              int flags,
              int changed_button_flags);
 
   // Conveniences to quickly test what button is down
   bool IsOnlyLeftMouseButton() const {
-    return (flags() & EF_LEFT_MOUSE_BUTTON) &&
-      !(flags() & (EF_MIDDLE_MOUSE_BUTTON | EF_RIGHT_MOUSE_BUTTON));
+    return button_flags() == EF_LEFT_MOUSE_BUTTON;
   }
 
   bool IsLeftMouseButton() const {
@@ -372,8 +369,7 @@ class EVENTS_EXPORT MouseEvent : public LocatedEvent {
   }
 
   bool IsOnlyMiddleMouseButton() const {
-    return (flags() & EF_MIDDLE_MOUSE_BUTTON) &&
-      !(flags() & (EF_LEFT_MOUSE_BUTTON | EF_RIGHT_MOUSE_BUTTON));
+    return button_flags() == EF_MIDDLE_MOUSE_BUTTON;
   }
 
   bool IsMiddleMouseButton() const {
@@ -381,8 +377,7 @@ class EVENTS_EXPORT MouseEvent : public LocatedEvent {
   }
 
   bool IsOnlyRightMouseButton() const {
-    return (flags() & EF_RIGHT_MOUSE_BUTTON) &&
-      !(flags() & (EF_LEFT_MOUSE_BUTTON | EF_MIDDLE_MOUSE_BUTTON));
+    return button_flags() == EF_RIGHT_MOUSE_BUTTON;
   }
 
   bool IsRightMouseButton() const {
@@ -390,8 +385,7 @@ class EVENTS_EXPORT MouseEvent : public LocatedEvent {
   }
 
   bool IsAnyButton() const {
-    return (flags() & (EF_LEFT_MOUSE_BUTTON | EF_MIDDLE_MOUSE_BUTTON |
-                       EF_RIGHT_MOUSE_BUTTON)) != 0;
+    return button_flags() != 0;
   }
 
   // Compares two mouse down events and returns true if the second one should
@@ -419,6 +413,13 @@ class EVENTS_EXPORT MouseEvent : public LocatedEvent {
  private:
   FRIEND_TEST_ALL_PREFIXES(EventTest, DoubleClickRequiresRelease);
   FRIEND_TEST_ALL_PREFIXES(EventTest, SingleClickRightLeft);
+
+  // Returns the flags for the mouse buttons.
+  int button_flags() const {
+    return flags() & (EF_LEFT_MOUSE_BUTTON | EF_MIDDLE_MOUSE_BUTTON |
+                      EF_RIGHT_MOUSE_BUTTON | EF_BACK_MOUSE_BUTTON |
+                      EF_FORWARD_MOUSE_BUTTON);
+  }
 
   // Returns the repeat count based on the previous mouse click, if it is
   // recent enough and within a small enough distance.
@@ -462,6 +463,7 @@ class EVENTS_EXPORT MouseWheelEvent : public MouseEvent {
   MouseWheelEvent(const gfx::Vector2d& offset,
                   const gfx::PointF& location,
                   const gfx::PointF& root_location,
+                  base::TimeDelta time_stamp,
                   int flags,
                   int changed_button_flags);
 
@@ -470,10 +472,6 @@ class EVENTS_EXPORT MouseWheelEvent : public MouseEvent {
   int x_offset() const { return offset_.x(); }
   int y_offset() const { return offset_.y(); }
   const gfx::Vector2d& offset() const { return offset_; }
-
-  // Overridden from LocatedEvent.
-  void UpdateForRootTransform(
-      const gfx::Transform& inverted_root_transform) override;
 
  private:
   gfx::Vector2d offset_;
@@ -495,7 +493,8 @@ class EVENTS_EXPORT TouchEvent : public LocatedEvent {
         radius_y_(model.radius_y_),
         rotation_angle_(model.rotation_angle_),
         force_(model.force_),
-        may_cause_scrolling_(model.may_cause_scrolling_) {}
+        may_cause_scrolling_(model.may_cause_scrolling_),
+        should_remove_native_touch_id_mapping_(false) {}
 
   TouchEvent(EventType type,
              const gfx::PointF& location,
@@ -512,14 +511,18 @@ class EVENTS_EXPORT TouchEvent : public LocatedEvent {
              float angle,
              float force);
 
+  TouchEvent(const TouchEvent& copy);
+
   ~TouchEvent() override;
 
   // The id of the pointer this event modifies.
   int touch_id() const { return touch_id_; }
   // A unique identifier for this event.
   uint64 unique_event_id() const { return unique_event_id_; }
-  float radius_x() const { return radius_x_; }
-  float radius_y() const { return radius_y_; }
+  // If we aren't provided with a radius on one axis, use the
+  // information from the other axis.
+  float radius_x() const { return radius_x_ > 0 ? radius_x_ : radius_y_; }
+  float radius_y() const { return radius_y_ > 0 ? radius_y_ : radius_x_; }
   float rotation_angle() const { return rotation_angle_; }
   float force() const { return force_; }
 
@@ -529,6 +532,12 @@ class EVENTS_EXPORT TouchEvent : public LocatedEvent {
   // Used for unit tests.
   void set_radius_x(const float r) { radius_x_ = r; }
   void set_radius_y(const float r) { radius_y_ = r; }
+
+  void set_should_remove_native_touch_id_mapping(
+      bool should_remove_native_touch_id_mapping) {
+    should_remove_native_touch_id_mapping_ =
+        should_remove_native_touch_id_mapping;
+  }
 
   // Overridden from LocatedEvent.
   void UpdateForRootTransform(
@@ -540,19 +549,10 @@ class EVENTS_EXPORT TouchEvent : public LocatedEvent {
     return !!(result() & ER_DISABLE_SYNC_HANDLING);
   }
 
- protected:
-  void set_radius(float radius_x, float radius_y) {
-    radius_x_ = radius_x;
-    radius_y_ = radius_y;
-  }
-
-  void set_rotation_angle(float rotation_angle) {
-    rotation_angle_ = rotation_angle;
-  }
-
-  void set_force(float force) { force_ = force; }
-
  private:
+  // Adjusts rotation_angle_ to within the acceptable range.
+  void FixRotationAngle();
+
   // The identity (typically finger) of the touch starting at 0 and incrementing
   // for each separable additional touch that the hardware can detect.
   const int touch_id_;
@@ -566,7 +566,8 @@ class EVENTS_EXPORT TouchEvent : public LocatedEvent {
   // Radius of the Y (minor) axis of the touch ellipse. 0.0 if unknown.
   float radius_y_;
 
-  // Angle of the major axis away from the X axis. Default 0.0.
+  // Clockwise angle (in degrees) of the major axis from the X axis. Must be
+  // less than 180 and non-negative.
   float rotation_angle_;
 
   // Force (pressure) of the touch. Normalized to be [0, 1]. Default to be 0.0.
@@ -576,6 +577,12 @@ class EVENTS_EXPORT TouchEvent : public LocatedEvent {
   // touchmove that exceeds the platform slop region, or a touchend that
   // causes a fling). Defaults to false.
   bool may_cause_scrolling_;
+
+  // True if this event should remove the mapping between the native
+  // event id and the touch_id_. This should only be the case for
+  // release and cancel events where the associated touch press event
+  // created a mapping between the native id and the touch_id_.
+  bool should_remove_native_touch_id_mapping_;
 };
 
 // An interface that individual platforms can use to store additional data on
@@ -644,7 +651,8 @@ class EVENTS_EXPORT KeyEvent : public Event {
            DomCode code,
            int flags,
            DomKey key,
-           base::char16 character);
+           base::char16 character,
+           base::TimeDelta time_stamp);
 
   // Create a character event.
   KeyEvent(base::char16 character, KeyboardCode key_code, int flags);
@@ -749,9 +757,6 @@ class EVENTS_EXPORT KeyEvent : public Event {
   void set_is_char(bool is_char) { is_char_ = is_char; }
 
  private:
-  // True if the key press originated from a 'right' key (VKEY_RSHIFT, etc.).
-  bool IsRightSideKey() const;
-
   // Determine key_ and character_ on a keystroke event from code_ and flags().
   void ApplyLayout() const;
 

@@ -40,7 +40,7 @@ namespace nacl {
 
 NaClBrokerHost::NaClBrokerHost() : is_terminating_(false) {
   process_.reset(content::BrowserChildProcessHost::Create(
-      PROCESS_TYPE_NACL_BROKER, this));
+      static_cast<content::ProcessType>(PROCESS_TYPE_NACL_BROKER), this));
 }
 
 NaClBrokerHost::~NaClBrokerHost() {
@@ -67,7 +67,8 @@ bool NaClBrokerHost::Init() {
     cmd_line->AppendSwitch(switches::kNoErrorDialogs);
 
   process_->Launch(new NaClBrokerSandboxedProcessLauncherDelegate,
-                   cmd_line);
+                   cmd_line,
+                   true);
   return true;
 }
 

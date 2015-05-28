@@ -44,8 +44,10 @@ class EmbeddedWorkerTestHelper : public IPC::Sender,
                                  public IPC::Listener {
  public:
   // Initialize this helper for |context|, and enable this as an IPC
-  // sender for |mock_render_process_id|.
-  explicit EmbeddedWorkerTestHelper(int mock_render_process_id);
+  // sender for |mock_render_process_id|. If |user_data_directory| is empty,
+  // the context makes storage stuff in memory.
+  EmbeddedWorkerTestHelper(const base::FilePath& user_data_directory,
+                           int mock_render_process_id);
   ~EmbeddedWorkerTestHelper() override;
 
   // Call this to simulate add/associate a process to a pattern.
@@ -92,9 +94,7 @@ class EmbeddedWorkerTestHelper : public IPC::Sender,
   // worker. By default they just return success via
   // SimulateSendReplyToBrowser.
   virtual void OnActivateEvent(int embedded_worker_id, int request_id);
-  virtual void OnInstallEvent(int embedded_worker_id,
-                              int request_id,
-                              int active_version_id);
+  virtual void OnInstallEvent(int embedded_worker_id, int request_id);
   virtual void OnFetchEvent(int embedded_worker_id,
                             int request_id,
                             const ServiceWorkerFetchRequest& request);
@@ -119,7 +119,7 @@ class EmbeddedWorkerTestHelper : public IPC::Sender,
                              int embedded_worker_id,
                              const IPC::Message& message);
   void OnActivateEventStub(int request_id);
-  void OnInstallEventStub(int request_id, int active_version_id);
+  void OnInstallEventStub(int request_id);
   void OnFetchEventStub(int request_id,
                         const ServiceWorkerFetchRequest& request);
 

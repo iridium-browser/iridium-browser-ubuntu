@@ -35,11 +35,11 @@ namespace blink {
 namespace XPath {
 
 class NodeSet : public NoBaseWillBeGarbageCollected<NodeSet> {
-    WTF_MAKE_FAST_ALLOCATED_WILL_BE_REMOVED;
+    WTF_MAKE_FAST_ALLOCATED_WILL_BE_REMOVED(NodeSet);
 public:
     static PassOwnPtrWillBeRawPtr<NodeSet> create() { return adoptPtrWillBeNoop(new NodeSet); }
     static PassOwnPtrWillBeRawPtr<NodeSet> create(const NodeSet&);
-    void trace(Visitor* visitor) { visitor->trace(m_nodes); }
+    DEFINE_INLINE_TRACE() { visitor->trace(m_nodes); }
 
     size_t size() const { return m_nodes.size(); }
     bool isEmpty() const { return !m_nodes.size(); }
@@ -78,7 +78,7 @@ private:
 
     bool m_isSorted;
     bool m_subtreesAreDisjoint;
-    WillBeHeapVector<RefPtrWillBeMember<Node> > m_nodes;
+    WillBeHeapVector<RefPtrWillBeMember<Node>> m_nodes;
 };
 
 }

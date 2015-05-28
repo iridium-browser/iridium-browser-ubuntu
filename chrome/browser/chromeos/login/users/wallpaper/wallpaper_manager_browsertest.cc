@@ -67,9 +67,9 @@ class WallpaperManagerBrowserTest : public InProcessBrowserTest {
                                    local_state_(NULL) {
   }
 
-  virtual ~WallpaperManagerBrowserTest () {}
+  ~WallpaperManagerBrowserTest() override {}
 
-  virtual void SetUpOnMainThread() override {
+  void SetUpOnMainThread() override {
     controller_ = ash::Shell::GetInstance()->desktop_background_controller();
     local_state_ = g_browser_process->local_state();
     ash::DesktopBackgroundController::TestAPI(controller_)
@@ -77,14 +77,12 @@ class WallpaperManagerBrowserTest : public InProcessBrowserTest {
     UpdateDisplay("800x600");
   }
 
-  virtual void SetUpCommandLine(base::CommandLine* command_line) override {
+  void SetUpCommandLine(base::CommandLine* command_line) override {
     command_line->AppendSwitch(switches::kLoginManager);
     command_line->AppendSwitchASCII(switches::kLoginProfile, "user");
   }
 
-  virtual void TearDownOnMainThread() override {
-    controller_ = NULL;
-  }
+  void TearDownOnMainThread() override { controller_ = NULL; }
 
   // Update the display configuration as given in |display_specs|.  See
   // ash::test::DisplayManagerTestApi::UpdateDisplay for more details.
@@ -119,6 +117,17 @@ class WallpaperManagerBrowserTest : public InProcessBrowserTest {
     user_manager::UserManager::Get()->UserLoggedIn(
         username, username_hash, false);
     WaitAsyncWallpaperLoadStarted();
+  }
+
+  // Logs in |username| and sets it as child account.
+  void LogInAsChild(
+      const std::string& username, const std::string& username_hash) {
+    user_manager::UserManager::Get()->UserLoggedIn(
+        username, username_hash, false);
+    user_manager::User* user =
+        user_manager::UserManager::Get()->FindUserAndModify(username);
+    user_manager::UserManager::Get()->ChangeUserChildStatus(
+        user, true /* is_child */);
   }
 
   int LoadedWallpapers() {
@@ -352,7 +361,7 @@ IN_PROC_BROWSER_TEST_F(WallpaperManagerBrowserTest,
 class WallpaperManagerBrowserTestNoAnimation
     : public WallpaperManagerBrowserTest {
  public:
-  virtual void SetUpCommandLine(base::CommandLine* command_line) override {
+  void SetUpCommandLine(base::CommandLine* command_line) override {
     command_line->AppendSwitch(switches::kLoginManager);
     command_line->AppendSwitchASCII(switches::kLoginProfile, "user");
     command_line->AppendSwitch(chromeos::switches::kDisableLoginAnimations);
@@ -415,7 +424,7 @@ IN_PROC_BROWSER_TEST_F(WallpaperManagerBrowserTestNoAnimation,
 class WallpaperManagerBrowserTestCrashRestore
     : public WallpaperManagerBrowserTest {
  public:
-  virtual void SetUpCommandLine(base::CommandLine* command_line) override {
+  void SetUpCommandLine(base::CommandLine* command_line) override {
     command_line->AppendSwitch(chromeos::switches::kDisableLoginAnimations);
     command_line->AppendSwitch(chromeos::switches::kDisableBootAnimation);
     command_line->AppendSwitchASCII(switches::kLoginUser, kTestUser1);
@@ -445,7 +454,7 @@ IN_PROC_BROWSER_TEST_F(WallpaperManagerBrowserTestCrashRestore,
 class WallpaperManagerBrowserTestCacheUpdate
     : public WallpaperManagerBrowserTest {
  public:
-  virtual void SetUpCommandLine(base::CommandLine* command_line) override {
+  void SetUpCommandLine(base::CommandLine* command_line) override {
     command_line->AppendSwitchASCII(switches::kLoginUser, kTestUser1);
     command_line->AppendSwitchASCII(switches::kLoginProfile, "user");
   }
@@ -580,16 +589,11 @@ class TestObserver : public WallpaperManager::Observer {
     wallpaper_manager_->AddObserver(this);
   }
 
-  virtual ~TestObserver() {
-    wallpaper_manager_->RemoveObserver(this);
-  }
+  ~TestObserver() override { wallpaper_manager_->RemoveObserver(this); }
 
-  virtual void OnWallpaperAnimationFinished(const std::string&) override {
-  }
+  void OnWallpaperAnimationFinished(const std::string&) override {}
 
-  virtual void OnUpdateWallpaperForTesting() override {
-    ++update_wallpaper_count_;
-  }
+  void OnUpdateWallpaperForTesting() override { ++update_wallpaper_count_; }
 
   int GetUpdateWallpaperCountAndReset() {
     const size_t old = update_wallpaper_count_;
@@ -774,6 +778,33 @@ IN_PROC_BROWSER_TEST_F(WallpaperManagerBrowserTest, LargeGuestWallpaper) {
   EXPECT_TRUE(wallpaper_manager_test_utils::ImageIsNearColor(
       controller_->GetWallpaper(),
       wallpaper_manager_test_utils::kLargeGuestWallpaperColor));
+}
+
+IN_PROC_BROWSER_TEST_F(WallpaperManagerBrowserTest, SmallChildWallpaper) {
+  if (!ash::test::AshTestHelper::SupportsMultipleDisplays())
+    return;
+  CreateCmdlineWallpapers();
+  LogInAsChild(kTestUser1, kTestUser1Hash);
+  UpdateDisplay("800x600");
+  WallpaperManager::Get()->SetDefaultWallpaperNow(std::string());
+  wallpaper_manager_test_utils::WaitAsyncWallpaperLoadFinished();
+  EXPECT_TRUE(wallpaper_manager_test_utils::ImageIsNearColor(
+      controller_->GetWallpaper(),
+      wallpaper_manager_test_utils::kSmallChildWallpaperColor));
+}
+
+IN_PROC_BROWSER_TEST_F(WallpaperManagerBrowserTest, LargeChildWallpaper) {
+  if (!ash::test::AshTestHelper::SupportsMultipleDisplays())
+    return;
+
+  CreateCmdlineWallpapers();
+  LogInAsChild(kTestUser1, kTestUser1Hash);
+  UpdateDisplay("1600x1200");
+  WallpaperManager::Get()->SetDefaultWallpaperNow(std::string());
+  wallpaper_manager_test_utils::WaitAsyncWallpaperLoadFinished();
+  EXPECT_TRUE(wallpaper_manager_test_utils::ImageIsNearColor(
+      controller_->GetWallpaper(),
+      wallpaper_manager_test_utils::kLargeChildWallpaperColor));
 }
 
 IN_PROC_BROWSER_TEST_F(WallpaperManagerBrowserTest,

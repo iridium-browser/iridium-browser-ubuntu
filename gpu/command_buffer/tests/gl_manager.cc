@@ -38,11 +38,19 @@
 namespace gpu {
 namespace {
 
-size_t BytesPerPixel(gfx::GpuMemoryBuffer::Format format) {
+size_t StrideInBytes(size_t width, gfx::GpuMemoryBuffer::Format format) {
   switch (format) {
+    case gfx::GpuMemoryBuffer::ATCIA:
+    case gfx::GpuMemoryBuffer::DXT5:
+      return width;
+    case gfx::GpuMemoryBuffer::ATC:
+    case gfx::GpuMemoryBuffer::DXT1:
+    case gfx::GpuMemoryBuffer::ETC1:
+      DCHECK_EQ(width % 2, 0U);
+      return width / 2;
     case gfx::GpuMemoryBuffer::RGBA_8888:
     case gfx::GpuMemoryBuffer::BGRA_8888:
-      return 4;
+      return width * 4;
     case gfx::GpuMemoryBuffer::RGBX_8888:
       NOTREACHED();
       return 0;
@@ -64,15 +72,16 @@ class GpuMemoryBufferImpl : public gfx::GpuMemoryBuffer {
   }
 
   // Overridden from gfx::GpuMemoryBuffer:
-  void* Map() override {
+  bool Map(void** data) override {
     mapped_ = true;
-    return &bytes_->data().front();
+    *data = &bytes_->data().front();
+    return true;
   }
   void Unmap() override { mapped_ = false; }
   bool IsMapped() const override { return mapped_; }
   Format GetFormat() const override { return format_; }
-  uint32 GetStride() const override {
-    return size_.width() * BytesPerPixel(format_);
+  void GetStride(uint32* stride) const override {
+    *stride = StrideInBytes(size_.width(), format_);
   }
   gfx::GpuMemoryBufferHandle GetHandle() const override {
     NOTREACHED();
@@ -134,7 +143,8 @@ GLManager::~GLManager() {
 scoped_ptr<gfx::GpuMemoryBuffer> GLManager::CreateGpuMemoryBuffer(
     const gfx::Size& size,
     gfx::GpuMemoryBuffer::Format format) {
-  std::vector<unsigned char> data(size.GetArea() * BytesPerPixel(format), 0);
+  std::vector<unsigned char> data(
+      StrideInBytes(size.width(), format) * size.height(), 0);
   scoped_refptr<base::RefCountedBytes> bytes(new base::RefCountedBytes(data));
   return make_scoped_ptr<gfx::GpuMemoryBuffer>(
       new GpuMemoryBufferImpl(bytes.get(), size, format));
@@ -426,6 +436,10 @@ void GLManager::SetSurfaceVisible(bool visible) {
 uint32 GLManager::CreateStreamTexture(uint32 texture_id) {
   NOTIMPLEMENTED();
   return 0;
+}
+
+void GLManager::SetLock(base::Lock*) {
+  NOTIMPLEMENTED();
 }
 
 }  // namespace gpu

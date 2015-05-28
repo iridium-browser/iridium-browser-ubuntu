@@ -78,7 +78,11 @@ class ASH_EXPORT DisplayManager
   };
 
   DisplayManager();
+#if defined(OS_CHROMEOS)
+  ~DisplayManager() override;
+#else
   virtual ~DisplayManager();
+#endif
 
   DisplayLayoutStore* layout_store() {
     return layout_store_.get();
@@ -147,8 +151,11 @@ class ASH_EXPORT DisplayManager
   // display's bounds change.
   void SetOverscanInsets(int64 display_id, const gfx::Insets& insets_in_dip);
 
-  // Sets the display's rotation.
-  void SetDisplayRotation(int64 display_id, gfx::Display::Rotation rotation);
+  // Sets the display's rotation for the given |source|. The new |rotation| will
+  // also become active.
+  void SetDisplayRotation(int64 display_id,
+                          gfx::Display::Rotation rotation,
+                          gfx::Display::RotationSource source);
 
   // Sets the display's ui scale. Returns true if it's successful, or
   // false otherwise.  TODO(mukai): remove this and merge into
@@ -270,8 +277,8 @@ class ASH_EXPORT DisplayManager
 
   // SoftwareMirroringController override:
 #if defined(OS_CHROMEOS)
-  virtual void SetSoftwareMirroring(bool enabled) override;
-  virtual bool SoftwareMirroringEnabled() const override;
+  void SetSoftwareMirroring(bool enabled) override;
+  bool SoftwareMirroringEnabled() const override;
 #endif
   bool software_mirroring_enabled() const {
     return second_display_mode_ == MIRRORING;

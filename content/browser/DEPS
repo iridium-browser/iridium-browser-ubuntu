@@ -7,9 +7,11 @@ include_rules = [
   "+media/base",  # For Android JNI registration.
   "+media/filters",  # For reporting GPU decoding UMA.
   "+media/midi",  # For Web MIDI API
+  "+media/mojo",  # For mojo media services.
   "+media/video",  # For Video Device monitoring in Mac.
   "+mojo",
   "+sql",
+  "+ui/aura_extra",
   "+ui/webui",
   "+win8/util",
 
@@ -41,6 +43,7 @@ include_rules = [
   "-third_party/WebKit",
   "+third_party/WebKit/public/platform/WebCircularGeofencingRegion.h",
   "+third_party/WebKit/public/platform/WebCursorInfo.h",
+  "+third_party/WebKit/public/platform/WebFocusType.h",
   "+third_party/WebKit/public/platform/WebGamepad.h",
   "+third_party/WebKit/public/platform/WebGamepads.h",
   "+third_party/WebKit/public/platform/WebGeofencingEventType.h",
@@ -49,8 +52,6 @@ include_rules = [
   "+third_party/WebKit/public/platform/WebIDBTypes.h",
   "+third_party/WebKit/public/platform/WebReferrerPolicy.h",
   "+third_party/WebKit/public/platform/WebLockOrientationError.h",
-  "+third_party/WebKit/public/platform/WebNotificationPermission.h",
-  "+third_party/WebKit/public/platform/WebPushPermissionStatus.h",
   "+third_party/WebKit/public/platform/WebScreenOrientationLockType.h",
   "+third_party/WebKit/public/platform/WebScreenOrientationType.h",
   "+third_party/WebKit/public/platform/WebScreenInfo.h",
@@ -60,17 +61,19 @@ include_rules = [
   "+third_party/WebKit/public/platform/WebServiceWorkerResponseType.h",
   "+third_party/WebKit/public/platform/WebServiceWorkerState.h",
   "+third_party/WebKit/public/platform/WebString.h",
+  "+third_party/WebKit/public/platform/modules/notifications/WebNotificationPermission.h",
+  "+third_party/WebKit/public/platform/modules/push_messaging/WebPushPermissionStatus.h",
   "+third_party/WebKit/public/web/mac/WebScrollbarTheme.h",
   "+third_party/WebKit/public/web/WebAXEnums.h",
   "+third_party/WebKit/public/web/WebCompositionUnderline.h",
   "+third_party/WebKit/public/web/WebConsoleMessage.h",
   "+third_party/WebKit/public/web/WebContentSecurityPolicy.h",
+  "+third_party/WebKit/public/web/WebDeviceEmulationParams.h",
   "+third_party/WebKit/public/web/WebDragOperation.h",
   "+third_party/WebKit/public/web/WebDragStatus.h",
   "+third_party/WebKit/public/web/WebFindOptions.h",
   "+third_party/WebKit/public/web/WebInputEvent.h",
   "+third_party/WebKit/public/web/WebMediaPlayerAction.h",
-  "+third_party/WebKit/public/web/WebNotificationPresenter.h",
   "+third_party/WebKit/public/web/WebPageSerializerClient.h",
   "+third_party/WebKit/public/web/WebPluginAction.h",
   "+third_party/WebKit/public/web/WebPopupType.h",

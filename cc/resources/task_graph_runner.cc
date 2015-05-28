@@ -6,9 +6,9 @@
 
 #include <algorithm>
 
-#include "base/debug/trace_event.h"
 #include "base/strings/stringprintf.h"
 #include "base/threading/thread_restrictions.h"
+#include "base/trace_event/trace_event.h"
 
 namespace cc {
 namespace {
@@ -290,6 +290,7 @@ void TaskGraphRunner::WaitForTasksToFinishRunning(NamespaceToken token) {
 
   {
     base::AutoLock lock(lock_);
+    base::ThreadRestrictions::ScopedAllowWait allow_wait;
 
     TaskNamespaceMap::const_iterator it = namespaces_.find(token.id_);
     if (it == namespaces_.end())

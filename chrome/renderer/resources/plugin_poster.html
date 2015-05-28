@@ -3,28 +3,75 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, user-scalable=no">
+<script>
+function notifyDidFinishLoading() {
+  if (plugin.didFinishLoading)
+    plugin.didFinishLoading();
+}
+
+document.onkeydown = function(e) {
+  if (e.keyIdentifier == 'Enter' || e.keyIdentifier == 'U+0020') {
+    plugin.load();
+    e.preventDefault();
+  }
+};
+</script>
 <link rel="stylesheet" href="plugin_placeholders.css"></link>
 <style>
 #outer {
+  position: relative;
+  border: none;
   cursor: pointer;
 }
 
-#plugin_icon {
-  opacity: 0.0;
+#shielding {
+  background-color: rgba(0, 0, 0, 0.5);
+  position: absolute;
+  top: 0px;
+  left: 0px;
+  height: 100%;
+  width: 100%;
+  z-index: 2;
 }
 
-#outer:hover #plugin_icon {
-  opacity: 0.4;
+#plugin_icon {
+  opacity: 0.8;
+}
+
+#plugin_icon:hover {
+  opacity: 0.95;
+}
+
+#poster {
+  height: 100%;
+  width: 100%;
+  z-index: 1;
+}
+
+#inner_container {
+  height: 100%;
+  width: 100%;
+  position: relative;
+}
+
+#inner {
+  margin-top: -25px;
 }
 </style>
+<base i18n-values="href:baseurl">
 </head>
 
-<body i18n-values=".style.background-image:background">
-<div i18n-values="title:name" id="outer" onclick="plugin.load()">
-<p id="debug"> </p>
-<div id="inner">
-<div><img id="plugin_icon" src="plugin_blocked.png" /></div>
-</div>
-</div>
+<body onload="notifyDidFinishLoading();">
+  <div i18n-values="title:name" id="outer" onclick="plugin.load()">
+    <img id="poster" i18n-values="srcset:poster">
+    <div id="shielding">
+      <div id="inner_container"
+           i18n-values=".style.width:visibleWidth;.style.height:visibleHeight">
+        <div id="inner">
+          <img id="plugin_icon" src="plugin_power_saver_play.png" />
+        </div>
+      </div>
+    </div>
+  </div>
 </body>
 </html>

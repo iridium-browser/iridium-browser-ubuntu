@@ -24,13 +24,14 @@ class MockVideoCapturerDelegate : public VideoCapturerDelegate {
   explicit MockVideoCapturerDelegate(const StreamDeviceInfo& device_info)
       : VideoCapturerDelegate(device_info) {}
 
-  MOCK_METHOD3(StartCapture,
-               void(const media::VideoCaptureParams& params,
-                    const VideoCaptureDeliverFrameCB& new_frame_callback,
-                    const RunningCallback& running_callback));
+  MOCK_METHOD4(
+      StartCapture,
+      void(const media::VideoCaptureParams& params,
+           const VideoCaptureDeliverFrameCB& new_frame_callback,
+           scoped_refptr<base::SingleThreadTaskRunner>
+           frame_callback_task_runner,
+           const RunningCallback& running_callback));
   MOCK_METHOD0(StopCapture, void());
-
-  virtual ~MockVideoCapturerDelegate() {}
 };
 
 class MediaStreamVideoCapturerSourceTest : public testing::Test {
@@ -52,10 +53,10 @@ class MediaStreamVideoCapturerSourceTest : public testing::Test {
         new MockVideoCapturerDelegate(device_info));
     delegate_ = delegate.get();
     source_ = new MediaStreamVideoCapturerSource(
-        device_info,
         base::Bind(&MediaStreamVideoCapturerSourceTest::OnSourceStopped,
                     base::Unretained(this)),
         delegate.Pass());
+    source_->SetDeviceInfo(device_info);
 
     webkit_source_.initialize(base::UTF8ToUTF16("dummy_source_id"),
                               blink::WebMediaStreamSource::TypeVideo,
@@ -110,6 +111,7 @@ TEST_F(MediaStreamVideoCapturerSourceTest, TabCaptureAllowResolutionChange) {
       testing::Field(&media::VideoCaptureParams::resolution_change_policy,
                      media::RESOLUTION_POLICY_DYNAMIC_WITHIN_LIMIT),
       testing::_,
+      testing::_,
       testing::_)).Times(1);
   blink::WebMediaStreamTrack track = StartSource();
   // When the track goes out of scope, the source will be stopped.
@@ -126,6 +128,7 @@ TEST_F(MediaStreamVideoCapturerSourceTest,
       testing::Field(&media::VideoCaptureParams::resolution_change_policy,
                      media::RESOLUTION_POLICY_DYNAMIC_WITHIN_LIMIT),
       testing::_,
+      testing::_,
       testing::_)).Times(1);
   blink::WebMediaStreamTrack track = StartSource();
   // When the track goes out of scope, the source will be stopped.
@@ -139,10 +142,10 @@ TEST_F(MediaStreamVideoCapturerSourceTest, Ended) {
       new VideoCapturerDelegate(device_info));
   VideoCapturerDelegate* delegate_ptr = delegate.get();
   source_ = new MediaStreamVideoCapturerSource(
-      device_info,
       base::Bind(&MediaStreamVideoCapturerSourceTest::OnSourceStopped,
                  base::Unretained(this)),
       delegate.Pass());
+  source_->SetDeviceInfo(device_info);
   webkit_source_.initialize(base::UTF8ToUTF16("dummy_source_id"),
                             blink::WebMediaStreamSource::TypeVideo,
                             base::UTF8ToUTF16("dummy_source_name"),
@@ -152,13 +155,13 @@ TEST_F(MediaStreamVideoCapturerSourceTest, Ended) {
   blink::WebMediaStreamTrack track = StartSource();
   message_loop_.RunUntilIdle();
 
-  delegate_ptr->OnStateUpdateOnRenderThread(VIDEO_CAPTURE_STATE_STARTED);
+  delegate_ptr->OnStateUpdate(VIDEO_CAPTURE_STATE_STARTED);
   message_loop_.RunUntilIdle();
   EXPECT_EQ(blink::WebMediaStreamSource::ReadyStateLive,
             webkit_source_.readyState());
 
   EXPECT_FALSE(source_stopped_);
-  delegate_ptr->OnStateUpdateOnRenderThread(VIDEO_CAPTURE_STATE_ERROR);
+  delegate_ptr->OnStateUpdate(VIDEO_CAPTURE_STATE_ERROR);
   message_loop_.RunUntilIdle();
   EXPECT_EQ(blink::WebMediaStreamSource::ReadyStateEnded,
             webkit_source_.readyState());
@@ -169,24 +172,30 @@ TEST_F(MediaStreamVideoCapturerSourceTest, Ended) {
 class FakeMediaStreamVideoSink : public MediaStreamVideoSink {
  public:
   FakeMediaStreamVideoSink(base::TimeTicks* capture_time,
+                           media::VideoFrameMetadata* metadata,
                            base::Closure got_frame_cb)
       : capture_time_(capture_time),
+        metadata_(metadata),
         got_frame_cb_(got_frame_cb) {
   }
 
   void OnVideoFrame(const scoped_refptr<media::VideoFrame>& frame,
-                    const media::VideoCaptureFormat& format,
                     const base::TimeTicks& capture_time) {
     *capture_time_ = capture_time;
+    metadata_->Clear();
+    base::DictionaryValue tmp;
+    frame->metadata()->MergeInternalValuesInto(&tmp);
+    metadata_->MergeInternalValuesFrom(tmp);
     base::ResetAndReturn(&got_frame_cb_).Run();
   }
 
  private:
-  base::TimeTicks* capture_time_;
+  base::TimeTicks* const capture_time_;
+  media::VideoFrameMetadata* const metadata_;
   base::Closure got_frame_cb_;
 };
 
-TEST_F(MediaStreamVideoCapturerSourceTest, CaptureTime) {
+TEST_F(MediaStreamVideoCapturerSourceTest, CaptureTimeAndMetadataPlumbing) {
   StreamDeviceInfo device_info;
   device_info.device.type = MEDIA_DESKTOP_VIDEO_CAPTURE;
   InitWithDeviceInfo(device_info);
@@ -197,35 +206,41 @@ TEST_F(MediaStreamVideoCapturerSourceTest, CaptureTime) {
   EXPECT_CALL(mock_delegate(), StartCapture(
       testing::_,
       testing::_,
+      testing::_,
       testing::_))
       .Times(1)
       .WillOnce(testing::DoAll(testing::SaveArg<1>(&deliver_frame_cb),
-                               testing::SaveArg<2>(&running_cb)));
+                               testing::SaveArg<3>(&running_cb)));
   EXPECT_CALL(mock_delegate(), StopCapture());
   blink::WebMediaStreamTrack track = StartSource();
-  running_cb.Run(MEDIA_DEVICE_OK);
+  running_cb.Run(true);
 
   base::RunLoop run_loop;
   base::TimeTicks reference_capture_time =
       base::TimeTicks::FromInternalValue(60013);
   base::TimeTicks capture_time;
+  media::VideoFrameMetadata metadata;
   FakeMediaStreamVideoSink fake_sink(
       &capture_time,
+      &metadata,
       media::BindToCurrentLoop(run_loop.QuitClosure()));
   FakeMediaStreamVideoSink::AddToVideoTrack(
       &fake_sink,
       base::Bind(&FakeMediaStreamVideoSink::OnVideoFrame,
                  base::Unretained(&fake_sink)),
       track);
+  const scoped_refptr<media::VideoFrame> frame =
+      media::VideoFrame::CreateBlackFrame(gfx::Size(2, 2));
+  frame->metadata()->SetDouble(media::VideoFrameMetadata::FRAME_RATE, 30.0);
   child_process_->io_message_loop()->PostTask(
-      FROM_HERE,
-      base::Bind(deliver_frame_cb,
-                 media::VideoFrame::CreateBlackFrame(gfx::Size(2, 2)),
-                 media::VideoCaptureFormat(),
-                 reference_capture_time));
+      FROM_HERE, base::Bind(deliver_frame_cb, frame, reference_capture_time));
   run_loop.Run();
   FakeMediaStreamVideoSink::RemoveFromVideoTrack(&fake_sink, track);
   EXPECT_EQ(reference_capture_time, capture_time);
+  double metadata_value;
+  EXPECT_TRUE(metadata.GetDouble(media::VideoFrameMetadata::FRAME_RATE,
+                                 &metadata_value));
+  EXPECT_EQ(30.0, metadata_value);
 }
 
 }  // namespace content

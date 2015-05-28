@@ -42,7 +42,7 @@ public:
     String label() const;
     String groupId() const;
 
-    void trace(Visitor*) { }
+    DEFINE_INLINE_TRACE() { }
 
 private:
     explicit MediaDeviceInfo(const WebMediaDeviceInfo&);
@@ -50,7 +50,7 @@ private:
     WebMediaDeviceInfo m_webMediaDeviceInfo;
 };
 
-typedef HeapVector<Member<MediaDeviceInfo> > MediaDeviceInfoVector;
+typedef HeapVector<Member<MediaDeviceInfo>> MediaDeviceInfoVector;
 
 } // namespace blink
 

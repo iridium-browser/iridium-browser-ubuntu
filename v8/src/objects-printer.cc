@@ -231,26 +231,27 @@ void JSObject::PrintProperties(std::ostream& os) {  // NOLINT
       descs->GetKey(i)->NamePrint(os);
       os << ": ";
       switch (descs->GetType(i)) {
-        case FIELD: {
+        case DATA: {
           FieldIndex index = FieldIndex::ForDescriptor(map(), i);
           if (IsUnboxedDoubleField(index)) {
             os << "<unboxed double> " << RawFastDoublePropertyAt(index);
           } else {
             os << Brief(RawFastPropertyAt(index));
           }
-          os << " (field at offset " << index.property_index() << ")\n";
+          os << " (data field at offset " << index.property_index() << ")\n";
           break;
         }
-        case ACCESSOR_FIELD: {
+        case ACCESSOR: {
           FieldIndex index = FieldIndex::ForDescriptor(map(), i);
-          os << " (accessor at offset " << index.property_index() << ")\n";
+          os << " (accessor field at offset " << index.property_index()
+             << ")\n";
           break;
         }
-        case CONSTANT:
-          os << Brief(descs->GetConstant(i)) << " (constant)\n";
+        case DATA_CONSTANT:
+          os << Brief(descs->GetConstant(i)) << " (data constant)\n";
           break;
-        case CALLBACKS:
-          os << Brief(descs->GetCallbacksObject(i)) << " (callbacks)\n";
+        case ACCESSOR_CONSTANT:
+          os << Brief(descs->GetCallbacksObject(i)) << " (accessor constant)\n";
           break;
       }
     }
@@ -423,6 +424,7 @@ void Map::MapPrint(std::ostream& os) {  // NOLINT
   if (has_instance_call_handler()) os << " - instance_call_handler\n";
   if (is_access_check_needed()) os << " - access_check_needed\n";
   if (!is_extensible()) os << " - non-extensible\n";
+  if (is_observed()) os << " - observed\n";
   os << " - back pointer: " << Brief(GetBackPointer());
   os << "\n - instance descriptors " << (owns_descriptors() ? "(own) " : "")
      << "#" << NumberOfOwnDescriptors() << ": "
@@ -430,11 +432,12 @@ void Map::MapPrint(std::ostream& os) {  // NOLINT
   if (FLAG_unbox_double_fields) {
     os << "\n - layout descriptor: " << Brief(layout_descriptor());
   }
-  if (HasTransitionArray()) {
-    os << "\n - transitions: " << Brief(transitions());
+  if (TransitionArray::NumberOfTransitions(raw_transitions()) > 0) {
+    os << "\n - transitions: ";
+    TransitionArray::PrintTransitions(os, raw_transitions());
   }
   os << "\n - prototype: " << Brief(prototype());
-  os << "\n - constructor: " << Brief(constructor());
+  os << "\n - constructor: " << Brief(GetConstructor());
   os << "\n - code cache: " << Brief(code_cache());
   os << "\n - dependent code: " << Brief(dependent_code());
   os << "\n";
@@ -863,24 +866,6 @@ void ExecutableAccessorInfo::ExecutableAccessorInfoPrint(
 }
 
 
-void DeclaredAccessorInfo::DeclaredAccessorInfoPrint(
-    std::ostream& os) {  // NOLINT
-  HeapObject::PrintHeader(os, "DeclaredAccessorInfo");
-  os << "\n - name: " << Brief(name());
-  os << "\n - flag: " << Brief(flag());
-  os << "\n - descriptor: " << Brief(descriptor());
-  os << "\n";
-}
-
-
-void DeclaredAccessorDescriptor::DeclaredAccessorDescriptorPrint(
-    std::ostream& os) {  // NOLINT
-  HeapObject::PrintHeader(os, "DeclaredAccessorDescriptor");
-  os << "\n - internal field: " << Brief(serialized_data());
-  os << "\n";
-}
-
-
 void Box::BoxPrint(std::ostream& os) {  // NOLINT
   HeapObject::PrintHeader(os, "Box");
   os << "\n - value: " << Brief(value());
@@ -944,6 +929,7 @@ void FunctionTemplateInfo::FunctionTemplateInfoPrint(
   os << "\n - hidden_prototype: " << (hidden_prototype() ? "true" : "false");
   os << "\n - undetectable: " << (undetectable() ? "true" : "false");
   os << "\n - need_access_check: " << (needs_access_check() ? "true" : "false");
+  os << "\n - instantiated: " << (instantiated() ? "true" : "false");
   os << "\n";
 }
 
@@ -955,14 +941,6 @@ void ObjectTemplateInfo::ObjectTemplateInfoPrint(std::ostream& os) {  // NOLINT
   os << "\n - property_accessors: " << Brief(property_accessors());
   os << "\n - constructor: " << Brief(constructor());
   os << "\n - internal_field_count: " << Brief(internal_field_count());
-  os << "\n";
-}
-
-
-void SignatureInfo::SignatureInfoPrint(std::ostream& os) {  // NOLINT
-  HeapObject::PrintHeader(os, "SignatureInfo");
-  os << "\n - receiver: " << Brief(receiver());
-  os << "\n - args: " << Brief(args());
   os << "\n";
 }
 
@@ -1161,19 +1139,20 @@ void DescriptorArray::PrintDescriptors(std::ostream& os) {  // NOLINT
 
 void TransitionArray::Print() {
   OFStream os(stdout);
-  this->PrintTransitions(os);
+  TransitionArray::PrintTransitions(os, this);
   os << std::flush;
 }
 
 
-void TransitionArray::PrintTransitions(std::ostream& os,
+void TransitionArray::PrintTransitions(std::ostream& os, Object* transitions,
                                        bool print_header) {  // NOLINT
+  int num_transitions = NumberOfTransitions(transitions);
   if (print_header) {
-    os << "Transition array " << number_of_transitions() << "\n";
+    os << "Transition array " << num_transitions << "\n";
   }
-  for (int i = 0; i < number_of_transitions(); i++) {
-    Name* key = GetKey(i);
-    Map* target = GetTarget(i);
+  for (int i = 0; i < num_transitions; i++) {
+    Name* key = GetKey(transitions, i);
+    Map* target = GetTarget(transitions, i);
     os << "   ";
 #ifdef OBJECT_PRINT
     key->NamePrint(os);
@@ -1181,26 +1160,29 @@ void TransitionArray::PrintTransitions(std::ostream& os,
     key->ShortPrint(os);
 #endif
     os << ": ";
-    if (key == GetHeap()->nonextensible_symbol()) {
+    Heap* heap = key->GetHeap();
+    if (key == heap->nonextensible_symbol()) {
       os << " (transition to non-extensible)";
-    } else if (key == GetHeap()->sealed_symbol()) {
+    } else if (key == heap->sealed_symbol()) {
       os << " (transition to sealed)";
-    } else if (key == GetHeap()->frozen_symbol()) {
+    } else if (key == heap->frozen_symbol()) {
       os << " (transition to frozen)";
-    } else if (key == GetHeap()->elements_transition_symbol()) {
+    } else if (key == heap->elements_transition_symbol()) {
       os << " (transition to " << ElementsKindToString(target->elements_kind())
          << ")";
-    } else if (key == GetHeap()->observed_symbol()) {
+    } else if (key == heap->observed_symbol()) {
       os << " (transition to Object.observe)";
     } else {
       PropertyDetails details = GetTargetDetails(key, target);
       os << " (transition to ";
-      if (details.location() == IN_DESCRIPTOR) {
+      if (details.location() == kDescriptor) {
         os << "immutable ";
       }
-      os << (details.kind() == DATA ? "data" : "accessor");
-      if (details.location() == IN_DESCRIPTOR) {
-        os << " " << Brief(GetTargetValue(i));
+      os << (details.kind() == kData ? "data" : "accessor");
+      if (details.location() == kDescriptor) {
+        Object* value =
+            target->instance_descriptors()->GetValue(target->LastAdded());
+        os << " " << Brief(value);
       }
       os << "), attrs: " << details.attributes();
     }
@@ -1210,8 +1192,7 @@ void TransitionArray::PrintTransitions(std::ostream& os,
 
 
 void JSObject::PrintTransitions(std::ostream& os) {  // NOLINT
-  if (!map()->HasTransitionArray()) return;
-  map()->transitions()->PrintTransitions(os, false);
+  TransitionArray::PrintTransitions(os, map()->raw_transitions());
 }
 #endif  // defined(DEBUG) || defined(OBJECT_PRINT)
 } }  // namespace v8::internal

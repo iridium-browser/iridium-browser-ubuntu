@@ -46,9 +46,7 @@ class HTMLFormElement final : public HTMLElement {
 public:
     static PassRefPtrWillBeRawPtr<HTMLFormElement> create(Document&);
     virtual ~HTMLFormElement();
-    virtual void trace(Visitor*) override;
-
-    void setNeedsValidityCheck(ValidityRecalcReason, bool isValid);
+    DECLARE_VIRTUAL_TRACE();
 
     PassRefPtrWillBeRawPtr<HTMLFormControlsCollection> elements();
     void getNamedElements(const AtomicString&, WillBeHeapVector<RefPtrWillBeMember<Element>>&);
@@ -123,7 +121,7 @@ public:
 private:
     explicit HTMLFormElement(Document&);
 
-    virtual bool rendererIsNeeded(const RenderStyle&) override;
+    virtual bool layoutObjectIsNeeded(const ComputedStyle&) override;
     virtual InsertionNotificationRequest insertedInto(ContainerNode*) override;
     virtual void removedFrom(ContainerNode*) override;
     virtual void finishParsingChildren() override;
@@ -185,10 +183,6 @@ private:
     bool m_isInResetFunction : 1;
 
     bool m_wasDemoted : 1;
-
-    // Number of invalid elements associated to the form that are candidates
-    // for constraint validation (their willValidate state is true).
-    int m_invalidControlsCount;
 
     OwnPtrWillBeMember<GenericEventQueue> m_pendingAutocompleteEventsQueue;
 };

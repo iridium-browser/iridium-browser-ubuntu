@@ -46,7 +46,7 @@ public class OffTheRecordDocumentTabModelTest extends NativeLibraryTestBase {
         loadNativeLibraryAndInitBrowserProcess();
 
         mContext = getInstrumentation().getTargetContext();
-        mStorageDelegate = new MockStorageDelegate(mContext.getCacheDir(), true);
+        mStorageDelegate = new MockStorageDelegate(mContext.getCacheDir());
         mActivityDelegate = new MockActivityDelegate();
         mTabDelegate = new MockTabDelegate();
     }
@@ -63,8 +63,8 @@ public class OffTheRecordDocumentTabModelTest extends NativeLibraryTestBase {
             }
 
             @Override
-            public int getOffTheRecordTabCount() {
-                return mModel == null ? 0 : mModel.getCount();
+            public boolean doOffTheRecordTabsExist() {
+                return mModel == null ? false : (mModel.getCount() > 0);
             }
 
         };

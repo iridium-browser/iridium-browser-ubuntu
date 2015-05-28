@@ -14,18 +14,44 @@
 #include "libANGLE/Texture.h"
 #include "libANGLE/renderer/SurfaceImpl.h"
 
+#include <EGL/eglext.h>
+
 namespace egl
 {
 
-Surface::Surface(rx::SurfaceImpl *impl)
-    : mImplementation(impl),
+Surface::Surface(rx::SurfaceImpl *impl, EGLint surfaceType, const egl::Config *config, const AttributeMap &attributes)
+    : RefCountObject(0), // id unused
+      mImplementation(impl),
+      mType(surfaceType),
+      mConfig(config),
+      mPostSubBufferRequested(false),
+      mFixedSize(false),
+      mFixedWidth(0),
+      mFixedHeight(0),
+      mTextureFormat(EGL_NO_TEXTURE),
+      mTextureTarget(EGL_NO_TEXTURE),
       // FIXME: Determine actual pixel aspect ratio
       mPixelAspectRatio(static_cast<EGLint>(1.0 * EGL_DISPLAY_SCALING)),
       mRenderBuffer(EGL_BACK_BUFFER),
       mSwapBehavior(EGL_BUFFER_PRESERVED),
       mTexture(NULL)
 {
-    setSwapInterval(1);
+    addRef();
+
+    mPostSubBufferRequested = (attributes.get(EGL_POST_SUB_BUFFER_SUPPORTED_NV, EGL_FALSE) == EGL_TRUE);
+
+    mFixedSize = (attributes.get(EGL_FIXED_SIZE_ANGLE, EGL_FALSE) == EGL_TRUE);
+    if (mFixedSize)
+    {
+        mFixedWidth = attributes.get(EGL_WIDTH, 0);
+        mFixedHeight = attributes.get(EGL_HEIGHT, 0);
+    }
+
+    if (mType != EGL_WINDOW_BIT)
+    {
+        mTextureFormat = attributes.get(EGL_TEXTURE_FORMAT, EGL_NO_TEXTURE);
+        mTextureTarget = attributes.get(EGL_TEXTURE_TARGET, EGL_NO_TEXTURE);
+    }
 }
 
 Surface::~Surface()
@@ -43,14 +69,9 @@ Surface::~Surface()
     SafeDelete(mImplementation);
 }
 
-Error Surface::initialize()
+EGLint Surface::getType() const
 {
-    return mImplementation->initialize();
-}
-
-EGLNativeWindowType Surface::getWindowHandle() const
-{
-    return mImplementation->getWindowHandle();
+    return mType;
 }
 
 Error Surface::swap()
@@ -60,12 +81,6 @@ Error Surface::swap()
 
 Error Surface::postSubBuffer(EGLint x, EGLint y, EGLint width, EGLint height)
 {
-    if (!isPostSubBufferSupported())
-    {
-        // Spec is not clear about how this should be handled.
-        return Error(EGL_SUCCESS);
-    }
-
     return mImplementation->postSubBuffer(x, y, width, height);
 }
 
@@ -76,7 +91,7 @@ Error Surface::querySurfacePointerANGLE(EGLint attribute, void **value)
 
 EGLint Surface::isPostSubBufferSupported() const
 {
-    return mImplementation->isPostSubBufferSupported();
+    return mPostSubBufferRequested && mImplementation->isPostSubBufferSupported();
 }
 
 void Surface::setSwapInterval(EGLint interval)
@@ -84,9 +99,9 @@ void Surface::setSwapInterval(EGLint interval)
     mImplementation->setSwapInterval(interval);
 }
 
-EGLint Surface::getConfigID() const
+const Config *Surface::getConfig() const
 {
-    return mImplementation->getConfig()->mConfigID;
+    return mConfig;
 }
 
 EGLint Surface::getPixelAspectRatio() const
@@ -106,35 +121,30 @@ EGLenum Surface::getSwapBehavior() const
 
 EGLenum Surface::getTextureFormat() const
 {
-    return mImplementation->getTextureFormat();
+    return mTextureFormat;
 }
 
 EGLenum Surface::getTextureTarget() const
 {
-    return mImplementation->getTextureTarget();
+    return mTextureTarget;
 }
 
 EGLint Surface::isFixedSize() const
 {
-    return mImplementation->isFixedSize();
-}
-
-EGLenum Surface::getFormat() const
-{
-    return mImplementation->getFormat();
+    return mFixedSize;
 }
 
 EGLint Surface::getWidth() const
 {
-    return mImplementation->getWidth();
+    return mFixedSize ? mFixedWidth : mImplementation->getWidth();
 }
 
 EGLint Surface::getHeight() const
 {
-    return mImplementation->getHeight();
+    return mFixedSize ? mFixedHeight : mImplementation->getHeight();
 }
 
-Error Surface::bindTexImage(gl::Texture2D *texture, EGLint buffer)
+Error Surface::bindTexImage(gl::Texture *texture, EGLint buffer)
 {
     ASSERT(!mTexture);
 
@@ -146,7 +156,7 @@ Error Surface::bindTexImage(gl::Texture2D *texture, EGLint buffer)
 Error Surface::releaseTexImage(EGLint buffer)
 {
     ASSERT(mTexture);
-    gl::Texture2D *boundTexture = mTexture;
+    gl::Texture *boundTexture = mTexture;
     mTexture = NULL;
 
     boundTexture->releaseTexImage();

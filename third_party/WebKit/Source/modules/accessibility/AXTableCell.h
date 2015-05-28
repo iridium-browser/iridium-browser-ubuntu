@@ -29,19 +29,19 @@
 #ifndef AXTableCell_h
 #define AXTableCell_h
 
-#include "modules/accessibility/AXRenderObject.h"
+#include "modules/accessibility/AXLayoutObject.h"
 
 namespace blink {
 
 class AXObjectCacheImpl;
 
-class AXTableCell : public AXRenderObject {
+class AXTableCell : public AXLayoutObject {
 
 protected:
-    AXTableCell(RenderObject*, AXObjectCacheImpl*);
+    AXTableCell(LayoutObject*, AXObjectCacheImpl*);
 
 public:
-    static PassRefPtr<AXTableCell> create(RenderObject*, AXObjectCacheImpl*);
+    static PassRefPtr<AXTableCell> create(LayoutObject*, AXObjectCacheImpl*);
     virtual ~AXTableCell();
 
     virtual bool isTableCell() const override final;
@@ -50,6 +50,9 @@ public:
     virtual void rowIndexRange(pair<unsigned, unsigned>& rowRange);
     // fills in the start location and column span of cell
     virtual void columnIndexRange(pair<unsigned, unsigned>& columnRange);
+    // In the case of cells that act as row or column headers.
+    virtual SortDirection sortDirection() const override final;
+    virtual AccessibilityRole scanToDecideHeaderRole();
 
 protected:
     virtual AXObject* parentTable() const;
@@ -58,7 +61,9 @@ protected:
 
 private:
     bool isTableHeaderCell() const;
-    AccessibilityRole scanToDecideHeaderRole();
+    bool isRowHeaderCell() const;
+    bool isColumnHeaderCell() const;
+
     // If a table cell is not exposed as a table cell, a TH element can serve as its title UI element.
     virtual AXObject* titleUIElement() const override final;
     virtual bool exposesTitleUIElement() const override final { return true; }

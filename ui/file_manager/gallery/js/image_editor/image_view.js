@@ -7,11 +7,12 @@
  *
  * @param {!HTMLElement} container The container element.
  * @param {!Viewport} viewport The viewport.
+ * @param {!MetadataModel} metadataModel
  * @constructor
  * @extends {ImageBuffer.Overlay}
  * @struct
  */
-function ImageView(container, viewport) {
+function ImageView(container, viewport, metadataModel) {
   ImageBuffer.Overlay.call(this);
 
   this.container_ = container;
@@ -27,10 +28,12 @@ function ImageView(container, viewport) {
   this.contentGeneration_ = 0;
   this.displayedContentGeneration_ = 0;
 
-  this.imageLoader_ = new ImageUtil.ImageLoader(this.document_);
+  this.imageLoader_ =
+      new ImageUtil.ImageLoader(this.document_, metadataModel);
   // We have a separate image loader for prefetch which does not get cancelled
   // when the selection changes.
-  this.prefetchLoader_ = new ImageUtil.ImageLoader(this.document_);
+  this.prefetchLoader_ =
+      new ImageUtil.ImageLoader(this.document_, metadataModel);
 
   this.contentCallbacks_ = [];
 
@@ -149,9 +152,10 @@ ImageView.getLoadTarget = function(item, effect) {
     return ImageView.LoadTarget.CACHED_THUMBNAIL;
 
   // Only show thumbnails if there is no effect or the effect is Slide.
-  var metadata = item.getMetadata();
   var thumbnailLoader = new ThumbnailLoader(
-      item.getEntry(), ThumbnailLoader.LoaderType.CANVAS, item.getMetadata());
+      item.getEntry(),
+      ThumbnailLoader.LoaderType.CANVAS,
+      item.getThumbnailMetadataItem());
   if ((effect instanceof ImageView.Effect.None ||
        effect instanceof ImageView.Effect.Slide) &&
       thumbnailLoader.getLoadTarget() !==
@@ -180,7 +184,7 @@ ImageView.prototype.draw = function() {
     this.displayedContentGeneration_ = this.contentGeneration_;
     ImageUtil.trace.resetTimer('paint');
     this.paintDeviceRect(
-        this.contentCanvas_, ImageRect.createFromCanvas(this.contentCanvas_));
+        this.contentCanvas_, ImageRect.createFromImage(this.contentCanvas_));
     ImageUtil.trace.reportTimer('paint');
   }
 };
@@ -254,7 +258,7 @@ ImageView.prototype.paintDeviceRect = function(canvas, imageRect) {
   var deviceBounds = this.viewport_.getDeviceBounds();
   var scaleX = deviceBounds.width / canvas.width;
   var scaleY = deviceBounds.height / canvas.height;
-  var deviceRect = ImageRect.createWith(
+  var deviceRect = new ImageRect(
       imageRect.left * scaleX,
       imageRect.top * scaleY,
       imageRect.width * scaleX,
@@ -347,7 +351,6 @@ ImageView.prototype.cancelLoad = function() {
 ImageView.prototype.load =
     function(item, effect, displayCallback, loadCallback) {
   var entry = item.getEntry();
-  var metadata = item.getMetadata() || {};
 
   if (!(effect instanceof ImageView.Effect.None)) {
     // Skip effects when reloading repeatedly very quickly.
@@ -386,7 +389,7 @@ ImageView.prototype.load =
       var thumbnailLoader = new ThumbnailLoader(
           entry,
           ThumbnailLoader.LoaderType.CANVAS,
-          metadata);
+          item.getThumbnailMetadataItem());
       thumbnailLoader.loadDetachedImage(function(success) {
         displayThumbnail(
             ImageView.LoadType.IMAGE_FILE,
@@ -412,26 +415,16 @@ ImageView.prototype.load =
    */
   function displayThumbnail(loadType, canvas) {
     if (canvas) {
-      var width = null;
-      var height = null;
-      if (metadata.media) {
-        width = metadata.media.width;
-        height = metadata.media.height;
-      }
-      // If metadata.external.present is true, the image data is loaded directly
-      // from local cache, whose size may be out of sync with the drive
-      // metadata.
-      if (metadata.external && !metadata.external.present) {
-        width = metadata.external.imageWidth;
-        height = metadata.external.imageHeight;
-      }
+      var width = item.getMetadataItem().imageWidth;
+      var height = item.getMetadataItem().imageHeight;
       self.replace(
           canvas,
           effect,
           width,
           height,
           true /* preview */);
-      if (displayCallback) displayCallback();
+      if (displayCallback)
+        displayCallback();
     }
     loadMainImage(loadType, entry, !!canvas,
         (effect && canvas) ? effect.getSafeInterval() : 0);
@@ -492,7 +485,7 @@ ImageView.prototype.load =
         loadType, Object.keys(ImageView.LoadType).length);
 
     if (loadType === ImageView.LoadType.ERROR &&
-        !navigator.onLine && !metadata.external.present) {
+        !navigator.onLine && !item.getMetadataItem().present) {
       loadType = ImageView.LoadType.OFFLINE;
     }
     if (loadCallback) loadCallback(loadType, animationDuration, opt_error);
@@ -505,7 +498,7 @@ ImageView.prototype.load =
  * @param {number=} opt_delay Image load delay in ms.
  */
 ImageView.prototype.prefetch = function(item, opt_delay) {
-  if (item.contentImage)
+  if (item.contentImage || this.prefetchLoader_.isLoading(item.getEntry()))
     return;
   this.prefetchLoader_.load(item, function(canvas) {
     if (canvas.width && canvas.height && !item.contentImage)
@@ -651,7 +644,7 @@ ImageView.prototype.replace = function(
         newScreenImage,
         this.viewport_,
         null,
-        opt_effect && opt_effect.getDuration());
+        opt_effect ? opt_effect.getDuration() : undefined);
     if (oldScreenImage) {
       ImageUtil.setAttribute(newScreenImage, 'fade', false);
       ImageUtil.setAttribute(oldScreenImage, 'fade', true);

@@ -7,8 +7,10 @@
 
 #include "base/basictypes.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/memory/weak_ptr.h"
 #include "media/base/cdm_factory.h"
 #include "third_party/WebKit/public/platform/WebContentDecryptionModuleAccess.h"
+#include "third_party/WebKit/public/platform/WebMediaKeySystemConfiguration.h"
 #include "third_party/WebKit/public/platform/WebString.h"
 #include "third_party/WebKit/public/web/WebSecurityOrigin.h"
 
@@ -18,30 +20,38 @@ class WebLocalFrame;
 
 namespace media {
 
+class WebEncryptedMediaClientImpl;
+
 class WebContentDecryptionModuleAccessImpl
     : public blink::WebContentDecryptionModuleAccess {
  public:
   static WebContentDecryptionModuleAccessImpl* Create(
       const blink::WebString& key_system,
+      const blink::WebMediaKeySystemConfiguration& configuration,
       const blink::WebSecurityOrigin& security_origin,
-      CdmFactory* cdm_factory);
+      const base::WeakPtr<WebEncryptedMediaClientImpl>& client);
   virtual ~WebContentDecryptionModuleAccessImpl();
 
   // blink::WebContentDecryptionModuleAccess interface.
+  virtual blink::WebMediaKeySystemConfiguration getConfiguration();
   virtual void createContentDecryptionModule(
-      blink::WebContentDecryptionModuleResult result) override;
+      blink::WebContentDecryptionModuleResult result);
 
  private:
   WebContentDecryptionModuleAccessImpl(
       const blink::WebString& key_system,
+      const blink::WebMediaKeySystemConfiguration& configuration,
       const blink::WebSecurityOrigin& security_origin,
-      CdmFactory* cdm_factory);
+      const base::WeakPtr<WebEncryptedMediaClientImpl>& client);
 
   DISALLOW_COPY_AND_ASSIGN(WebContentDecryptionModuleAccessImpl);
 
   blink::WebString key_system_;
+  blink::WebMediaKeySystemConfiguration configuration_;
   blink::WebSecurityOrigin security_origin_;
-  CdmFactory* cdm_factory_;
+
+  // Keep a WeakPtr as client is owned by render_frame_impl.
+  base::WeakPtr<WebEncryptedMediaClientImpl> client_;
 };
 
 }  // namespace media

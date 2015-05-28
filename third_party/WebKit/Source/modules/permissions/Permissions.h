@@ -9,24 +9,19 @@
 #include "bindings/core/v8/ScriptWrappable.h"
 #include "platform/heap/Handle.h"
 
-namespace WTF {
-class AtomicString;
-} // namespace WTF
-
 namespace blink {
 
 class ScriptState;
+class ScriptValue;
 
 class Permissions final
-    : public GarbageCollectedFinalized<Permissions>
+    : public GarbageCollected<Permissions>
     , public ScriptWrappable {
     DEFINE_WRAPPERTYPEINFO();
 public:
-    virtual ~Permissions();
+    DEFINE_INLINE_TRACE() { }
 
-    virtual void trace(Visitor*);
-
-    static ScriptPromise query(ScriptState*, const AtomicString&);
+    ScriptPromise query(ScriptState*, const ScriptValue&);
 };
 
 } // namespace blink

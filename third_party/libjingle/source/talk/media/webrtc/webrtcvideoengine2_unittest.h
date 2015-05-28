@@ -54,16 +54,16 @@ class FakeVideoSendStream : public webrtc::VideoSendStream,
   void SetStats(const webrtc::VideoSendStream::Stats& stats);
 
  private:
-  virtual void SwapFrame(webrtc::I420VideoFrame* frame) OVERRIDE;
-  virtual webrtc::VideoSendStream::Stats GetStats() OVERRIDE;
+  void IncomingCapturedFrame(const webrtc::I420VideoFrame& frame) override;
+  webrtc::VideoSendStream::Stats GetStats() override;
 
-  virtual bool ReconfigureVideoEncoder(
-      const webrtc::VideoEncoderConfig& config) OVERRIDE;
+  bool ReconfigureVideoEncoder(
+      const webrtc::VideoEncoderConfig& config) override;
 
-  virtual webrtc::VideoSendStreamInput* Input() OVERRIDE;
+  webrtc::VideoSendStreamInput* Input() override;
 
-  virtual void Start() OVERRIDE;
-  virtual void Stop() OVERRIDE;
+  void Start() override;
+  void Stop() override;
 
   bool sending_;
   webrtc::VideoSendStream::Config config_;
@@ -84,33 +84,29 @@ class FakeVideoReceiveStream : public webrtc::VideoReceiveStream {
 
   bool IsReceiving() const;
 
- private:
-  virtual webrtc::VideoReceiveStream::Stats GetStats() const OVERRIDE;
+  void InjectFrame(const webrtc::I420VideoFrame& frame, int time_to_render_ms);
 
-  virtual void Start() OVERRIDE;
-  virtual void Stop() OVERRIDE;
+  void SetStats(const webrtc::VideoReceiveStream::Stats& stats);
+
+ private:
+  webrtc::VideoReceiveStream::Stats GetStats() const override;
+
+  void Start() override;
+  void Stop() override;
 
   webrtc::VideoReceiveStream::Config config_;
   bool receiving_;
+  webrtc::VideoReceiveStream::Stats stats_;
 };
 
-class FakeCall : public webrtc::Call {
+class FakeCall : public webrtc::Call, public webrtc::PacketReceiver {
  public:
   FakeCall(const webrtc::Call::Config& config);
   ~FakeCall();
 
-  void SetVideoCodecs(const std::vector<webrtc::VideoCodec> codecs);
-
   webrtc::Call::Config GetConfig() const;
   std::vector<FakeVideoSendStream*> GetVideoSendStreams();
   std::vector<FakeVideoReceiveStream*> GetVideoReceiveStreams();
-
-  webrtc::VideoCodec GetEmptyVideoCodec();
-
-  webrtc::VideoCodec GetVideoCodecVp8();
-  webrtc::VideoCodec GetVideoCodecVp9();
-
-  std::vector<webrtc::VideoCodec> GetDefaultVideoCodecs();
 
   webrtc::Call::NetworkState GetNetworkState() const;
   int GetNumCreatedSendStreams() const;
@@ -118,30 +114,29 @@ class FakeCall : public webrtc::Call {
   void SetStats(const webrtc::Call::Stats& stats);
 
  private:
-  virtual webrtc::VideoSendStream* CreateVideoSendStream(
+  webrtc::VideoSendStream* CreateVideoSendStream(
       const webrtc::VideoSendStream::Config& config,
-      const webrtc::VideoEncoderConfig& encoder_config) OVERRIDE;
+      const webrtc::VideoEncoderConfig& encoder_config) override;
 
-  virtual void DestroyVideoSendStream(
-      webrtc::VideoSendStream* send_stream) OVERRIDE;
+  void DestroyVideoSendStream(webrtc::VideoSendStream* send_stream) override;
 
-  virtual webrtc::VideoReceiveStream* CreateVideoReceiveStream(
-      const webrtc::VideoReceiveStream::Config& config) OVERRIDE;
+  webrtc::VideoReceiveStream* CreateVideoReceiveStream(
+      const webrtc::VideoReceiveStream::Config& config) override;
 
-  virtual void DestroyVideoReceiveStream(
-      webrtc::VideoReceiveStream* receive_stream) OVERRIDE;
-  virtual webrtc::PacketReceiver* Receiver() OVERRIDE;
+  void DestroyVideoReceiveStream(
+      webrtc::VideoReceiveStream* receive_stream) override;
+  webrtc::PacketReceiver* Receiver() override;
+  DeliveryStatus DeliverPacket(const uint8_t* packet, size_t length) override;
 
-  virtual webrtc::Call::Stats GetStats() const OVERRIDE;
+  webrtc::Call::Stats GetStats() const override;
 
-  virtual void SetBitrateConfig(
-      const webrtc::Call::Config::BitrateConfig& bitrate_config) OVERRIDE;
-  virtual void SignalNetworkState(webrtc::Call::NetworkState state) OVERRIDE;
+  void SetBitrateConfig(
+      const webrtc::Call::Config::BitrateConfig& bitrate_config) override;
+  void SignalNetworkState(webrtc::Call::NetworkState state) override;
 
   webrtc::Call::Config config_;
   webrtc::Call::NetworkState network_state_;
   webrtc::Call::Stats stats_;
-  std::vector<webrtc::VideoCodec> codecs_;
   std::vector<FakeVideoSendStream*> video_send_streams_;
   std::vector<FakeVideoReceiveStream*> video_receive_streams_;
 

@@ -5,18 +5,18 @@
 #ifndef BoxDecorationData_h
 #define BoxDecorationData_h
 
-#include "core/rendering/RenderBoxModelObject.h"
+#include "core/layout/LayoutBoxModelObject.h" // For BackgroundBleedAvoidance.
 #include "platform/graphics/Color.h"
 
 namespace blink {
 
-class RenderBox;
 class GraphicsContext;
+class LayoutBox;
 
-// Information extracted from RenderStyle for box painting.
+// Information extracted from ComputedStyle for box painting.
 class BoxDecorationData {
 public:
-    BoxDecorationData(const RenderBox&, GraphicsContext*);
+    BoxDecorationData(const LayoutBox&, GraphicsContext*);
 
     Color backgroundColor;
     bool hasBackground;
@@ -25,8 +25,8 @@ public:
     BackgroundBleedAvoidance bleedAvoidance() { return static_cast<BackgroundBleedAvoidance>(m_bleedAvoidance); }
 
 private:
-    BackgroundBleedAvoidance determineBackgroundBleedAvoidance(const RenderBox&, GraphicsContext*);
-    bool borderObscuresBackgroundEdge(const RenderStyle&, const FloatSize& contextScale) const;
+    BackgroundBleedAvoidance determineBackgroundBleedAvoidance(const LayoutBox&, GraphicsContext*);
+    bool borderObscuresBackgroundEdge(const ComputedStyle&, const FloatSize& contextScale) const;
     unsigned m_bleedAvoidance : 2; // BackgroundBleedAvoidance
 };
 

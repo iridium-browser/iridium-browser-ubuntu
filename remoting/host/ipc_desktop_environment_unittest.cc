@@ -29,6 +29,7 @@
 #include "remoting/host/host_mock_objects.h"
 #include "remoting/host/ipc_desktop_environment.h"
 #include "remoting/protocol/protocol_mock_objects.h"
+#include "remoting/protocol/test_event_matchers.h"
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/webrtc/modules/desktop_capture/desktop_geometry.h"
@@ -41,10 +42,14 @@ using testing::AtLeast;
 using testing::AtMost;
 using testing::DeleteArg;
 using testing::DoAll;
+using testing::InSequence;
 using testing::Return;
 using testing::ReturnRef;
 
 namespace remoting {
+
+using protocol::test::EqualsTouchEvent;
+using protocol::test::EqualsTouchEventTypeAndId;
 
 namespace {
 
@@ -421,9 +426,16 @@ void IpcDesktopEnvironmentTest::OnDisconnectCallback() {
 void IpcDesktopEnvironmentTest::OnDesktopAttached(
     IPC::PlatformFileForTransit desktop_pipe) {
 
+  base::ProcessHandle process_handle = base::GetCurrentProcessHandle();
+#if defined(OS_WIN)
+  ASSERT_NE(FALSE, ::DuplicateHandle(GetCurrentProcess(), process_handle,
+                                     GetCurrentProcess(), &process_handle,
+                                     0, FALSE, DUPLICATE_SAME_ACCESS));
+#endif
+
   // Instruct DesktopSessionProxy to connect to the network-to-desktop pipe.
   desktop_environment_factory_->OnDesktopSessionAgentAttached(
-      terminal_id_, base::GetCurrentProcessHandle(), desktop_pipe);
+      terminal_id_, process_handle, desktop_pipe);
 }
 
 // Runs until the desktop is attached and exits immediately after that.
@@ -626,6 +638,52 @@ TEST_F(IpcDesktopEnvironmentTest, InjectMouseEvent) {
   event.set_x(0);
   event.set_y(0);
   input_injector_->InjectMouseEvent(event);
+
+  task_runner_ = nullptr;
+  io_task_runner_ = nullptr;
+  main_run_loop_.Run();
+}
+
+// Tests injection of touch events.
+TEST_F(IpcDesktopEnvironmentTest, InjectTouchEvent) {
+  scoped_ptr<protocol::MockClipboardStub> clipboard_stub(
+      new protocol::MockClipboardStub());
+  EXPECT_CALL(*clipboard_stub, InjectClipboardEvent(_))
+      .Times(0);
+
+  // Start the input injector and screen capturer.
+  input_injector_->Start(clipboard_stub.Pass());
+  video_capturer_->Start(&desktop_capturer_callback_);
+
+  // Run the message loop until the desktop is attached.
+  setup_run_loop_->Run();
+
+  protocol::TouchEvent event;
+  event.set_event_type(protocol::TouchEvent::TOUCH_POINT_START);
+  protocol::TouchEventPoint* point = event.add_touch_points();
+  point->set_id(0u);
+  point->set_x(0.0f);
+  point->set_y(0.0f);
+  point->set_radius_x(0.0f);
+  point->set_radius_y(0.0f);
+  point->set_angle(0.0f);
+  point->set_pressure(0.0f);
+
+  ON_CALL(*remote_input_injector_, InjectTouchEvent(_))
+      .WillByDefault(InvokeWithoutArgs(
+          this, &IpcDesktopEnvironmentTest::DeleteDesktopEnvironment));
+
+  InSequence s;
+  // Expect that the event gets propagated to remote_input_injector_.
+  // And one more call for ReleaseAll().
+  EXPECT_CALL(*remote_input_injector_,
+              InjectTouchEvent(EqualsTouchEvent(event)));
+  EXPECT_CALL(*remote_input_injector_,
+              InjectTouchEvent(EqualsTouchEventTypeAndId(
+                  protocol::TouchEvent::TOUCH_POINT_CANCEL, 0u)));
+
+  // Send the touch event.
+  input_injector_->InjectTouchEvent(event);
 
   task_runner_ = nullptr;
   io_task_runner_ = nullptr;

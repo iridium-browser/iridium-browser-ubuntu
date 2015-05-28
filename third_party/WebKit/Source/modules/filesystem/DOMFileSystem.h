@@ -38,6 +38,7 @@
 #include "modules/filesystem/DOMFileSystemBase.h"
 #include "modules/filesystem/EntriesCallback.h"
 #include "platform/heap/Handle.h"
+#include "public/platform/WebTraceLocation.h"
 
 namespace blink {
 
@@ -55,7 +56,7 @@ public:
     // Creates a new isolated file system for the given filesystemId.
     static DOMFileSystem* createIsolatedFileSystem(ExecutionContext*, const String& filesystemId);
 
-    DirectoryEntry* root();
+    DirectoryEntry* root() const;
 
     // DOMFileSystemBase overrides.
     virtual void addPendingCallbacks() override;
@@ -106,7 +107,7 @@ public:
         scheduleCallback(executionContext(), callback, callbackArg);
     }
 
-    virtual void trace(Visitor*) override;
+    DECLARE_VIRTUAL_TRACE();
 
 private:
     DOMFileSystem(ExecutionContext*, const String& name, FileSystemType, const KURL& rootURL);
@@ -195,6 +196,7 @@ private:
     };
 
     int m_numberOfPendingCallbacks;
+    Member<DirectoryEntry> m_rootEntry;
 };
 
 template <typename CB, typename CBArg>
@@ -202,7 +204,7 @@ void DOMFileSystem::scheduleCallback(ExecutionContext* executionContext, CB* cal
 {
     ASSERT(executionContext->isContextThread());
     if (callback)
-        executionContext->postTask(adoptPtr(new DispatchCallbackRefPtrArgTask<CB, CBArg>(callback, arg)));
+        executionContext->postTask(FROM_HERE, adoptPtr(new DispatchCallbackRefPtrArgTask<CB, CBArg>(callback, arg)));
 }
 
 template <typename CB, typename CBArg>
@@ -210,7 +212,7 @@ void DOMFileSystem::scheduleCallback(ExecutionContext* executionContext, CB* cal
 {
     ASSERT(executionContext->isContextThread());
     if (callback)
-        executionContext->postTask(adoptPtr(new DispatchCallbackPtrArgTask<CB, CBArg>(callback, arg)));
+        executionContext->postTask(FROM_HERE, adoptPtr(new DispatchCallbackPtrArgTask<CB, CBArg>(callback, arg)));
 }
 
 template <typename CB, typename CBArg>
@@ -218,7 +220,7 @@ void DOMFileSystem::scheduleCallback(ExecutionContext* executionContext, CB* cal
 {
     ASSERT(executionContext->isContextThread());
     if (callback)
-        executionContext->postTask(adoptPtr(new DispatchCallbackNonPtrArgTask<CB, PersistentHeapVector<CBArg> >(callback, arg)));
+        executionContext->postTask(FROM_HERE, adoptPtr(new DispatchCallbackNonPtrArgTask<CB, PersistentHeapVector<CBArg>>(callback, arg)));
 }
 
 template <typename CB, typename CBArg>
@@ -226,7 +228,7 @@ void DOMFileSystem::scheduleCallback(ExecutionContext* executionContext, CB* cal
 {
     ASSERT(executionContext->isContextThread());
     if (callback)
-        executionContext->postTask(adoptPtr(new DispatchCallbackNonPtrArgTask<CB, CBArg>(callback, arg)));
+        executionContext->postTask(FROM_HERE, adoptPtr(new DispatchCallbackNonPtrArgTask<CB, CBArg>(callback, arg)));
 }
 
 template <typename CB, typename CBArg>
@@ -234,7 +236,7 @@ void DOMFileSystem::scheduleCallback(ExecutionContext* executionContext, CB* cal
 {
     ASSERT(executionContext->isContextThread());
     if (callback)
-        executionContext->postTask(adoptPtr(new DispatchCallbackNonPtrArgTask<CB, Persistent<CBArg> >(callback, arg)));
+        executionContext->postTask(FROM_HERE, adoptPtr(new DispatchCallbackNonPtrArgTask<CB, Persistent<CBArg>>(callback, arg)));
 }
 
 template <typename CB>
@@ -242,7 +244,7 @@ void DOMFileSystem::scheduleCallback(ExecutionContext* executionContext, CB* cal
 {
     ASSERT(executionContext->isContextThread());
     if (callback)
-        executionContext->postTask(adoptPtr(new DispatchCallbackNoArgTask<CB>(callback)));
+        executionContext->postTask(FROM_HERE, adoptPtr(new DispatchCallbackNoArgTask<CB>(callback)));
 }
 
 } // namespace blink

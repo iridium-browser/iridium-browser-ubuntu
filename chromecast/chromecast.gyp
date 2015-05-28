@@ -6,9 +6,11 @@
   'variables': {
     'android_support_v13_target%':
         '../third_party/android_tools/android_tools.gyp:android_support_v13_javalib',
+    'cast_build_release': 'internal/build/cast_build_release',
     'chromium_code': 1,
     'chromecast_branding%': 'Chromium',
     'disable_display%': 0,
+    'use_chromecast_webui%': 0,
   },
   'includes': [
     'chromecast_tests.gypi',
@@ -24,10 +26,17 @@
     ],
   },
   'targets': [
-    # TODO(gunsch): Remove these fake targets once they're either added or no
+    # Public API target for OEM partners to replace shlibs.
+    {
+      'target_name': 'cast_public_api',
+      'type': '<(component)',
+      'sources': [
+        'public/chromecast_export.h',
+      ],
+    },
+    # TODO(gunsch): Remove this fake target once it's either added or no
     # longer referenced from internal code.
     {'target_name': 'cast_media_audio', 'type': 'none'},
-    {'target_name': 'cast_port_impl', 'type': 'none'},
 
     {
       'target_name': 'cast_base',
@@ -36,6 +45,8 @@
         '../base/base.gyp:base',
       ],
       'sources': [
+        'base/cast_paths.cc',
+        'base/cast_paths.h',
         'base/metrics/cast_histograms.h',
         'base/metrics/cast_metrics_helper.cc',
         'base/metrics/cast_metrics_helper.h',
@@ -44,13 +55,54 @@
       ],
     },  # end of target 'cast_base'
     {
+      'target_name': 'cast_crash_client',
+      'type': '<(component)',
+      'dependencies': [
+        '../breakpad/breakpad.gyp:breakpad_client',
+        '../components/components.gyp:crash_component',
+      ],
+      'sources': [
+        'crash/cast_crash_keys.cc',
+        'crash/cast_crash_keys.h',
+        'crash/cast_crash_reporter_client.cc',
+        'crash/cast_crash_reporter_client.h',
+      ],
+      'conditions': [
+        ['chromecast_branding=="Chrome"', {
+          'dependencies': [
+            'internal/chromecast_internal.gyp:crash_internal',
+          ],
+        }, {
+          'sources': [
+            'crash/cast_crash_reporter_client_simple.cc',
+          ],
+        }],
+      ]
+    },  # end of target 'cast_crash_client'
+    {
       'target_name': 'cast_net',
       'type': '<(component)',
       'sources': [
-        'net/network_change_notifier_cast.cc',
-        'net/network_change_notifier_cast.h',
-        'net/network_change_notifier_factory_cast.cc',
-        'net/network_change_notifier_factory_cast.h',
+        'net/connectivity_checker.cc',
+        'net/connectivity_checker.h',
+        'net/net_switches.cc',
+        'net/net_switches.h',
+      ],
+    },
+    {
+      'target_name': 'cast_ozone',
+      'type': '<(component)',
+      'sources': [
+        'ozone/gpu_platform_support_cast.cc',
+        'ozone/gpu_platform_support_cast.h',
+        'ozone/ozone_platform_cast.cc',
+        'ozone/ozone_platform_cast.h',
+        'ozone/platform_window_cast.cc',
+        'ozone/platform_window_cast.h',
+        'ozone/surface_factory_cast.cc',
+        'ozone/surface_factory_cast.h',
+        'ozone/surface_ozone_egl_cast.cc',
+        'ozone/surface_ozone_egl_cast.h',
       ],
     },
     {
@@ -85,10 +137,11 @@
       ],
       'actions': [
         {
-          'action_name': 'repack_cast_shell_pack',
+          'action_name': 'repack_cast_shell_pak',
           'variables': {
             'pak_inputs': [
               '<(SHARED_INTERMEDIATE_DIR)/blink/public/resources/blink_resources.pak',
+              '<(SHARED_INTERMEDIATE_DIR)/blink/public/resources/blink_image_resources_100_percent.pak',
               '<(SHARED_INTERMEDIATE_DIR)/chromecast/shell_resources.pak',
               '<(SHARED_INTERMEDIATE_DIR)/content/content_resources.pak',
               '<(SHARED_INTERMEDIATE_DIR)/content/app/resources/content_resources_100_percent.pak',
@@ -99,12 +152,28 @@
               '<(SHARED_INTERMEDIATE_DIR)/ui/strings/app_locale_settings_en-US.pak',
               '<(SHARED_INTERMEDIATE_DIR)/ui/strings/ui_strings_en-US.pak',
             ],
+            'conditions': [
+              ['chromecast_branding=="Chrome" and use_chromecast_webui==1', {
+                'pak_inputs': [
+                  '<(SHARED_INTERMEDIATE_DIR)/chromecast/app_resources.pak',
+                  '<(SHARED_INTERMEDIATE_DIR)/chromecast/cast_webui_resources.pak',
+                ],
+              }],
+            ],
             'pak_output': '<(PRODUCT_DIR)/assets/cast_shell.pak',
           },
           'includes': [ '../build/repack_action.gypi' ],
         },
       ],
-    },
+      'conditions': [
+        ['chromecast_branding=="Chrome" and use_chromecast_webui==1', {
+          'dependencies': [
+            'internal/chromecast_resources.gyp:chromecast_app_resources',
+            'internal/chromecast_resources.gyp:chromecast_webui_resources',
+          ],
+        }],
+      ],
+    },  # end of target 'cast_shell_pak'
     # This target contains all content-embedder implementation that is
     # non-platform-specific.
     {
@@ -112,6 +181,8 @@
       'type': '<(component)',
       'dependencies': [
         'cast_base',
+        'cast_crash_client',
+        'cast_net',
         'cast_shell_pak',
         'cast_shell_resources',
         'cast_version_header',
@@ -123,14 +194,14 @@
         '../components/components.gyp:cdm_renderer',
         '../components/components.gyp:component_metrics_proto',
         '../components/components.gyp:crash_component',
-        '../components/components.gyp:dns_prefetch_browser',
-        '../components/components.gyp:dns_prefetch_renderer',
+        '../components/components.gyp:network_hints_browser',
+        '../components/components.gyp:network_hints_renderer',
         '../components/components.gyp:metrics',
         '../components/components.gyp:metrics_gpu',
         '../components/components.gyp:metrics_net',
         '../components/components.gyp:metrics_profiler',
         '../content/content.gyp:content',
-        '../content/content.gyp:content_app_browser',
+        '../content/content.gyp:content_app_both',
         '../skia/skia.gyp:skia',
         '../third_party/WebKit/public/blink.gyp:blink',
         '../third_party/widevine/cdm/widevine_cdm.gyp:widevine_cdm_version_h',
@@ -154,6 +225,10 @@
         'browser/cast_http_user_agent_settings.h',
         'browser/cast_network_delegate.cc',
         'browser/cast_network_delegate.h',
+        'browser/cast_permission_manager.cc',
+        'browser/cast_permission_manager.h',
+        'browser/cast_resource_dispatcher_host_delegate.cc',
+        'browser/cast_resource_dispatcher_host_delegate.h',
         'browser/devtools/cast_dev_tools_delegate.cc',
         'browser/devtools/cast_dev_tools_delegate.h',
         'browser/devtools/remote_debugging_server.cc',
@@ -175,12 +250,13 @@
         'browser/url_request_context_factory.h',
         'common/cast_content_client.cc',
         'common/cast_content_client.h',
-        'common/cast_paths.cc',
-        'common/cast_paths.h',
         'common/cast_resource_delegate.cc',
         'common/cast_resource_delegate.h',
         'common/chromecast_switches.cc',
         'common/chromecast_switches.h',
+        'common/media/cast_messages.h',
+        'common/media/cast_message_generator.cc',
+        'common/media/cast_message_generator.h',
         'common/platform_client_auth.h',
         'common/pref_names.cc',
         'common/pref_names.h',
@@ -192,20 +268,23 @@
         'renderer/cast_render_process_observer.h',
         'renderer/key_systems_cast.cc',
         'renderer/key_systems_cast.h',
+        'renderer/media/capabilities_message_filter.cc',
+        'renderer/media/capabilities_message_filter.h',
       ],
       'conditions': [
         ['chromecast_branding=="Chrome"', {
           'dependencies': [
-            '<(cast_internal_gyp):cast_shell_internal',
+            'internal/chromecast_internal.gyp:cast_shell_internal',
           ],
         }, {
           'sources': [
+            'browser/cast_content_browser_client_simple.cc',
             'browser/cast_network_delegate_simple.cc',
             'browser/devtools/remote_debugging_server_simple.cc',
-            'browser/media/cast_browser_cdm_factory_simple.cc',
             'browser/metrics/platform_metrics_providers_simple.cc',
             'browser/pref_service_helper_simple.cc',
             'common/platform_client_auth_simple.cc',
+            'renderer/cast_content_renderer_client_simple.cc',
             'renderer/key_systems_cast_simple.cc',
           ],
           'conditions': [
@@ -216,6 +295,7 @@
               ],
             }, {
               'sources': [
+                'browser/media/cast_browser_cdm_factory_simple.cc',
                 'browser/service/cast_service_simple.cc',
                 'browser/service/cast_service_simple.h',
               ],
@@ -259,8 +339,12 @@
             'python',
             '<(version_py_path)',
             '-e', 'VERSION_FULL="<(version_full)"',
-            # Revision is taken from buildbot if available; otherwise, a dev string is used.
-            '-e', 'CAST_BUILD_REVISION="<!(echo ${CAST_BUILD_REVISION:="eng.${USER}.<!(date +%Y%m%d.%H%M%S)"})"',
+            # CAST_BUILD_INCREMENTAL is taken from buildbot if available;
+            # otherwise, a dev string is used.
+            '-e', 'CAST_BUILD_INCREMENTAL="<!(echo ${CAST_BUILD_INCREMENTAL:="<!(date +%Y%m%d.%H%M%S)"})"',
+            # CAST_BUILD_RELEASE is taken from cast_build_release file if exist;
+            # otherwise, a dev string is used.
+            '-e', 'CAST_BUILD_RELEASE="<!(if test -f <(cast_build_release); then cat <(cast_build_release); else echo eng.${USER}; fi)"',
             '-e', 'CAST_IS_DEBUG_BUILD=1 if "<(CONFIGURATION_NAME)" == "Debug" else 0',
             'common/version.h.in',
             '<@(_outputs)',
@@ -301,7 +385,6 @@
             '../breakpad/breakpad.gyp:breakpad_client',
             '../components/components.gyp:breakpad_host',
             '../components/components.gyp:crash_component',
-            '../content/content.gyp:content_app_browser',
             '../content/content.gyp:content',
             '../skia/skia.gyp:skia',
             '../ui/gfx/gfx.gyp:gfx',
@@ -331,7 +414,7 @@
           'conditions': [
             ['chromecast_branding=="Chrome"', {
               'dependencies': [
-                '<(cast_internal_gyp):cast_shell_android_internal'
+                'internal/chromecast_internal.gyp:cast_shell_android_internal'
               ],
             }, {
               'sources': [
@@ -417,29 +500,6 @@
     }, {  # OS != "android"
       'targets': [
         {
-          'target_name': 'cast_crash_client',
-          'type': '<(component)',
-          'dependencies': [
-            '../breakpad/breakpad.gyp:breakpad_client',
-            '../components/components.gyp:crash_component',
-          ],
-          'sources': [
-            'crash/cast_crash_reporter_client.cc',
-            'crash/cast_crash_reporter_client.h',
-          ],
-          'conditions': [
-            ['chromecast_branding=="Chrome"', {
-              'dependencies': [
-                '<(cast_internal_gyp):crash_internal',
-              ],
-            }, {
-              'sources': [
-                'crash/cast_crash_reporter_client_simple.cc',
-              ],
-            }],
-          ]
-        },  # end of target 'cast_crash_client'
-        {
           'target_name': 'cast_shell_media',
           'type': '<(component)',
           'dependencies': [
@@ -467,8 +527,8 @@
             'common/media/shared_memory_chunk.h',
             'renderer/media/audio_pipeline_proxy.cc',
             'renderer/media/audio_pipeline_proxy.h',
-            'renderer/media/cma_media_renderer_factory.cc',
-            'renderer/media/cma_media_renderer_factory.h',
+            'renderer/media/chromecast_media_renderer_factory.cc',
+            'renderer/media/chromecast_media_renderer_factory.h',
             'renderer/media/cma_message_filter_proxy.cc',
             'renderer/media/cma_message_filter_proxy.h',
             'renderer/media/media_channel_proxy.cc',
@@ -486,8 +546,7 @@
           'target_name': 'cast_shell_core',
           'type': '<(component)',
           'dependencies': [
-            'cast_crash_client',
-            'cast_net',
+            'cast_ozone',
             'cast_shell_media',
             'cast_shell_common',
             'media/media.gyp:cast_media',
@@ -496,7 +555,7 @@
           'conditions': [
             ['chromecast_branding=="Chrome"', {
               'dependencies': [
-                '<(cast_internal_gyp):cast_gfx_internal',
+                'internal/chromecast_internal.gyp:cast_gfx_internal',
               ],
             }, {
               'dependencies': [
@@ -513,6 +572,11 @@
           ],
           'sources': [
             'app/cast_main.cc',
+          ],
+          # TODO(dougsteed): remove when Chromecast moves to boringssl.
+          # Allow the cast shell to find the NSS module in the same directory.
+          'ldflags': [
+            '-Wl,-rpath=\$$ORIGIN'
           ],
         },
       ],  # end of targets

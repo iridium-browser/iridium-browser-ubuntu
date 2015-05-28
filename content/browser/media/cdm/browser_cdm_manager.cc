@@ -4,26 +4,37 @@
 
 #include "content/browser/media/cdm/browser_cdm_manager.h"
 
+#include <string>
+
 #include "base/bind.h"
-#include "base/command_line.h"
 #include "base/lazy_instance.h"
+#include "base/memory/scoped_ptr.h"
 #include "base/task_runner.h"
 #include "content/common/media/cdm_messages.h"
+#include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/content_browser_client.h"
+#include "content/public/browser/permission_manager.h"
+#include "content/public/browser/permission_type.h"
 #include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/web_contents.h"
-#include "content/public/common/content_switches.h"
 #include "media/base/browser_cdm.h"
 #include "media/base/browser_cdm_factory.h"
-#include "media/base/media_switches.h"
+#include "media/base/cdm_promise.h"
+#include "media/base/limits.h"
+
+#if defined(OS_ANDROID)
+#include "content/public/common/renderer_preferences.h"
+#endif
 
 namespace content {
 
 using media::BrowserCdm;
 using media::MediaKeys;
+
+namespace {
 
 // Maximum lengths for various EME API parameters. These are checks to
 // prevent unnecessarily large parameters from being passed around, and the
@@ -35,14 +46,69 @@ const size_t kMaxKeySystemLength = 256;
 // The ID used in this class is a concatenation of |render_frame_id| and
 // |cdm_id|, i.e. (render_frame_id << 32) + cdm_id.
 
-static uint64 GetId(int render_frame_id, int cdm_id) {
+uint64 GetId(int render_frame_id, int cdm_id) {
   return (static_cast<uint64>(render_frame_id) << 32) +
          static_cast<uint64>(cdm_id);
 }
 
-static bool IdBelongsToFrame(uint64 id, int render_frame_id) {
+bool IdBelongsToFrame(uint64 id, int render_frame_id) {
   return (id >> 32) == static_cast<uint64>(render_frame_id);
 }
+
+// media::CdmPromiseTemplate implementation backed by a BrowserCdmManager.
+template <typename... T>
+class CdmPromiseInternal : public media::CdmPromiseTemplate<T...> {
+ public:
+  CdmPromiseInternal(BrowserCdmManager* manager,
+                     int render_frame_id,
+                     int cdm_id,
+                     uint32_t promise_id)
+      : manager_(manager),
+        render_frame_id_(render_frame_id),
+        cdm_id_(cdm_id),
+        promise_id_(promise_id) {
+    DCHECK(manager_);
+  }
+
+  ~CdmPromiseInternal() final {}
+
+  // CdmPromiseTemplate<> implementation.
+  void resolve(const T&... result) final;
+
+  void reject(MediaKeys::Exception exception,
+              uint32_t system_code,
+              const std::string& error_message) final {
+    MarkPromiseSettled();
+    manager_->RejectPromise(render_frame_id_, cdm_id_, promise_id_, exception,
+                            system_code, error_message);
+  }
+
+ private:
+  using media::CdmPromiseTemplate<T...>::MarkPromiseSettled;
+
+  BrowserCdmManager* const manager_;
+  const int render_frame_id_;
+  const int cdm_id_;
+  const uint32_t promise_id_;
+};
+
+template <>
+void CdmPromiseInternal<>::resolve() {
+  MarkPromiseSettled();
+  manager_->ResolvePromise(render_frame_id_, cdm_id_, promise_id_);
+}
+
+template <>
+void CdmPromiseInternal<std::string>::resolve(const std::string& session_id) {
+  MarkPromiseSettled();
+  manager_->ResolvePromiseWithSession(render_frame_id_, cdm_id_, promise_id_,
+                                      session_id);
+}
+
+typedef CdmPromiseInternal<> SimplePromise;
+typedef CdmPromiseInternal<std::string> NewSessionPromise;
+
+}  // namespace
 
 // Render process ID to BrowserCdmManager map.
 typedef std::map<int, BrowserCdmManager*> BrowserCdmManagerMap;
@@ -111,16 +177,19 @@ bool BrowserCdmManager::OnMessageReceived(const IPC::Message& msg) {
   bool handled = true;
   IPC_BEGIN_MESSAGE_MAP(BrowserCdmManager, msg)
     IPC_MESSAGE_HANDLER(CdmHostMsg_InitializeCdm, OnInitializeCdm)
-    IPC_MESSAGE_HANDLER(CdmHostMsg_CreateSession, OnCreateSession)
+    IPC_MESSAGE_HANDLER(CdmHostMsg_SetServerCertificate, OnSetServerCertificate)
+    IPC_MESSAGE_HANDLER(CdmHostMsg_CreateSessionAndGenerateRequest,
+                        OnCreateSessionAndGenerateRequest)
     IPC_MESSAGE_HANDLER(CdmHostMsg_UpdateSession, OnUpdateSession)
-    IPC_MESSAGE_HANDLER(CdmHostMsg_ReleaseSession, OnReleaseSession)
+    IPC_MESSAGE_HANDLER(CdmHostMsg_CloseSession, OnCloseSession)
     IPC_MESSAGE_HANDLER(CdmHostMsg_DestroyCdm, OnDestroyCdm)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
   return handled;
 }
 
-media::BrowserCdm* BrowserCdmManager::GetCdm(int render_frame_id, int cdm_id) {
+media::BrowserCdm* BrowserCdmManager::GetCdm(int render_frame_id,
+                                             int cdm_id) const {
   DCHECK(task_runner_->RunsTasksOnCurrentThread());
   return cdm_map_.get(GetId(render_frame_id, cdm_id));
 }
@@ -136,49 +205,95 @@ void BrowserCdmManager::RenderFrameDeleted(int render_frame_id) {
   RemoveAllCdmForFrame(render_frame_id);
 }
 
-void BrowserCdmManager::OnSessionCreated(int render_frame_id,
-                                         int cdm_id,
-                                         uint32 session_id,
-                                         const std::string& web_session_id) {
-  Send(new CdmMsg_SessionCreated(
-      render_frame_id, cdm_id, session_id, web_session_id));
+void BrowserCdmManager::ResolvePromise(int render_frame_id,
+                                       int cdm_id,
+                                       uint32_t promise_id) {
+  Send(new CdmMsg_ResolvePromise(render_frame_id, cdm_id, promise_id));
 }
 
-void BrowserCdmManager::OnSessionMessage(int render_frame_id,
-                                         int cdm_id,
-                                         uint32 session_id,
-                                         const std::vector<uint8>& message,
-                                         const GURL& destination_url) {
-  GURL verified_gurl = destination_url;
-  if (!verified_gurl.is_valid() && !verified_gurl.is_empty()) {
-    DLOG(WARNING) << "SessionMessage destination_url is invalid : "
-                  << destination_url.possibly_invalid_spec();
-    verified_gurl = GURL::EmptyGURL();  // Replace invalid destination_url.
+void BrowserCdmManager::ResolvePromiseWithSession(
+    int render_frame_id,
+    int cdm_id,
+    uint32_t promise_id,
+    const std::string& session_id) {
+  if (session_id.length() > media::limits::kMaxSessionIdLength) {
+    RejectPromise(render_frame_id, cdm_id, promise_id,
+                  MediaKeys::INVALID_ACCESS_ERROR, 0,
+                  "Session ID is too long.");
+    return;
   }
 
-  Send(new CdmMsg_SessionMessage(
-      render_frame_id, cdm_id, session_id, message, verified_gurl));
+  Send(new CdmMsg_ResolvePromiseWithSession(render_frame_id, cdm_id, promise_id,
+                                            session_id));
 }
 
-void BrowserCdmManager::OnSessionReady(int render_frame_id,
-                                       int cdm_id,
-                                       uint32 session_id) {
-  Send(new CdmMsg_SessionReady(render_frame_id, cdm_id, session_id));
+void BrowserCdmManager::RejectPromise(int render_frame_id,
+                                      int cdm_id,
+                                      uint32_t promise_id,
+                                      media::MediaKeys::Exception exception,
+                                      uint32_t system_code,
+                                      const std::string& error_message) {
+  Send(new CdmMsg_RejectPromise(render_frame_id, cdm_id, promise_id, exception,
+                                system_code, error_message));
+}
+
+void BrowserCdmManager::OnSessionMessage(
+    int render_frame_id,
+    int cdm_id,
+    const std::string& session_id,
+    media::MediaKeys::MessageType message_type,
+    const std::vector<uint8>& message,
+    const GURL& legacy_destination_url) {
+  GURL verified_gurl = legacy_destination_url;
+  if (!verified_gurl.is_valid() && !verified_gurl.is_empty()) {
+    DLOG(WARNING) << "SessionMessage legacy_destination_url is invalid : "
+                  << legacy_destination_url.possibly_invalid_spec();
+    verified_gurl =
+        GURL::EmptyGURL();  // Replace invalid legacy_destination_url.
+  }
+
+  Send(new CdmMsg_SessionMessage(render_frame_id, cdm_id, session_id,
+                                 message_type, message, verified_gurl));
 }
 
 void BrowserCdmManager::OnSessionClosed(int render_frame_id,
                                         int cdm_id,
-                                        uint32 session_id) {
+                                        const std::string& session_id) {
   Send(new CdmMsg_SessionClosed(render_frame_id, cdm_id, session_id));
 }
 
-void BrowserCdmManager::OnSessionError(int render_frame_id,
-                                       int cdm_id,
-                                       uint32 session_id,
-                                       MediaKeys::KeyError error_code,
-                                       uint32 system_code) {
-  Send(new CdmMsg_SessionError(
-      render_frame_id, cdm_id, session_id, error_code, system_code));
+void BrowserCdmManager::OnLegacySessionError(
+    int render_frame_id,
+    int cdm_id,
+    const std::string& session_id,
+    MediaKeys::Exception exception_code,
+    uint32 system_code,
+    const std::string& error_message) {
+  Send(new CdmMsg_LegacySessionError(render_frame_id, cdm_id, session_id,
+                                     exception_code, system_code,
+                                     error_message));
+}
+
+void BrowserCdmManager::OnSessionKeysChange(int render_frame_id,
+                                            int cdm_id,
+                                            const std::string& session_id,
+                                            bool has_additional_usable_key,
+                                            media::CdmKeysInfo keys_info) {
+  std::vector<media::CdmKeyInformation> key_info_vector;
+  for (const auto& key_info : keys_info)
+    key_info_vector.push_back(*key_info);
+  Send(new CdmMsg_SessionKeysChange(render_frame_id, cdm_id, session_id,
+                                    has_additional_usable_key,
+                                    key_info_vector));
+}
+
+void BrowserCdmManager::OnSessionExpirationUpdate(
+    int render_frame_id,
+    int cdm_id,
+    const std::string& session_id,
+    const base::Time& new_expiry_time) {
+  Send(new CdmMsg_SessionExpirationUpdate(render_frame_id, cdm_id, session_id,
+                                          new_expiry_time));
 }
 
 void BrowserCdmManager::OnInitializeCdm(int render_frame_id,
@@ -195,113 +310,132 @@ void BrowserCdmManager::OnInitializeCdm(int render_frame_id,
   AddCdm(render_frame_id, cdm_id, key_system, security_origin);
 }
 
-void BrowserCdmManager::OnCreateSession(
+void BrowserCdmManager::OnSetServerCertificate(
     int render_frame_id,
     int cdm_id,
-    uint32 session_id,
-    CdmHostMsg_CreateSession_ContentType content_type,
+    uint32_t promise_id,
+    const std::vector<uint8_t>& certificate) {
+  DCHECK(task_runner_->RunsTasksOnCurrentThread());
+
+  scoped_ptr<SimplePromise> promise(
+      new SimplePromise(this, render_frame_id, cdm_id, promise_id));
+
+  BrowserCdm* cdm = GetCdm(render_frame_id, cdm_id);
+  if (!cdm) {
+    promise->reject(MediaKeys::INVALID_STATE_ERROR, 0, "CDM not found.");
+    return;
+  }
+
+  if (certificate.empty()) {
+    promise->reject(MediaKeys::INVALID_ACCESS_ERROR, 0, "Empty certificate.");
+    return;
+  }
+
+  cdm->SetServerCertificate(&certificate[0], certificate.size(),
+                            promise.Pass());
+}
+
+void BrowserCdmManager::OnCreateSessionAndGenerateRequest(
+    int render_frame_id,
+    int cdm_id,
+    uint32_t promise_id,
+    CdmHostMsg_CreateSession_InitDataType init_data_type,
     const std::vector<uint8>& init_data) {
+  DCHECK(task_runner_->RunsTasksOnCurrentThread());
+
+  scoped_ptr<NewSessionPromise> promise(
+      new NewSessionPromise(this, render_frame_id, cdm_id, promise_id));
+
   if (init_data.size() > kMaxInitDataLength) {
     LOG(WARNING) << "InitData for ID: " << cdm_id
                  << " too long: " << init_data.size();
-    SendSessionError(render_frame_id, cdm_id, session_id);
+    promise->reject(MediaKeys::INVALID_ACCESS_ERROR, 0, "Init data too long.");
     return;
   }
 
-  // Convert the session content type into a MIME type. "audio" and "video"
-  // don't matter, so using "video" for the MIME type.
-  // Ref:
-  // https://dvcs.w3.org/hg/html-media/raw-file/default/encrypted-media/encrypted-media.html#dom-createsession
-  std::string mime_type;
-  switch (content_type) {
-    case CREATE_SESSION_TYPE_WEBM:
-      mime_type = "video/webm";
+  media::EmeInitDataType eme_init_data_type;
+  switch (init_data_type) {
+    case INIT_DATA_TYPE_WEBM:
+      eme_init_data_type = media::EmeInitDataType::WEBM;
       break;
-    case CREATE_SESSION_TYPE_MP4:
-      mime_type = "video/mp4";
+#if defined(USE_PROPRIETARY_CODECS)
+    case INIT_DATA_TYPE_CENC:
+      eme_init_data_type = media::EmeInitDataType::CENC;
       break;
+#endif
     default:
       NOTREACHED();
+      promise->reject(MediaKeys::INVALID_ACCESS_ERROR, 0,
+                      "Invalid init data type.");
       return;
   }
 
-#if defined(OS_ANDROID)
-  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
-          switches::kDisableInfobarForProtectedMediaIdentifier)) {
-    CreateSessionIfPermitted(
-        render_frame_id, cdm_id, session_id, mime_type, init_data, true);
-    return;
-  }
-#endif
-
   BrowserCdm* cdm = GetCdm(render_frame_id, cdm_id);
   if (!cdm) {
     DLOG(WARNING) << "No CDM found for: " << render_frame_id << ", " << cdm_id;
-    SendSessionError(render_frame_id, cdm_id, session_id);
+    promise->reject(MediaKeys::INVALID_STATE_ERROR, 0, "CDM not found.");
     return;
   }
 
-  std::map<uint64, GURL>::const_iterator iter =
-      cdm_security_origin_map_.find(GetId(render_frame_id, cdm_id));
-  if (iter == cdm_security_origin_map_.end()) {
-    NOTREACHED();
-    SendSessionError(render_frame_id, cdm_id, session_id);
-    return;
-  }
-  GURL security_origin = iter->second;
-
-  RequestSessionPermission(render_frame_id,
-                           security_origin,
-                           cdm_id,
-                           session_id,
-                           mime_type,
-                           init_data);
+  CheckPermissionStatus(
+      render_frame_id, cdm_id,
+      base::Bind(&BrowserCdmManager::CreateSessionAndGenerateRequestIfPermitted,
+                 this, render_frame_id, cdm_id, eme_init_data_type, init_data,
+                 base::Passed(&promise)));
 }
 
-void BrowserCdmManager::OnUpdateSession(
-    int render_frame_id,
-    int cdm_id,
-    uint32 session_id,
-    const std::vector<uint8>& response) {
+void BrowserCdmManager::OnUpdateSession(int render_frame_id,
+                                        int cdm_id,
+                                        uint32_t promise_id,
+                                        const std::string& session_id,
+                                        const std::vector<uint8>& response) {
+  DCHECK(task_runner_->RunsTasksOnCurrentThread());
+
+  scoped_ptr<SimplePromise> promise(
+      new SimplePromise(this, render_frame_id, cdm_id, promise_id));
+
   BrowserCdm* cdm = GetCdm(render_frame_id, cdm_id);
   if (!cdm) {
-    DLOG(WARNING) << "No CDM found for: " << render_frame_id << ", " << cdm_id;
-    SendSessionError(render_frame_id, cdm_id, session_id);
+    promise->reject(MediaKeys::INVALID_STATE_ERROR, 0, "CDM not found.");
     return;
   }
 
   if (response.size() > kMaxSessionResponseLength) {
     LOG(WARNING) << "Response for ID " << cdm_id
                  << " is too long: " << response.size();
-    SendSessionError(render_frame_id, cdm_id, session_id);
+    promise->reject(MediaKeys::INVALID_ACCESS_ERROR, 0, "Response too long.");
     return;
   }
 
-  cdm->UpdateSession(session_id, &response[0], response.size());
+  if (response.empty()) {
+    promise->reject(MediaKeys::INVALID_ACCESS_ERROR, 0, "Response is empty.");
+    return;
+  }
+
+  cdm->UpdateSession(session_id, &response[0], response.size(), promise.Pass());
 }
 
-void BrowserCdmManager::OnReleaseSession(int render_frame_id,
-                                         int cdm_id,
-                                         uint32 session_id) {
+void BrowserCdmManager::OnCloseSession(int render_frame_id,
+                                       int cdm_id,
+                                       uint32_t promise_id,
+                                       const std::string& session_id) {
+  DCHECK(task_runner_->RunsTasksOnCurrentThread());
+
+  scoped_ptr<SimplePromise> promise(
+      new SimplePromise(this, render_frame_id, cdm_id, promise_id));
+
   BrowserCdm* cdm = GetCdm(render_frame_id, cdm_id);
   if (!cdm) {
-    DLOG(WARNING) << "No CDM found for: " << render_frame_id << ", " << cdm_id;
-    SendSessionError(render_frame_id, cdm_id, session_id);
+    promise->reject(MediaKeys::INVALID_STATE_ERROR, 0, "CDM not found.");
     return;
   }
 
-  cdm->ReleaseSession(session_id);
+  cdm->CloseSession(session_id, promise.Pass());
 }
 
 void BrowserCdmManager::OnDestroyCdm(int render_frame_id, int cdm_id) {
+  DCHECK(task_runner_->RunsTasksOnCurrentThread());
   RemoveCdm(GetId(render_frame_id, cdm_id));
-}
-
-void BrowserCdmManager::SendSessionError(int render_frame_id,
-                                         int cdm_id,
-                                         uint32 session_id) {
-  OnSessionError(
-        render_frame_id, cdm_id, session_id, MediaKeys::kUnknownError, 0);
 }
 
 // Use a weak pointer here instead of |this| to avoid circular references.
@@ -316,17 +450,31 @@ void BrowserCdmManager::AddCdm(int render_frame_id,
   DCHECK(task_runner_->RunsTasksOnCurrentThread());
   DCHECK(!GetCdm(render_frame_id, cdm_id));
 
-  scoped_ptr<BrowserCdm> cdm(
-      media::CreateBrowserCdm(key_system,
-                              BROWSER_CDM_MANAGER_CB(OnSessionCreated),
-                              BROWSER_CDM_MANAGER_CB(OnSessionMessage),
-                              BROWSER_CDM_MANAGER_CB(OnSessionReady),
-                              BROWSER_CDM_MANAGER_CB(OnSessionClosed),
-                              BROWSER_CDM_MANAGER_CB(OnSessionError)));
+  bool use_secure_surface = false;
+
+#if defined(OS_ANDROID)
+  // TODO(sandersd): Pass the security level from key system instead.
+  // http://crbug.com/467779
+  RenderFrameHost* rfh =
+      RenderFrameHost::FromID(render_process_id_, render_frame_id);
+  WebContents* web_contents = WebContents::FromRenderFrameHost(rfh);
+  if (web_contents) {
+    content::RendererPreferences* prefs =
+        web_contents->GetMutableRendererPrefs();
+    use_secure_surface = prefs->use_video_overlay_for_embedded_encrypted_video;
+  }
+#endif
+
+  scoped_ptr<BrowserCdm> cdm(media::CreateBrowserCdm(
+      key_system, use_secure_surface, BROWSER_CDM_MANAGER_CB(OnSessionMessage),
+      BROWSER_CDM_MANAGER_CB(OnSessionClosed),
+      BROWSER_CDM_MANAGER_CB(OnLegacySessionError),
+      BROWSER_CDM_MANAGER_CB(OnSessionKeysChange),
+      BROWSER_CDM_MANAGER_CB(OnSessionExpirationUpdate)));
 
   if (!cdm) {
-    // This failure will be discovered and reported by OnCreateSession()
-    // as GetCdm() will return null.
+    // This failure will be discovered and reported by
+    // OnCreateSessionAndGenerateRequest() as GetCdm() will return null.
     DVLOG(1) << "failed to create CDM.";
     return;
   }
@@ -354,77 +502,90 @@ void BrowserCdmManager::RemoveCdm(uint64 id) {
 
   cdm_map_.erase(id);
   cdm_security_origin_map_.erase(id);
-  if (cdm_cancel_permission_map_.count(id)) {
-    cdm_cancel_permission_map_[id].Run();
-    cdm_cancel_permission_map_.erase(id);
+}
+
+void BrowserCdmManager::CheckPermissionStatus(
+    int render_frame_id,
+    int cdm_id,
+    const PermissionStatusCB& permission_status_cb) {
+  // Always called on |task_runner_|, which may not be on the UI thread.
+  DCHECK(task_runner_->RunsTasksOnCurrentThread());
+
+  GURL security_origin;
+  std::map<uint64, GURL>::const_iterator iter =
+      cdm_security_origin_map_.find(GetId(render_frame_id, cdm_id));
+  DCHECK(iter != cdm_security_origin_map_.end());
+  if (iter != cdm_security_origin_map_.end())
+    security_origin = iter->second;
+
+  if (!BrowserThread::CurrentlyOn(BrowserThread::UI)) {
+    BrowserThread::PostTask(
+        BrowserThread::UI, FROM_HERE,
+        base::Bind(&BrowserCdmManager::CheckPermissionStatusOnUIThread, this,
+                   render_frame_id, security_origin, permission_status_cb));
+  } else {
+    CheckPermissionStatusOnUIThread(render_frame_id, security_origin,
+                                    permission_status_cb);
   }
 }
 
-void BrowserCdmManager::RequestSessionPermission(
+// Note: This function runs on the UI thread, which may be different from
+// |task_runner_|. Be careful about thread safety!
+void BrowserCdmManager::CheckPermissionStatusOnUIThread(
     int render_frame_id,
     const GURL& security_origin,
-    int cdm_id,
-    uint32 session_id,
-    const std::string& content_type,
-    const std::vector<uint8>& init_data) {
-  if (!BrowserThread::CurrentlyOn(BrowserThread::UI)) {
-    BrowserThread::PostTask(
-        BrowserThread::UI,
-        FROM_HERE,
-        base::Bind(&BrowserCdmManager::RequestSessionPermission,
-                   this,
-                   render_frame_id,
-                   security_origin,
-                   cdm_id,
-                   session_id,
-                   content_type,
-                   init_data));
-    return;
-  }
+    const base::Callback<void(bool)>& permission_status_cb) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   RenderFrameHost* rfh =
       RenderFrameHost::FromID(render_process_id_, render_frame_id);
   WebContents* web_contents = WebContents::FromRenderFrameHost(rfh);
-  DCHECK(web_contents);
-  GetContentClient()->browser()->RequestPermission(
-      content::PERMISSION_PROTECTED_MEDIA,
-      web_contents,
-      0,  // bridge id
+  PermissionManager* permission_manager =
+      web_contents->GetBrowserContext()->GetPermissionManager();
+  if (!permission_manager) {
+    permission_status_cb.Run(false);
+    return;
+  }
+
+  PermissionStatus permission_status = permission_manager->GetPermissionStatus(
+      content::PermissionType::PROTECTED_MEDIA_IDENTIFIER,
       security_origin,
-      // Only implemented for Android infobars which do not support
-      // user gestures.
-      true,
-      base::Bind(&BrowserCdmManager::CreateSessionIfPermitted,
-                 this,
-                 render_frame_id,
-                 cdm_id,
-                 session_id,
-                 content_type,
-                 init_data));
+      web_contents->GetLastCommittedURL().GetOrigin());
+
+  bool allowed = (permission_status == PERMISSION_STATUS_GRANTED);
+  if (!task_runner_->RunsTasksOnCurrentThread()) {
+    task_runner_->PostTask(FROM_HERE,
+                           base::Bind(permission_status_cb, allowed));
+  } else {
+    permission_status_cb.Run(allowed);
+  }
 }
 
-void BrowserCdmManager::CreateSessionIfPermitted(
+void BrowserCdmManager::CreateSessionAndGenerateRequestIfPermitted(
     int render_frame_id,
     int cdm_id,
-    uint32 session_id,
-    const std::string& content_type,
+    media::EmeInitDataType init_data_type,
     const std::vector<uint8>& init_data,
-    bool permitted) {
-  cdm_cancel_permission_map_.erase(GetId(render_frame_id, cdm_id));
-  if (!permitted) {
-    SendSessionError(render_frame_id, cdm_id, session_id);
+    scoped_ptr<media::NewSessionCdmPromise> promise,
+    bool permission_was_allowed) {
+  DCHECK(task_runner_->RunsTasksOnCurrentThread());
+
+  if (!permission_was_allowed) {
+    promise->reject(MediaKeys::NOT_SUPPORTED_ERROR, 0, "Permission denied.");
     return;
   }
 
   BrowserCdm* cdm = GetCdm(render_frame_id, cdm_id);
   if (!cdm) {
-    DLOG(WARNING) << "No CDM found for: " << render_frame_id << ", " << cdm_id;
-    SendSessionError(render_frame_id, cdm_id, session_id);
+    promise->reject(MediaKeys::INVALID_STATE_ERROR, 0, "CDM not found.");
     return;
   }
 
-  // This could fail, in which case a SessionError will be fired.
-  cdm->CreateSession(session_id, content_type, &init_data[0], init_data.size());
+  // Only the temporary session type is supported in browser CDM path.
+  // TODO(xhwang): Add SessionType support if needed.
+  cdm->CreateSessionAndGenerateRequest(media::MediaKeys::TEMPORARY_SESSION,
+                                       init_data_type, &init_data[0],
+                                       init_data.size(), promise.Pass());
 }
 
 }  // namespace content

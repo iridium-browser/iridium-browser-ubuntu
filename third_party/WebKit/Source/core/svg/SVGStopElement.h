@@ -37,16 +37,15 @@ public:
 
     SVGAnimatedNumber* offset() { return m_offset.get(); }
 
-    virtual void trace(Visitor*) override;
+    DECLARE_VIRTUAL_TRACE();
 
 private:
     explicit SVGStopElement(Document&);
 
-    virtual void parseAttribute(const QualifiedName&, const AtomicString&) override;
     virtual void svgAttributeChanged(const QualifiedName&) override;
 
-    virtual RenderObject* createRenderer(RenderStyle*) override;
-    virtual bool rendererIsNeeded(const RenderStyle&) override;
+    virtual LayoutObject* createLayoutObject(const ComputedStyle&) override;
+    virtual bool layoutObjectIsNeeded(const ComputedStyle&) override;
 
     RefPtrWillBeMember<SVGAnimatedNumber> m_offset;
 };

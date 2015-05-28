@@ -5,11 +5,13 @@
 #ifndef CC_DEBUG_FRAME_VIEWER_INSTRUMENTATION_H_
 #define CC_DEBUG_FRAME_VIEWER_INSTRUMENTATION_H_
 
-#include "base/debug/trace_event.h"
+#include "base/trace_event/trace_event.h"
 #include "cc/resources/tile.h"
 
 namespace cc {
 namespace frame_viewer_instrumentation {
+
+extern const char kCategoryLayerTree[];
 
 class ScopedAnalyzeTask {
  public:
@@ -34,6 +36,8 @@ class ScopedRasterTask {
  private:
   DISALLOW_COPY_AND_ASSIGN(ScopedRasterTask);
 };
+
+bool IsTracingLayerTreeSnapshots();
 
 }  // namespace frame_viewer_instrumentation
 }  // namespace cc

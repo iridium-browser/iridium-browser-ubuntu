@@ -5,7 +5,7 @@
 // Original code copyright 2014 Foxit Software Inc. http://www.foxitsoftware.com
 
 #include "../../include/fxcrt/fx_basic.h"
-#include "../../../third_party/numerics/safe_math.h"
+#include "../../../third_party/base/numerics/safe_math.h"
 
 static CFX_StringDataW* FX_AllocStringW(int nLen)
 {
@@ -13,7 +13,7 @@ static CFX_StringDataW* FX_AllocStringW(int nLen)
         return NULL;
     }
 
-    base::CheckedNumeric<int> iSize = static_cast<int>(sizeof(FX_WCHAR));
+    pdfium::base::CheckedNumeric<int> iSize = static_cast<int>(sizeof(FX_WCHAR));
     iSize *= nLen + 1;
     iSize += sizeof(long) * 3;
     CFX_StringDataW* pData = (CFX_StringDataW*)FX_Alloc(FX_BYTE, iSize.ValueOrDie());
@@ -323,25 +323,21 @@ CFX_ByteString CFX_WideString::UTF8Encode() const
 {
     return FX_UTF8Encode(*this);
 }
-CFX_ByteString CFX_WideString::UTF16LE_Encode(FX_BOOL bTerminate) const
+CFX_ByteString CFX_WideString::UTF16LE_Encode() const
 {
     if (m_pData == NULL) {
-        return bTerminate ? CFX_ByteString(FX_BSTRC("\0\0")) : CFX_ByteString();
+        return CFX_ByteString(FX_BSTRC("\0\0"));
     }
     int len = m_pData->m_nDataLength;
     CFX_ByteString result;
-    FX_LPSTR buffer = result.GetBuffer(len * 2 + (bTerminate ? 2 : 0));
+    FX_LPSTR buffer = result.GetBuffer(len * 2 + 2);
     for (int i = 0; i < len; i ++) {
         buffer[i * 2] = m_pData->m_String[i] & 0xff;
         buffer[i * 2 + 1] = m_pData->m_String[i] >> 8;
     }
-    if (bTerminate) {
-        buffer[len * 2] = 0;
-        buffer[len * 2 + 1] = 0;
-        result.ReleaseBuffer(len * 2 + 2);
-    } else {
-        result.ReleaseBuffer(len * 2);
-    }
+    buffer[len * 2] = 0;
+    buffer[len * 2 + 1] = 0;
+    result.ReleaseBuffer(len * 2 + 2);
     return result;
 }
 void CFX_WideString::ConvertFrom(const CFX_ByteString& str, CFX_CharMap* pCharMap)
@@ -439,7 +435,7 @@ void CFX_WideString::AllocCopy(CFX_WideString& dest, FX_STRSIZE nCopyLen, FX_STR
     if (nCopyLen == 0 || nCopyLen < 0) {
         return;
     }
-    base::CheckedNumeric<FX_STRSIZE> iSize = static_cast<FX_STRSIZE>(sizeof(FX_WCHAR));
+    pdfium::base::CheckedNumeric<FX_STRSIZE> iSize = static_cast<FX_STRSIZE>(sizeof(FX_WCHAR));
     iSize *= nCopyLen;
     ASSERT(dest.m_pData == NULL);
     dest.m_pData = FX_AllocStringW(nCopyLen);
@@ -980,9 +976,9 @@ void CFX_WideString::FormatV(FX_LPCWSTR lpszFormat, va_list argList)
                         nItemLen = nPrecision + nWidth + 128;
                     } else {
                         double f;
-                        char pszTemp[256];
+                        char pszTemp[256] = {0};
                         f = va_arg(argList, double);
-                        FXSYS_snprintf(pszTemp, sizeof(pszTemp), "%*.*f", nWidth, nPrecision + 6, f );
+                        FXSYS_snprintf(pszTemp, sizeof(pszTemp) - 1, "%*.*f", nWidth, nPrecision + 6, f );
                         nItemLen = (FX_STRSIZE)FXSYS_strlen(pszTemp);
                     }
                     break;

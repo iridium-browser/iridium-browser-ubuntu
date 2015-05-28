@@ -14,6 +14,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/observer_list.h"
 #include "chrome/browser/chromeos/login/ui/oobe_display.h"
+#include "chrome/browser/chromeos/settings/shutdown_policy_handler.h"
 #include "chrome/browser/ui/webui/chromeos/login/core_oobe_handler.h"
 #include "content/public/browser/web_ui_controller.h"
 
@@ -47,7 +48,8 @@ class UserBoardScreenHandler;
 // - update screen.
 class OobeUI : public OobeDisplay,
                public content::WebUIController,
-               public CoreOobeHandler::Delegate {
+               public CoreOobeHandler::Delegate,
+               public ShutdownPolicyHandler::Delegate {
  public:
   class Observer {
    public:
@@ -94,38 +96,36 @@ class OobeUI : public OobeDisplay,
   static const char kScreenDeviceDisabled[];
 
   OobeUI(content::WebUI* web_ui, const GURL& url);
-  virtual ~OobeUI();
+  ~OobeUI() override;
 
   // OobeDisplay implementation:
-  virtual CoreOobeActor* GetCoreOobeActor() override;
-  virtual UpdateScreenActor* GetUpdateScreenActor() override;
-  virtual NetworkView* GetNetworkView() override;
-  virtual EulaView* GetEulaView() override;
-  virtual EnableDebuggingScreenActor* GetEnableDebuggingScreenActor() override;
-  virtual EnrollmentScreenActor* GetEnrollmentScreenActor() override;
-  virtual ResetScreenActor* GetResetScreenActor() override;
-  virtual KioskAutolaunchScreenActor* GetKioskAutolaunchScreenActor() override;
-  virtual KioskEnableScreenActor* GetKioskEnableScreenActor() override;
-  virtual TermsOfServiceScreenActor*
-      GetTermsOfServiceScreenActor() override;
-  virtual UserImageScreenActor* GetUserImageScreenActor() override;
-  virtual ErrorScreenActor* GetErrorScreenActor() override;
-  virtual WrongHWIDScreenActor* GetWrongHWIDScreenActor() override;
-  virtual AutoEnrollmentCheckScreenActor*
-      GetAutoEnrollmentCheckScreenActor() override;
-  virtual SupervisedUserCreationScreenHandler*
-      GetSupervisedUserCreationScreenActor() override;
-  virtual AppLaunchSplashScreenActor*
-      GetAppLaunchSplashScreenActor() override;
-  virtual bool IsJSReady(const base::Closure& display_is_ready_callback)
+  CoreOobeActor* GetCoreOobeActor() override;
+  NetworkView* GetNetworkView() override;
+  EulaView* GetEulaView() override;
+  UpdateView* GetUpdateView() override;
+  EnableDebuggingScreenActor* GetEnableDebuggingScreenActor() override;
+  EnrollmentScreenActor* GetEnrollmentScreenActor() override;
+  ResetView* GetResetView() override;
+  KioskAutolaunchScreenActor* GetKioskAutolaunchScreenActor() override;
+  KioskEnableScreenActor* GetKioskEnableScreenActor() override;
+  TermsOfServiceScreenActor* GetTermsOfServiceScreenActor() override;
+  UserImageView* GetUserImageView() override;
+  ErrorScreen* GetErrorScreen() override;
+  WrongHWIDScreenActor* GetWrongHWIDScreenActor() override;
+  AutoEnrollmentCheckScreenActor* GetAutoEnrollmentCheckScreenActor() override;
+  SupervisedUserCreationScreenHandler* GetSupervisedUserCreationScreenActor()
       override;
-  virtual HIDDetectionScreenActor* GetHIDDetectionScreenActor() override;
-  virtual ControllerPairingScreenActor* GetControllerPairingScreenActor()
-      override;
-  virtual HostPairingScreenActor* GetHostPairingScreenActor() override;
+  AppLaunchSplashScreenActor* GetAppLaunchSplashScreenActor() override;
+  bool IsJSReady(const base::Closure& display_is_ready_callback) override;
+  HIDDetectionView* GetHIDDetectionView() override;
+  ControllerPairingScreenActor* GetControllerPairingScreenActor() override;
+  HostPairingScreenActor* GetHostPairingScreenActor() override;
   DeviceDisabledScreenActor* GetDeviceDisabledScreenActor() override;
-  virtual GaiaScreenHandler* GetGaiaScreenActor() override;
-  virtual UserBoardView* GetUserBoardScreenActor() override;
+  GaiaScreenHandler* GetGaiaScreenActor() override;
+  UserBoardView* GetUserBoardScreenActor() override;
+
+  // ShutdownPolicyObserver::Delegate
+  void OnShutdownPolicyChanged(bool reboot_on_shutdown) override;
 
   // Collects localized strings from the owned handlers.
   void GetLocalizedStrings(base::DictionaryValue* localized_strings);
@@ -175,7 +175,7 @@ class OobeUI : public OobeDisplay,
   void AddScreenHandler(BaseScreenHandler* handler);
 
   // CoreOobeHandler::Delegate implementation:
-  virtual void OnCurrentScreenChanged(const std::string& screen) override;
+  void OnCurrentScreenChanged(const std::string& screen) override;
 
   // Type of UI.
   std::string display_type_;
@@ -197,8 +197,8 @@ class OobeUI : public OobeDisplay,
   EnableDebuggingScreenActor* debugging_screen_actor_;
   EulaView* eula_view_;
   EnrollmentScreenActor* enrollment_screen_actor_;
-  HIDDetectionScreenActor* hid_detection_screen_actor_;
-  ResetScreenActor* reset_screen_actor_;
+  ResetView* reset_view_;
+  HIDDetectionView* hid_detection_view_;
   KioskAutolaunchScreenActor* autolaunch_screen_actor_;
   KioskEnableScreenActor* kiosk_enable_screen_actor_;
   WrongHWIDScreenActor* wrong_hwid_screen_actor_;
@@ -227,7 +227,7 @@ class OobeUI : public OobeDisplay,
   SigninScreenHandler* signin_screen_handler_;
 
   TermsOfServiceScreenActor* terms_of_service_screen_actor_;
-  UserImageScreenActor* user_image_screen_actor_;
+  UserImageView* user_image_view_;
 
   std::vector<BaseScreenHandler*> handlers_;  // Non-owning pointers.
 
@@ -256,6 +256,9 @@ class OobeUI : public OobeDisplay,
 
   // List of registered observers.
   ObserverList<Observer> observer_list_;
+
+  // Observer of CrosSettings watching the kRebootOnShutdown policy.
+  scoped_ptr<ShutdownPolicyHandler> shutdown_policy_handler_;
 
   DISALLOW_COPY_AND_ASSIGN(OobeUI);
 };

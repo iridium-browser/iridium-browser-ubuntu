@@ -272,10 +272,9 @@ BasicJsonStringifier::Result BasicJsonStringifier::StackPush(
     for (int i = 0; i < length; i++) {
       if (elements->get(i) == *object) {
         AllowHeapAllocation allow_to_return_error;
-        Handle<Object> error;
-        MaybeHandle<Object> maybe_error = factory()->NewTypeError(
+        Handle<Object> error = factory()->NewTypeError(
             "circular_structure", HandleVector<Object>(NULL, 0));
-        if (maybe_error.ToHandle(&error)) isolate_->Throw(*error);
+        isolate_->Throw(*error);
         return EXCEPTION;
       }
     }
@@ -539,7 +538,7 @@ BasicJsonStringifier::Result BasicJsonStringifier::SerializeJSObject(
       PropertyDetails details = map->instance_descriptors()->GetDetails(i);
       if (details.IsDontEnum()) continue;
       Handle<Object> property;
-      if (details.type() == FIELD && *map == object->map()) {
+      if (details.type() == DATA && *map == object->map()) {
         FieldIndex field_index = FieldIndex::ForDescriptor(*map, i);
         Isolate* isolate = object->GetIsolate();
         if (object->IsUnboxedDoubleField(field_index)) {

@@ -9,7 +9,8 @@
 #ifndef LIBANGLE_RENDERER_D3D_D3D9_FENCE9_H_
 #define LIBANGLE_RENDERER_D3D_D3D9_FENCE9_H_
 
-#include "libANGLE/renderer/FenceImpl.h"
+#include "libANGLE/renderer/FenceNVImpl.h"
+#include "libANGLE/renderer/FenceSyncImpl.h"
 
 namespace rx
 {
@@ -26,8 +27,6 @@ class FenceNV9 : public FenceNVImpl
     gl::Error finishFence(GLboolean *outFinished);
 
   private:
-    DISALLOW_COPY_AND_ASSIGN(FenceNV9);
-
     Renderer9 *mRenderer;
     IDirect3DQuery9 *mQuery;
 };

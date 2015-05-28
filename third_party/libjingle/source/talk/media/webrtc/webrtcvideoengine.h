@@ -94,11 +94,10 @@ bool IsNackEnabled(const VideoCodec& codec);
 bool IsRembEnabled(const VideoCodec& codec);
 void AddDefaultFeedbackParams(VideoCodec* codec);
 
-class WebRtcVideoEngine : public sigslot::has_slots<>,
-                          public webrtc::TraceCallback {
+class WebRtcVideoEngine : public sigslot::has_slots<> {
  public:
   // Creates the WebRtcVideoEngine with internal VideoCaptureModule.
-  WebRtcVideoEngine();
+  explicit WebRtcVideoEngine(WebRtcVoiceEngine* voice_engine);
   // For testing purposes. Allows the WebRtcVoiceEngine,
   // ViEWrapper and CpuMonitor to be mocks.
   // TODO(juberti): Remove the 3-arg ctor once fake tracing is implemented.
@@ -131,8 +130,6 @@ class WebRtcVideoEngine : public sigslot::has_slots<>,
 
   sigslot::repeater2<VideoCapturer*, CaptureState> SignalCaptureStateChange;
 
-  // Set the VoiceEngine for A/V sync. This can only be called before Init.
-  bool SetVoiceEngine(WebRtcVoiceEngine* voice_engine);
   // Set a WebRtcVideoDecoderFactory for external decoding. Video engine does
   // not take the ownership of |decoder_factory|. The caller needs to make sure
   // that |decoder_factory| outlives the video engine.
@@ -155,7 +152,12 @@ class WebRtcVideoEngine : public sigslot::has_slots<>,
   // Returns an external encoder for the given codec type. The return value
   // can be NULL if encoder factory is not given or it does not support the
   // codec type. The caller takes the ownership of the returned object.
-  webrtc::VideoEncoder* CreateExternalEncoder(webrtc::VideoCodecType type);
+  // On success, |internal_source| is set to true if the encoder has an internal
+  // frame source, meaning that it doesn't expect/require frames through the
+  // normal camera pipeline. See ViEExternalCodec::RegisterExternalSendCodec for
+  // more information.
+  webrtc::VideoEncoder* CreateExternalEncoder(webrtc::VideoCodecType type,
+                                              bool* internal_source);
   // Releases the encoder instance created by CreateExternalEncoder().
   void DestroyExternalEncoder(webrtc::VideoEncoder* encoder);
 
@@ -176,8 +178,6 @@ class WebRtcVideoEngine : public sigslot::has_slots<>,
   void UnregisterChannel(WebRtcVideoMediaChannel* channel);
   bool ConvertFromCricketVideoCodec(const VideoCodec& in_codec,
                                     webrtc::VideoCodec* out_codec);
-  // Check whether the supplied trace should be ignored.
-  bool ShouldIgnoreTrace(const std::string& trace);
   int GetNumOfChannels();
 
   VideoFormat GetStartCaptureFormat() const { return default_codec_format_; }
@@ -185,6 +185,19 @@ class WebRtcVideoEngine : public sigslot::has_slots<>,
   rtc::CpuMonitor* cpu_monitor() { return cpu_monitor_.get(); }
 
  protected:
+  class TraceCallbackImpl : public webrtc::TraceCallback {
+   public:
+    TraceCallbackImpl(WebRtcVoiceEngine* voice_engine)
+        : voice_engine_(voice_engine) {}
+    ~TraceCallbackImpl() override {}
+
+   private:
+    void Print(webrtc::TraceLevel level, const char* trace,
+               int length) override;
+
+    WebRtcVoiceEngine* const voice_engine_;
+  };
+
   bool initialized() const {
     return initialized_;
   }
@@ -208,16 +221,11 @@ class WebRtcVideoEngine : public sigslot::has_slots<>,
   bool InitVideoEngine();
   bool VerifyApt(const VideoCodec& in, int expected_apt) const;
 
-  // webrtc::TraceCallback implementation.
-  virtual void Print(webrtc::TraceLevel level,
-                     const char* trace,
-                     int length) OVERRIDE;
-
   rtc::Thread* worker_thread_;
   rtc::scoped_ptr<ViEWrapper> vie_wrapper_;
   bool vie_wrapper_base_initialized_;
   rtc::scoped_ptr<ViETraceWrapper> tracing_;
-  WebRtcVoiceEngine* voice_engine_;
+  WebRtcVoiceEngine* const voice_engine_;
   rtc::scoped_ptr<webrtc::VideoRender> render_module_;
   rtc::scoped_ptr<WebRtcVideoEncoderFactory> simulcast_encoder_factory_;
   WebRtcVideoEncoderFactory* encoder_factory_;
@@ -226,6 +234,7 @@ class WebRtcVideoEngine : public sigslot::has_slots<>,
   std::vector<VideoCodec> default_video_codec_list_;
   std::vector<RtpHeaderExtension> rtp_header_extensions_;
   VideoFormat default_codec_format_;
+  TraceCallbackImpl trace_callback_;
 
   bool initialized_;
   rtc::CriticalSection channels_crit_;
@@ -236,15 +245,7 @@ class WebRtcVideoEngine : public sigslot::has_slots<>,
   rtc::scoped_ptr<rtc::CpuMonitor> cpu_monitor_;
 };
 
-struct CapturedFrameInfo {
-  CapturedFrameInfo() : width(0), height(0), screencast(false) {}
-  CapturedFrameInfo(size_t width, size_t height, bool screencast) :
-      width(width), height(height), screencast(screencast) {}
-
-  size_t width;
-  size_t height;
-  bool screencast;
-};
+struct CapturedFrameInfo;
 
 // TODO(pthatcher): Add VideoOptions.
 struct VideoSendParams {
@@ -270,44 +271,42 @@ class WebRtcVideoMediaChannel : public rtc::MessageHandler,
   int GetDefaultChannelId() const { return default_channel_id_; }
 
   // VideoMediaChannel implementation
-  virtual bool SetRecvCodecs(const std::vector<VideoCodec> &codecs) OVERRIDE;
-  virtual bool SetSendCodecs(const std::vector<VideoCodec> &codecs) OVERRIDE;
-  virtual bool GetSendCodec(VideoCodec* send_codec) OVERRIDE;
-  virtual bool SetSendStreamFormat(uint32 ssrc,
-                                   const VideoFormat& format) OVERRIDE;
-  virtual bool SetRender(bool render) OVERRIDE;
-  virtual bool SetSend(bool send) OVERRIDE;
+  bool SetRecvCodecs(const std::vector<VideoCodec>& codecs) override;
+  bool SetSendCodecs(const std::vector<VideoCodec>& codecs) override;
+  bool GetSendCodec(VideoCodec* send_codec) override;
+  bool SetSendStreamFormat(uint32 ssrc, const VideoFormat& format) override;
+  bool SetRender(bool render) override;
+  bool SetSend(bool send) override;
 
-  virtual bool AddSendStream(const StreamParams& sp) OVERRIDE;
-  virtual bool RemoveSendStream(uint32 ssrc) OVERRIDE;
-  virtual bool AddRecvStream(const StreamParams& sp) OVERRIDE;
-  virtual bool RemoveRecvStream(uint32 ssrc) OVERRIDE;
-  virtual bool SetRenderer(uint32 ssrc, VideoRenderer* renderer) OVERRIDE;
-  virtual bool GetStats(const StatsOptions& options,
-                        VideoMediaInfo* info) OVERRIDE;
-  virtual bool SetCapturer(uint32 ssrc, VideoCapturer* capturer) OVERRIDE;
-  virtual bool SendIntraFrame() OVERRIDE;
-  virtual bool RequestIntraFrame() OVERRIDE;
+  bool AddSendStream(const StreamParams& sp) override;
+  bool RemoveSendStream(uint32 ssrc) override;
+  bool AddRecvStream(const StreamParams& sp) override;
+  bool RemoveRecvStream(uint32 ssrc) override;
+  bool SetRenderer(uint32 ssrc, VideoRenderer* renderer) override;
+  bool GetStats(VideoMediaInfo* info) override;
+  bool SetCapturer(uint32 ssrc, VideoCapturer* capturer) override;
+  bool SendIntraFrame() override;
+  bool RequestIntraFrame() override;
 
-  virtual void OnPacketReceived(rtc::Buffer* packet,
-                                const rtc::PacketTime& packet_time) OVERRIDE;
-  virtual void OnRtcpReceived(rtc::Buffer* packet,
-                              const rtc::PacketTime& packet_time) OVERRIDE;
-  virtual void OnReadyToSend(bool ready) OVERRIDE;
-  virtual bool MuteStream(uint32 ssrc, bool on) OVERRIDE;
-  virtual bool SetRecvRtpHeaderExtensions(
-      const std::vector<RtpHeaderExtension>& extensions) OVERRIDE;
-  virtual bool SetSendRtpHeaderExtensions(
-      const std::vector<RtpHeaderExtension>& extensions) OVERRIDE;
-  virtual int GetRtpSendTimeExtnId() const OVERRIDE;
-  virtual bool SetMaxSendBandwidth(int bps) OVERRIDE;
-  virtual bool SetOptions(const VideoOptions &options) OVERRIDE;
-  virtual bool GetOptions(VideoOptions *options) const OVERRIDE {
+  void OnPacketReceived(rtc::Buffer* packet,
+                        const rtc::PacketTime& packet_time) override;
+  void OnRtcpReceived(rtc::Buffer* packet,
+                      const rtc::PacketTime& packet_time) override;
+  void OnReadyToSend(bool ready) override;
+  bool MuteStream(uint32 ssrc, bool on) override;
+  bool SetRecvRtpHeaderExtensions(
+      const std::vector<RtpHeaderExtension>& extensions) override;
+  bool SetSendRtpHeaderExtensions(
+      const std::vector<RtpHeaderExtension>& extensions) override;
+  int GetRtpSendTimeExtnId() const override;
+  bool SetMaxSendBandwidth(int bps) override;
+  bool SetOptions(const VideoOptions& options) override;
+  bool GetOptions(VideoOptions* options) const override {
     *options = options_;
     return true;
   }
-  virtual void SetInterface(NetworkInterface* iface) OVERRIDE;
-  virtual void UpdateAspectRatio(int ratio_w, int ratio_h) OVERRIDE;
+  void SetInterface(NetworkInterface* iface) override;
+  void UpdateAspectRatio(int ratio_w, int ratio_h) override;
 
   // Public functions for use by tests and other specialized code.
   uint32 send_ssrc() const { return 0; }
@@ -325,17 +324,15 @@ class WebRtcVideoMediaChannel : public rtc::MessageHandler,
   }
 
   // rtc::MessageHandler:
-  virtual void OnMessage(rtc::Message* msg) OVERRIDE;
+  void OnMessage(rtc::Message* msg) override;
 
  protected:
   void Terminate();
   int GetLastEngineError() { return engine()->GetLastEngineError(); }
 
   // webrtc::Transport:
-  virtual int SendPacket(int channel, const void* data, size_t len) OVERRIDE;
-  virtual int SendRTCPPacket(int channel,
-                             const void* data,
-                             size_t len) OVERRIDE;
+  int SendPacket(int channel, const void* data, size_t len) override;
+  int SendRTCPPacket(int channel, const void* data, size_t len) override;
 
   bool ConferenceModeIsEnabled() const {
     return options_.conference_mode.GetWithDefaultIfUnset(false);
@@ -521,6 +518,35 @@ class WebRtcVideoMediaChannel : public rtc::MessageHandler,
   // aspect ratio
   int ratio_w_;
   int ratio_h_;
+};
+
+// An encoder factory that wraps Create requests for simulcastable codec types
+// with a webrtc::SimulcastEncoderAdapter. Non simulcastable codec type
+// requests are just passed through to the contained encoder factory.
+// Exposed here for code to be shared with WebRtcVideoEngine2, not to be used
+// externally.
+class WebRtcSimulcastEncoderFactory
+    : public cricket::WebRtcVideoEncoderFactory {
+ public:
+  // WebRtcSimulcastEncoderFactory doesn't take ownership of |factory|, which is
+  // owned by e.g. PeerConnectionFactory.
+  explicit WebRtcSimulcastEncoderFactory(
+      cricket::WebRtcVideoEncoderFactory* factory);
+  virtual ~WebRtcSimulcastEncoderFactory();
+
+  static bool UseSimulcastEncoderFactory(const std::vector<VideoCodec>& codecs);
+
+  webrtc::VideoEncoder* CreateVideoEncoder(
+      webrtc::VideoCodecType type) override;
+  const std::vector<VideoCodec>& codecs() const override;
+  bool EncoderTypeHasInternalSource(webrtc::VideoCodecType type) const override;
+  void DestroyVideoEncoder(webrtc::VideoEncoder* encoder) override;
+
+ private:
+  cricket::WebRtcVideoEncoderFactory* factory_;
+  // A list of encoders that were created without being wrapped in a
+  // SimulcastEncoderAdapter.
+  std::vector<webrtc::VideoEncoder*> non_simulcast_encoders_;
 };
 
 }  // namespace cricket

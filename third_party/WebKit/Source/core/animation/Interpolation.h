@@ -10,20 +10,21 @@
 
 namespace blink {
 
-class Interpolation : public RefCountedWillBeGarbageCollected<Interpolation> {
-    DECLARE_EMPTY_VIRTUAL_DESTRUCTOR_WILL_BE_REMOVED(Interpolation);
+class Interpolation : public RefCountedWillBeGarbageCollectedFinalized<Interpolation> {
 public:
     static PassRefPtrWillBeRawPtr<Interpolation> create(PassOwnPtrWillBeRawPtr<InterpolableValue> start, PassOwnPtrWillBeRawPtr<InterpolableValue> end)
     {
         return adoptRefWillBeNoop(new Interpolation(start, end));
     }
 
+    virtual ~Interpolation();
+
     void interpolate(int iteration, double fraction) const;
 
     virtual bool isStyleInterpolation() const { return false; }
     virtual bool isLegacyStyleInterpolation() const { return false; }
 
-    virtual void trace(Visitor*);
+    DECLARE_VIRTUAL_TRACE();
 
 protected:
     const OwnPtrWillBeMember<InterpolableValue> m_start;
@@ -43,6 +44,7 @@ private:
     friend class AnimationDoubleStyleInterpolationTest;
     friend class AnimationVisibilityStyleInterpolationTest;
     friend class AnimationColorStyleInterpolationTest;
+    friend class AnimationSVGStrokeDasharrayStyleInterpolationTest;
 };
 
 } // namespace blink

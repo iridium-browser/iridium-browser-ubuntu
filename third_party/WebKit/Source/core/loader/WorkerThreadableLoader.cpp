@@ -39,10 +39,12 @@
 #include "core/workers/WorkerGlobalScope.h"
 #include "core/workers/WorkerLoaderProxy.h"
 #include "core/workers/WorkerThread.h"
+#include "platform/heap/SafePoint.h"
 #include "platform/network/ResourceError.h"
 #include "platform/network/ResourceRequest.h"
 #include "platform/network/ResourceResponse.h"
 #include "platform/weborigin/Referrer.h"
+#include "platform/weborigin/SecurityPolicy.h"
 #include "public/platform/Platform.h"
 #include "public/platform/WebWaitableEvent.h"
 #include "wtf/MainThread.h"
@@ -84,7 +86,7 @@ void WorkerThreadableLoader::loadResourceSynchronously(WorkerGlobalScope& worker
 
     blink::WebWaitableEvent* signalled;
     {
-        ThreadState::SafePointScope scope(ThreadState::HeapPointersOnStack);
+        SafePointScope scope(ThreadState::HeapPointersOnStack);
         signalled = blink::Platform::current()->waitMultipleEvents(events);
     }
     if (signalled == shutdownEvent) {
@@ -108,7 +110,7 @@ void WorkerThreadableLoader::cancel()
 WorkerThreadableLoader::MainThreadBridge::MainThreadBridge(
     PassRefPtr<ThreadableLoaderClientWrapper> workerClientWrapper,
     PassOwnPtr<ThreadableLoaderClient> clientBridge,
-    WorkerLoaderProxy& loaderProxy,
+    PassRefPtr<WorkerLoaderProxy> loaderProxy,
     const ResourceRequest& request,
     const ThreadableLoaderOptions& options,
     const ResourceLoaderOptions& resourceLoaderOptions,
@@ -119,7 +121,7 @@ WorkerThreadableLoader::MainThreadBridge::MainThreadBridge(
 {
     ASSERT(m_workerClientWrapper.get());
     ASSERT(m_clientBridge.get());
-    m_loaderProxy.postTaskToLoader(
+    m_loaderProxy->postTaskToLoader(
         createCrossThreadTask(&MainThreadBridge::mainThreadCreateLoader, AllowCrossThreadAccess(this), request, options, resourceLoaderOptions, outgoingReferrer));
 }
 
@@ -133,7 +135,7 @@ void WorkerThreadableLoader::MainThreadBridge::mainThreadCreateLoader(ExecutionC
     Document* document = toDocument(context);
 
     OwnPtr<ResourceRequest> request(ResourceRequest::adopt(requestData));
-    request->setHTTPReferrer(Referrer(outgoingReferrer, ReferrerPolicyDefault));
+    request->setHTTPReferrer(SecurityPolicy::generateReferrer(ReferrerPolicyDefault, request->url(), outgoingReferrer));
     resourceLoaderOptions.requestInitiatorContext = WorkerContext;
     thisPtr->m_mainThreadLoader = DocumentThreadableLoader::create(*document, thisPtr, *request, options, resourceLoaderOptions);
     if (!thisPtr->m_mainThreadLoader) {
@@ -155,7 +157,7 @@ void WorkerThreadableLoader::MainThreadBridge::destroy()
     clearClientWrapper();
 
     // "delete this" and m_mainThreadLoader::deref() on the worker object's thread.
-    m_loaderProxy.postTaskToLoader(
+    m_loaderProxy->postTaskToLoader(
         createCrossThreadTask(&MainThreadBridge::mainThreadDestroy, AllowCrossThreadAccess(this)));
 }
 
@@ -171,7 +173,7 @@ void WorkerThreadableLoader::MainThreadBridge::mainThreadOverrideTimeout(Executi
 
 void WorkerThreadableLoader::MainThreadBridge::overrideTimeout(unsigned long timeoutMilliseconds)
 {
-    m_loaderProxy.postTaskToLoader(
+    m_loaderProxy->postTaskToLoader(
         createCrossThreadTask(&MainThreadBridge::mainThreadOverrideTimeout, AllowCrossThreadAccess(this),
             timeoutMilliseconds));
 }
@@ -189,13 +191,15 @@ void WorkerThreadableLoader::MainThreadBridge::mainThreadCancel(ExecutionContext
 
 void WorkerThreadableLoader::MainThreadBridge::cancel()
 {
-    m_loaderProxy.postTaskToLoader(createCrossThreadTask(&MainThreadBridge::mainThreadCancel, AllowCrossThreadAccess(this)));
-    if (!m_workerClientWrapper->isDetached()) {
+    m_loaderProxy->postTaskToLoader(
+        createCrossThreadTask(&MainThreadBridge::mainThreadCancel, AllowCrossThreadAccess(this)));
+    ThreadableLoaderClientWrapper* clientWrapper = m_workerClientWrapper.get();
+    if (!clientWrapper->done()) {
         // If the client hasn't reached a termination state, then transition it by sending a cancellation error.
         // Note: no more client callbacks will be done after this method -- the clearClientWrapper() call ensures that.
         ResourceError error(String(), 0, String(), String());
         error.setIsCancellation(true);
-        m_workerClientWrapper->didFail(error);
+        clientWrapper->didFail(error);
     }
     clearClientWrapper();
 }

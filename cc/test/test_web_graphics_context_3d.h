@@ -373,11 +373,7 @@ class TestWebGraphicsContext3D {
   void clear_reshape_called() { reshape_called_ = false; }
   float scale_factor() const { return scale_factor_; }
 
-  enum UpdateType {
-    NoUpdate = 0,
-    PrepareTexture,
-    PostSubBuffer
-  };
+  enum UpdateType { NO_UPDATE = 0, PREPARE_TEXTURE, POST_SUB_BUFFER };
 
   gfx::Rect update_rect() const { return update_rect_; }
 
@@ -445,6 +441,7 @@ class TestWebGraphicsContext3D {
   void CreateNamespace();
   GLuint BoundTextureId(GLenum target);
   scoped_refptr<TestTexture> BoundTexture(GLenum target);
+  scoped_refptr<TestTexture> UnboundTexture(GLuint texture);
   void CheckTextureIsBound(GLenum target);
 
   unsigned context_id_;

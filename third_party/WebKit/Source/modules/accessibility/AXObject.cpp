@@ -34,12 +34,13 @@
 #include "core/editing/htmlediting.h"
 #include "core/frame/LocalFrame.h"
 #include "core/frame/Settings.h"
-#include "core/rendering/RenderListItem.h"
-#include "core/rendering/RenderTheme.h"
-#include "core/rendering/RenderView.h"
+#include "core/layout/LayoutListItem.h"
+#include "core/layout/LayoutTheme.h"
+#include "core/layout/LayoutView.h"
 #include "modules/accessibility/AXObjectCacheImpl.h"
 #include "platform/UserGestureIndicator.h"
 #include "platform/text/PlatformLocale.h"
+#include "wtf/HashSet.h"
 #include "wtf/StdLibExtras.h"
 #include "wtf/text/WTFString.h"
 
@@ -51,6 +52,7 @@ using namespace HTMLNames;
 
 namespace {
 typedef HashMap<String, AccessibilityRole, CaseFoldingHash> ARIARoleMap;
+typedef HashSet<String, CaseFoldingHash> ARIAWidgetSet;
 
 struct RoleEntry {
     const char* ariaRole;
@@ -65,25 +67,24 @@ const RoleEntry roles[] = {
     { "banner", BannerRole },
     { "button", ButtonRole },
     { "checkbox", CheckBoxRole },
-    { "complementary", ComplementaryRole },
-    { "contentinfo", ContentInfoRole },
-    { "dialog", DialogRole },
-    { "directory", DirectoryRole },
-    { "grid", GridRole },
-    { "gridcell", CellRole },
     { "columnheader", ColumnHeaderRole },
     { "combobox", ComboBoxRole },
+    { "complementary", ComplementaryRole },
+    { "contentinfo", ContentInfoRole },
     { "definition", DefinitionRole },
+    { "dialog", DialogRole },
+    { "directory", DirectoryRole },
     { "document", DocumentRole },
-    { "rowheader", RowHeaderRole },
     { "form", FormRole },
+    { "grid", GridRole },
+    { "gridcell", CellRole },
     { "group", GroupRole },
     { "heading", HeadingRole },
     { "img", ImageRole },
     { "link", LinkRole },
     { "list", ListRole },
-    { "listitem", ListItemRole },
     { "listbox", ListBoxRole },
+    { "listitem", ListItemRole },
     { "log", LogRole },
     { "main", MainRole },
     { "marquee", MarqueeRole },
@@ -93,9 +94,9 @@ const RoleEntry roles[] = {
     { "menuitem", MenuItemRole },
     { "menuitemcheckbox", MenuItemCheckBoxRole },
     { "menuitemradio", MenuItemRadioRole },
-    { "note", NoteRole },
     { "navigation", NavigationRole },
     { "none", NoneRole },
+    { "note", NoteRole },
     { "option", ListBoxOptionRole },
     { "presentation", PresentationalRole },
     { "progressbar", ProgressIndicatorRole },
@@ -103,12 +104,15 @@ const RoleEntry roles[] = {
     { "radiogroup", RadioGroupRole },
     { "region", RegionRole },
     { "row", RowRole },
+    { "rowheader", RowHeaderRole },
     { "scrollbar", ScrollBarRole },
     { "search", SearchRole },
+    { "searchbox", SearchBoxRole },
     { "separator", SplitterRole },
     { "slider", SliderRole },
     { "spinbutton", SpinButtonRole },
     { "status", StatusRole },
+    { "switch", SwitchRole },
     { "tab", TabRole },
     { "tablist", TabListRole },
     { "tabpanel", TabPanelRole },
@@ -120,6 +124,17 @@ const RoleEntry roles[] = {
     { "tree", TreeRole },
     { "treegrid", TreeGridRole },
     { "treeitem", TreeItemRole }
+};
+
+// Roles which we need to map in the other direction
+const RoleEntry reverseRoles[] = {
+    { "button", ToggleButtonRole },
+    { "combobox", PopUpButtonRole },
+    { "contentinfo", FooterRole },
+    { "menuitem", MenuButtonRole },
+    { "menuitem", MenuListOptionRole },
+    { "progressbar", MeterRole },
+    { "textbox", TextFieldRole }
 };
 
 static ARIARoleMap* createARIARoleMap()
@@ -140,8 +155,73 @@ static Vector<AtomicString>* createRoleNameVector()
     for (size_t i = 0; i < WTF_ARRAY_LENGTH(roles); ++i)
         (*roleNameVector)[roles[i].webcoreRole] = AtomicString(roles[i].ariaRole);
 
+    for (size_t i = 0; i < WTF_ARRAY_LENGTH(reverseRoles); ++i)
+        (*roleNameVector)[reverseRoles[i].webcoreRole] = AtomicString(reverseRoles[i].ariaRole);
+
     return roleNameVector;
 }
+
+const char* ariaWidgets[] = {
+    // From http://www.w3.org/TR/wai-aria/roles#widget_roles
+    "alert",
+    "alertdialog",
+    "button",
+    "checkbox",
+    "dialog",
+    "gridcell",
+    "link",
+    "log",
+    "marquee",
+    "menuitem",
+    "menuitemcheckbox",
+    "menuitemradio",
+    "option",
+    "progressbar",
+    "radio",
+    "scrollbar",
+    "slider",
+    "spinbutton",
+    "status",
+    "tab",
+    "tabpanel",
+    "textbox",
+    "timer",
+    "tooltip",
+    "treeitem",
+    // Composite user interface widgets.  This list is also from w3.org site refrerenced above.
+    "combobox",
+    "grid",
+    "listbox",
+    "menu",
+    "menubar",
+    "radiogroup",
+    "tablist",
+    "tree",
+    "treegrid"
+};
+
+static ARIAWidgetSet* createARIARoleWidgetSet()
+{
+    ARIAWidgetSet* widgetSet = new HashSet<String, CaseFoldingHash>();
+    for (size_t i = 0; i < WTF_ARRAY_LENGTH(ariaWidgets); ++i)
+        widgetSet->add(String(ariaWidgets[i]));
+    return widgetSet;
+}
+
+const char* ariaInteractiveWidgetAttributes[] = {
+    // These attributes implicitly indicate the given widget is interactive.
+    // From http://www.w3.org/TR/wai-aria/states_and_properties#attrs_widgets
+    "aria-activedescendant",
+    "aria-checked",
+    "aria-controls",
+    "aria-disabled", // If it's disabled, it can be made interactive.
+    "aria-expanded",
+    "aria-haspopup",
+    "aria-multiselectable",
+    "aria-pressed",
+    "aria-required",
+    "aria-selected"
+};
 
 } // namespace
 
@@ -154,6 +234,10 @@ AXObject::AXObject(AXObjectCacheImpl* axObjectCache)
     , m_parent(0)
     , m_lastModificationCount(-1)
     , m_cachedIsIgnored(false)
+    , m_cachedIsInertOrAriaHidden(false)
+    , m_cachedIsDescendantOfBarrenParent(false)
+    , m_cachedIsDescendantOfDisabledNode(false)
+    , m_cachedHasInheritedPresentationalRole(false)
     , m_cachedLiveRegionRoot(0)
     , m_axObjectCache(axObjectCache)
 {
@@ -180,7 +264,7 @@ bool AXObject::isDetached() const
 
 bool AXObject::isARIATextControl() const
 {
-    return ariaRoleAttribute() == TextAreaRole || ariaRoleAttribute() == TextFieldRole;
+    return ariaRoleAttribute() == TextAreaRole || ariaRoleAttribute() == TextFieldRole || ariaRoleAttribute() == SearchBoxRole;
 }
 
 bool AXObject::isButton() const
@@ -240,6 +324,7 @@ bool AXObject::isTextControl() const
     case TextAreaRole:
     case TextFieldRole:
     case ComboBoxRole:
+    case SearchBoxRole:
         return true;
     default:
         return false;
@@ -286,6 +371,10 @@ void AXObject::updateCachedAttributeValuesIfNeeded() const
         return;
 
     m_lastModificationCount = cache->modificationCount();
+    m_cachedIsInertOrAriaHidden = computeIsInertOrAriaHidden();
+    m_cachedIsDescendantOfBarrenParent = computeIsDescendantOfBarrenParent();
+    m_cachedIsDescendantOfDisabledNode = computeIsDescendantOfDisabledNode();
+    m_cachedHasInheritedPresentationalRole = computeHasInheritedPresentationalRole();
     m_cachedIsIgnored = computeAccessibilityIsIgnored();
     m_cachedLiveRegionRoot = isLiveRegion() ?
         this :
@@ -318,16 +407,68 @@ AXObjectInclusion AXObject::defaultObjectInclusion() const
 
 bool AXObject::isInertOrAriaHidden() const
 {
-    bool mightBeInInertSubtree = true;
+    updateCachedAttributeValuesIfNeeded();
+    return m_cachedIsInertOrAriaHidden;
+}
+
+bool AXObject::computeIsInertOrAriaHidden() const
+{
+    if (equalIgnoringCase(getAttribute(aria_hiddenAttr), "true"))
+        return true;
+    if (node() && node()->isInert())
+        return true;
+
+    AXObject* parent = parentObject();
+    if (parent)
+        return parent->isInertOrAriaHidden();
+
+    return false;
+}
+
+bool AXObject::isDescendantOfBarrenParent() const
+{
+    updateCachedAttributeValuesIfNeeded();
+    return m_cachedIsDescendantOfBarrenParent;
+}
+
+bool AXObject::computeIsDescendantOfBarrenParent() const
+{
+    if (AXObject* parent = parentObject()) {
+        if (!parent->canHaveChildren())
+            return true;
+
+        return parent->isDescendantOfBarrenParent();
+    }
+
+    return false;
+}
+
+const AXObject* AXObject::ariaHiddenRoot() const
+{
     for (const AXObject* object = this; object; object = object->parentObject()) {
         if (equalIgnoringCase(object->getAttribute(aria_hiddenAttr), "true"))
-            return true;
-        if (mightBeInInertSubtree && object->node()) {
-            if (object->node()->isInert())
-                return true;
-            mightBeInInertSubtree = false;
-        }
+            return object;
     }
+
+    return 0;
+}
+
+bool AXObject::isDescendantOfDisabledNode() const
+{
+    updateCachedAttributeValuesIfNeeded();
+    return m_cachedIsDescendantOfDisabledNode;
+}
+
+bool AXObject::computeIsDescendantOfDisabledNode() const
+{
+    const AtomicString& disabled = getAttribute(aria_disabledAttr);
+    if (equalIgnoringCase(disabled, "true"))
+        return true;
+    if (equalIgnoringCase(disabled, "false"))
+        return false;
+
+    if (AXObject* parent = parentObject())
+        return parent->isDescendantOfDisabledNode();
 
     return false;
 }
@@ -370,6 +511,7 @@ String AXObject::actionVerb() const
     case RadioButtonRole:
         return queryString(WebLocalizedString::AXRadioButtonActionVerb);
     case CheckBoxRole:
+    case SwitchRole:
         return queryString(isChecked() ? WebLocalizedString::AXCheckedCheckBoxActionVerb : WebLocalizedString::AXUncheckedCheckBoxActionVerb);
     case LinkRole:
         return queryString(WebLocalizedString::AXLinkActionVerb);
@@ -386,7 +528,7 @@ String AXObject::actionVerb() const
 
 AccessibilityButtonState AXObject::checkboxOrRadioValue() const
 {
-    // If this is a real checkbox or radio button, AXRenderObject will handle.
+    // If this is a real checkbox or radio button, AXLayoutObject will handle.
     // If it's an ARIA checkbox or radio, the aria-checked attribute should be used.
 
     const AtomicString& result = getAttribute(aria_checkedAttr);
@@ -394,7 +536,7 @@ AccessibilityButtonState AXObject::checkboxOrRadioValue() const
         return ButtonStateOn;
     if (equalIgnoringCase(result, "mixed")) {
         AccessibilityRole role = ariaRoleAttribute();
-        if (role == RadioButtonRole || role == MenuItemRadioRole)
+        if (role == RadioButtonRole || role == MenuItemRadioRole || role == SwitchRole)
             return ButtonStateOff;
         return ButtonStateMixed;
     }
@@ -433,17 +575,13 @@ bool AXObject::supportsRangeValue() const
 
 void AXObject::ariaTreeRows(AccessibilityChildrenVector& result)
 {
-    AccessibilityChildrenVector axChildren = children();
-    unsigned count = axChildren.size();
-    for (unsigned k = 0; k < count; ++k) {
-        AXObject* obj = axChildren[k].get();
-
+    for (const auto& child : children()) {
         // Add tree items as the rows.
-        if (obj->roleValue() == TreeItemRole)
-            result.append(obj);
+        if (child->roleValue() == TreeItemRole)
+            result.append(child);
 
         // Now see if this item also has rows hiding inside of it.
-        obj->ariaTreeRows(result);
+        child->ariaTreeRows(result);
     }
 }
 
@@ -485,8 +623,8 @@ bool AXObject::containerLiveRegionBusy() const
 
 void AXObject::markCachedElementRectDirty() const
 {
-    for (unsigned i = 0; i < m_children.size(); ++i)
-        m_children[i].get()->markCachedElementRectDirty();
+    for (const auto& child : m_children)
+        child->markCachedElementRectDirty();
 }
 
 IntPoint AXObject::clickPoint()
@@ -495,7 +633,7 @@ IntPoint AXObject::clickPoint()
     return roundedIntPoint(LayoutPoint(rect.x() + rect.width() / 2, rect.y() + rect.height() / 2));
 }
 
-IntRect AXObject::boundingBoxForQuads(RenderObject* obj, const Vector<FloatQuad>& quads)
+IntRect AXObject::boundingBoxForQuads(LayoutObject* obj, const Vector<FloatQuad>& quads)
 {
     ASSERT(obj);
     if (!obj)
@@ -510,7 +648,7 @@ IntRect AXObject::boundingBoxForQuads(RenderObject* obj, const Vector<FloatQuad>
         IntRect r = quads[i].enclosingBoundingBox();
         if (!r.isEmpty()) {
             if (obj->style()->hasAppearance())
-                RenderTheme::theme().adjustPaintInvalidationRect(obj, r);
+                LayoutTheme::theme().adjustPaintInvalidationRect(obj, r);
             result.unite(r);
         }
     }
@@ -528,10 +666,9 @@ AXObject* AXObject::elementAccessibilityHitTest(const IntPoint& point) const
     }
 
     // Check if there are any mock elements that need to be handled.
-    size_t count = m_children.size();
-    for (size_t k = 0; k < count; k++) {
-        if (m_children[k]->isMockObject() && m_children[k]->elementRect().contains(point))
-            return m_children[k]->elementAccessibilityHitTest(point);
+    for (const auto& child : m_children) {
+        if (child->isMockObject() && child->elementRect().contains(point))
+            return child->elementAccessibilityHitTest(point);
     }
 
     return const_cast<AXObject*>(this);
@@ -575,7 +712,6 @@ AXObject* AXObject::parentObjectUnignored() const
     return parent;
 }
 
-
 void AXObject::updateChildrenIfNecessary()
 {
     if (!hasChildren())
@@ -585,9 +721,8 @@ void AXObject::updateChildrenIfNecessary()
 void AXObject::clearChildren()
 {
     // Detach all weak pointers from objects to their parents.
-    size_t length = m_children.size();
-    for (size_t i = 0; i < length; i++)
-        m_children[i]->detachFromParent();
+    for (const auto& child : m_children)
+        child->detachFromParent();
 
     m_children.clear();
     m_haveChildren = false;
@@ -618,7 +753,7 @@ Document* AXObject::document() const
 FrameView* AXObject::documentFrameView() const
 {
     const AXObject* object = this;
-    while (object && !object->isAXRenderObject())
+    while (object && !object->isAXLayoutObject())
         object = object->parentObject();
 
     if (!object)
@@ -791,12 +926,18 @@ void AXObject::scrollToMakeVisibleWithSubFocus(const IntRect& subfocus) const
             break;
         scrollParent = scrollParent->parentObject();
     }
-    if (!scrollableArea)
+    if (!scrollParent || !scrollableArea)
         return;
 
     IntRect objectRect = pixelSnappedIntRect(elementRect());
     IntPoint scrollPosition = scrollableArea->scrollPosition();
     IntRect scrollVisibleRect = scrollableArea->visibleContentRect();
+
+    // Convert the object rect into local coordinates.
+    if (!scrollParent->isAXScrollView()) {
+        objectRect.moveBy(scrollPosition);
+        objectRect.moveBy(-pixelSnappedIntRect(scrollParent->elementRect()).location());
+    }
 
     int desiredX = computeBestScrollOffset(
         scrollPosition.x(),
@@ -920,7 +1061,7 @@ int AXObject::lineForPosition(const VisiblePosition& visiblePos) const
         VisiblePosition prevVisiblePos = previousLinePosition(currentVisiblePos, 0, HasEditableAXRole);
         currentVisiblePos = prevVisiblePos;
         ++lineCount;
-    }  while (currentVisiblePos.isNotNull() && !(inSameLine(currentVisiblePos, savedVisiblePos)));
+    } while (currentVisiblePos.isNotNull() && !(inSameLine(currentVisiblePos, savedVisiblePos)));
 
     return lineCount;
 }
@@ -928,12 +1069,12 @@ int AXObject::lineForPosition(const VisiblePosition& visiblePos) const
 bool AXObject::isARIAControl(AccessibilityRole ariaRole)
 {
     return isARIAInput(ariaRole) || ariaRole == TextAreaRole || ariaRole == ButtonRole
-    || ariaRole == ComboBoxRole || ariaRole == SliderRole;
+        || ariaRole == ComboBoxRole || ariaRole == SliderRole;
 }
 
 bool AXObject::isARIAInput(AccessibilityRole ariaRole)
 {
-    return ariaRole == RadioButtonRole || ariaRole == CheckBoxRole || ariaRole == TextFieldRole;
+    return ariaRole == RadioButtonRole || ariaRole == CheckBoxRole || ariaRole == TextFieldRole || ariaRole == SwitchRole || ariaRole ==  SearchBoxRole;
 }
 
 AccessibilityRole AXObject::ariaRoleToWebCoreRole(const String& value)
@@ -945,15 +1086,56 @@ AccessibilityRole AXObject::ariaRoleToWebCoreRole(const String& value)
     Vector<String> roleVector;
     value.split(' ', roleVector);
     AccessibilityRole role = UnknownRole;
-    unsigned size = roleVector.size();
-    for (unsigned i = 0; i < size; ++i) {
-        String roleName = roleVector[i];
-        role = roleMap->get(roleName);
+    for (const auto& child : roleVector) {
+        role = roleMap->get(child);
         if (role)
             return role;
     }
 
     return role;
+}
+
+bool AXObject::isInsideFocusableElementOrARIAWidget(const Node& node)
+{
+    const Node* curNode = &node;
+    do {
+        if (curNode->isElementNode()) {
+            const Element* element = toElement(curNode);
+            if (element->isFocusable())
+                return true;
+            String role = element->getAttribute("role");
+            if (!role.isEmpty() && AXObject::includesARIAWidgetRole(role))
+                return true;
+            if (hasInteractiveARIAAttribute(*element))
+                return true;
+        }
+        curNode = curNode->parentNode();
+    } while (curNode && !isHTMLBodyElement(node));
+    return false;
+}
+
+bool AXObject::hasInteractiveARIAAttribute(const Element& element)
+{
+    for (size_t i = 0; i < WTF_ARRAY_LENGTH(ariaInteractiveWidgetAttributes); ++i) {
+        const char* attribute = ariaInteractiveWidgetAttributes[i];
+        if (element.hasAttribute(attribute)) {
+            return true;
+        }
+    }
+    return false;
+}
+
+bool AXObject::includesARIAWidgetRole(const String& role)
+{
+    static const HashSet<String, CaseFoldingHash>* roleSet = createARIARoleWidgetSet();
+
+    Vector<String> roleVector;
+    role.split(' ', roleVector);
+    for (const auto& child : roleVector) {
+        if (roleSet->contains(child))
+            return true;
+    }
+    return false;
 }
 
 AccessibilityRole AXObject::buttonRoleType() const

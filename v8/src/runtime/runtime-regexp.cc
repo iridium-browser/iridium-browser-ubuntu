@@ -759,7 +759,7 @@ RUNTIME_FUNCTION(Runtime_StringSplit) {
 }
 
 
-RUNTIME_FUNCTION(Runtime_RegExpExecRT) {
+RUNTIME_FUNCTION(Runtime_RegExpExec) {
   HandleScope scope(isolate);
   DCHECK(args.length() == 4);
   CONVERT_ARG_HANDLE_CHECKED(JSRegExp, regexp, 0);
@@ -779,7 +779,7 @@ RUNTIME_FUNCTION(Runtime_RegExpExecRT) {
 }
 
 
-RUNTIME_FUNCTION(Runtime_RegExpConstructResult) {
+RUNTIME_FUNCTION(Runtime_RegExpConstructResultRT) {
   HandleScope handle_scope(isolate);
   DCHECK(args.length() == 3);
   CONVERT_SMI_ARG_CHECKED(size, 0);
@@ -800,12 +800,18 @@ RUNTIME_FUNCTION(Runtime_RegExpConstructResult) {
 }
 
 
+RUNTIME_FUNCTION(Runtime_RegExpConstructResult) {
+  SealHandleScope shs(isolate);
+  return __RT_impl_Runtime_RegExpConstructResultRT(args, isolate);
+}
+
+
 static JSRegExp::Flags RegExpFlagsFromString(Handle<String> flags,
                                              bool* success) {
   uint32_t value = JSRegExp::NONE;
   int length = flags->length();
   // A longer flags string cannot be valid.
-  if (length > 4) return JSRegExp::Flags(0);
+  if (length > 5) return JSRegExp::Flags(0);
   for (int i = 0; i < length; i++) {
     uint32_t flag = JSRegExp::NONE;
     switch (flags->Get(i)) {
@@ -817,6 +823,10 @@ static JSRegExp::Flags RegExpFlagsFromString(Handle<String> flags,
         break;
       case 'm':
         flag = JSRegExp::MULTILINE;
+        break;
+      case 'u':
+        if (!FLAG_harmony_unicode_regexps) return JSRegExp::Flags(0);
+        flag = JSRegExp::UNICODE_ESCAPES;
         break;
       case 'y':
         if (!FLAG_harmony_regexps) return JSRegExp::Flags(0);
@@ -859,10 +869,12 @@ RUNTIME_FUNCTION(Runtime_RegExpInitializeAndCompile) {
   Handle<Object> ignore_case = factory->ToBoolean(flags.is_ignore_case());
   Handle<Object> multiline = factory->ToBoolean(flags.is_multiline());
   Handle<Object> sticky = factory->ToBoolean(flags.is_sticky());
+  Handle<Object> unicode = factory->ToBoolean(flags.is_unicode());
 
   Map* map = regexp->map();
-  Object* constructor = map->constructor();
-  if (!FLAG_harmony_regexps && constructor->IsJSFunction() &&
+  Object* constructor = map->GetConstructor();
+  if (!FLAG_harmony_regexps && !FLAG_harmony_unicode_regexps &&
+      constructor->IsJSFunction() &&
       JSFunction::cast(constructor)->initial_map() == map) {
     // If we still have the original map, set in-object properties directly.
     // Both true and false are immovable immortal objects so no need for write
@@ -896,6 +908,10 @@ RUNTIME_FUNCTION(Runtime_RegExpInitializeAndCompile) {
       JSObject::SetOwnPropertyIgnoreAttributes(regexp, factory->sticky_string(),
                                                sticky, final).Check();
     }
+    if (FLAG_harmony_unicode_regexps) {
+      JSObject::SetOwnPropertyIgnoreAttributes(
+          regexp, factory->unicode_string(), unicode, final).Check();
+    }
     JSObject::SetOwnPropertyIgnoreAttributes(
         regexp, factory->last_index_string(), zero, writable).Check();
   }
@@ -915,13 +931,7 @@ RUNTIME_FUNCTION(Runtime_MaterializeRegExpLiteral) {
   CONVERT_ARG_HANDLE_CHECKED(String, pattern, 2);
   CONVERT_ARG_HANDLE_CHECKED(String, flags, 3);
 
-  // Get the RegExp function from the context in the literals array.
-  // This is the RegExp function from the context in which the
-  // function was created.  We do not use the RegExp function from the
-  // current native context because this might be the RegExp function
-  // from another context which we should not have access to.
-  Handle<JSFunction> constructor = Handle<JSFunction>(
-      JSFunction::NativeContextFromLiterals(*literals)->regexp_function());
+  Handle<JSFunction> constructor = isolate->regexp_function();
   // Compute the regular expression literal.
   Handle<Object> regexp;
   ASSIGN_RETURN_FAILURE_ON_EXCEPTION(
@@ -1100,19 +1110,16 @@ RUNTIME_FUNCTION(Runtime_RegExpExecMultiple) {
 }
 
 
-RUNTIME_FUNCTION(RuntimeReference_RegExpConstructResult) {
+RUNTIME_FUNCTION(Runtime_RegExpExecReThrow) {
   SealHandleScope shs(isolate);
-  return __RT_impl_Runtime_RegExpConstructResult(args, isolate);
+  DCHECK(args.length() == 4);
+  Object* exception = isolate->pending_exception();
+  isolate->clear_pending_exception();
+  return isolate->ReThrow(exception);
 }
 
 
-RUNTIME_FUNCTION(RuntimeReference_RegExpExec) {
-  SealHandleScope shs(isolate);
-  return __RT_impl_Runtime_RegExpExecRT(args, isolate);
-}
-
-
-RUNTIME_FUNCTION(RuntimeReference_IsRegExp) {
+RUNTIME_FUNCTION(Runtime_IsRegExp) {
   SealHandleScope shs(isolate);
   DCHECK(args.length() == 1);
   CONVERT_ARG_CHECKED(Object, obj, 0);

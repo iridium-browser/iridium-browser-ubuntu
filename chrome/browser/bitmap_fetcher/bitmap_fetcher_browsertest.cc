@@ -35,7 +35,7 @@ class BitmapFetcherTestDelegate : public BitmapFetcherDelegate {
   ~BitmapFetcherTestDelegate() override { EXPECT_TRUE(called_); }
 
   // Method inherited from BitmapFetcherDelegate.
-  void OnFetchComplete(const GURL url, const SkBitmap* bitmap) override {
+  void OnFetchComplete(const GURL& url, const SkBitmap* bitmap) override {
     called_ = true;
     url_ = url;
     if (bitmap) {
@@ -141,7 +141,7 @@ IN_PROC_BROWSER_TEST_F(BitmapFetcherBrowserTest, OnImageDecodedTest) {
 
   BitmapFetcher fetcher(url, &delegate);
 
-  fetcher.OnImageDecoded(NULL, image);
+  fetcher.OnImageDecoded(image);
 
   // Ensure image is marked as succeeded.
   EXPECT_TRUE(delegate.success());

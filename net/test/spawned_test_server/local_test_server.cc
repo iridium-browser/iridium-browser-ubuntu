@@ -8,7 +8,6 @@
 #include "base/json/json_reader.h"
 #include "base/logging.h"
 #include "base/path_service.h"
-#include "base/process/kill.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/values.h"
 #include "net/base/host_port_pair.h"
@@ -125,16 +124,15 @@ bool LocalTestServer::Stop() {
     return true;
 
   // First check if the process has already terminated.
-  bool ret = base::WaitForSingleProcess(process_.Handle(), base::TimeDelta());
-  if (!ret) {
-    ret = base::KillProcess(process_.Handle(), 1, true);
-  }
+  int exit_code;
+  bool ret = process_.WaitForExitWithTimeout(base::TimeDelta(), &exit_code);
+  if (!ret)
+    ret = process_.Terminate(1, true);
 
-  if (ret) {
+  if (ret)
     process_.Close();
-  } else {
+  else
     VLOG(1) << "Kill failed?";
-  }
 
   return ret;
 }

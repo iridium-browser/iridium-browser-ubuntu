@@ -58,13 +58,13 @@ public:
     bool update(bool startOnCompositor = true);
     void notifyCompositorAnimationStarted(double monotonicAnimationStartTime, int compositorGroup = 0);
 
-    void trace(Visitor*);
+    DECLARE_TRACE();
 
 private:
     void timerFired(Timer<CompositorPendingAnimations>*) { update(false); }
 
-    WillBeHeapVector<RefPtrWillBeMember<AnimationPlayer> > m_pending;
-    WillBeHeapVector<RefPtrWillBeMember<AnimationPlayer> > m_waitingForCompositorAnimationStart;
+    WillBeHeapVector<RefPtrWillBeMember<AnimationPlayer>> m_pending;
+    WillBeHeapVector<RefPtrWillBeMember<AnimationPlayer>> m_waitingForCompositorAnimationStart;
     Timer<CompositorPendingAnimations> m_timer;
     int m_compositorGroup;
 };

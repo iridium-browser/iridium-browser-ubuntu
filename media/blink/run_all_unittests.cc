@@ -15,6 +15,10 @@
 #include "ui/gl/android/gl_jni_registrar.h"
 #endif
 
+#ifdef V8_USE_EXTERNAL_STARTUP_DATA
+#include "gin/public/isolate_holder.h"
+#endif
+
 class TestBlinkPlatformSupport : NON_EXPORTED_BASE(public blink::Platform) {
  public:
   virtual ~TestBlinkPlatformSupport();
@@ -41,10 +45,10 @@ const unsigned char* TestBlinkPlatformSupport::getTraceCategoryEnabledFlag(
 class BlinkMediaTestSuite : public base::TestSuite {
  public:
   BlinkMediaTestSuite(int argc, char** argv);
-  virtual ~BlinkMediaTestSuite();
+  ~BlinkMediaTestSuite() override;
 
  protected:
-  virtual void Initialize() override;
+  void Initialize() override;
 
  private:
   scoped_ptr<TestBlinkPlatformSupport> blink_platform_support_;
@@ -72,6 +76,10 @@ void BlinkMediaTestSuite::Initialize() {
   // Run this here instead of main() to ensure an AtExitManager is already
   // present.
   media::InitializeMediaLibraryForTesting();
+
+#ifdef V8_USE_EXTERNAL_STARTUP_DATA
+    gin::IsolateHolder::LoadV8Snapshot();
+#endif
 
   blink::initialize(blink_platform_support_.get());
 }

@@ -16,11 +16,11 @@
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/chrome_notification_types.h"
-#include "chrome/browser/history/top_sites.h"
+#include "chrome/browser/history/top_sites_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_info_cache.h"
 #include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/browser/profiles/profile_window.h"
 #include "chrome/browser/sessions/tab_restore_service.h"
 #include "chrome/browser/sessions/tab_restore_service_factory.h"
 #include "chrome/browser/ui/browser.h"
@@ -32,7 +32,7 @@
 #include "chrome/browser/ui/views/frame/global_menu_bar_registrar_x11.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/grit/generated_resources.h"
-#include "content/public/browser/notification_source.h"
+#include "components/history/core/browser/top_sites.h"
 #include "ui/base/accelerators/menu_label_accelerator_util_linux.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/events/keycodes/keyboard_code_conversion_x.h"
@@ -334,6 +334,7 @@ GlobalMenuBarX11::GlobalMenuBarX11(BrowserView* browser_view,
       profiles_menu_(nullptr),
       top_sites_(nullptr),
       tab_restore_service_(nullptr),
+      scoped_observer_(this),
       weak_ptr_factory_(this) {
   EnsureMethodsLoaded();
 
@@ -426,14 +427,13 @@ void GlobalMenuBarX11::InitServer(unsigned long xid) {
                  base::Unretained(this)));
   OnBookmarkBarVisibilityChanged();
 
-  top_sites_ = profile_->GetTopSites();
+  top_sites_ = TopSitesFactory::GetForProfile(profile_);
   if (top_sites_) {
     GetTopSitesData();
 
-    // Register for notification when TopSites changes so that we can update
-    // ourself.
-    registrar_.Add(this, chrome::NOTIFICATION_TOP_SITES_CHANGED,
-                   content::Source<history::TopSites>(top_sites_));
+    // Register as TopSitesObserver so that we can update ourselves when the
+    // TopSites changes.
+    scoped_observer_.Add(top_sites_.get());
   }
 
   ProfileManager* profile_manager = g_browser_process->profile_manager();
@@ -728,14 +728,11 @@ void GlobalMenuBarX11::EnabledStateChangedForCommand(int id, bool enabled) {
     menuitem_property_set_bool(it->second, kPropertyEnabled, enabled);
 }
 
-void GlobalMenuBarX11::Observe(int type,
-                               const content::NotificationSource& source,
-                               const content::NotificationDetails& details) {
-  if (type == chrome::NOTIFICATION_TOP_SITES_CHANGED) {
+void GlobalMenuBarX11::TopSitesLoaded(history::TopSites* top_sites) {
+}
+
+void GlobalMenuBarX11::TopSitesChanged(history::TopSites* top_sites) {
     GetTopSitesData();
-  } else {
-    NOTREACHED();
-  }
 }
 
 void GlobalMenuBarX11::TabRestoreServiceChanged(TabRestoreService* service) {
@@ -897,5 +894,7 @@ void GlobalMenuBarX11::OnEditProfileItemActivated(DbusmenuMenuitem* sender,
 
 void GlobalMenuBarX11::OnCreateProfileItemActivated(DbusmenuMenuitem* sender,
                                                     unsigned int timestamp) {
-  avatar_menu_->AddNewProfile(ProfileMetrics::ADD_NEW_USER_MENU);
+  profiles::CreateAndSwitchToNewProfile(chrome::HOST_DESKTOP_TYPE_NATIVE,
+                                        ProfileManager::CreateCallback(),
+                                        ProfileMetrics::ADD_NEW_USER_MENU);
 }

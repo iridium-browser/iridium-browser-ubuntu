@@ -12,6 +12,167 @@
 #ifndef GPU_COMMAND_BUFFER_SERVICE_GLES2_CMD_DECODER_UNITTEST_3_AUTOGEN_H_
 #define GPU_COMMAND_BUFFER_SERVICE_GLES2_CMD_DECODER_UNITTEST_3_AUTOGEN_H_
 
+TEST_P(GLES2DecoderTest3, VertexAttrib2fValidArgs) {
+  EXPECT_CALL(*gl_, VertexAttrib2f(1, 2, 3));
+  SpecializedSetup<cmds::VertexAttrib2f, 0>(true);
+  cmds::VertexAttrib2f cmd;
+  cmd.Init(1, 2, 3);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  EXPECT_EQ(GL_NO_ERROR, GetGLError());
+}
+
+TEST_P(GLES2DecoderTest3, VertexAttrib2fvImmediateValidArgs) {
+  cmds::VertexAttrib2fvImmediate& cmd =
+      *GetImmediateAs<cmds::VertexAttrib2fvImmediate>();
+  SpecializedSetup<cmds::VertexAttrib2fvImmediate, 0>(true);
+  GLfloat temp[2] = {
+      0,
+  };
+  cmd.Init(1, &temp[0]);
+  EXPECT_CALL(*gl_, VertexAttrib2fv(1, reinterpret_cast<GLfloat*>(
+                                           ImmediateDataAddress(&cmd))));
+  EXPECT_EQ(error::kNoError, ExecuteImmediateCmd(cmd, sizeof(temp)));
+  EXPECT_EQ(GL_NO_ERROR, GetGLError());
+}
+
+TEST_P(GLES2DecoderTest3, VertexAttrib3fValidArgs) {
+  EXPECT_CALL(*gl_, VertexAttrib3f(1, 2, 3, 4));
+  SpecializedSetup<cmds::VertexAttrib3f, 0>(true);
+  cmds::VertexAttrib3f cmd;
+  cmd.Init(1, 2, 3, 4);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  EXPECT_EQ(GL_NO_ERROR, GetGLError());
+}
+
+TEST_P(GLES2DecoderTest3, VertexAttrib3fvImmediateValidArgs) {
+  cmds::VertexAttrib3fvImmediate& cmd =
+      *GetImmediateAs<cmds::VertexAttrib3fvImmediate>();
+  SpecializedSetup<cmds::VertexAttrib3fvImmediate, 0>(true);
+  GLfloat temp[3] = {
+      0,
+  };
+  cmd.Init(1, &temp[0]);
+  EXPECT_CALL(*gl_, VertexAttrib3fv(1, reinterpret_cast<GLfloat*>(
+                                           ImmediateDataAddress(&cmd))));
+  EXPECT_EQ(error::kNoError, ExecuteImmediateCmd(cmd, sizeof(temp)));
+  EXPECT_EQ(GL_NO_ERROR, GetGLError());
+}
+
+TEST_P(GLES2DecoderTest3, VertexAttrib4fValidArgs) {
+  EXPECT_CALL(*gl_, VertexAttrib4f(1, 2, 3, 4, 5));
+  SpecializedSetup<cmds::VertexAttrib4f, 0>(true);
+  cmds::VertexAttrib4f cmd;
+  cmd.Init(1, 2, 3, 4, 5);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  EXPECT_EQ(GL_NO_ERROR, GetGLError());
+}
+
+TEST_P(GLES2DecoderTest3, VertexAttrib4fvImmediateValidArgs) {
+  cmds::VertexAttrib4fvImmediate& cmd =
+      *GetImmediateAs<cmds::VertexAttrib4fvImmediate>();
+  SpecializedSetup<cmds::VertexAttrib4fvImmediate, 0>(true);
+  GLfloat temp[4] = {
+      0,
+  };
+  cmd.Init(1, &temp[0]);
+  EXPECT_CALL(*gl_, VertexAttrib4fv(1, reinterpret_cast<GLfloat*>(
+                                           ImmediateDataAddress(&cmd))));
+  EXPECT_EQ(error::kNoError, ExecuteImmediateCmd(cmd, sizeof(temp)));
+  EXPECT_EQ(GL_NO_ERROR, GetGLError());
+}
+
+TEST_P(GLES2DecoderTest3, VertexAttribI4iValidArgs) {
+  EXPECT_CALL(*gl_, VertexAttribI4i(1, 2, 3, 4, 5));
+  SpecializedSetup<cmds::VertexAttribI4i, 0>(true);
+  cmds::VertexAttribI4i cmd;
+  cmd.Init(1, 2, 3, 4, 5);
+  decoder_->set_unsafe_es3_apis_enabled(true);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  EXPECT_EQ(GL_NO_ERROR, GetGLError());
+  decoder_->set_unsafe_es3_apis_enabled(false);
+  EXPECT_EQ(error::kUnknownCommand, ExecuteCmd(cmd));
+}
+
+TEST_P(GLES2DecoderTest3, VertexAttribI4ivImmediateValidArgs) {
+  cmds::VertexAttribI4ivImmediate& cmd =
+      *GetImmediateAs<cmds::VertexAttribI4ivImmediate>();
+  SpecializedSetup<cmds::VertexAttribI4ivImmediate, 0>(true);
+  GLint temp[4] = {
+      0,
+  };
+  cmd.Init(1, &temp[0]);
+  EXPECT_CALL(*gl_, VertexAttribI4iv(1, reinterpret_cast<GLint*>(
+                                            ImmediateDataAddress(&cmd))));
+  decoder_->set_unsafe_es3_apis_enabled(true);
+  EXPECT_EQ(error::kNoError, ExecuteImmediateCmd(cmd, sizeof(temp)));
+  EXPECT_EQ(GL_NO_ERROR, GetGLError());
+  decoder_->set_unsafe_es3_apis_enabled(false);
+  EXPECT_EQ(error::kUnknownCommand, ExecuteImmediateCmd(cmd, sizeof(temp)));
+}
+
+TEST_P(GLES2DecoderTest3, VertexAttribI4uiValidArgs) {
+  EXPECT_CALL(*gl_, VertexAttribI4ui(1, 2, 3, 4, 5));
+  SpecializedSetup<cmds::VertexAttribI4ui, 0>(true);
+  cmds::VertexAttribI4ui cmd;
+  cmd.Init(1, 2, 3, 4, 5);
+  decoder_->set_unsafe_es3_apis_enabled(true);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  EXPECT_EQ(GL_NO_ERROR, GetGLError());
+  decoder_->set_unsafe_es3_apis_enabled(false);
+  EXPECT_EQ(error::kUnknownCommand, ExecuteCmd(cmd));
+}
+
+TEST_P(GLES2DecoderTest3, VertexAttribI4uivImmediateValidArgs) {
+  cmds::VertexAttribI4uivImmediate& cmd =
+      *GetImmediateAs<cmds::VertexAttribI4uivImmediate>();
+  SpecializedSetup<cmds::VertexAttribI4uivImmediate, 0>(true);
+  GLuint temp[4] = {
+      0,
+  };
+  cmd.Init(1, &temp[0]);
+  EXPECT_CALL(*gl_, VertexAttribI4uiv(1, reinterpret_cast<GLuint*>(
+                                             ImmediateDataAddress(&cmd))));
+  decoder_->set_unsafe_es3_apis_enabled(true);
+  EXPECT_EQ(error::kNoError, ExecuteImmediateCmd(cmd, sizeof(temp)));
+  EXPECT_EQ(GL_NO_ERROR, GetGLError());
+  decoder_->set_unsafe_es3_apis_enabled(false);
+  EXPECT_EQ(error::kUnknownCommand, ExecuteImmediateCmd(cmd, sizeof(temp)));
+}
+// TODO(gman): VertexAttribIPointer
+
+// TODO(gman): VertexAttribPointer
+
+TEST_P(GLES2DecoderTest3, ViewportValidArgs) {
+  EXPECT_CALL(*gl_, Viewport(1, 2, 3, 4));
+  SpecializedSetup<cmds::Viewport, 0>(true);
+  cmds::Viewport cmd;
+  cmd.Init(1, 2, 3, 4);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  EXPECT_EQ(GL_NO_ERROR, GetGLError());
+}
+
+TEST_P(GLES2DecoderTest3, ViewportInvalidArgs2_0) {
+  EXPECT_CALL(*gl_, Viewport(_, _, _, _)).Times(0);
+  SpecializedSetup<cmds::Viewport, 0>(false);
+  cmds::Viewport cmd;
+  cmd.Init(1, 2, -1, 4);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  EXPECT_EQ(GL_INVALID_VALUE, GetGLError());
+}
+
+TEST_P(GLES2DecoderTest3, ViewportInvalidArgs3_0) {
+  EXPECT_CALL(*gl_, Viewport(_, _, _, _)).Times(0);
+  SpecializedSetup<cmds::Viewport, 0>(false);
+  cmds::Viewport cmd;
+  cmd.Init(1, 2, 3, -1);
+  EXPECT_EQ(error::kNoError, ExecuteCmd(cmd));
+  EXPECT_EQ(GL_INVALID_VALUE, GetGLError());
+}
+// TODO(gman): WaitSync
+
+// TODO(gman): TexStorage2DEXT
+// TODO(gman): GenQueriesEXTImmediate
+// TODO(gman): DeleteQueriesEXTImmediate
 // TODO(gman): BeginQueryEXT
 
 TEST_P(GLES2DecoderTest3, BeginTransformFeedbackValidArgs) {
@@ -57,6 +218,10 @@ TEST_P(GLES2DecoderTest3, PopGroupMarkerEXTValidArgs) {
 // TODO(gman): GetMaxValueInBufferCHROMIUM
 // TODO(gman): EnableFeatureCHROMIUM
 
+// TODO(gman): MapBufferRange
+
+// TODO(gman): UnmapBuffer
+
 // TODO(gman): ResizeCHROMIUM
 // TODO(gman): GetRequestableExtensionsCHROMIUM
 
@@ -64,10 +229,17 @@ TEST_P(GLES2DecoderTest3, PopGroupMarkerEXTValidArgs) {
 
 // TODO(gman): GetProgramInfoCHROMIUM
 
+// TODO(gman): GetUniformBlocksCHROMIUM
+
+// TODO(gman): GetTransformFeedbackVaryingsCHROMIUM
+
+// TODO(gman): GetUniformsES3CHROMIUM
+
 // TODO(gman): GetTranslatedShaderSourceANGLE
 // TODO(gman): PostSubBufferCHROMIUM
 // TODO(gman): TexImageIOSurface2DCHROMIUM
 // TODO(gman): CopyTextureCHROMIUM
+// TODO(gman): CopySubTextureCHROMIUM
 // TODO(gman): DrawArraysInstancedANGLE
 // TODO(gman): DrawElementsInstancedANGLE
 // TODO(gman): VertexAttribDivisorANGLE

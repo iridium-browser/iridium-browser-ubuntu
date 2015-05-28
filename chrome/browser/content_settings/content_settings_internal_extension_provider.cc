@@ -4,6 +4,7 @@
 
 #include "chrome/browser/content_settings/content_settings_internal_extension_provider.h"
 
+#include "chrome/browser/pdf/pdf_extension_util.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_content_client.h"
 #include "chrome/common/extensions/api/plugins/plugins_handler.h"
@@ -28,7 +29,7 @@ namespace {
 
 // This is the set of extensions that are allowed to access the internal
 // remoting viewer plugin.
-const char* kRemotingViewerWhitelist[] = {
+const char* const kRemotingViewerWhitelist[] = {
     "gbchcmhmhahfdphkhkmpfmihenigjmpp",  // Chrome Remote Desktop
     "kgngmbheleoaphbjbaiobfdepmghbfah",  // Pre-release Chrome Remote Desktop
     "odkaodonbgfohohmklejpjiejmcipmib",  // Dogfood Chrome Remote Desktop
@@ -83,9 +84,10 @@ bool InternalExtensionProvider::SetWebsiteSetting(
 void InternalExtensionProvider::ClearAllContentSettingsRules(
     ContentSettingsType content_type) {}
 
-void InternalExtensionProvider::Observe(int type,
-                                  const content::NotificationSource& source,
-                                  const content::NotificationDetails& details) {
+void InternalExtensionProvider::Observe(
+    int type,
+    const content::NotificationSource& source,
+    const content::NotificationDetails& details) {
   switch (type) {
     case extensions::NOTIFICATION_EXTENSION_HOST_CREATED: {
       const extensions::ExtensionHost* host =
@@ -94,7 +96,7 @@ void InternalExtensionProvider::Observe(int type,
         SetContentSettingForExtension(host->extension(), CONTENT_SETTING_BLOCK);
 
         // White-list CRD's v2 app, until crbug.com/134216 is complete.
-        const char* kAppWhitelist[] = {
+        const char* const kAppWhitelist[] = {
           "2775E568AC98F9578791F1EAB65A1BF5F8CEF414",
           "4AA3C5D69A4AECBD236CAD7884502209F0F5C169",
           "97B23E01B2AA064E8332EE43A7A85C628AADC3F2",
@@ -136,10 +138,10 @@ void InternalExtensionProvider::Observe(int type,
           "48CA541313139786F056DBCB504A1025CFF5D2E3",
           "05106136AE7F08A3C181D4648E5438350B1D2B4F"
         };
-        if (extensions::SimpleFeature::IsIdInList(
+        if (extensions::SimpleFeature::IsIdInArray(
                 host->extension()->id(),
-                std::set<std::string>(
-                    kAppWhitelist, kAppWhitelist + arraysize(kAppWhitelist)))) {
+                kAppWhitelist,
+                arraysize(kAppWhitelist))) {
           SetContentSettingForExtensionAndResource(
               host->extension(),
               ChromeContentClient::kRemotingViewerPluginPath,
@@ -185,6 +187,12 @@ void InternalExtensionProvider::ApplyPluginContentSettingsForExtension(
       chrome_remote_desktop_.end()) {
     SetContentSettingForExtensionAndResource(
         extension, ChromeContentClient::kRemotingViewerPluginPath, setting);
+  }
+
+  // The PDF viewer extension relies on the out of process PDF plugin.
+  if (extension->id() == extension_misc::kPdfExtensionId) {
+    SetContentSettingForExtensionAndResource(
+        extension, pdf_extension_util::kPdfResourceIdentifier, setting);
   }
 }
 

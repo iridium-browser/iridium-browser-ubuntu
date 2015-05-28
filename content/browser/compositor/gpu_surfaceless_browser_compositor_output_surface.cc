@@ -19,22 +19,32 @@ GpuSurfacelessBrowserCompositorOutputSurface::
     GpuSurfacelessBrowserCompositorOutputSurface(
         const scoped_refptr<ContextProviderCommandBuffer>& context,
         int surface_id,
-        IDMap<BrowserCompositorOutputSurface>* output_surface_map,
         const scoped_refptr<ui::CompositorVSyncManager>& vsync_manager,
         scoped_ptr<cc::OverlayCandidateValidator> overlay_candidate_validator,
         unsigned internalformat,
-        bool use_own_gl_helper,
         BrowserGpuMemoryBufferManager* gpu_memory_buffer_manager)
     : GpuBrowserCompositorOutputSurface(context,
-                                        surface_id,
-                                        output_surface_map,
                                         vsync_manager,
                                         overlay_candidate_validator.Pass()),
       internalformat_(internalformat),
-      use_own_gl_helper_(use_own_gl_helper),
       gpu_memory_buffer_manager_(gpu_memory_buffer_manager) {
   capabilities_.uses_default_gl_framebuffer = false;
   capabilities_.flipped_output_surface = true;
+  // Set |max_frames_pending| to 2 for surfaceless, which aligns scheduling
+  // more closely with the previous surfaced behavior.
+  // With a surface, swap buffer ack used to return early, before actually
+  // presenting the back buffer, enabling the browser compositor to run ahead.
+  // Surfaceless implementation acks at the time of actual buffer swap, which
+  // shifts the start of the new frame forward relative to the old
+  // implementation.
+  capabilities_.max_frames_pending = 2;
+
+  gl_helper_.reset(new GLHelper(context_provider_->ContextGL(),
+                                context_provider_->ContextSupport()));
+  output_surface_.reset(
+      new BufferQueue(context_provider_, internalformat_, gl_helper_.get(),
+                      gpu_memory_buffer_manager_, surface_id));
+  output_surface_->Initialize();
 }
 
 GpuSurfacelessBrowserCompositorOutputSurface::
@@ -80,27 +90,6 @@ void GpuSurfacelessBrowserCompositorOutputSurface::Reshape(
   GpuBrowserCompositorOutputSurface::Reshape(size, scale_factor);
   DCHECK(output_surface_);
   output_surface_->Reshape(SurfaceSize(), scale_factor);
-}
-
-bool GpuSurfacelessBrowserCompositorOutputSurface::BindToClient(
-    cc::OutputSurfaceClient* client) {
-  if (!GpuBrowserCompositorOutputSurface::BindToClient(client))
-    return false;
-  GLHelper* helper;
-  if (use_own_gl_helper_) {
-    gl_helper_.reset(new GLHelper(context_provider_->ContextGL(),
-                                  context_provider_->ContextSupport()));
-    helper = gl_helper_.get();
-  } else {
-    helper = ImageTransportFactory::GetInstance()->GetGLHelper();
-  }
-  if (!helper)
-    return false;
-
-  output_surface_.reset(new BufferQueue(context_provider_, internalformat_,
-                                        helper, gpu_memory_buffer_manager_,
-                                        surface_id_));
-  return output_surface_->Initialize();
 }
 
 }  // namespace content

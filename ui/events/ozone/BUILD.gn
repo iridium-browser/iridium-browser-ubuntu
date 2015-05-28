@@ -36,6 +36,8 @@ component("events_ozone") {
   deps = [
     "//base",
     "//base/third_party/dynamic_annotations",
+    "//ui/events",
+    "//ui/events:events_base",
   ]
 
   defines = [ "EVENTS_OZONE_IMPLEMENTATION" ]
@@ -62,6 +64,8 @@ config("evdev_gestures") {
 
 component("events_ozone_evdev") {
   sources = [
+    "evdev/device_event_dispatcher_evdev.cc",
+    "evdev/device_event_dispatcher_evdev.h",
     "evdev/event_converter_evdev.cc",
     "evdev/event_converter_evdev.h",
     "evdev/event_converter_evdev_impl.cc",
@@ -72,15 +76,23 @@ component("events_ozone_evdev") {
     "evdev/event_factory_evdev.h",
     "evdev/event_modifiers_evdev.cc",
     "evdev/event_modifiers_evdev.h",
+    "evdev/event_thread_evdev.cc",
+    "evdev/event_thread_evdev.h",
     "evdev/events_ozone_evdev_export.h",
     "evdev/input_controller_evdev.cc",
     "evdev/input_controller_evdev.h",
+    "evdev/input_device_factory_evdev.cc",
+    "evdev/input_device_factory_evdev.h",
+    "evdev/input_device_factory_evdev_proxy.cc",
+    "evdev/input_device_factory_evdev_proxy.h",
     "evdev/input_device_settings_evdev.cc",
     "evdev/input_device_settings_evdev.h",
     "evdev/input_injector_evdev.cc",
     "evdev/input_injector_evdev.h",
     "evdev/keyboard_evdev.cc",
     "evdev/keyboard_evdev.h",
+    "evdev/keyboard_util_evdev.cc",
+    "evdev/keyboard_util_evdev.h",
     "evdev/mouse_button_map_evdev.cc",
     "evdev/mouse_button_map_evdev.h",
     "evdev/tablet_event_converter_evdev.cc",
@@ -95,7 +107,9 @@ component("events_ozone_evdev") {
     ":events_ozone",
     ":events_ozone_layout",
     "//base",
+    "//ui/events",
     "//ui/events:dom4_keycode_converter",
+    "//ui/events:events_base",
     "//ui/events/devices",
     "//ui/events/platform",
     "//ui/gfx",
@@ -107,6 +121,8 @@ component("events_ozone_evdev") {
     sources += [
       "evdev/libgestures_glue/event_reader_libevdev_cros.cc",
       "evdev/libgestures_glue/event_reader_libevdev_cros.h",
+      "evdev/libgestures_glue/gesture_feedback.cc",
+      "evdev/libgestures_glue/gesture_feedback.h",
       "evdev/libgestures_glue/gesture_interpreter_libevdev_cros.cc",
       "evdev/libgestures_glue/gesture_interpreter_libevdev_cros.h",
       "evdev/libgestures_glue/gesture_logging.cc",
@@ -160,6 +176,7 @@ component("events_ozone_layout") {
     configs += [ ":xkbcommon" ]
 
     sources += [
+      "layout/xkb/scoped_xkb.h",
       "layout/xkb/xkb.h",
       "layout/xkb/xkb_evdev_codes.cc",
       "layout/xkb/xkb_evdev_codes.h",
@@ -169,7 +186,6 @@ component("events_ozone_layout") {
       "layout/xkb/xkb_keyboard_layout_engine.cc",
       "layout/xkb/xkb_keyboard_layout_engine.h",
       "layout/xkb/xkb_keysym.h",
-      "layout/xkb/scoped_xkb.h",
     ]
   }
 }

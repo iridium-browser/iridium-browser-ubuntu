@@ -37,7 +37,7 @@ class WebkitFileStreamReaderImplTest : public ::testing::Test {
       : thread_bundle_(content::TestBrowserThreadBundle::IO_MAINLOOP) {
   }
 
-  virtual void SetUp() override {
+  void SetUp() override {
     worker_thread_.reset(new base::Thread("WebkitFileStreamReaderImplTest"));
     ASSERT_TRUE(worker_thread_->Start());
 
@@ -181,16 +181,15 @@ TEST_F(WebkitFileStreamReaderImplTest, LastModification) {
   EXPECT_EQ(FILE_ERROR_OK, error);
   ASSERT_TRUE(entry);
 
-  google_apis::GDataErrorCode status = google_apis::GDATA_OTHER_ERROR;
+  google_apis::DriveApiErrorCode status = google_apis::DRIVE_OTHER_ERROR;
   scoped_ptr<google_apis::FileResource> server_entry;
   fake_drive_service_->UpdateResource(
       entry->resource_id(),
       std::string(),  // parent_resource_id
       std::string(),  // title
-      expected_modification_time,
-      base::Time(),
-      google_apis::test_util::CreateCopyResultCallback(&status,
-                                                       &server_entry));
+      expected_modification_time, base::Time(),
+      google_apis::drive::Properties(),
+      google_apis::test_util::CreateCopyResultCallback(&status, &server_entry));
   base::RunLoop().RunUntilIdle();
   EXPECT_EQ(google_apis::HTTP_SUCCESS, status);
 

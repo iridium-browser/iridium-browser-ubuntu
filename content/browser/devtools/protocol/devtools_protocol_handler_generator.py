@@ -126,7 +126,7 @@ ${methods}\
   }
 
   scoped_ptr<base::DictionaryValue> ToValue() {
-    COMPILE_ASSERT(MASK == kAllSet, required_properties_missing);
+    static_assert(MASK == kAllSet, "required properties missing");
     return make_scoped_ptr(dict_->DeepCopy());
   }
 
@@ -137,7 +137,7 @@ ${methods}\
   }
 
   template<class T> T* ThisAs() {
-    COMPILE_ASSERT(sizeof(*this) == sizeof(T), cannot_cast);
+    static_assert(sizeof(*this) == sizeof(T), "cannot cast");
     return reinterpret_cast<T*>(this);
   }
 
@@ -152,7 +152,7 @@ typedef ${declared_name}Builder<0> ${declared_name};
 tmpl_builder_setter_req = string.Template("""\
   scoped_refptr<${declared_name}Builder<MASK & ~k${Param}>>
   set_${param}(${pass_type} ${param}) {
-    COMPILE_ASSERT(MASK & k${Param}, already_set);
+    static_assert(MASK & k${Param}, "already set");
     dict_->Set("${proto_param}", CreateValue(${param}));
     return ThisAs<${declared_name}Builder<MASK & ~k${Param}>>();
   }
@@ -174,7 +174,13 @@ tmpl_builder_none_set = string.Template("""\
     kNoneSet = ${all_fields}
 """)
 
-tmpl_enum = string.Template("""\
+tmpl_named_enum = string.Template("""\
+namespace ${domain} {
+${values}\
+}  // namespace ${domain}
+""")
+
+tmpl_inline_enum = string.Template("""\
 namespace ${domain} {
 namespace ${subdomain} {
 ${values}\
@@ -183,11 +189,11 @@ ${values}\
 """)
 
 tmpl_enum_value = string.Template("""\
-extern const char k${Param}${Value}[];
+extern const char k${Enum}${Value}[];
 """)
 
 tmpl_enum_value_def = string.Template("""\
-const char k${Param}${Value}[] = "${value}";
+const char k${Enum}${Value}[] = "${value}";
 """)
 
 tmpl_handler = string.Template("""\
@@ -305,7 +311,7 @@ ${initializations}\
 tmpl_register = string.Template("""\
   command_handlers_["${Domain}.${command}"] =
       base::Bind(
-          &DevToolsProtocolDispatcher::On${Domain}${Command},
+          &DevToolsProtocolDispatcher::On${TargetDomain}${Command},
           base::Unretained(this));
 """)
 
@@ -349,7 +355,7 @@ ${prep}\
 """)
 
 tmpl_prep_req = string.Template("""\
-  ${param_type} in_${param}${init};
+  ${raw_type} in_${param}${init};
   if (!params || !params->Get${Type}("${proto_param}", &in_${param})) {
     client_.SendError(command_id, Response::InvalidParams("${proto_param}"));
     return true;
@@ -365,17 +371,17 @@ tmpl_prep_req_list = string.Template("""\
   std::vector<${item_type}> in_${param};
   for (base::ListValue::const_iterator it =
       list_${param}->begin(); it != list_${param}->end(); ++it) {
-    ${item_type} item${item_init};
+    ${item_raw_type} item;
     if (!(*it)->GetAs${ItemType}(&item)) {
       client_.SendError(command_id, Response::InvalidParams("${proto_param}"));
       return true;
     }
-    in_${param}.push_back(item);
+    in_${param}.push_back(${item_pass});
   }
 """)
 
 tmpl_prep_opt = string.Template("""\
-  ${param_type} in_${param}${init};
+  ${raw_type} in_${param}${init};
   bool ${param}_found = params && params->Get${Type}(
       "${proto_param}",
       &in_${param});
@@ -385,10 +391,15 @@ tmpl_prep_output = string.Template("""\
   ${param_type} out_${param}${init};
 """)
 
-tmpl_arg_req = string.Template("in_${param}")
+tmpl_arg_name = string.Template("in_${param}")
+
+tmpl_arg_req = string.Template("${param_pass}")
 
 tmpl_arg_opt = string.Template(
-    "${param}_found ? &in_${param} : nullptr")
+    "${param}_found ? ${param_pass} : nullptr")
+
+tmpl_object_pass = string.Template(
+    "make_scoped_ptr<base::DictionaryValue>(${name}->DeepCopy())")
 
 tmpl_client_impl = string.Template("""\
 namespace ${domain} {
@@ -444,6 +455,8 @@ type_decls = []
 type_impls = []
 handler_methods = []
 handler_method_impls = []
+domain_maps = []
+redirects = {}
 
 all_domains = blink_protocol["domains"] + browser_protocol["domains"]
 
@@ -462,6 +475,8 @@ def DeclareStruct(json_properties, mapping):
     prop_map["proto_param"] = json_prop["name"]
     prop_map["param"] = Uncamelcase(json_prop["name"])
     prop_map["Param"] = Capitalize(json_prop["name"])
+    prop_map["subdomain"] = Uncamelcase(prop_map["declared_name"])
+    del prop_map["declared_name"]
     ResolveType(json_prop, prop_map)
     prop_map["declared_name"] = mapping["declared_name"]
     if json_prop.get("optional"):
@@ -482,6 +497,27 @@ def DeclareStruct(json_properties, mapping):
       methods = "\n".join(methods),
       fields_enum = "".join(fields_enum)))
 
+def DeclareEnum(json, mapping):
+  values = []
+  value_defs = []
+  tmpl_enum = tmpl_inline_enum
+  if "declared_name" in mapping:
+    mapping["Enum"] = mapping["declared_name"]
+    tmpl_enum = tmpl_named_enum
+  else:
+    mapping["Enum"] = Capitalize(mapping["proto_param"])
+
+  for enum_value in json["enum"]:
+    values.append(tmpl_enum_value.substitute(mapping,
+        Value = Capitalize(enum_value)))
+    value_defs.append(tmpl_enum_value_def.substitute(mapping,
+        value = enum_value,
+        Value = Capitalize(enum_value)))
+  type_decls.append(tmpl_enum.substitute(mapping,
+      values = "".join(values)))
+  type_impls.append(tmpl_enum.substitute(mapping,
+      values = "".join(value_defs)))
+
 def ResolveRef(json, mapping):
   dot_pos = json["$ref"].find(".")
   if dot_pos == -1:
@@ -495,32 +531,40 @@ def ResolveRef(json, mapping):
   mapping["Domain"] = domain_name
   mapping["domain"] = Uncamelcase(domain_name)
   mapping["param_type"] = tmpl_typename.substitute(mapping)
-  if json_type.get("enum"):
-    # TODO(vkuzkokov) Implement. Approximate template:
-    # namespace ${domain} { const char k${declared_name}${Value}; }
-    raise Exception("Named enumerations are not implemented")
   ResolveType(json_type, mapping)
-  if not "___struct_declared" in json_type:
-    json_type["___struct_declared"] = True;
+  if not "___type_declared" in json_type:
+    json_type["___type_declared"] = True;
     if (json_type.get("type") == "object") and ("properties" in json_type):
       DeclareStruct(json_type["properties"], mapping)
     else:
+      if ("enum" in json_type):
+        DeclareEnum(json_type, mapping)
       type_decls.append(tmpl_typedef.substitute(mapping))
 
 def ResolveArray(json, mapping):
   items_map = mapping.copy()
   ResolveType(json["items"], items_map)
+  if items_map["Type"] == "List":
+    # TODO(dgozman) Implement this.
+    raise Exception("Nested arrays are not implemented")
   mapping["param_type"] = "std::vector<%s>" % items_map["param_type"]
   mapping["Type"] = "List"
   mapping["pass_type"] = "const %s&" % mapping["param_type"]
+  mapping["storage_type"] = "std::vector<%s>" % items_map["storage_type"]
+  mapping["raw_type"] = mapping["storage_type"]
   mapping["prep_req"] = tmpl_prep_req_list.substitute(mapping,
-      item_type = items_map["param_type"],
+      item_type = items_map["storage_type"],
       item_init = items_map["init"],
+      item_raw_type = items_map["raw_type"],
+      item_pass = items_map["pass_template"].substitute(name="item", opt=""),
       ItemType = items_map["Type"])
   mapping["arg_out"] = "&out_%s" % mapping["param"]
 
 def ResolveObject(json, mapping):
   mapping["Type"] = "Dictionary"
+  mapping["storage_type"] = "scoped_ptr<base::DictionaryValue>"
+  mapping["raw_type"] = "base::DictionaryValue*"
+  mapping["pass_template"] = tmpl_object_pass
   if "properties" in json:
     if not "declared_name" in mapping:
       mapping["declared_name"] = ("%s%s" %
@@ -537,6 +581,7 @@ def ResolveObject(json, mapping):
     mapping["param_type"] = "base::DictionaryValue"
     mapping["pass_type"] = "scoped_ptr<base::DictionaryValue>"
     mapping["arg_out"] = "out_%s.get()" % mapping["param"]
+  mapping["prep_req"] = tmpl_prep_req.substitute(mapping)
 
 def ResolvePrimitive(json, mapping):
   jsonrpc_type = json["type"]
@@ -556,26 +601,14 @@ def ResolvePrimitive(json, mapping):
     mapping["param_type"] = "std::string"
     mapping["pass_type"] = "const std::string&"
     mapping["Type"] = "String"
-    if "enum" in json:
-      values = []
-      value_defs = []
-      if "declared_name" in mapping:
-        mapping["subdomain"] = Uncamelcase(mapping["declared_name"])
-      else:
+    if "enum" in json and not "declared_name" in mapping:
+      if not "subdomain" in mapping:
         mapping["subdomain"] = Uncamelcase(mapping["command"])
-      mapping["Param"] = Capitalize(mapping["proto_param"])
-      for enum_value in json["enum"]:
-        values.append(tmpl_enum_value.substitute(mapping,
-            Value = Capitalize(enum_value)))
-        value_defs.append(tmpl_enum_value_def.substitute(mapping,
-            value = enum_value,
-            Value = Capitalize(enum_value)))
-      type_decls.append(tmpl_enum.substitute(mapping,
-          values = "".join(values)))
-      type_impls.append(tmpl_enum.substitute(mapping,
-          values = "".join(value_defs)))
+      DeclareEnum(json, mapping)
   else:
     raise Exception("Unknown type: %s" % json_type)
+  mapping["storage_type"] = mapping["param_type"]
+  mapping["raw_type"] = mapping["param_type"]
   mapping["prep_req"] = tmpl_prep_req.substitute(mapping)
   if jsonrpc_type != "string":
     mapping["pass_type"] = mapping["param_type"]
@@ -583,6 +616,7 @@ def ResolvePrimitive(json, mapping):
 
 def ResolveType(json, mapping):
   mapping["init"] = ""
+  mapping["pass_template"] = string.Template("${opt}${name}")
   if "$ref" in json:
     ResolveRef(json, mapping)
   elif "type" in json:
@@ -625,6 +659,15 @@ for json_domain in all_domains:
       command_map["command"] = json_command["name"]
       command_map["Command"] = Capitalize(json_command["name"])
 
+      if "redirect" in json_command:
+        redirect_domain = json_command["redirect"]
+        if not (redirect_domain in redirects):
+          redirects[redirect_domain] = []
+        command_map["TargetDomain"] = redirect_domain
+        redirects[redirect_domain].append(tmpl_register.substitute(command_map))
+        continue
+
+      command_map["TargetDomain"] = command_map["Domain"]
       prep = []
       args = []
 
@@ -635,16 +678,24 @@ for json_domain in all_domains:
           param_map["param"] = Uncamelcase(json_param["name"])
           ResolveType(json_param, param_map)
           if json_param.get("optional"):
-            if param_map["Type"] in ["List", "Dictionary"]:
+            if param_map["Type"] in ["List"]:
               # TODO(vkuzkokov) Implement transformation of base::ListValue
               # to std::vector and base::DictonaryValue to struct.
               raise Exception(
-                  "Optional array and object parameters are not implemented")
+                  "Optional array parameters are not implemented")
             prep.append(tmpl_prep_opt.substitute(param_map))
-            args.append(tmpl_arg_opt.substitute(param_map))
+            param_pass = param_map["pass_template"].substitute(
+                name=tmpl_arg_name.substitute(param_map),
+                opt="&")
+            args.append(
+                tmpl_arg_opt.substitute(param_map, param_pass=param_pass))
           else:
             prep.append(param_map["prep_req"])
-            args.append(tmpl_arg_req.substitute(param_map))
+            param_pass = param_map["pass_template"].substitute(
+                name=tmpl_arg_name.substitute(param_map),
+                opt="")
+            args.append(
+                tmpl_arg_req.substitute(param_map, param_pass=param_pass))
 
       if json_command.get("async"):
         domain_needs_client = True
@@ -722,9 +773,14 @@ for json_domain in all_domains:
     initializations.append(tmpl_init_client.substitute(domain_map))
     type_impls.append(tmpl_client_impl.substitute(domain_map,
         methods = "\n".join(client_method_impls)))
-  handler_method_impls.append(tmpl_setter_impl.substitute(domain_map,
-      initializations = "".join(initializations)))
+  domain_map["initializations"] = "".join(initializations)
+  domain_maps.append(domain_map)
 
+for domain_map in domain_maps:
+  domain = domain_map["Domain"]
+  if domain in redirects:
+    domain_map["initializations"] += "".join(redirects[domain])
+  handler_method_impls.append(tmpl_setter_impl.substitute(domain_map))
 
 output_h_file = open(output_h_path, "w")
 output_cc_file = open(output_cc_path, "w")

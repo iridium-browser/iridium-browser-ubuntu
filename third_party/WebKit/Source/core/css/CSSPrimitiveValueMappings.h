@@ -35,9 +35,9 @@
 #include "core/css/CSSPrimitiveValue.h"
 #include "core/css/CSSReflectionDirection.h"
 #include "core/css/CSSToLengthConversionData.h"
-#include "core/rendering/style/LineClampValue.h"
-#include "core/rendering/style/RenderStyleConstants.h"
-#include "core/rendering/style/SVGRenderStyleDefs.h"
+#include "core/style/SVGComputedStyleDefs.h"
+#include "core/style/LineClampValue.h"
+#include "core/style/ComputedStyleConstants.h"
 #include "platform/Length.h"
 #include "platform/ThemeTypes.h"
 #include "platform/fonts/FontDescription.h"
@@ -50,6 +50,7 @@
 #include "platform/text/TextRun.h"
 #include "platform/text/UnicodeBidi.h"
 #include "platform/text/WritingMode.h"
+#include "public/platform/WebScrollBlocksOn.h"
 #include "wtf/MathExtras.h"
 
 namespace blink {
@@ -347,13 +348,10 @@ template<> inline CSSPrimitiveValue::CSSPrimitiveValue(CompositeOperator e)
     case CompositeXOR:
         m_value.valueID = CSSValueXor;
         break;
-    case CompositePlusDarker:
-        m_value.valueID = CSSValuePlusDarker;
-        break;
     case CompositePlusLighter:
         m_value.valueID = CSSValuePlusLighter;
         break;
-    case CompositeDifference:
+    default:
         ASSERT_NOT_REACHED();
         break;
     }
@@ -385,8 +383,6 @@ template<> inline CSSPrimitiveValue::operator CompositeOperator() const
         return CompositeDestinationAtop;
     case CSSValueXor:
         return CompositeXOR;
-    case CSSValuePlusDarker:
-        return CompositePlusDarker;
     case CSSValuePlusLighter:
         return CompositePlusLighter;
     default:
@@ -1366,56 +1362,6 @@ template<> inline CSSPrimitiveValue::operator EFlexDirection() const
     return FlowRow;
 }
 
-template<> inline CSSPrimitiveValue::CSSPrimitiveValue(EAlignContent e)
-    : CSSValue(PrimitiveClass)
-{
-    m_primitiveUnitType = CSS_VALUE_ID;
-    switch (e) {
-    case AlignContentFlexStart:
-        m_value.valueID = CSSValueFlexStart;
-        break;
-    case AlignContentFlexEnd:
-        m_value.valueID = CSSValueFlexEnd;
-        break;
-    case AlignContentCenter:
-        m_value.valueID = CSSValueCenter;
-        break;
-    case AlignContentSpaceBetween:
-        m_value.valueID = CSSValueSpaceBetween;
-        break;
-    case AlignContentSpaceAround:
-        m_value.valueID = CSSValueSpaceAround;
-        break;
-    case AlignContentStretch:
-        m_value.valueID = CSSValueStretch;
-        break;
-    }
-}
-
-template<> inline CSSPrimitiveValue::operator EAlignContent() const
-{
-    ASSERT(isValueID());
-    switch (m_value.valueID) {
-    case CSSValueFlexStart:
-        return AlignContentFlexStart;
-    case CSSValueFlexEnd:
-        return AlignContentFlexEnd;
-    case CSSValueCenter:
-        return AlignContentCenter;
-    case CSSValueSpaceBetween:
-        return AlignContentSpaceBetween;
-    case CSSValueSpaceAround:
-        return AlignContentSpaceAround;
-    case CSSValueStretch:
-        return AlignContentStretch;
-    default:
-        break;
-    }
-
-    ASSERT_NOT_REACHED();
-    return AlignContentStretch;
-}
-
 template<> inline CSSPrimitiveValue::CSSPrimitiveValue(EFlexWrap e)
     : CSSValue(PrimitiveClass)
 {
@@ -1477,7 +1423,6 @@ template<> inline CSSPrimitiveValue::operator EFloat() const
     case CSSValueRight:
         return RightFloat;
     case CSSValueNone:
-    case CSSValueCenter: // Non-standard CSS value.
         return NoFloat;
     default:
         break;
@@ -3075,13 +3020,13 @@ template<> inline CSSPrimitiveValue::CSSPrimitiveValue(EPointerEvents e)
         m_value.valueID = CSSValueVisible;
         break;
     case PE_VISIBLE_STROKE:
-        m_value.valueID = CSSValueVisiblestroke;
+        m_value.valueID = CSSValueVisibleStroke;
         break;
     case PE_VISIBLE_FILL:
-        m_value.valueID = CSSValueVisiblefill;
+        m_value.valueID = CSSValueVisibleFill;
         break;
     case PE_VISIBLE_PAINTED:
-        m_value.valueID = CSSValueVisiblepainted;
+        m_value.valueID = CSSValueVisiblePainted;
         break;
     case PE_AUTO:
         m_value.valueID = CSSValueAuto;
@@ -3105,11 +3050,11 @@ template<> inline CSSPrimitiveValue::operator EPointerEvents() const
         return PE_AUTO;
     case CSSValueNone:
         return PE_NONE;
-    case CSSValueVisiblepainted:
+    case CSSValueVisiblePainted:
         return PE_VISIBLE_PAINTED;
-    case CSSValueVisiblefill:
+    case CSSValueVisibleFill:
         return PE_VISIBLE_FILL;
-    case CSSValueVisiblestroke:
+    case CSSValueVisibleStroke:
         return PE_VISIBLE_STROKE;
     case CSSValueVisible:
         return PE_VISIBLE;
@@ -3487,13 +3432,13 @@ template<> inline CSSPrimitiveValue::CSSPrimitiveValue(TextRenderingMode e)
         m_value.valueID = CSSValueAuto;
         break;
     case OptimizeSpeed:
-        m_value.valueID = CSSValueOptimizespeed;
+        m_value.valueID = CSSValueOptimizeSpeed;
         break;
     case OptimizeLegibility:
-        m_value.valueID = CSSValueOptimizelegibility;
+        m_value.valueID = CSSValueOptimizeLegibility;
         break;
     case GeometricPrecision:
-        m_value.valueID = CSSValueGeometricprecision;
+        m_value.valueID = CSSValueGeometricPrecision;
         break;
     }
 }
@@ -3504,11 +3449,11 @@ template<> inline CSSPrimitiveValue::operator TextRenderingMode() const
     switch (m_value.valueID) {
     case CSSValueAuto:
         return AutoTextRendering;
-    case CSSValueOptimizespeed:
+    case CSSValueOptimizeSpeed:
         return OptimizeSpeed;
-    case CSSValueOptimizelegibility:
+    case CSSValueOptimizeLegibility:
         return OptimizeLegibility;
-    case CSSValueGeometricprecision:
+    case CSSValueGeometricPrecision:
         return GeometricPrecision;
     default:
         break;
@@ -3918,10 +3863,10 @@ template<> inline CSSPrimitiveValue::CSSPrimitiveValue(EImageRendering e)
         m_value.valueID = CSSValueAuto;
         break;
     case ImageRenderingOptimizeSpeed:
-        m_value.valueID = CSSValueOptimizespeed;
+        m_value.valueID = CSSValueOptimizeSpeed;
         break;
     case ImageRenderingOptimizeQuality:
-        m_value.valueID = CSSValueOptimizequality;
+        m_value.valueID = CSSValueOptimizeQuality;
         break;
     case ImageRenderingPixelated:
         m_value.valueID = CSSValuePixelated;
@@ -3938,9 +3883,9 @@ template<> inline CSSPrimitiveValue::operator EImageRendering() const
     switch (m_value.valueID) {
     case CSSValueAuto:
         return ImageRenderingAuto;
-    case CSSValueOptimizespeed:
+    case CSSValueOptimizeSpeed:
         return ImageRenderingOptimizeSpeed;
-    case CSSValueOptimizequality:
+    case CSSValueOptimizeQuality:
         return ImageRenderingOptimizeQuality;
     case CSSValuePixelated:
         return ImageRenderingPixelated;
@@ -3982,27 +3927,6 @@ template<> inline CSSPrimitiveValue::operator ETransformStyle3D() const
 
     ASSERT_NOT_REACHED();
     return TransformStyle3DFlat;
-}
-
-enum LengthConversion {
-    AnyConversion = ~0,
-    FixedConversion = 1 << 0,
-    AutoConversion = 1 << 1,
-    PercentConversion = 1 << 2,
-};
-
-template<int supported> Length CSSPrimitiveValue::convertToLength(const CSSToLengthConversionData& conversionData)
-{
-    if ((supported & FixedConversion) && isLength())
-        return computeLength<Length>(conversionData);
-    if ((supported & PercentConversion) && isPercentage())
-        return Length(getDoubleValue(), Percent);
-    if ((supported & AutoConversion) && getValueID() == CSSValueAuto)
-        return Length(Auto);
-    if ((supported & FixedConversion) && (supported & PercentConversion) && isCalculated())
-        return Length(cssCalcValue()->toCalcValue(conversionData));
-    ASSERT_NOT_REACHED();
-    return Length(0, Fixed);
 }
 
 template<> inline CSSPrimitiveValue::CSSPrimitiveValue(EBufferedRendering e)
@@ -4049,10 +3973,10 @@ template<> inline CSSPrimitiveValue::CSSPrimitiveValue(EColorInterpolation e)
         m_value.valueID = CSSValueAuto;
         break;
     case CI_SRGB:
-        m_value.valueID = CSSValueSrgb;
+        m_value.valueID = CSSValueSRGB;
         break;
     case CI_LINEARRGB:
-        m_value.valueID = CSSValueLinearrgb;
+        m_value.valueID = CSSValueLinearRGB;
         break;
     }
 }
@@ -4061,9 +3985,9 @@ template<> inline CSSPrimitiveValue::operator EColorInterpolation() const
 {
     ASSERT(isValueID());
     switch (m_value.valueID) {
-    case CSSValueSrgb:
+    case CSSValueSRGB:
         return CI_SRGB;
-    case CSSValueLinearrgb:
+    case CSSValueLinearRGB:
         return CI_LINEARRGB;
     case CSSValueAuto:
         return CI_AUTO;
@@ -4084,10 +4008,10 @@ template<> inline CSSPrimitiveValue::CSSPrimitiveValue(EColorRendering e)
         m_value.valueID = CSSValueAuto;
         break;
     case CR_OPTIMIZESPEED:
-        m_value.valueID = CSSValueOptimizespeed;
+        m_value.valueID = CSSValueOptimizeSpeed;
         break;
     case CR_OPTIMIZEQUALITY:
-        m_value.valueID = CSSValueOptimizequality;
+        m_value.valueID = CSSValueOptimizeQuality;
         break;
     }
 }
@@ -4096,9 +4020,9 @@ template<> inline CSSPrimitiveValue::operator EColorRendering() const
 {
     ASSERT(isValueID());
     switch (m_value.valueID) {
-    case CSSValueOptimizespeed:
+    case CSSValueOptimizeSpeed:
         return CR_OPTIMIZESPEED;
-    case CSSValueOptimizequality:
+    case CSSValueOptimizeQuality:
         return CR_OPTIMIZEQUALITY;
     case CSSValueAuto:
         return CR_AUTO;
@@ -4199,13 +4123,13 @@ template<> inline CSSPrimitiveValue::CSSPrimitiveValue(EShapeRendering e)
         m_value.valueID = CSSValueAuto;
         break;
     case SR_OPTIMIZESPEED:
-        m_value.valueID = CSSValueOptimizespeed;
+        m_value.valueID = CSSValueOptimizeSpeed;
         break;
     case SR_CRISPEDGES:
-        m_value.valueID = CSSValueCrispedges;
+        m_value.valueID = CSSValueCrispEdges;
         break;
     case SR_GEOMETRICPRECISION:
-        m_value.valueID = CSSValueGeometricprecision;
+        m_value.valueID = CSSValueGeometricPrecision;
         break;
     }
 }
@@ -4216,11 +4140,11 @@ template<> inline CSSPrimitiveValue::operator EShapeRendering() const
     switch (m_value.valueID) {
     case CSSValueAuto:
         return SR_AUTO;
-    case CSSValueOptimizespeed:
+    case CSSValueOptimizeSpeed:
         return SR_OPTIMIZESPEED;
-    case CSSValueCrispedges:
+    case CSSValueCrispEdges:
         return SR_CRISPEDGES;
-    case CSSValueGeometricprecision:
+    case CSSValueGeometricPrecision:
         return SR_GEOMETRICPRECISION;
     default:
         break;
@@ -4466,23 +4390,23 @@ template<> inline CSSPrimitiveValue::operator EIsolation() const
     return IsolationAuto;
 }
 
-template<> inline CSSPrimitiveValue::operator ScrollBlocksOn() const
+template<> inline CSSPrimitiveValue::operator WebScrollBlocksOn() const
 {
     switch (m_value.valueID) {
     case CSSValueNone:
-        return ScrollBlocksOnNone;
+        return WebScrollBlocksOnNone;
     case CSSValueStartTouch:
-        return ScrollBlocksOnStartTouch;
+        return WebScrollBlocksOnStartTouch;
     case CSSValueWheelEvent:
-        return ScrollBlocksOnWheelEvent;
+        return WebScrollBlocksOnWheelEvent;
     case CSSValueScrollEvent:
-        return ScrollBlocksOnScrollEvent;
+        return WebScrollBlocksOnScrollEvent;
     default:
         break;
     }
 
     ASSERT_NOT_REACHED();
-    return ScrollBlocksOnNone;
+    return WebScrollBlocksOnNone;
 }
 
 template<> inline CSSPrimitiveValue::CSSPrimitiveValue(CSSBoxType cssBox)

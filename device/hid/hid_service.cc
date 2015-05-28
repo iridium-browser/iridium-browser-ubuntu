@@ -9,12 +9,13 @@
 #include "base/logging.h"
 #include "base/message_loop/message_loop.h"
 #include "base/stl_util.h"
+#include "components/device_event_log/device_event_log.h"
 
 #if defined(OS_LINUX) && defined(USE_UDEV)
 #include "device/hid/hid_service_linux.h"
 #elif defined(OS_MACOSX)
 #include "device/hid/hid_service_mac.h"
-#else
+#elif defined(OS_WIN)
 #include "device/hid/hid_service_win.h"
 #endif
 
@@ -41,7 +42,7 @@ HidService* HidService::GetInstance(
 #elif defined(OS_MACOSX)
     g_service = new HidServiceMac(file_task_runner);
 #elif defined(OS_WIN)
-    g_service = new HidServiceWin();
+    g_service = new HidServiceWin(file_task_runner);
 #endif
     if (g_service != nullptr) {
       base::AtExitManager::RegisterTask(base::Bind(
@@ -103,6 +104,12 @@ void HidService::AddDevice(scoped_refptr<HidDeviceInfo> device_info) {
   if (!ContainsKey(devices_, device_info->device_id())) {
     devices_[device_info->device_id()] = device_info;
 
+    HID_LOG(USER) << "HID device "
+                  << (enumeration_ready_ ? "added" : "detected")
+                  << ": vendorId = " << device_info->vendor_id()
+                  << ", productId = " << device_info->product_id()
+                  << ", deviceId = '" << device_info->device_id() << "'";
+
     if (enumeration_ready_) {
       FOR_EACH_OBSERVER(Observer, observer_list_, OnDeviceAdded(device_info));
     }
@@ -113,6 +120,8 @@ void HidService::RemoveDevice(const HidDeviceId& device_id) {
   DCHECK(thread_checker_.CalledOnValidThread());
   DeviceMap::iterator it = devices_.find(device_id);
   if (it != devices_.end()) {
+    HID_LOG(USER) << "HID device removed: deviceId = '" << device_id << "'";
+
     if (enumeration_ready_) {
       FOR_EACH_OBSERVER(Observer, observer_list_, OnDeviceRemoved(it->second));
     }

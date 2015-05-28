@@ -22,7 +22,7 @@ std::string TreeToStringHelper(AXNode* node, int indent) {
   return result;
 }
 
-}  // anonymous namespace
+}  // namespace
 
 // Intermediate state to keep track of during a tree update.
 struct AXTreeUpdateState {
@@ -67,13 +67,9 @@ void AXTree::SetDelegate(AXTreeDelegate* delegate) {
   delegate_ = delegate;
 }
 
-AXNode* AXTree::GetRoot() const {
-  return root_;
-}
-
 AXNode* AXTree::GetFromId(int32 id) const {
   base::hash_map<int32, AXNode*>::const_iterator iter = id_map_.find(id);
-  return iter != id_map_.end() ? (iter->second) : NULL;
+  return iter != id_map_.end() ? iter->second : NULL;
 }
 
 bool AXTree::Unserialize(const AXTreeUpdate& update) {
@@ -88,11 +84,11 @@ bool AXTree::Unserialize(const AXTreeUpdate& update) {
       return false;
     }
     if (node == root_) {
-      DestroyNodeAndSubtree(root_);
+      DestroySubtree(root_);
       root_ = NULL;
     } else {
       for (int i = 0; i < node->child_count(); ++i)
-        DestroyNodeAndSubtree(node->ChildAtIndex(i));
+        DestroySubtree(node->ChildAtIndex(i));
       std::vector<AXNode*> children;
       node->SwapChildren(children);
       update_state.pending_nodes.insert(node);
@@ -114,17 +110,25 @@ bool AXTree::Unserialize(const AXTreeUpdate& update) {
   }
 
   if (delegate_) {
+    std::set<AXNode*>& new_nodes = update_state.new_nodes;
+    std::vector<AXTreeDelegate::Change> changes;
+    changes.reserve(update.nodes.size());
     for (size_t i = 0; i < update.nodes.size(); ++i) {
       AXNode* node = GetFromId(update.nodes[i].id);
-      if (update_state.new_nodes.find(node) != update_state.new_nodes.end()) {
-        delegate_->OnNodeCreationFinished(node);
-        update_state.new_nodes.erase(node);
+      if (new_nodes.find(node) != new_nodes.end()) {
+        if (new_nodes.find(node->parent()) == new_nodes.end()) {
+          changes.push_back(
+              AXTreeDelegate::Change(node, AXTreeDelegate::SUBTREE_CREATED));
+        } else {
+          changes.push_back(
+              AXTreeDelegate::Change(node, AXTreeDelegate::NODE_CREATED));
+        }
       } else {
-        delegate_->OnNodeChangeFinished(node);
+        changes.push_back(
+            AXTreeDelegate::Change(node, AXTreeDelegate::NODE_CHANGED));
       }
     }
-    if (root_->id() != old_root_id)
-      delegate_->OnRootChanged(root_);
+    delegate_->OnAtomicUpdateFinished(root_->id() != old_root_id, changes);
   }
 
   return true;
@@ -134,8 +138,7 @@ std::string AXTree::ToString() const {
   return TreeToStringHelper(root_, 0);
 }
 
-AXNode* AXTree::CreateNode(
-    AXNode* parent, int32 id, int32 index_in_parent) {
+AXNode* AXTree::CreateNode(AXNode* parent, int32 id, int32 index_in_parent) {
   AXNode* new_node = new AXNode(parent, id, index_in_parent);
   id_map_[new_node->id()] = new_node;
   if (delegate_)
@@ -143,8 +146,8 @@ AXNode* AXTree::CreateNode(
   return new_node;
 }
 
-bool AXTree::UpdateNode(
-    const AXNodeData& src, AXTreeUpdateState* update_state) {
+bool AXTree::UpdateNode(const AXNodeData& src,
+                        AXTreeUpdateState* update_state) {
   // This method updates one node in the tree based on serialized data
   // received in an AXTreeUpdate. See AXTreeUpdate for pre and post
   // conditions.
@@ -176,7 +179,7 @@ bool AXTree::UpdateNode(
   // anymore.
   if (!DeleteOldChildren(node, src.child_ids)) {
     if (new_root)
-      DestroyNodeAndSubtree(new_root);
+      DestroySubtree(new_root);
     return false;
   }
 
@@ -191,11 +194,17 @@ bool AXTree::UpdateNode(
   if (src.role == AX_ROLE_ROOT_WEB_AREA &&
       (!root_ || root_->id() != src.id)) {
     if (root_)
-      DestroyNodeAndSubtree(root_);
+      DestroySubtree(root_);
     root_ = node;
   }
 
   return success;
+}
+
+void AXTree::DestroySubtree(AXNode* node) {
+  if (delegate_)
+    delegate_->OnSubtreeWillBeDeleted(node);
+  DestroyNodeAndSubtree(node);
 }
 
 void AXTree::DestroyNodeAndSubtree(AXNode* node) {
@@ -208,7 +217,7 @@ void AXTree::DestroyNodeAndSubtree(AXNode* node) {
 }
 
 bool AXTree::DeleteOldChildren(AXNode* node,
-                               const std::vector<int32> new_child_ids) {
+                               const std::vector<int32>& new_child_ids) {
   // Create a set of child ids in |src| for fast lookup, and return false
   // if a duplicate is found;
   std::set<int32> new_child_id_set;
@@ -226,14 +235,14 @@ bool AXTree::DeleteOldChildren(AXNode* node,
   for (size_t i = 0; i < old_children.size(); ++i) {
     int old_id = old_children[i]->id();
     if (new_child_id_set.find(old_id) == new_child_id_set.end())
-      DestroyNodeAndSubtree(old_children[i]);
+      DestroySubtree(old_children[i]);
   }
 
   return true;
 }
 
 bool AXTree::CreateNewChildVector(AXNode* node,
-                                  const std::vector<int32> new_child_ids,
+                                  const std::vector<int32>& new_child_ids,
                                   std::vector<AXNode*>* new_children,
                                   AXTreeUpdateState* update_state) {
   bool success = true;

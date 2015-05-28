@@ -25,19 +25,73 @@ var errServerKeyExchange = errors.New("tls: invalid ServerKeyExchange message")
 // rsaKeyAgreement implements the standard TLS key agreement where the client
 // encrypts the pre-master secret to the server's public key.
 type rsaKeyAgreement struct {
+	version       uint16
 	clientVersion uint16
+	exportKey     *rsa.PrivateKey
 }
 
 func (ka *rsaKeyAgreement) generateServerKeyExchange(config *Config, cert *Certificate, clientHello *clientHelloMsg, hello *serverHelloMsg) (*serverKeyExchangeMsg, error) {
 	// Save the client version for comparison later.
 	ka.clientVersion = versionToWire(clientHello.vers, clientHello.isDTLS)
 
-	if config.Bugs.RSAServerKeyExchange {
-		// Send an empty ServerKeyExchange message.
-		return &serverKeyExchangeMsg{}, nil
+	if !config.Bugs.RSAEphemeralKey {
+		return nil, nil
 	}
 
-	return nil, nil
+	// Generate an ephemeral RSA key to use instead of the real
+	// one, as in RSA_EXPORT.
+	key, err := rsa.GenerateKey(config.rand(), 512)
+	if err != nil {
+		return nil, err
+	}
+	ka.exportKey = key
+
+	modulus := key.N.Bytes()
+	exponent := big.NewInt(int64(key.E)).Bytes()
+	serverRSAParams := make([]byte, 0, 2+len(modulus)+2+len(exponent))
+	serverRSAParams = append(serverRSAParams, byte(len(modulus)>>8), byte(len(modulus)))
+	serverRSAParams = append(serverRSAParams, modulus...)
+	serverRSAParams = append(serverRSAParams, byte(len(exponent)>>8), byte(len(exponent)))
+	serverRSAParams = append(serverRSAParams, exponent...)
+
+	var tls12HashId uint8
+	if ka.version >= VersionTLS12 {
+		if tls12HashId, err = pickTLS12HashForSignature(signatureRSA, clientHello.signatureAndHashes, config.signatureAndHashesForServer()); err != nil {
+			return nil, err
+		}
+	}
+
+	digest, hashFunc, err := hashForServerKeyExchange(signatureRSA, tls12HashId, ka.version, clientHello.random, hello.random, serverRSAParams)
+	if err != nil {
+		return nil, err
+	}
+	privKey, ok := cert.PrivateKey.(*rsa.PrivateKey)
+	if !ok {
+		return nil, errors.New("RSA ephemeral key requires an RSA server private key")
+	}
+	sig, err := rsa.SignPKCS1v15(config.rand(), privKey, hashFunc, digest)
+	if err != nil {
+		return nil, errors.New("failed to sign RSA parameters: " + err.Error())
+	}
+
+	skx := new(serverKeyExchangeMsg)
+	sigAndHashLen := 0
+	if ka.version >= VersionTLS12 {
+		sigAndHashLen = 2
+	}
+	skx.key = make([]byte, len(serverRSAParams)+sigAndHashLen+2+len(sig))
+	copy(skx.key, serverRSAParams)
+	k := skx.key[len(serverRSAParams):]
+	if ka.version >= VersionTLS12 {
+		k[0] = tls12HashId
+		k[1] = signatureRSA
+		k = k[2:]
+	}
+	k[0] = byte(len(sig) >> 8)
+	k[1] = byte(len(sig))
+	copy(k[2:], sig)
+
+	return skx, nil
 }
 
 func (ka *rsaKeyAgreement) processClientKeyExchange(config *Config, cert *Certificate, ckx *clientKeyExchangeMsg, version uint16) ([]byte, error) {
@@ -60,7 +114,11 @@ func (ka *rsaKeyAgreement) processClientKeyExchange(config *Config, cert *Certif
 		ciphertext = ckx.ciphertext[2:]
 	}
 
-	err = rsa.DecryptPKCS1v15SessionKey(config.rand(), cert.PrivateKey.(*rsa.PrivateKey), ciphertext, preMasterSecret)
+	key := cert.PrivateKey.(*rsa.PrivateKey)
+	if ka.exportKey != nil {
+		key = ka.exportKey
+	}
+	err = rsa.DecryptPKCS1v15SessionKey(config.rand(), key, ciphertext, preMasterSecret)
 	if err != nil {
 		return nil, err
 	}
@@ -154,20 +212,19 @@ func hashForServerKeyExchange(sigType, hashFunc uint8, version uint16, slices ..
 // pickTLS12HashForSignature returns a TLS 1.2 hash identifier for signing a
 // ServerKeyExchange given the signature type being used and the client's
 // advertized list of supported signature and hash combinations.
-func pickTLS12HashForSignature(sigType uint8, clientSignatureAndHashes []signatureAndHash) (uint8, error) {
-	if len(clientSignatureAndHashes) == 0 {
+func pickTLS12HashForSignature(sigType uint8, clientList, serverList []signatureAndHash) (uint8, error) {
+	if len(clientList) == 0 {
 		// If the client didn't specify any signature_algorithms
 		// extension then we can assume that it supports SHA1. See
 		// http://tools.ietf.org/html/rfc5246#section-7.4.1.4.1
 		return hashSHA1, nil
 	}
 
-	for _, sigAndHash := range clientSignatureAndHashes {
+	for _, sigAndHash := range clientList {
 		if sigAndHash.signature != sigType {
 			continue
 		}
-		switch sigAndHash.hash {
-		case hashSHA1, hashSHA256:
+		if isSupportedSignatureAndHash(sigAndHash, serverList) {
 			return sigAndHash.hash, nil
 		}
 	}
@@ -221,7 +278,7 @@ func (ka *signedKeyAgreement) signParameters(config *Config, cert *Certificate, 
 	var tls12HashId uint8
 	var err error
 	if ka.version >= VersionTLS12 {
-		if tls12HashId, err = pickTLS12HashForSignature(ka.sigType, clientHello.signatureAndHashes); err != nil {
+		if tls12HashId, err = pickTLS12HashForSignature(ka.sigType, clientHello.signatureAndHashes, config.signatureAndHashesForServer()); err != nil {
 			return nil, err
 		}
 	}

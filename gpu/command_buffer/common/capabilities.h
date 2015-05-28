@@ -75,10 +75,16 @@ struct GPU_EXPORT Capabilities {
   int num_compressed_texture_formats;
   int num_shader_binary_formats;
   int bind_generates_resource_chromium;
+  int max_transform_feedback_separate_attribs;
+  int max_uniform_buffer_bindings;
+  int uniform_buffer_offset_alignment;
 
   bool post_sub_buffer;
   bool egl_image_external;
+  bool texture_format_atc;
   bool texture_format_bgra8888;
+  bool texture_format_dxt1;
+  bool texture_format_dxt5;
   bool texture_format_etc1;
   bool texture_format_etc1_npot;
   bool texture_rectangle;

@@ -13,18 +13,22 @@
  * @param {!ErrorBanner} errorBanner Error banner.
  * @param {!cr.ui.ArrayDataModel} dataModel Data model.
  * @param {!cr.ui.ListSelectionModel} selectionModel Selection model.
+ * @param {!MetadataModel} metadataModel
+ * @param {!ThumbnailModel} thumbnailModel
  * @param {!Object} context Context.
- * @param {!VolumeManager} volumeManager Volume manager.
+ * @param {!VolumeManagerWrapper} volumeManager Volume manager.
  * @param {function(function())} toggleMode Function to toggle the Gallery mode.
  * @param {function(string):string} displayStringFunction String formatting
  *     function.
+
  * @constructor
  * @struct
  * @suppress {checkStructDictInheritance}
  * @extends {cr.EventTarget}
  */
 function SlideMode(container, content, toolbar, prompt, errorBanner, dataModel,
-    selectionModel, context, volumeManager, toggleMode, displayStringFunction) {
+    selectionModel, metadataModel, thumbnailModel, context, volumeManager,
+    toggleMode, displayStringFunction) {
   /**
    * @type {!HTMLElement}
    * @private
@@ -88,18 +92,11 @@ function SlideMode(container, content, toolbar, prompt, errorBanner, dataModel,
   this.context_ = context;
 
   /**
-   * @type {!VolumeManager}
+   * @type {!VolumeManagerWrapper}
    * @private
    * @const
    */
   this.volumeManager_ = volumeManager;
-
-  /**
-   * @type {!MetadataCache}
-   * @private
-   * @const
-   */
-  this.metadataCache_ = context.metadataCache;
 
   /**
    * @type {function(function())}
@@ -235,9 +232,10 @@ function SlideMode(container, content, toolbar, prompt, errorBanner, dataModel,
 
   /**
    * @type {!HTMLElement}
+   * @private
    * @const
    */
-  var overwriteOriginalBox = util.createChild(
+  this.overwriteOriginalBox_ = util.createChild(
       this.options_, 'overwrite-original');
 
   /**
@@ -246,7 +244,7 @@ function SlideMode(container, content, toolbar, prompt, errorBanner, dataModel,
    * @const
    */
   this.overwriteOriginal_ = util.createChild(
-      overwriteOriginalBox, '', 'input');
+      this.overwriteOriginalBox_, '', 'input');
   this.overwriteOriginal_.type = 'checkbox';
   this.overwriteOriginal_.id = 'overwrite-checkbox';
   chrome.storage.local.get(SlideMode.OVERWRITE_KEY, function(values) {
@@ -262,7 +260,8 @@ function SlideMode(container, content, toolbar, prompt, errorBanner, dataModel,
    * @type {!HTMLElement}
    * @const
    */
-  var overwriteLabel = util.createChild(overwriteOriginalBox, '', 'label');
+  var overwriteLabel = util.createChild(
+      this.overwriteOriginalBox_, '', 'label');
   overwriteLabel.textContent =
       this.displayStringFunction_('GALLERY_OVERWRITE_ORIGINAL');
   overwriteLabel.setAttribute('for', 'overwrite-checkbox');
@@ -337,7 +336,7 @@ function SlideMode(container, content, toolbar, prompt, errorBanner, dataModel,
    * @const
    */
   this.ribbon_ = new Ribbon(
-      this.document_, this.dataModel_, this.selectionModel_);
+      this.document_, this.dataModel_, this.selectionModel_, thumbnailModel);
   this.ribbonSpacer_.appendChild(this.ribbon_);
 
   util.createChild(this.container_, 'spinner');
@@ -428,7 +427,8 @@ function SlideMode(container, content, toolbar, prompt, errorBanner, dataModel,
    */
   this.imageView_ = new ImageView(
       this.imageContainer_,
-      this.viewport_);
+      this.viewport_,
+      metadataModel);
 
   /**
    * @type {!ImageEditor}
@@ -515,21 +515,6 @@ SlideMode.prototype.enter = function(
   this.sequenceDirection_ = 0;
   this.sequenceLength_ = 0;
 
-  var loadDone = function(loadType, delay) {
-    this.active_ = true;
-
-    this.selectionModel_.addEventListener('change', this.onSelectionBound_);
-    this.dataModel_.addEventListener('splice', this.onSpliceBound_);
-
-    ImageUtil.setAttribute(this.arrowBox_, 'active', this.getItemCount_() > 1);
-    this.ribbon_.enable();
-
-    // Wait 1000ms after the animation is done, then prefetch the next image.
-    this.requestPrefetch(1, delay + 1000);
-
-    if (loadCallback) loadCallback();
-  }.bind(this);
-
   // The latest |leave| call might have left the image animating. Remove it.
   this.unloadImage_();
 
@@ -562,7 +547,7 @@ SlideMode.prototype.enter = function(
 
     // Load the image of the item.
     this.loadItem_(
-        selectedItem,
+        assert(selectedItem),
         zoomFromRect ?
             this.imageView_.createZoomEffect(zoomFromRect) :
             new ImageView.Effect.None(),
@@ -774,12 +759,6 @@ SlideMode.prototype.loadSelectedItem_ = function() {
 
   this.displayedItem_ = this.getSelectedItem();
   var selectedItem = assertInstanceof(this.getSelectedItem(), Gallery.Item);
-
-  if (this.sequenceLength_ <= 1) {
-    // We have just broke the sequence. Touch the current image so that it stays
-    // in the cache longer.
-    this.imageView_.prefetch(selectedItem);
-  }
 
   function shouldPrefetch(loadType, step, sequenceLength) {
     // Never prefetch when selecting out of sequence.
@@ -993,7 +972,6 @@ SlideMode.prototype.loadItem_ = function(
 SlideMode.prototype.itemLoaded_ = function(
     item, loadCallback, loadType, delay, opt_error) {
   var entry = item.getEntry();
-  var metadata = item.getMetadata();
 
   this.showSpinner_(false);
   if (loadType === ImageView.LoadType.ERROR) {
@@ -1015,7 +993,7 @@ SlideMode.prototype.itemLoaded_ = function(
   };
 
   ImageUtil.metrics.recordSmallCount(ImageUtil.getMetricName('Size.MB'),
-      toMillions(metadata.filesystem.size));
+      toMillions(item.getMetadataItem().size));
 
   var canvas = this.imageView_.getCanvas();
   ImageUtil.metrics.recordSmallCount(ImageUtil.getMetricName('Size.MPix'),
@@ -1038,12 +1016,15 @@ SlideMode.prototype.itemLoaded_ = function(
   }
 
   // For once edited image, disallow the 'overwrite' setting change.
-  ImageUtil.setAttribute(this.options_, 'saved',
-      !this.getSelectedItem().isOriginal());
+  ImageUtil.setAttribute(this.overwriteOriginalBox_, 'disabled',
+      !this.getSelectedItem().isOriginal() || FileType.isRaw(item.getEntry()));
 
-  chrome.storage.local.get(SlideMode.OVERWRITE_BUBBLE_KEY,
+  var keys = {};
+  keys[SlideMode.OVERWRITE_BUBBLE_KEY] = 0;
+  keys[SlideMode.OVERWRITE_KEY] = true;
+  chrome.storage.local.get(keys,
       function(values) {
-        var times = values[SlideMode.OVERWRITE_BUBBLE_KEY] || 0;
+        var times = values[SlideMode.OVERWRITE_BUBBLE_KEY];
         if (times < SlideMode.OVERWRITE_BUBBLE_MAX_TIMES) {
           this.bubble_.hidden = false;
           if (this.isEditing()) {
@@ -1052,6 +1033,10 @@ SlideMode.prototype.itemLoaded_ = function(
             chrome.storage.local.set(items);
           }
         }
+        if (FileType.isRaw(item.getEntry()))
+          this.overwriteOriginal_.checked = false;
+        else
+          this.overwriteOriginal_.checked = values[SlideMode.OVERWRITE_KEY];
       }.bind(this));
 
   loadCallback(loadType, delay);
@@ -1101,7 +1086,10 @@ SlideMode.prototype.onClick_ = function(event) {
  * @private
  */
 SlideMode.prototype.onDocumentClick_ = function(event) {
-  event = assertInstanceof(event, MouseEvent);
+  // Events created in fakeMouseClick in test util don't pass this test.
+  if (!window.IN_TEST)
+    event = assertInstanceof(event, MouseEvent);
+
   var targetElement = assertInstanceof(event.target, HTMLElement);
   // Close the bubble if clicked outside of it and if it is visible.
   if (!this.bubble_.contains(targetElement) &&
@@ -1266,29 +1254,31 @@ SlideMode.prototype.saveCurrentImage_ = function(item, callback) {
       this.imageView_.getCanvas(),
       this.shouldOverwriteOriginal_());
 
-  savedPromise.catch(function(error) {
-    // TODO(hirono): Implement write error handling.
-    // Until then pretend that the save succeeded.
-    console.error(error.stack || error);
-  }).then(function() {
+  savedPromise.then(function() {
     this.showSpinner_(false);
     this.flashSavedLabel_();
 
     // Allow changing the 'Overwrite original' setting only if the user
     // used Undo to restore the original image AND it is not a copy.
     // Otherwise lock the setting in its current state.
-    var mayChangeOverwrite = !this.editor_.canUndo() && item.isOriginal();
-    ImageUtil.setAttribute(this.options_, 'saved', !mayChangeOverwrite);
+    var mayChangeOverwrite = !this.editor_.canUndo() && item.isOriginal() &&
+        !FileType.isRaw(item.getEntry());
+    ImageUtil.setAttribute(
+        this.overwriteOriginalBox_, 'disabled', !mayChangeOverwrite);
 
     // Record UMA for the first edit.
     if (this.imageView_.getContentRevision() === 1)
       ImageUtil.metrics.recordUserAction(ImageUtil.getMetricName('Edit'));
 
     callback();
-    cr.dispatchSimpleEvent(this, 'image-saved');
   }.bind(this)).catch(function(error) {
     console.error(error.stack || error);
-  });
+
+    this.showSpinner_(false);
+    this.errorBanner_.show('GALLERY_SAVE_FAILED');
+
+    callback();
+  }.bind(this));
 };
 
 /**

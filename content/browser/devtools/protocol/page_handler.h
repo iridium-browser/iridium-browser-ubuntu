@@ -23,11 +23,16 @@ namespace devtools {
 namespace page {
 
 class ColorPicker;
-class FrameRecorder;
 
 class PageHandler {
  public:
   typedef DevToolsProtocolClient::Response Response;
+
+  class ScreencastListener {
+   public:
+    virtual ~ScreencastListener() { }
+    virtual void ScreencastEnabledChanged() = 0;
+  };
 
   PageHandler();
   virtual ~PageHandler();
@@ -39,13 +44,15 @@ class PageHandler {
   void OnVisibilityChanged(bool visible);
   void DidAttachInterstitialPage();
   void DidDetachInterstitialPage();
+  void SetScreencastListener(ScreencastListener* listener);
+  bool screencast_enabled() const { return enabled_ && screencast_enabled_; }
 
   Response Enable();
   Response Disable();
 
   Response Reload(const bool* ignoreCache,
                   const std::string* script_to_evaluate_on_load,
-                  const std::string* script_preprocessor);
+                  const std::string* script_preprocessor = NULL);
 
   Response Navigate(const std::string& url, FrameId* frame_id);
 
@@ -55,30 +62,15 @@ class PageHandler {
 
   Response NavigateToHistoryEntry(int entry_id);
 
-  Response SetGeolocationOverride(double* latitude,
-                                  double* longitude,
-                                  double* accuracy);
-
-  Response ClearGeolocationOverride();
-
-  Response SetTouchEmulationEnabled(bool enabled);
-  Response SetTouchEmulationEnabled(bool enabled,
-                                    const std::string* configuration);
-
   Response CaptureScreenshot(DevToolsCommandId command_id);
 
   Response CanScreencast(bool* result);
-  Response CanEmulate(bool* result);
-
   Response StartScreencast(const std::string* format,
                            const int* quality,
                            const int* max_width,
                            const int* max_height);
   Response StopScreencast();
   Response ScreencastFrameAck(int frame_number);
-
-  Response StartRecordingFrames(int max_frame_count);
-  Response StopRecordingFrames(DevToolsCommandId command_id);
 
   Response HandleJavaScriptDialog(bool accept, const std::string* prompt_text);
 
@@ -88,8 +80,6 @@ class PageHandler {
   Response SetColorPickerEnabled(bool enabled);
 
  private:
-  void UpdateTouchEventEmulationState();
-
   void NotifyScreencastVisibility(bool visible);
   void InnerSwapCompositorFrame();
   void ScreencastFrameCaptured(const cc::CompositorFrameMetadata& metadata,
@@ -105,17 +95,8 @@ class PageHandler {
       size_t png_size);
 
   void OnColorPicked(int r, int g, int b, int a);
-  void OnFramesRecorded(
-      DevToolsCommandId command_id,
-      scoped_refptr<StopRecordingFramesResponse> response_data);
-
-  void QueryUsageAndQuotaCompleted(
-      DevToolsCommandId command_id,
-      scoped_refptr<QueryUsageAndQuotaResponse> response);
 
   bool enabled_;
-  bool touch_emulation_enabled_;
-  std::string touch_emulation_configuration_;
 
   bool screencast_enabled_;
   std::string screencast_format_;
@@ -131,10 +112,10 @@ class PageHandler {
   bool processing_screencast_frame_;
 
   scoped_ptr<ColorPicker> color_picker_;
-  scoped_ptr<FrameRecorder> frame_recorder_;
 
   RenderViewHostImpl* host_;
   scoped_ptr<Client> client_;
+  ScreencastListener* screencast_listener_;
   base::WeakPtrFactory<PageHandler> weak_factory_;
 
   DISALLOW_COPY_AND_ASSIGN(PageHandler);

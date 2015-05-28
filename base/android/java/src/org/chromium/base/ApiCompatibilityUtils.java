@@ -14,6 +14,8 @@ import android.content.ContentResolver;
 import android.content.Context;
 import android.content.Intent;
 import android.content.res.Configuration;
+import android.content.res.Resources;
+import android.content.res.Resources.NotFoundException;
 import android.graphics.Bitmap;
 import android.graphics.Color;
 import android.graphics.drawable.Drawable;
@@ -69,13 +71,6 @@ public class ApiCompatibilityUtils {
      */
     public static boolean isPrintingSupported() {
         return Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT;
-    }
-
-    /**
-     * @return True if the running version of the Android supports HTML clipboard.
-     */
-    public static boolean isHTMLClipboardSupported() {
-        return Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN;
     }
 
     /**
@@ -485,6 +480,27 @@ public class ApiCompatibilityUtils {
                 window.addFlags(WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS);
             }
             window.setStatusBarColor(statusBarColor);
+        }
+    }
+
+    /**
+     * @see android.content.res.Resources#getDrawable(int id).
+     */
+    @SuppressWarnings("deprecation")
+    public static Drawable getDrawable(Resources res, int id) throws NotFoundException {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            return res.getDrawable(id, null);
+        } else {
+            return res.getDrawable(id);
+        }
+    }
+
+    /**
+     * @see android.view.View#announceForAccessibility(CharSequence text)
+     */
+    public static void announceForAccessibility(View view, CharSequence text) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN) {
+            view.announceForAccessibility(text);
         }
     }
 }

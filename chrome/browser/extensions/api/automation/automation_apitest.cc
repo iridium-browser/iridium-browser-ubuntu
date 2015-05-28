@@ -27,6 +27,12 @@
 #include "ui/accessibility/ax_tree_serializer.h"
 #include "ui/accessibility/tree_generator.h"
 
+#if defined(OS_CHROMEOS)
+#include "ash/accelerators/accelerator_controller.h"
+#include "ash/shell.h"
+#include "chrome/browser/ui/aura/accessibility/automation_manager_aura.h"
+#endif
+
 namespace extensions {
 
 namespace {
@@ -140,7 +146,7 @@ IN_PROC_BROWSER_TEST_F(AutomationApiTest, TabsAutomationHostsPermissions) {
       << message_;
 }
 
-#if defined(OS_CHROMEOS)
+#if defined(USE_AURA)
 IN_PROC_BROWSER_TEST_F(AutomationApiTest, Desktop) {
   ASSERT_TRUE(RunExtensionSubtest("automation/tests/desktop", "desktop.html"))
       << message_;
@@ -151,22 +157,29 @@ IN_PROC_BROWSER_TEST_F(AutomationApiTest, DesktopNotRequested) {
                                   "desktop_not_requested.html")) << message_;
 }
 
+#if defined(OS_CHROMEOS)
 IN_PROC_BROWSER_TEST_F(AutomationApiTest, DesktopActions) {
+  AutomationManagerAura::GetInstance()->Enable(browser()->profile());
+  // Trigger the shelf subtree to be computed.
+  ash::Shell::GetInstance()->accelerator_controller()->PerformActionIfEnabled(
+      ash::FOCUS_SHELF);
+
   ASSERT_TRUE(RunExtensionSubtest("automation/tests/desktop", "actions.html"))
       << message_;
 }
 
-// http://crbug.com/435449
 IN_PROC_BROWSER_TEST_F(AutomationApiTest, DesktopLoadTabs) {
   ASSERT_TRUE(RunExtensionSubtest("automation/tests/desktop", "load_tabs.html"))
       << message_;
 }
-#else
+#endif  // defined(OS_CHROMEOS)
+#else  // !defined(USE_AURA)
 IN_PROC_BROWSER_TEST_F(AutomationApiTest, DesktopNotSupported) {
   ASSERT_TRUE(RunExtensionSubtest("automation/tests/desktop",
-                                  "desktop_not_supported.html")) << message_;
+                                  "desktop_not_supported.html"))
+      << message_;
 }
-#endif
+#endif  // defined(USE_AURA)
 
 IN_PROC_BROWSER_TEST_F(AutomationApiTest, CloseTab) {
   StartEmbeddedTestServer();
@@ -187,9 +200,21 @@ IN_PROC_BROWSER_TEST_F(AutomationApiTest, Find) {
       << message_;
 }
 
-IN_PROC_BROWSER_TEST_F(AutomationApiTest, Mixins) {
+// Flaky on Linux only. http://crbug.com/467921
+#if defined(OS_LINUX)
+#define MAYBE_Mixins DISABLED_Mixins
+#else
+#define MAYBE_Mixins Mixins
+#endif
+IN_PROC_BROWSER_TEST_F(AutomationApiTest, DISABLED_Mixins) {
   StartEmbeddedTestServer();
   ASSERT_TRUE(RunExtensionSubtest("automation/tests/tabs", "mixins.html"))
+      << message_;
+}
+
+IN_PROC_BROWSER_TEST_F(AutomationApiTest, TreeChange) {
+  StartEmbeddedTestServer();
+  ASSERT_TRUE(RunExtensionSubtest("automation/tests/tabs", "tree_change.html"))
       << message_;
 }
 
@@ -225,7 +250,7 @@ class TreeSerializationState {
 #else
       : tree_size(2),
 #endif
-        generator(tree_size),
+        generator(tree_size, true),
         num_trees(generator.UniqueTreeCount()),
         tree0_version(0),
         tree1_version(0) {
@@ -237,10 +262,10 @@ class TreeSerializationState {
                        int routing_id,
                        BrowserContext* browser_context) {
     ui::AXTreeUpdate update;
-    serializer->SerializeChanges(tree->GetRoot(), &update);
+    serializer->SerializeChanges(tree->root(), &update);
     SendUpdate(update,
                ui::AX_EVENT_LAYOUT_COMPLETE,
-               tree->GetRoot()->id(),
+               tree->root()->id(),
                routing_id,
                browser_context);
   }
@@ -398,14 +423,14 @@ void TransformTree(TreeSerializer* source_serializer,
     ui::AXEvent event =
         is_last_update ? AX_EVENT_ASSERT_EQUAL : AX_EVENT_IGNORE;
     state.SendUpdate(
-        update, event, target_tree->GetRoot()->id(), kTab0Rid, browser_context);
+        update, event, target_tree->root()->id(), kTab0Rid, browser_context);
   }
 }
 
 // Helper method to send a no-op tree update to tab 0 with the given event.
 void SendEvent(ui::AXEvent event, content::BrowserContext* browser_context) {
   ui::AXTreeUpdate update;
-  ui::AXNode* root = state.tree0->GetRoot();
+  ui::AXNode* root = state.tree0->root();
   state.serializer0->SerializeChanges(root, &update);
   state.SendUpdate(update, event, root->id(), kTab0Rid, browser_context);
 }

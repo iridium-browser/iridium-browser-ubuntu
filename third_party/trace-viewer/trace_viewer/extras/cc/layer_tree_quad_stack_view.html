@@ -1,6 +1,6 @@
 <!DOCTYPE html>
 <!--
-Copyright (c) 2013 The Chromium Authors. All rights reserved.
+Copyright (c) 2015 The Chromium Authors. All rights reserved.
 Use of this source code is governed by a BSD-style license that can be
 found in the LICENSE file.
 -->
@@ -76,7 +76,6 @@ tv.exportTo('tv.e.cc', function() {
   var TILE_HEATMAP_TYPE = {};
   TILE_HEATMAP_TYPE.NONE = 'none';
   TILE_HEATMAP_TYPE.SCHEDULED_PRIORITY = 'scheduledPriority';
-  TILE_HEATMAP_TYPE.DISTANCE_TO_VISIBLE = 'distanceToVisible';
   TILE_HEATMAP_TYPE.USING_GPU_MEMORY = 'usingGpuMemory';
 
   function createTileRectsSelectorBaseOptions() {
@@ -140,8 +139,6 @@ tv.exportTo('tv.e.cc', function() {
             value: TILE_HEATMAP_TYPE.NONE},
            {label: 'Scheduled Priority',
             value: TILE_HEATMAP_TYPE.SCHEDULED_PRIORITY},
-           {label: 'Distance to Visible',
-            value: TILE_HEATMAP_TYPE.DISTANCE_TO_VISIBLE},
            {label: 'Is using GPU memory',
             value: TILE_HEATMAP_TYPE.USING_GPU_MEMORY}
           ]);
@@ -452,10 +449,10 @@ tv.exportTo('tv.e.cc', function() {
               'MB on this tree';
 
           if (this.layerTreeImpl_.otherTree) {
-            // Older Chromes don't report enough data to know how much memory
-            // is being used across both trees. We know the memory consumed by
-            // each tree, but there is resource sharing *between the trees* so
-            // we can't simply sum up the per-tree costs. We need either the total
+            // Older Chromes don't report enough data to know how much memory is
+            // being used across both trees. We know the memory consumed by each
+            // tree, but there is resource sharing *between the trees* so we
+            // can't simply sum up the per-tree costs. We need either the total
             // plus one tree, to guess the unique on the other tree, etc. Newer
             // chromes report memory per tile, which allows LTHI to compute the
             // total tile memory usage, letting us figure things out properly.
@@ -860,8 +857,6 @@ tv.exportTo('tv.e.cc', function() {
         return tile.scheduledPriority == 0 ?
             undefined :
             tile.scheduledPriority;
-      } else if (heatmapType == TILE_HEATMAP_TYPE.DISTANCE_TO_VISIBLE) {
-        return Math.min(3000, tile.distanceToVisible);
       } else if (heatmapType == TILE_HEATMAP_TYPE.USING_GPU_MEMORY) {
         if (tile.isSolidColor)
           return 0.5;
@@ -954,7 +949,7 @@ tv.exportTo('tv.e.cc', function() {
 
         quad.backgroundColor = heatmapResult[i].color;
         var data = {
-          tileType: type,
+          tileType: type
         };
         if (heatmapType !== TILE_HEATMAP_TYPE.NONE)
           data[heatmapType] = heatmapResult[i].value;
@@ -971,7 +966,8 @@ tv.exportTo('tv.e.cc', function() {
         var unitRect = rect.asUVRectInside(layer.bounds);
         var quad = layerQuad.projectUnitRect(unitRect);
 
-        var colorId = tv.b.ui.getStringColorId(highlight.colorKey);
+        var colorId = tv.b.ui.getColorIdForGeneralPurposeString(
+            highlight.colorKey);
         colorId += tv.b.ui.getColorPaletteHighlightIdBoost();
 
         var color = tv.b.Color.fromString(tv.b.ui.getColorPalette()[colorId]);
@@ -1076,13 +1072,13 @@ tv.exportTo('tv.e.cc', function() {
         highlights = extraHighlightsByLayerId[layer.layerId];
         if (highlights) {
           this.appendHighlightQuadsForLayer_(
-              quads, layer, layerQuad, highlights)
+              quads, layer, layerQuad, highlights);
         }
 
         highlights = selectionHighlightsByLayerId[layer.layerId];
         if (highlights) {
           this.appendHighlightQuadsForLayer_(
-              quads, layer, layerQuad, highlights)
+              quads, layer, layerQuad, highlights);
         }
       }
 
@@ -1160,7 +1156,7 @@ tv.exportTo('tv.e.cc', function() {
           return false;
 
         if (tile.containingSnapshot == lthi)
-          tasks.push(event)
+          tasks.push(event);
       }, this);
       return tasks;
     },

@@ -24,18 +24,21 @@
 #ifndef SVGPathParser_h
 #define SVGPathParser_h
 
-#include "core/svg/SVGPathConsumer.h"
 #include "core/svg/SVGPathSeg.h"
 #include "platform/heap/Handle.h"
-#include "wtf/PassOwnPtr.h"
-#include "wtf/text/WTFString.h"
 
 namespace blink {
 
+enum PathParsingMode {
+    NormalizedParsing,
+    UnalteredParsing
+};
+
+class SVGPathConsumer;
 class SVGPathSource;
 
 class SVGPathParser final : public NoBaseWillBeGarbageCollected<SVGPathParser> {
-    WTF_MAKE_NONCOPYABLE(SVGPathParser); WTF_MAKE_FAST_ALLOCATED_WILL_BE_REMOVED;
+    WTF_MAKE_NONCOPYABLE(SVGPathParser); WTF_MAKE_FAST_ALLOCATED_WILL_BE_REMOVED(SVGPathParser);
 public:
     SVGPathParser(SVGPathSource* source, SVGPathConsumer* consumer)
         : m_source(source)
@@ -45,32 +48,26 @@ public:
         ASSERT(m_consumer);
     }
 
-    bool parsePathDataFromSource(PathParsingMode, bool checkForInitialMoveTo = true);
+    bool parsePathDataFromSource(PathParsingMode pathParsingMode, bool checkForInitialMoveTo = true)
+    {
+        ASSERT(m_source);
+        ASSERT(m_consumer);
+        if (checkForInitialMoveTo && !initialCommandIsMoveTo())
+            return false;
+        if (pathParsingMode == NormalizedParsing)
+            return parseAndNormalizePath();
+        return parsePath();
+    }
 
-    void trace(Visitor*);
+    DECLARE_TRACE();
 
 private:
-    bool decomposeArcToCubic(float, float, float, FloatPoint&, FloatPoint&, bool largeArcFlag, bool sweepFlag);
-    void parseClosePathSegment();
-    bool parseMoveToSegment();
-    bool parseLineToSegment();
-    bool parseLineToHorizontalSegment();
-    bool parseLineToVerticalSegment();
-    bool parseCurveToCubicSegment();
-    bool parseCurveToCubicSmoothSegment();
-    bool parseCurveToQuadraticSegment();
-    bool parseCurveToQuadraticSmoothSegment();
-    bool parseArcToSegment();
+    bool initialCommandIsMoveTo();
+    bool parsePath();
+    bool parseAndNormalizePath();
 
     RawPtrWillBeMember<SVGPathSource> m_source;
     RawPtrWillBeMember<SVGPathConsumer> m_consumer;
-    PathCoordinateMode m_mode;
-    PathParsingMode m_pathParsingMode;
-    SVGPathSegType m_lastCommand;
-    bool m_closePath;
-    FloatPoint m_controlPoint;
-    FloatPoint m_currentPoint;
-    FloatPoint m_subPathPoint;
 };
 
 } // namespace blink

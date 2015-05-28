@@ -26,6 +26,7 @@
 #ifndef Position_h
 #define Position_h
 
+#include "core/CoreExport.h"
 #include "core/dom/ContainerNode.h"
 #include "core/editing/EditingBoundary.h"
 #include "core/editing/TextAffinity.h"
@@ -40,8 +41,9 @@ class CSSComputedStyleDeclaration;
 class Element;
 class InlineBox;
 class Node;
-class RenderObject;
+class LayoutObject;
 class Text;
+class TreeScope;
 
 enum PositionMoveType {
     CodePoint,       // Move by a single code point.
@@ -49,7 +51,7 @@ enum PositionMoveType {
     BackwardDeletion // Subject to platform conventions.
 };
 
-class Position {
+class CORE_EXPORT Position {
     DISALLOW_ALLOCATION();
 public:
     enum AnchorType {
@@ -79,6 +81,9 @@ public:
 
         int m_offset;
     };
+
+    static const TreeScope* commonAncestorTreeScope(const Position&, const Position&);
+
     Position(PassRefPtrWillBeRawPtr<Node> anchorNode, LegacyEditingOffset);
 
     // For creating before/after positions:
@@ -101,6 +106,12 @@ public:
     int computeOffsetInContainerNode() const;  // O(n) for before/after-anchored positions, O(1) for parent-anchored positions
     Position parentAnchoredEquivalent() const; // Convenience method for DOM positions that also fixes up some positions for editing
 
+    // Returns |PositionIsAnchor| type |Position| which is compatible with
+    // |RangeBoundaryPoint| as safe to pass |Range| constructor. Return value
+    // of this function is different from |parentAnchoredEquivalent()| which
+    // returns editing specific position.
+    Position toOffsetInAnchor() const;
+
     // Inline O(1) access for Positions which callers know to be parent-anchored
     int offsetInContainerNode() const
     {
@@ -119,6 +130,16 @@ public:
     // These are convenience methods which are smart about whether the position is neighbor anchored or parent anchored
     Node* computeNodeBeforePosition() const;
     Node* computeNodeAfterPosition() const;
+
+    // Returns node as |Range::firstNode()|. This position must be a
+    // |PositionIs::OffsetInAhcor| to behave as |Range| boundary point.
+    Node* nodeAsRangeFirstNode() const;
+
+    // Returns a node as past last as same as |Range::pastLastNode()|. This
+    // function is supposed to used in HTML serialization and plain text
+    // iterator. This position must be a |PositionIs::OffsetInAhcor| to
+    // behave as |Range| boundary point.
+    Node* nodeAsRangePastLastNode() const;
 
     Node* anchorNode() const { return m_anchorNode.get(); }
 
@@ -145,7 +166,7 @@ public:
     bool isOrphan() const { return m_anchorNode && !m_anchorNode->inDocument(); }
 
     Element* element() const;
-    PassRefPtrWillBeRawPtr<CSSComputedStyleDeclaration> computedStyle() const;
+    PassRefPtrWillBeRawPtr<CSSComputedStyleDeclaration> ensureComputedStyle() const;
 
     // Move up or down the DOM by one position.
     // Offsets are computed using render text for nodes that have renderers - but note that even when
@@ -183,7 +204,7 @@ public:
 
     TextDirection primaryDirection() const;
 
-    static bool hasRenderedNonAnonymousDescendantsWithHeight(RenderObject*);
+    static bool hasRenderedNonAnonymousDescendantsWithHeight(LayoutObject*);
     static bool nodeIsUserSelectNone(Node*);
     static bool nodeIsUserSelectAll(const Node*);
     static Node* rootUserSelectAllForNode(Node*);
@@ -198,7 +219,7 @@ public:
     void showTreeForThis() const;
 #endif
 
-    void trace(Visitor*);
+    DECLARE_TRACE();
 
 private:
     int offsetForPositionAfterAnchor() const;
@@ -213,7 +234,7 @@ private:
     // and m_offset > 0 as "after the anchor node".  See parentAnchoredEquivalent for more info.
     int m_offset;
     unsigned m_anchorType : 3;
-    bool m_isLegacyEditingPosition : 1;
+    unsigned m_isLegacyEditingPosition : 1;
 };
 
 inline Position createLegacyEditingPosition(PassRefPtrWillBeRawPtr<Node> node, int offset)

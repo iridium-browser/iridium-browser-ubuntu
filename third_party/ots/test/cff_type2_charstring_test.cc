@@ -151,7 +151,10 @@ bool Validate(const int *char_string, size_t char_string_len,
   const std::vector<ots::CFFIndex *> local_subrs_per_font;  // empty
   ots::Buffer ots_buffer(&buffer[0], buffer.size());
 
-  return ots::ValidateType2CharStringIndex(char_strings_index,
+  ots::OpenTypeFile* file = new ots::OpenTypeFile();
+  file->context = new ots::OTSContext();
+  return ots::ValidateType2CharStringIndex(file,
+                                           char_strings_index,
                                            global_subrs_index,
                                            fd_select,
                                            local_subrs_per_font,
@@ -1535,13 +1538,6 @@ TEST(ValidateTest, TestStackOverflow) {
 }
 
 TEST(ValidateTest, TestDeprecatedOperators) {
-  {
-    const int char_string[] = {
-      kOpPrefix, (12 << 8) + 0,  // dotsection operator, which is not supported.
-      kOpPrefix, ots::kEndChar,
-    };
-    EXPECT_FALSE(ValidateCharStrings(char_string, ARRAYSIZE(char_string)));
-  }
   {
     const int char_string[] = {
       kOpPrefix, 16,  // 'blend'.

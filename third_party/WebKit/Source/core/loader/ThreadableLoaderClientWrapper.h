@@ -48,16 +48,13 @@ public:
 
     void clearClient()
     {
-        MutexLocker lock(m_lock);
         m_done = true;
         m_client = 0;
     }
 
-    // Returns true iff client has been detached. No restriction on caller thread.
-    bool isDetached()
+    bool done() const
     {
-        MutexLocker lock(m_lock);
-        return m_done && !m_client;
+        return m_done;
     }
 
     void didSendData(unsigned long long bytesSent, unsigned long long totalBytesToBeSent)
@@ -134,7 +131,6 @@ protected:
     {
     }
 
-    Mutex m_lock;
     ThreadableLoaderClient* m_client;
     bool m_done;
 };

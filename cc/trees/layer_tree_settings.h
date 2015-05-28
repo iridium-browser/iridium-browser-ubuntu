@@ -9,6 +9,7 @@
 #include "cc/base/cc_export.h"
 #include "cc/debug/layer_tree_debug_state.h"
 #include "cc/output/renderer_settings.h"
+#include "cc/scheduler/scheduler_settings.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "ui/gfx/geometry/size.h"
 
@@ -21,13 +22,12 @@ class CC_EXPORT LayerTreeSettings {
 
   RendererSettings renderer_settings;
   bool impl_side_painting;
+  bool raster_enabled;
   bool throttle_frame_production;
   bool single_thread_proxy_scheduler;
   bool use_external_begin_frame_source;
-  bool forward_begin_frames_to_children;
   bool main_frame_before_activation_enabled;
   bool using_synchronous_renderer_compositor;
-  bool disable_hi_res_timer_tasks_on_battery;
   bool report_overscroll_only_for_scrollable_axes;
   bool per_tile_painting_enabled;
   bool accelerated_animation_enabled;
@@ -35,12 +35,14 @@ class CC_EXPORT LayerTreeSettings {
   bool use_distance_field_text;
   bool gpu_rasterization_enabled;
   bool gpu_rasterization_forced;
+  int gpu_rasterization_msaa_sample_count;
+  float gpu_rasterization_skewport_target_time_in_seconds;
   bool create_low_res_tiling;
 
   enum ScrollbarAnimator {
-    NoAnimator,
-    LinearFade,
-    Thinning,
+    NO_ANIMATOR,
+    LINEAR_FADE,
+    THINNING,
   };
   ScrollbarAnimator scrollbar_animator;
   int scrollbar_fade_delay_ms;
@@ -48,7 +50,6 @@ class CC_EXPORT LayerTreeSettings {
   int scrollbar_fade_duration_ms;
   float scrollbar_show_scale_threshold;
   SkColor solid_color_scrollbar_color;
-  bool calculate_top_controls_position;
   bool timeout_and_draw_when_animation_checkerboards;
   int maximum_number_of_failed_draws_before_draw_is_forced_;
   bool layer_transforms_should_scale_layer_contents;
@@ -81,8 +82,12 @@ class CC_EXPORT LayerTreeSettings {
   bool record_full_layer;
   bool use_display_lists;
   bool verify_property_trees;
+  bool gather_pixel_refs;
+  bool use_compositor_animation_timelines;
 
   LayerTreeDebugState initial_debug_state;
+
+  SchedulerSettings ToSchedulerSettings() const;
 };
 
 }  // namespace cc

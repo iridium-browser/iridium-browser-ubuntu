@@ -135,7 +135,6 @@ private:
         EXPECT_EQ(expectedQueryParams.ignoreSearch, queryParams.ignoreSearch);
         EXPECT_EQ(expectedQueryParams.ignoreMethod, queryParams.ignoreMethod);
         EXPECT_EQ(expectedQueryParams.ignoreVary, queryParams.ignoreVary);
-        EXPECT_EQ(expectedQueryParams.prefixMatch, queryParams.prefixMatch);
         EXPECT_EQ(expectedQueryParams.cacheName, queryParams.cacheName);
     }
 
@@ -366,12 +365,10 @@ TEST_F(ServiceWorkerCacheTest, BatchOperationArguments)
     ASSERT(cache);
 
     WebServiceWorkerCache::QueryParams expectedQueryParams;
-    expectedQueryParams.prefixMatch = true;
     expectedQueryParams.cacheName = "this is another cache name";
     testCache->setExpectedQueryParams(&expectedQueryParams);
 
     CacheQueryOptions options;
-    options.setPrefixMatch(1);
     options.setCacheName(expectedQueryParams.cacheName);
 
     const String url = "http://batch.operations.test/";
@@ -491,7 +488,7 @@ TEST_F(ServiceWorkerCacheTest, KeysResponseTest)
     ScriptPromise result = cache->keys(scriptState(), exceptionState());
     ScriptValue scriptValue = getResolveValue(result);
 
-    Vector<v8::Local<v8::Value> > requests = toImplArray<v8::Local<v8::Value> >(scriptValue.v8Value(), 0, isolate(), exceptionState());
+    Vector<v8::Local<v8::Value>> requests = toImplArray<v8::Local<v8::Value>>(scriptValue.v8Value(), 0, isolate(), exceptionState());
     EXPECT_EQ(expectedUrls.size(), requests.size());
     for (int i = 0, minsize = std::min(expectedUrls.size(), requests.size()); i < minsize; ++i) {
         Request* request = V8Request::toImplWithTypeCheck(isolate(), requests[i]);
@@ -543,7 +540,7 @@ TEST_F(ServiceWorkerCacheTest, MatchAllAndBatchResponseTest)
     ScriptPromise result = cache->matchAll(scriptState(), stringToRequestInfo("http://some.url/"), options, exceptionState());
     ScriptValue scriptValue = getResolveValue(result);
 
-    Vector<v8::Local<v8::Value> > responses = toImplArray<v8::Local<v8::Value> >(scriptValue.v8Value(), 0, isolate(), exceptionState());
+    Vector<v8::Local<v8::Value>> responses = toImplArray<v8::Local<v8::Value>>(scriptValue.v8Value(), 0, isolate(), exceptionState());
     EXPECT_EQ(expectedUrls.size(), responses.size());
     for (int i = 0, minsize = std::min(expectedUrls.size(), responses.size()); i < minsize; ++i) {
         Response* response = V8Response::toImplWithTypeCheck(isolate(), responses[i]);

@@ -20,6 +20,7 @@
       <structure type="chrome_scaled_image" name="IDR_AURA_UBER_TRAY_NETWORK_ARCS_LIGHT" file="network/statusbar_network_arcs_light.png" />
       <structure type="chrome_scaled_image" name="IDR_AURA_UBER_TRAY_NETWORK_BARS_DARK" file="network/statusbar_network_bars_dark.png" />
       <structure type="chrome_scaled_image" name="IDR_AURA_UBER_TRAY_NETWORK_BARS_LIGHT" file="network/statusbar_network_bars_light.png" />
+      <structure type="chrome_scaled_image" name="IDR_AURA_UBER_TRAY_NETWORK_CONTROLLED" file="network/status_captive_portal_access.png" />
       <structure type="chrome_scaled_image" name="IDR_AURA_UBER_TRAY_NETWORK_EDGE_DARK" file="network/statusbar_network_edge_dark.png" />
       <structure type="chrome_scaled_image" name="IDR_AURA_UBER_TRAY_NETWORK_EDGE_LIGHT" file="network/statusbar_network_edge_light.png" />
       <structure type="chrome_scaled_image" name="IDR_AURA_UBER_TRAY_NETWORK_EVDO_DARK" file="network/statusbar_network_evdo_dark.png" />
@@ -81,6 +82,7 @@
       <structure type="chrome_scaled_image" name="IDR_LOGIN_DEFAULT_USER_30" file="default_user_images/avatar_rainbowfish.png" />
       <structure type="chrome_scaled_image" name="IDR_LOGIN_DEFAULT_USER_31" file="default_user_images/avatar_recordplayer.png" />
       <structure type="chrome_scaled_image" name="IDR_LOGIN_DEFAULT_USER_32" file="default_user_images/avatar_upsidedown.png" />
+      <structure type="chrome_scaled_image" name="IDR_LOGIN_DEFAULT_USER_33" file="default_user_images/avatar_cat.png" />
     </structures>
   </release>
 </grit>

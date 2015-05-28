@@ -32,6 +32,7 @@
 #define WebRuntimeFeatures_h
 
 #include "../platform/WebCommon.h"
+#include "../platform/WebString.h"
 
 namespace blink {
 
@@ -41,6 +42,10 @@ class WebRuntimeFeatures {
 public:
     BLINK_EXPORT static void enableExperimentalFeatures(bool);
     BLINK_EXPORT static void enableTestOnlyFeatures(bool);
+
+    // Enables a feature by its string identifier from
+    // RuntimeEnabledFeatures.in.
+    BLINK_EXPORT static void enableFeatureFromString(const WebString& name, bool enable);
 
     BLINK_EXPORT static void enableApplicationCache(bool);
 
@@ -64,6 +69,8 @@ public:
 
     BLINK_EXPORT static void enableBlinkScheduler(bool);
 
+    BLINK_EXPORT static void enableCompositorAnimationTimelines(bool);
+
     BLINK_EXPORT static void enableExperimentalCanvasFeatures(bool);
 
     BLINK_EXPORT static void enableFastMobileScrolling(bool);
@@ -81,6 +88,8 @@ public:
     BLINK_EXPORT static void enableMediaCapture(bool);
 
     BLINK_EXPORT static void enableMediaSource(bool);
+
+    BLINK_EXPORT static void enableNotificationConstructor(bool);
 
     BLINK_EXPORT static void enableNotifications(bool);
 
@@ -100,11 +109,7 @@ public:
 
     BLINK_EXPORT static void enableScreenOrientation(bool);
 
-    BLINK_EXPORT static void enableScriptedSpeech(bool);
-
     BLINK_EXPORT static void enableServiceWorker(bool);
-
-    BLINK_EXPORT static void enableSessionStorage(bool);
 
     BLINK_EXPORT static void enableSlimmingPaint(bool);
 
@@ -132,8 +137,6 @@ public:
 
     BLINK_EXPORT static void enableLayerSquashing(bool) { }
 
-    BLINK_EXPORT static void enableShowModalDialog(bool);
-
     BLINK_EXPORT static void enableCredentialManagerAPI(bool);
 
     BLINK_EXPORT static void enableTextBlobs(bool);
@@ -146,6 +149,17 @@ public:
 
     BLINK_EXPORT static void enableReducedReferrerGranularity(bool);
 
+    BLINK_EXPORT static void enablePushMessaging(bool);
+
+    BLINK_EXPORT static void enablePushMessagingData(bool);
+
+    BLINK_EXPORT static void enablePushMessagingHasPermission(bool);
+
+    BLINK_EXPORT static void enableStaleWhileRevalidateCacheControl(bool);
+
+    BLINK_EXPORT static void enableUnsafeES3APIs(bool);
+
+    BLINK_EXPORT static void enableVRDevice(bool);
 private:
     WebRuntimeFeatures();
 };

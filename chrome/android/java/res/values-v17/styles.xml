@@ -1,25 +1,37 @@
 <?xml version="1.0" encoding="utf-8"?>
 <!-- Copyright 2014 The Chromium Authors. All rights reserved.
      Use of this source code is governed by a BSD-style license that can be
-     found in the LICENSE file.
--->
+     found in the LICENSE file. -->
 
 <resources>
+    <!-- A theme for alert dialogs. The colors are copied from MainTheme, and the window
+         dimensions are copied from *.MinWidth theme variants. Sadly there is no
+         AppCompat.Light.Dialog.Alert or even AppCompat.Light.Dialog.MinWidth. -->
+    <style name="AlertDialogTheme" parent="Theme.AppCompat.Light.Dialog">
+        <item name="android:textColorHighlight">@color/text_highlight_color</item>
+        <item name="android:windowMinWidthMajor">@android:dimen/dialog_min_width_major</item>
+        <item name="android:windowMinWidthMinor">@android:dimen/dialog_min_width_minor</item>
+
+        <!--  Overriding AppCompat values -->
+        <item name="colorAccent">@color/light_active_color</item>
+        <item name="colorControlActivated">@color/light_active_color</item>
+        <item name="colorControlNormal">@color/light_normal_color</item>
+        <item name="colorPrimary">@color/light_active_color</item>
+
+        <!-- Default TintedImageButton tint -->
+        <item name="tint">@color/dark_mode_tint</item>
+    </style>
+
     <!-- Preferences -->
     <style name="PreferencesTheme" parent="ThemeWithActionBar">
         <item name="android:textColorLink">@color/pref_accent_color</item>
-        <item name="android:buttonStyle">@style/PreferenceButtonStyle</item>
         <item name="android:textAppearanceMedium">@style/PreferenceTextAppearanceMedium</item>
         <item name="android:preferenceCategoryStyle">@style/PreferenceCategory</item>
-    </style>
-    <style name="PreferenceButtonStyle" parent="@android:style/Widget.Holo.Light.Button">
-        <!-- TODO(twellington): Delete btn_default_preferences.xml once the AppCompat theme supports
-                                Material-like buttons. -->
-        <item name="android:background">@drawable/btn_default_preferences</item>
-        <item name="android:textAllCaps">true</item>
-        <item name="android:textColor">#fff</item>
-        <item name="android:textSize">14sp</item>
-        <item name="android:textStyle">bold</item>
+        <item name="android:spinnerItemStyle">@style/PreferenceSpinnerItem</item>
+        <item name="floatLabelTextAppearance">@style/PreferenceFloatLabelTextAppearance</item>
+        <item name="floatLabelPaddingLeft">@dimen/pref_autofill_field_horizontal_padding</item>
+        <item name="floatLabelPaddingRight">@dimen/pref_autofill_field_horizontal_padding</item>
+        <item name="floatLabelPaddingTop">@dimen/pref_autofill_field_top_padding</item>
     </style>
     <style name="PreferenceTextAppearanceMedium">
         <item name="android:textSize">18sp</item>
@@ -51,6 +63,7 @@
         <item name="android:textColor">?android:attr/textColorSecondary</item>
     </style>
     <style name="PreferenceScreenLayout">
+        <item name="android:paddingTop">16dp</item>
         <item name="android:paddingStart">16dp</item>
         <item name="android:paddingEnd">16dp</item>
     </style>
@@ -63,6 +76,22 @@
         <item name="android:paddingEnd">8dp</item>
     </style>
     <style name="PreferenceLayout" parent="PreferenceLayoutBase" />
+    <style name="DeprecationWarningPreferenceTheme" parent="PreferencesTheme">
+        <item name="android:textSize">14sp</item>
+    </style>
+    <style name="PreferenceFloatLabelTextAppearance">
+        <item name="android:textColor">@color/float_label</item>
+        <item name="android:textSize">14sp</item>
+    </style>
+    <style name="PreferenceSpinnerItem">
+        <item name="android:textAppearance">@style/PreferenceTextAppearanceMedium</item>
+    </style>
+    <style name="PreferenceSpinnerUnderlineView">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">1dp</item>
+        <item name="android:layout_marginTop">2dp</item>
+        <item name="android:background">@color/input_underline_color</item>
+    </style>
 
     <style name="ThemeWithActionBar" parent="Theme.AppCompat.Light.DarkActionBar">
         <item name="android:windowBackground">@drawable/action_bar_activity_bg</item>
@@ -74,17 +103,7 @@
         <item name="colorAccent">@color/pref_accent_color</item>
     </style>
 
-    <style name="AppBannerTitle">
-        <item name="android:textColor">#333333</item>
-        <item name="android:textSize">@dimen/app_banner_title_text_size</item>
-        <item name="android:fontFamily">sans-serif-light</item>
-    </style>
-    <style name="AppBannerButton">
-        <item name="android:textSize">@dimen/app_banner_button_text_size</item>
-        <item name="android:textAllCaps">true</item>
-        <item name="android:fontFamily">sans-serif</item>
-        <item name="android:textStyle">bold</item>
-    </style>
+    <!-- Alert dialogs -->
     <style name="AlertDialogContent">
         <item name="android:layout_width">match_parent</item>
         <item name="android:layout_height">wrap_content</item>
@@ -100,6 +119,13 @@
         <item name="android:singleLine">true</item>
         <item name="android:paddingTop">10dp</item>
     </style>
+    <style name="AlertDialogSummaryViewItem" parent="@android:style/TextAppearance.Small">
+        <item name="android:layout_width">match_parent</item>
+        <item name="android:layout_height">wrap_content</item>
+        <item name="android:textAlignment">viewStart</item>
+        <item name="android:paddingTop">10dp</item>
+    </style>
+
     <style name="BoldTextFieldLabel" parent="@android:style/TextAppearance.Medium">
         <item name="android:layout_width">match_parent</item>
         <item name="android:layout_height">wrap_content</item>
@@ -111,15 +137,12 @@
              accessibility focusable. -->
         <item name="android:clickable">true</item>
     </style>
-    <style name="OverflowMenuThemeBase" parent="Theme.AppCompat.Light">
+    <style name="OverflowMenuTheme" parent="Theme.AppCompat.Light">
         <item name="android:popupBackground">@null</item>
         <item name="android:listDivider">@null</item>
         <item name="android:listPreferredItemHeightSmall">48dp</item>
-        <item name="android:listPreferredItemPaddingStart">16dp</item>
-        <item name="android:listPreferredItemPaddingEnd">16dp</item>
         <item name="android:textSize">16sp</item>
     </style>
-    <style name="OverflowMenuTheme" parent="OverflowMenuThemeBase" />
     <style name="OverflowMenuAnim">
         <item name="android:windowEnterAnimation">@anim/menu_enter</item>
         <item name="android:windowExitAnimation">@anim/menu_exit</item>
@@ -175,4 +198,67 @@
         <item name="android:windowEnterAnimation">@anim/fullscreen_notification_in</item>
     </style>
 
+    <!-- Buttons -->
+    <style name="ButtonCompatOverlay">
+        <item name="android:buttonStyle">@style/ButtonCompat</item>
+    </style>
+    <style name="ButtonCompatBorderlessOverlay">
+        <item name="android:buttonStyle">@style/ButtonCompatBorderless</item>
+    </style>
+    <style name="ButtonCompatBase">
+        <item name="android:minWidth">88dp</item>
+        <item name="android:minHeight">36dp</item>
+        <item name="android:textSize">14sp</item>
+        <item name="android:paddingStart">20dp</item>
+        <item name="android:paddingEnd">20dp</item>
+        <item name="android:paddingTop">5dp</item>
+        <item name="android:paddingBottom">5dp</item>
+        <item name="android:textAllCaps">true</item>
+        <item name="android:focusable">true</item>
+        <item name="android:clickable">true</item>
+        <item name="android:gravity">center_vertical|center_horizontal</item>
+    </style>
+    <style name="ButtonCompat" parent="ButtonCompatBase">
+        <item name="android:background">@drawable/button_compat_shape</item>
+        <item name="android:textStyle">bold</item>
+    </style>
+    <style name="ButtonCompatBorderless" parent="ButtonCompat">
+        <item name="android:background">?attr/selectableItemBackground</item>
+    </style>
+
+    <!-- Data Saver -->
+    <style name="DataReductionPromoScreenDialog" >
+        <item name="android:background">@android:color/transparent</item>
+        <item name="android:backgroundDimEnabled">false</item>
+        <item name="android:clipChildren">false</item>
+        <item name="android:clipToPadding">false</item>
+        <item name="android:windowAnimationStyle">@null</item>
+        <item name="android:windowBackground">@android:color/transparent</item>
+        <item name="android:windowCloseOnTouchOutside">false</item>
+        <item name="android:windowContentOverlay">@null</item>
+        <item name="android:windowFrame">@null</item>
+        <item name="android:windowFullscreen">false</item>
+        <item name="android:windowIsFloating">true</item>
+        <item name="android:windowIsTranslucent">true</item>
+        <item name="android:windowNoTitle">true</item>
+    </style>
+    <!-- Cast -->
+    <style
+        name="RemoteNotificationTitle"
+        parent="@android:style/TextAppearance.StatusBar.EventContent.Title"/>
+    <style
+        name="RemoteNotificationText"
+        parent="@android:style/TextAppearance.StatusBar.EventContent"/>
+    <style
+        name="RemoteNotificationProgressBar"
+        parent="@android:style/Widget.Holo.ProgressBar.Horizontal"/>
+    <style name="CastMediaRouteButton" parent="@style/Widget.MediaRouter.MediaRouteButton">
+        <item name="android:background">@null</item>
+        <item name="android:paddingTop">0dp</item>
+        <item name="android:paddingBottom">0dp</item>
+        <item name="android:paddingStart">0dp</item>
+        <item name="android:paddingEnd">0dp</item>
+        <item name="externalRouteEnabledDrawable">@drawable/ic_cast_dark_chrome</item>
+    </style>
+    
 </resources>

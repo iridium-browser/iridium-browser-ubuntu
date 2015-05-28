@@ -110,8 +110,8 @@ class ASH_EXPORT SystemTrayNotifier {
 
   void NotifyAccessibilityModeChanged(
       ui::AccessibilityNotificationVisibility notify);
-  void NotifyAudioOutputVolumeChanged();
-  void NotifyAudioOutputMuteChanged();
+  void NotifyAudioOutputVolumeChanged(uint64_t node_id, double volume);
+  void NotifyAudioOutputMuteChanged(bool mute_on);
   void NotifyAudioNodesChanged();
   void NotifyAudioActiveOutputNodeChanged();
   void NotifyAudioActiveInputNodeChanged();

@@ -23,9 +23,11 @@
 #include "components/autofill/core/browser/autofill_client.h"
 #include "components/autofill/core/browser/autofill_download_manager.h"
 #include "components/autofill/core/browser/autofill_driver.h"
+#include "components/autofill/core/browser/autofill_metrics.h"
 #include "components/autofill/core/browser/card_unmask_delegate.h"
 #include "components/autofill/core/browser/form_structure.h"
 #include "components/autofill/core/browser/personal_data_manager.h"
+#include "components/autofill/core/browser/wallet/real_pan_wallet_client.h"
 #include "components/autofill/core/common/form_data.h"
 
 namespace gfx {
@@ -56,7 +58,8 @@ struct FormFieldData;
 // Manages saving and restoring the user's personal information entered into web
 // forms. One per frame; owned by the AutofillDriver.
 class AutofillManager : public AutofillDownloadManager::Observer,
-                        public CardUnmaskDelegate {
+                        public CardUnmaskDelegate,
+                        public wallet::RealPanWalletClient::Delegate {
  public:
   enum AutofillDownloadManagerState {
     ENABLE_AUTOFILL_DOWNLOAD_MANAGER,
@@ -114,7 +117,9 @@ class AutofillManager : public AutofillDownloadManager::Observer,
                                   const FormData& form,
                                   const FormFieldData& field,
                                   const CreditCard& credit_card);
-  void DidShowSuggestions(bool is_new_popup);
+  void DidShowSuggestions(bool is_new_popup,
+                          const FormData& form,
+                          const FormFieldData& field);
   void OnDidFillAutofillFormData(const base::TimeTicks& timestamp);
   void OnDidPreviewAutofillFormData();
 
@@ -125,6 +130,9 @@ class AutofillManager : public AutofillDownloadManager::Observer,
   // Remove the specified Autocomplete entry.
   void RemoveAutocompleteEntry(const base::string16& name,
                                const base::string16& value);
+
+  // Returns true when the Wallet card unmask prompt is being displayed.
+  bool IsShowingUnmaskPrompt();
 
   // Returns the present form structures seen by Autofill manager.
   const std::vector<FormStructure*>& GetFormStructures();
@@ -142,11 +150,14 @@ class AutofillManager : public AutofillDownloadManager::Observer,
   void OnFormsSeen(const std::vector<FormData>& forms,
                    const base::TimeTicks& timestamp);
 
-  // Processes the submitted |form|, saving any new Autofill data and uploading
-  // the possible field types for the submitted fields to the crowdsourcing
-  // server.  Returns false if this form is not relevant for Autofill.
-  bool OnFormSubmitted(const FormData& form,
-                       const base::TimeTicks& timestamp);
+  // Processes the about-to-be-submitted |form|, uploading the possible field
+  // types for the submitted fields to the crowdsourcing server. Returns false
+  // if this form is not relevant for Autofill.
+  bool OnWillSubmitForm(const FormData& form, const base::TimeTicks& timestamp);
+
+  // Processes the submitted |form|, saving any new Autofill data to the user's
+  // personal profile. Returns false if this form is not relevant for Autofill.
+  bool OnFormSubmitted(const FormData& form);
 
   void OnTextFieldDidChange(const FormData& form,
                             const FormFieldData& field,
@@ -224,32 +235,70 @@ class AutofillManager : public AutofillDownloadManager::Observer,
   void OnLoadedServerPredictions(const std::string& response_xml) override;
 
   // CardUnmaskDelegate:
-  void OnUnmaskResponse(const base::string16& cvc) override;
+  void OnUnmaskResponse(const UnmaskResponse& response) override;
+  void OnUnmaskPromptClosed() override;
 
-  // A toy method called when the (fake) unmasking process has finished.
-  void OnUnmaskVerificationResult(bool success);
+  // wallet::RealPanWalletClient::Delegate:
+  IdentityProvider* GetIdentityProvider() override;
+  void OnDidGetRealPan(AutofillClient::GetRealPanResult result,
+                       const std::string& real_pan) override;
 
   // Returns false if Autofill is disabled or if no Autofill data is available.
-  bool RefreshDataModels() const;
+  bool RefreshDataModels();
 
-  // Unpacks |unique_id| and fills |form_group| and |variant| with the
-  // appropriate data source and variant index. Sets |is_credit_card| to true
-  // if |data_model| points to a CreditCard data model, false if it's a
-  // profile data model.
-  // Returns false if the unpacked id cannot be found.
-  bool GetProfileOrCreditCard(int unique_id,
-                              const AutofillDataModel** data_model,
-                              size_t* variant,
-                              bool* is_credit_card) const WARN_UNUSED_RESULT;
+  // Returns true if the unique_id refers to a credit card and false if
+  // it refers to a profile.
+  bool IsCreditCard(int unique_id);
+
+  // Gets the profile referred by |unique_id| and populates |variant|
+  // based on it. Returns true if the profile exists.
+  bool GetProfile(int unique_id,
+                  const AutofillProfile** profile,
+                  size_t* variant);
+
+  // Gets the credit card referred by |unique_id| and populates |variant|
+  // based on it. Returns true if the credit card exists.
+  bool GetCreditCard(int unique_id, const CreditCard** credit_card);
+
+  // Determines whether a fill on |form| initiated from |field| will wind up
+  // filling a credit card number. This is useful to determine if we will need
+  // to unmask a card.
+  bool WillFillCreditCardNumber(const FormData& form,
+                                const FormFieldData& field);
+
+  // Fills or previews the credit card form.
+  // Assumes the form and field are valid.
+  void FillOrPreviewCreditCardForm(
+      AutofillDriver::RendererFormDataAction action,
+      int query_id,
+      const FormData& form,
+      const FormFieldData& field,
+      const CreditCard& credit_card,
+      size_t variant);
+
+  // Fills or previews the profile form.
+  // Assumes the form and field are valid.
+  void FillOrPreviewProfileForm(
+      AutofillDriver::RendererFormDataAction action,
+      int query_id,
+      const FormData& form,
+      const FormFieldData& field,
+      const AutofillProfile& profile,
+      size_t variant);
 
   // Fills or previews |data_model| in the |form|.
   void FillOrPreviewDataModelForm(AutofillDriver::RendererFormDataAction action,
                                   int query_id,
                                   const FormData& form,
                                   const FormFieldData& field,
-                                  const AutofillDataModel* data_model,
+                                  const AutofillDataModel& data_model,
                                   size_t variant,
                                   bool is_credit_card);
+
+  // Creates a FormStructure using the FormData received from the renderer. Will
+  // return an empty scoped_ptr if the data should not be processed for upload
+  // or personal data.
+  scoped_ptr<FormStructure> ValidateSubmittedForm(const FormData& form);
 
   // Fills |form_structure| cached element corresponding to |form|.
   // Returns false if the cached element was not found.
@@ -314,6 +363,9 @@ class AutofillManager : public AutofillDownloadManager::Observer,
 
   AutofillClient* const client_;
 
+  // Handles real PAN requests.
+  wallet::RealPanWalletClient real_pan_client_;
+
   std::string app_locale_;
 
   // The personal data manager, used to save and load personal data to/from the
@@ -330,6 +382,10 @@ class AutofillManager : public AutofillDownloadManager::Observer,
 
   // Handles single-field autocomplete form data.
   scoped_ptr<AutocompleteHistoryManager> autocomplete_history_manager_;
+
+  // Utilities for logging form events.
+  scoped_ptr<AutofillMetrics::FormEventLogger> address_form_event_logger_;
+  scoped_ptr<AutofillMetrics::FormEventLogger> credit_card_form_event_logger_;
 
   // Have we logged whether Autofill is enabled for this page load?
   bool has_logged_autofill_enabled_;
@@ -356,9 +412,17 @@ class AutofillManager : public AutofillDownloadManager::Observer,
   // A copy of the credit card that's currently being unmasked, and data about
   // the form.
   CreditCard unmasking_card_;
+  // A copy of the latest card unmasking response.
+  UnmaskResponse unmask_response_;
   int unmasking_query_id_;
   FormData unmasking_form_;
   FormFieldData unmasking_field_;
+  // Time when we requested the last real pan
+  base::Time real_pan_request_timestamp_;
+
+  // Masked copies of recently unmasked cards, to help avoid double-asking to
+  // save the card (in the prompt and in the infobar after submit).
+  std::vector<CreditCard> recently_unmasked_cards_;
 
   // SuggestionBackendID to ID mapping. We keep two maps to convert back and
   // forth. These should be used only by BackendIDToInt and IntToBackendID.
@@ -383,8 +447,16 @@ class AutofillManager : public AutofillDownloadManager::Observer,
                            DeterminePossibleFieldTypesForUploadStressTest);
   FRIEND_TEST_ALL_PREFIXES(AutofillManagerTest,
                            DisabledAutofillDispatchesError);
+  FRIEND_TEST_ALL_PREFIXES(AutofillMetricsTest, AddressFilledFormEvents);
+  FRIEND_TEST_ALL_PREFIXES(AutofillMetricsTest, AddressSubmittedFormEvents);
+  FRIEND_TEST_ALL_PREFIXES(AutofillMetricsTest, AddressWillSubmitFormEvents);
   FRIEND_TEST_ALL_PREFIXES(AutofillMetricsTest, AddressSuggestionsCount);
   FRIEND_TEST_ALL_PREFIXES(AutofillMetricsTest, AutofillIsEnabledAtPageLoad);
+  FRIEND_TEST_ALL_PREFIXES(AutofillMetricsTest, CreditCardSelectedFormEvents);
+  FRIEND_TEST_ALL_PREFIXES(AutofillMetricsTest, CreditCardFilledFormEvents);
+  FRIEND_TEST_ALL_PREFIXES(AutofillMetricsTest, CreditCardGetRealPanDuration);
+  FRIEND_TEST_ALL_PREFIXES(AutofillMetricsTest, CreditCardWillSubmitFormEvents);
+  FRIEND_TEST_ALL_PREFIXES(AutofillMetricsTest, CreditCardSubmittedFormEvents);
   FRIEND_TEST_ALL_PREFIXES(AutofillMetricsTest, DeveloperEngagement);
   FRIEND_TEST_ALL_PREFIXES(AutofillMetricsTest, FormFillDuration);
   FRIEND_TEST_ALL_PREFIXES(AutofillMetricsTest,
@@ -405,6 +477,9 @@ class AutofillManager : public AutofillDownloadManager::Observer,
                            AutocompleteOffRespected);
   FRIEND_TEST_ALL_PREFIXES(AutofillManagerTest,
                            AutocompleteOffRespectedWithFlag);
+  FRIEND_TEST_ALL_PREFIXES(AutofillManagerTest,
+                           DontSaveCvcInAutocompleteHistory);
+  FRIEND_TEST_ALL_PREFIXES(AutofillManagerTest, DontOfferToSaveWalletCard);
   DISALLOW_COPY_AND_ASSIGN(AutofillManager);
 };
 

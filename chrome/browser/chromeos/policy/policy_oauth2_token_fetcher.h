@@ -44,7 +44,11 @@ class PolicyOAuth2TokenFetcher
                            net::URLRequestContextGetter* system_context_getter,
                            const TokenCallback& callback);
 
-  virtual ~PolicyOAuth2TokenFetcher();
+  PolicyOAuth2TokenFetcher(const std::string& auth_code,
+                           net::URLRequestContextGetter* system_context_getter,
+                           const TokenCallback& callback);
+
+  ~PolicyOAuth2TokenFetcher() override;
 
   // Starts process of minting device management service OAuth2 access token.
   void Start();
@@ -64,15 +68,14 @@ class PolicyOAuth2TokenFetcher
 
  private:
   // GaiaAuthConsumer overrides.
-  virtual void OnClientOAuthSuccess(
+  void OnClientOAuthSuccess(
       const GaiaAuthConsumer::ClientOAuthResult& oauth_tokens) override;
-  virtual void OnClientOAuthFailure(
-      const GoogleServiceAuthError& error) override;
+  void OnClientOAuthFailure(const GoogleServiceAuthError& error) override;
 
   // OAuth2AccessTokenConsumer overrides.
-  virtual void OnGetTokenSuccess(const std::string& access_token,
-                                 const base::Time& expiration_time) override;
-  virtual void OnGetTokenFailure(const GoogleServiceAuthError& error) override;
+  void OnGetTokenSuccess(const std::string& access_token,
+                         const base::Time& expiration_time) override;
+  void OnGetTokenFailure(const GoogleServiceAuthError& error) override;
 
   // Starts fetching OAuth2 refresh token.
   void StartFetchingRefreshToken();
@@ -90,6 +93,9 @@ class PolicyOAuth2TokenFetcher
   // Passes |token| and |error| to the |callback_|.
   void ForwardPolicyToken(const std::string& token,
                           const GoogleServiceAuthError& error);
+
+  // Auth code which is used to retreive a refresh token.
+  const std::string auth_code_;
 
   scoped_refptr<net::URLRequestContextGetter> auth_context_getter_;
   scoped_refptr<net::URLRequestContextGetter> system_context_getter_;

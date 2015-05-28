@@ -32,8 +32,8 @@
 #include "content/public/common/url_constants.h"
 #include "extensions/browser/api/declarative/rules_registry_service.h"
 #include "extensions/browser/api/extensions_api_client.h"
+#include "extensions/browser/api/guest_view/web_view/web_view_internal_api.h"
 #include "extensions/browser/api/web_request/web_request_api.h"
-#include "extensions/browser/api/web_view/web_view_internal_api.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/browser/guest_view/guest_view_manager.h"
 #include "extensions/browser/guest_view/web_view/web_view_constants.h"
@@ -48,15 +48,38 @@
 #include "net/base/escape.h"
 #include "net/base/net_errors.h"
 #include "ui/base/models/simple_menu_model.h"
+#include "url/url_constants.h"
 
 using base::UserMetricsAction;
 using content::RenderFrameHost;
 using content::ResourceType;
+using content::StoragePartition;
 using content::WebContents;
+using ui_zoom::ZoomController;
 
 namespace extensions {
 
 namespace {
+
+// Returns storage partition removal mask from web_view clearData mask. Note
+// that storage partition mask is a subset of webview's data removal mask.
+uint32 GetStoragePartitionRemovalMask(uint32 web_view_removal_mask) {
+  uint32 mask = 0;
+  if (web_view_removal_mask & webview::WEB_VIEW_REMOVE_DATA_MASK_APPCACHE)
+    mask |= StoragePartition::REMOVE_DATA_MASK_APPCACHE;
+  if (web_view_removal_mask & webview::WEB_VIEW_REMOVE_DATA_MASK_COOKIES)
+    mask |= StoragePartition::REMOVE_DATA_MASK_COOKIES;
+  if (web_view_removal_mask & webview::WEB_VIEW_REMOVE_DATA_MASK_FILE_SYSTEMS)
+    mask |= StoragePartition::REMOVE_DATA_MASK_FILE_SYSTEMS;
+  if (web_view_removal_mask & webview::WEB_VIEW_REMOVE_DATA_MASK_INDEXEDDB)
+    mask |= StoragePartition::REMOVE_DATA_MASK_INDEXEDDB;
+  if (web_view_removal_mask & webview::WEB_VIEW_REMOVE_DATA_MASK_LOCAL_STORAGE)
+    mask |= StoragePartition::REMOVE_DATA_MASK_LOCAL_STORAGE;
+  if (web_view_removal_mask & webview::WEB_VIEW_REMOVE_DATA_MASK_WEBSQL)
+    mask |= StoragePartition::REMOVE_DATA_MASK_WEBSQL;
+
+  return mask;
+}
 
 std::string WindowOpenDispositionToString(
   WindowOpenDisposition window_open_disposition) {
@@ -147,15 +170,19 @@ void RemoveWebViewEventListenersOnIOThread(
       view_instance_id);
 }
 
+double ConvertZoomLevelToZoomFactor(double zoom_level) {
+  double zoom_factor = content::ZoomLevelToZoomFactor(zoom_level);
+  // Because the conversion from zoom level to zoom factor isn't perfect, the
+  // resulting zoom factor is rounded to the nearest 6th decimal place.
+  zoom_factor = round(zoom_factor * 1000000) / 1000000;
+  return zoom_factor;
+}
+
 }  // namespace
 
 // static
-GuestViewBase* WebViewGuest::Create(content::BrowserContext* browser_context,
-                                    content::WebContents* owner_web_contents,
-                                    int guest_instance_id) {
-  return new WebViewGuest(browser_context,
-                          owner_web_contents,
-                          guest_instance_id);
+GuestViewBase* WebViewGuest::Create(content::WebContents* owner_web_contents) {
+  return new WebViewGuest(owner_web_contents);
 }
 
 // static
@@ -184,8 +211,8 @@ bool WebViewGuest::GetGuestPartitionConfigForSite(
 // static
 const char WebViewGuest::Type[] = "webview";
 
-typedef std::pair<int, int> WebViewKey;
-typedef std::map<WebViewKey, int> WebViewKeyToIDMap;
+using WebViewKey = std::pair<int, int>;
+using WebViewKeyToIDMap = std::map<WebViewKey, int>;
 static base::LazyInstance<WebViewKeyToIDMap> web_view_key_to_id_map =
     LAZY_INSTANCE_INITIALIZER;
 
@@ -202,8 +229,7 @@ int WebViewGuest::GetOrGenerateRulesRegistryID(
   if (it != web_view_key_to_id_map.Get().end())
     return it->second;
 
-  content::RenderProcessHost* rph =
-      content::RenderProcessHost::FromID(embedder_process_id);
+  auto rph = content::RenderProcessHost::FromID(embedder_process_id);
   int rules_registry_id =
       RulesRegistryService::Get(rph->GetBrowserContext())->
           GetNextRulesRegistryID();
@@ -213,19 +239,15 @@ int WebViewGuest::GetOrGenerateRulesRegistryID(
 
 // static
 int WebViewGuest::GetViewInstanceId(WebContents* contents) {
-  WebViewGuest* guest = FromWebContents(contents);
+  auto guest = FromWebContents(contents);
   if (!guest)
     return guestview::kInstanceIDNone;
 
   return guest->view_instance_id();
 }
 
-const char* WebViewGuest::GetAPINamespace() const {
-  return webview::kAPINamespace;
-}
-
-int WebViewGuest::GetTaskPrefix() const {
-  return IDS_EXTENSION_TASK_MANAGER_WEBVIEW_TAG_PREFIX;
+bool WebViewGuest::CanRunInDetachedState() const {
+  return true;
 }
 
 void WebViewGuest::CreateWebContents(
@@ -235,7 +257,6 @@ void WebViewGuest::CreateWebContents(
       owner_web_contents()->GetRenderProcessHost();
   std::string storage_partition_id;
   bool persist_storage = false;
-  std::string storage_partition_string;
   ParsePartitionParam(create_params, &storage_partition_id, &persist_storage);
   // Validate that the partition id coming from the renderer is valid UTF-8,
   // since we depend on this in other parts of the code, such as FilePath
@@ -246,7 +267,7 @@ void WebViewGuest::CreateWebContents(
         base::UserMetricsAction("BadMessageTerminate_BPGM"));
     owner_render_process_host->Shutdown(content::RESULT_CODE_KILLED_BAD_MESSAGE,
                                         false);
-    callback.Run(NULL);
+    callback.Run(nullptr);
     return;
   }
   std::string url_encoded_partition = net::EscapeQueryParamValue(
@@ -261,9 +282,8 @@ void WebViewGuest::CreateWebContents(
   // If we already have a webview tag in the same app using the same storage
   // partition, we should use the same SiteInstance so the existing tag and
   // the new tag can script each other.
-  GuestViewManager* guest_view_manager =
-      GuestViewManager::FromBrowserContext(
-          owner_render_process_host->GetBrowserContext());
+  auto guest_view_manager = GuestViewManager::FromBrowserContext(
+      owner_render_process_host->GetBrowserContext());
   content::SiteInstance* guest_site_instance =
       guest_view_manager->GetGuestSiteInstance(guest_site);
   if (!guest_site_instance) {
@@ -281,63 +301,17 @@ void WebViewGuest::CreateWebContents(
 }
 
 void WebViewGuest::DidAttachToEmbedder() {
-  std::string name;
-  if (attach_params()->GetString(webview::kAttributeName, &name)) {
-    // If the guest window's name is empty, then the WebView tag's name is
-    // assigned. Otherwise, the guest window's name takes precedence over the
-    // WebView tag's name.
-    if (name_.empty())
-      name_ = name;
-  }
-  ReportFrameNameChange(name_);
-
-  std::string user_agent_override;
-  if (attach_params()->GetString(webview::kParameterUserAgentOverride,
-                                 &user_agent_override)) {
-    SetUserAgentOverride(user_agent_override);
-  } else {
-    SetUserAgentOverride("");
-  }
-
-  bool is_pending_new_window = false;
-  if (GetOpener()) {
-    // We need to do a navigation here if the target URL has changed between
-    // the time the WebContents was created and the time it was attached.
-    // We also need to do an initial navigation if a RenderView was never
-    // created for the new window in cases where there is no referrer.
-    PendingWindowMap::iterator it =
-        GetOpener()->pending_new_windows_.find(this);
-    if (it != GetOpener()->pending_new_windows_.end()) {
-      const NewWindowInfo& new_window_info = it->second;
-      if (new_window_info.changed || !web_contents()->HasOpener())
-        NavigateGuest(new_window_info.url.spec(), false /* force_navigation */);
-
-      // Once a new guest is attached to the DOM of the embedder page, then the
-      // lifetime of the new guest is no longer managed by the opener guest.
-      GetOpener()->pending_new_windows_.erase(this);
-
-      is_pending_new_window = true;
-    }
-  }
-
-  // Only read the src attribute if this is not a New Window API flow.
-  if (!is_pending_new_window) {
-    std::string src;
-    if (attach_params()->GetString(webview::kAttributeSrc, &src) &&
-        !src.empty()) {
-      NavigateGuest(src, false /* force_navigation */);
-    }
-  }
-
-  bool allow_transparency = false;
-  attach_params()->GetBoolean(webview::kAttributeAllowTransparency,
-                              &allow_transparency);
-  // We need to set the background opaque flag after navigation to ensure that
-  // there is a RenderWidgetHostView available.
-  SetAllowTransparency(allow_transparency);
+  ApplyAttributes(*attach_params());
 }
 
-void WebViewGuest::DidInitialize() {
+void WebViewGuest::DidDropLink(const GURL& url) {
+  scoped_ptr<base::DictionaryValue> args(new base::DictionaryValue());
+  args->SetString(guestview::kUrl, url.spec());
+  DispatchEventToView(
+      new GuestViewBase::Event(webview::kEventDropLink, args.Pass()));
+}
+
+void WebViewGuest::DidInitialize(const base::DictionaryValue& create_params) {
   script_executor_.reset(
       new ScriptExecutor(web_contents(), &script_observers_));
 
@@ -352,6 +326,17 @@ void WebViewGuest::DidInitialize() {
   if (web_view_guest_delegate_)
     web_view_guest_delegate_->OnDidInitialize();
   AttachWebViewHelpers(web_contents());
+
+  rules_registry_id_ = GetOrGenerateRulesRegistryID(
+      owner_web_contents()->GetRenderProcessHost()->GetID(),
+      view_instance_id());
+
+  // We must install the mapping from guests to WebViews prior to resuming
+  // suspended resource loads so that the WebRequest API will catch resource
+  // requests.
+  PushWebViewStateToIOThread();
+
+  ApplyAttributes(create_params);
 }
 
 void WebViewGuest::AttachWebViewHelpers(WebContents* contents) {
@@ -360,10 +345,38 @@ void WebViewGuest::AttachWebViewHelpers(WebContents* contents) {
   web_view_permission_helper_.reset(new WebViewPermissionHelper(this));
 }
 
-void WebViewGuest::DidStopLoading() {
+void WebViewGuest::ClearDataInternal(base::Time remove_since,
+                                     uint32 removal_mask,
+                                     const base::Closure& callback) {
+  uint32 storage_partition_removal_mask =
+      GetStoragePartitionRemovalMask(removal_mask);
+  if (!storage_partition_removal_mask) {
+    callback.Run();
+    return;
+  }
+  content::StoragePartition* partition =
+      content::BrowserContext::GetStoragePartition(
+          web_contents()->GetBrowserContext(),
+          web_contents()->GetSiteInstance());
+  partition->ClearData(
+      storage_partition_removal_mask,
+      content::StoragePartition::QUOTA_MANAGED_STORAGE_MASK_ALL, GURL(),
+      content::StoragePartition::OriginMatcherFunction(), remove_since,
+      base::Time::Now(), callback);
+}
+
+void WebViewGuest::GuestViewDidStopLoading() {
   scoped_ptr<base::DictionaryValue> args(new base::DictionaryValue());
-  DispatchEventToEmbedder(
+  DispatchEventToView(
       new GuestViewBase::Event(webview::kEventLoadStop, args.Pass()));
+}
+
+void WebViewGuest::EmbedderFullscreenToggled(bool entered_fullscreen) {
+  is_embedder_fullscreen_ = entered_fullscreen;
+  // If the embedder has got out of fullscreen, we get out of fullscreen
+  // mode as well.
+  if (!entered_fullscreen)
+    SetFullscreenState(false);
 }
 
 void WebViewGuest::EmbedderWillBeDestroyed() {
@@ -385,6 +398,14 @@ void WebViewGuest::EmbedderWillBeDestroyed() {
           view_instance_id()));
 }
 
+const char* WebViewGuest::GetAPINamespace() const {
+  return webview::kAPINamespace;
+}
+
+int WebViewGuest::GetTaskPrefix() const {
+  return IDS_EXTENSION_TASK_MANAGER_WEBVIEW_TAG_PREFIX;
+}
+
 void WebViewGuest::GuestDestroyed() {
   // Clean up custom context menu items for this guest.
   if (web_view_guest_delegate_)
@@ -401,14 +422,14 @@ void WebViewGuest::GuestReady() {
   // WebContents::GetRenderWidgetHostView will return the RWHV of an
   // interstitial page if one is showing at this time. We only want opacity
   // to apply to web pages.
-  if (guest_opaque_) {
+  if (allow_transparency_) {
+    web_contents()->GetRenderViewHost()->GetView()->SetBackgroundColor(
+        SK_ColorTRANSPARENT);
+  } else {
     web_contents()
         ->GetRenderViewHost()
         ->GetView()
         ->SetBackgroundColorToDefault();
-  } else {
-    web_contents()->GetRenderViewHost()->GetView()->SetBackgroundColor(
-        SK_ColorTRANSPARENT);
   }
 }
 
@@ -419,7 +440,7 @@ void WebViewGuest::GuestSizeChangedDueToAutoSize(const gfx::Size& old_size,
   args->SetInteger(webview::kOldWidth, old_size.width());
   args->SetInteger(webview::kNewHeight, new_size.height());
   args->SetInteger(webview::kNewWidth, new_size.width());
-  DispatchEventToEmbedder(
+  DispatchEventToView(
       new GuestViewBase::Event(webview::kEventSizeChanged, args.Pass()));
 }
 
@@ -429,6 +450,18 @@ bool WebViewGuest::IsAutoSizeSupported() const {
 
 bool WebViewGuest::IsDragAndDropEnabled() const {
   return true;
+}
+
+void WebViewGuest::GuestZoomChanged(double old_zoom_level,
+                                    double new_zoom_level) {
+  // Dispatch the zoomchange event.
+  double old_zoom_factor = ConvertZoomLevelToZoomFactor(old_zoom_level);
+  double new_zoom_factor = ConvertZoomLevelToZoomFactor(new_zoom_level);
+  scoped_ptr<base::DictionaryValue> args(new base::DictionaryValue());
+  args->SetDouble(webview::kOldZoomFactor, old_zoom_factor);
+  args->SetDouble(webview::kNewZoomFactor, new_zoom_factor);
+  DispatchEventToView(
+      new GuestViewBase::Event(webview::kEventZoomChange, args.Pass()));
 }
 
 void WebViewGuest::WillDestroy() {
@@ -447,14 +480,14 @@ bool WebViewGuest::AddMessageToConsole(WebContents* source,
   args->SetString(webview::kMessage, message);
   args->SetInteger(webview::kLine, line_no);
   args->SetString(webview::kSourceId, source_id);
-  DispatchEventToEmbedder(
+  DispatchEventToView(
       new GuestViewBase::Event(webview::kEventConsoleMessage, args.Pass()));
   return true;
 }
 
 void WebViewGuest::CloseContents(WebContents* source) {
   scoped_ptr<base::DictionaryValue> args(new base::DictionaryValue());
-  DispatchEventToEmbedder(
+  DispatchEventToView(
       new GuestViewBase::Event(webview::kEventClose, args.Pass()));
 }
 
@@ -471,6 +504,16 @@ void WebViewGuest::FindReply(WebContents* source,
                          final_update);
 }
 
+double WebViewGuest::GetZoom() const {
+  double zoom_level =
+      ZoomController::FromWebContents(web_contents())->GetZoomLevel();
+  return ConvertZoomLevelToZoomFactor(zoom_level);
+}
+
+ZoomController::ZoomMode WebViewGuest::GetZoomMode() {
+  return ZoomController::FromWebContents(web_contents())->zoom_mode();
+}
+
 bool WebViewGuest::HandleContextMenu(
     const content::ContextMenuParams& params) {
   if (!web_view_guest_delegate_)
@@ -481,20 +524,15 @@ bool WebViewGuest::HandleContextMenu(
 void WebViewGuest::HandleKeyboardEvent(
     WebContents* source,
     const content::NativeWebKeyboardEvent& event) {
-  if (!attached())
-    return;
-
   if (HandleKeyboardShortcuts(event))
     return;
 
-  // Send the unhandled keyboard events back to the embedder to reprocess them.
-  // TODO(fsamuel): This introduces the possibility of out-of-order keyboard
-  // events because the guest may be arbitrarily delayed when responding to
-  // keyboard events. In that time, the embedder may have received and processed
-  // additional key events. This needs to be fixed as soon as possible.
-  // See http://crbug.com/229882.
-  embedder_web_contents()->GetDelegate()->HandleKeyboardEvent(
-      web_contents(), event);
+  GuestViewBase::HandleKeyboardEvent(source, event);
+}
+
+bool WebViewGuest::PreHandleGestureEvent(content::WebContents* source,
+                                         const blink::WebGestureEvent& event) {
+  return !allow_scaling_ && GuestViewBase::PreHandleGestureEvent(source, event);
 }
 
 void WebViewGuest::LoadProgressChanged(content::WebContents* source,
@@ -502,7 +540,7 @@ void WebViewGuest::LoadProgressChanged(content::WebContents* source,
   scoped_ptr<base::DictionaryValue> args(new base::DictionaryValue());
   args->SetString(guestview::kUrl, web_contents()->GetURL().spec());
   args->SetDouble(webview::kProgress, progress);
-  DispatchEventToEmbedder(
+  DispatchEventToView(
       new GuestViewBase::Event(webview::kEventLoadProgress, args.Pass()));
 }
 
@@ -513,19 +551,8 @@ void WebViewGuest::LoadAbort(bool is_top_level,
   args->SetBoolean(guestview::kIsTopLevel, is_top_level);
   args->SetString(guestview::kUrl, url.possibly_invalid_spec());
   args->SetString(guestview::kReason, error_type);
-  DispatchEventToEmbedder(
+  DispatchEventToView(
       new GuestViewBase::Event(webview::kEventLoadAbort, args.Pass()));
-}
-
-void WebViewGuest::OnFrameNameChanged(bool is_top_level,
-                                      const std::string& name) {
-  if (!is_top_level)
-    return;
-
-  if (name_ == name)
-    return;
-
-  ReportFrameNameChange(name);
 }
 
 void WebViewGuest::CreateNewGuestWebViewWindow(
@@ -572,7 +599,7 @@ void WebViewGuest::RendererResponsive(content::WebContents* source) {
   scoped_ptr<base::DictionaryValue> args(new base::DictionaryValue());
   args->SetInteger(webview::kProcessId,
                    web_contents()->GetRenderProcessHost()->GetID());
-  DispatchEventToEmbedder(
+  DispatchEventToView(
       new GuestViewBase::Event(webview::kEventResponsive, args.Pass()));
 }
 
@@ -580,7 +607,7 @@ void WebViewGuest::RendererUnresponsive(content::WebContents* source) {
   scoped_ptr<base::DictionaryValue> args(new base::DictionaryValue());
   args->SetInteger(webview::kProcessId,
                    web_contents()->GetRenderProcessHost()->GetID());
-  DispatchEventToEmbedder(
+  DispatchEventToView(
       new GuestViewBase::Event(webview::kEventUnresponsive, args.Pass()));
 }
 
@@ -611,14 +638,14 @@ void WebViewGuest::Observe(int type,
   }
 }
 
-void WebViewGuest::StartFinding(
+void WebViewGuest::StartFindInternal(
     const base::string16& search_text,
     const blink::WebFindOptions& options,
     scoped_refptr<WebViewInternalFindFunction> find_function) {
   find_helper_.Find(web_contents(), search_text, options, find_function);
 }
 
-void WebViewGuest::StopFinding(content::StopFindAction action) {
+void WebViewGuest::StopFindingInternal(content::StopFindAction action) {
   find_helper_.CancelAllFindSessions();
   web_contents()->StopFinding(action);
 }
@@ -641,8 +668,6 @@ void WebViewGuest::Reload() {
 
 void WebViewGuest::SetUserAgentOverride(
     const std::string& user_agent_override) {
-  if (!attached())
-    return;
   is_overriding_user_agent_ = !user_agent_override.empty();
   if (is_overriding_user_agent_) {
     content::RecordAction(UserMetricsAction("WebView.Guest.OverrideUA"));
@@ -663,7 +688,7 @@ void WebViewGuest::Terminate() {
         content::RESULT_CODE_KILLED, false);
 }
 
-bool WebViewGuest::ClearData(const base::Time remove_since,
+bool WebViewGuest::ClearData(base::Time remove_since,
                              uint32 removal_mask,
                              const base::Closure& callback) {
   content::RecordAction(UserMetricsAction("WebView.Guest.ClearData"));
@@ -675,29 +700,33 @@ bool WebViewGuest::ClearData(const base::Time remove_since,
   if (!partition)
     return false;
 
-  partition->ClearData(
-      removal_mask,
-      content::StoragePartition::QUOTA_MANAGED_STORAGE_MASK_ALL,
-      GURL(),
-      content::StoragePartition::OriginMatcherFunction(),
-      remove_since,
-      base::Time::Now(),
-      callback);
+  if (removal_mask & webview::WEB_VIEW_REMOVE_DATA_MASK_CACHE) {
+    if (web_view_guest_delegate_) {
+      // First clear http cache data and then clear the rest in
+      // |ClearDataInternal|.
+      web_view_guest_delegate_->ClearCache(
+          remove_since, base::Bind(&WebViewGuest::ClearDataInternal,
+                                   weak_ptr_factory_.GetWeakPtr(), remove_since,
+                                   removal_mask, callback));
+      return true;
+    }
+  }
+
+  ClearDataInternal(remove_since, removal_mask, callback);
   return true;
 }
 
-WebViewGuest::WebViewGuest(content::BrowserContext* browser_context,
-                           content::WebContents* owner_web_contents,
-                           int guest_instance_id)
-    : GuestView<WebViewGuest>(browser_context,
-                              owner_web_contents,
-                              guest_instance_id),
+WebViewGuest::WebViewGuest(content::WebContents* owner_web_contents)
+    : GuestView<WebViewGuest>(owner_web_contents),
       rules_registry_id_(RulesRegistryService::kInvalidRulesRegistryID),
       find_helper_(this),
       is_overriding_user_agent_(false),
-      guest_opaque_(true),
+      allow_transparency_(false),
       javascript_dialog_helper_(this),
-      current_zoom_factor_(1.0),
+      allow_scaling_(false),
+      is_guest_fullscreen_(false),
+      is_embedder_fullscreen_(false),
+      last_fullscreen_permission_was_allowed_by_embedder_(false),
       weak_ptr_factory_(this) {
   web_view_guest_delegate_.reset(
       ExtensionsAPIClient::Get()->CreateWebViewGuestDelegate(this));
@@ -727,17 +756,10 @@ void WebViewGuest::DidCommitProvisionalLoadForFrame(
                    web_contents()->GetController().GetEntryCount());
   args->SetInteger(webview::kInternalProcessId,
                    web_contents()->GetRenderProcessHost()->GetID());
-  DispatchEventToEmbedder(
+  DispatchEventToView(
       new GuestViewBase::Event(webview::kEventLoadCommit, args.Pass()));
 
   find_helper_.CancelAllFindSessions();
-
-  // Update the current zoom factor for the new page.
-  ui_zoom::ZoomController* zoom_controller =
-      ui_zoom::ZoomController::FromWebContents(web_contents());
-  DCHECK(zoom_controller);
-  current_zoom_factor_ =
-      content::ZoomLevelToZoomFactor(zoom_controller->GetZoomLevel());
 
   if (web_view_guest_delegate_) {
     web_view_guest_delegate_->OnDidCommitProvisionalLoadForFrame(
@@ -762,7 +784,7 @@ void WebViewGuest::DidStartProvisionalLoadForFrame(
   scoped_ptr<base::DictionaryValue> args(new base::DictionaryValue());
   args->SetString(guestview::kUrl, validated_url.spec());
   args->SetBoolean(guestview::kIsTopLevel, !render_frame_host->GetParent());
-  DispatchEventToEmbedder(
+  DispatchEventToView(
       new GuestViewBase::Event(webview::kEventLoadStart, args.Pass()));
 }
 
@@ -770,16 +792,6 @@ void WebViewGuest::DocumentLoadedInFrame(
     content::RenderFrameHost* render_frame_host) {
   if (web_view_guest_delegate_)
     web_view_guest_delegate_->OnDocumentLoadedInFrame(render_frame_host);
-}
-
-bool WebViewGuest::OnMessageReceived(const IPC::Message& message,
-                                     RenderFrameHost* render_frame_host) {
-  bool handled = true;
-  IPC_BEGIN_MESSAGE_MAP(WebViewGuest, message)
-    IPC_MESSAGE_HANDLER(ExtensionHostMsg_FrameNameChanged, OnFrameNameChanged)
-    IPC_MESSAGE_UNHANDLED(handled = false)
-  IPC_END_MESSAGE_MAP()
-  return handled;
 }
 
 void WebViewGuest::RenderProcessGone(base::TerminationStatus status) {
@@ -790,13 +802,11 @@ void WebViewGuest::RenderProcessGone(base::TerminationStatus status) {
   args->SetInteger(webview::kProcessId,
                    web_contents()->GetRenderProcessHost()->GetID());
   args->SetString(webview::kReason, TerminationStatusToString(status));
-  DispatchEventToEmbedder(
+  DispatchEventToView(
       new GuestViewBase::Event(webview::kEventExit, args.Pass()));
 }
 
 void WebViewGuest::UserAgentOverrideSet(const std::string& user_agent) {
-  if (!attached())
-    return;
   content::NavigationController& controller = web_contents()->GetController();
   content::NavigationEntry* entry = controller.GetVisibleEntry();
   if (!entry)
@@ -805,17 +815,28 @@ void WebViewGuest::UserAgentOverrideSet(const std::string& user_agent) {
   web_contents()->GetController().Reload(false);
 }
 
+void WebViewGuest::FrameNameChanged(RenderFrameHost* render_frame_host,
+                                    const std::string& name) {
+  if (render_frame_host->GetParent())
+    return;
+
+  if (name_ == name)
+    return;
+
+  ReportFrameNameChange(name);
+}
+
 void WebViewGuest::ReportFrameNameChange(const std::string& name) {
   name_ = name;
   scoped_ptr<base::DictionaryValue> args(new base::DictionaryValue());
   args->SetString(webview::kName, name);
-  DispatchEventToEmbedder(
+  DispatchEventToView(
       new GuestViewBase::Event(webview::kEventFrameNameChanged, args.Pass()));
 }
 
 void WebViewGuest::LoadHandlerCalled() {
   scoped_ptr<base::DictionaryValue> args(new base::DictionaryValue());
-  DispatchEventToEmbedder(
+  DispatchEventToView(
       new GuestViewBase::Event(webview::kEventContentLoad, args.Pass()));
 }
 
@@ -826,7 +847,7 @@ void WebViewGuest::LoadRedirect(const GURL& old_url,
   args->SetBoolean(guestview::kIsTopLevel, is_top_level);
   args->SetString(webview::kNewURL, new_url.spec());
   args->SetString(webview::kOldURL, old_url.spec());
-  DispatchEventToEmbedder(
+  DispatchEventToView(
       new GuestViewBase::Event(webview::kEventLoadRedirect, args.Pass()));
 }
 
@@ -869,16 +890,6 @@ void WebViewGuest::RemoveWebViewStateFromIOThread(
           base::Unretained(WebViewRendererState::GetInstance()),
           web_contents->GetRenderProcessHost()->GetID(),
           web_contents->GetRoutingID()));
-}
-
-content::WebContents* WebViewGuest::CreateNewGuestWindow(
-    const content::WebContents::CreateParams& create_params) {
-  GuestViewManager* guest_manager =
-      GuestViewManager::FromBrowserContext(browser_context());
-  return guest_manager->CreateGuestWithWebContentsParams(
-      WebViewGuest::Type,
-      embedder_web_contents(),
-      create_params);
 }
 
 void WebViewGuest::RequestMediaAccessPermission(
@@ -934,56 +945,24 @@ content::JavaScriptDialogManager* WebViewGuest::GetJavaScriptDialogManager(
   return &javascript_dialog_helper_;
 }
 
-content::ColorChooser* WebViewGuest::OpenColorChooser(
-    WebContents* web_contents,
-    SkColor color,
-    const std::vector<content::ColorSuggestion>& suggestions) {
-  if (!attached() || !embedder_web_contents()->GetDelegate())
-    return NULL;
-  return embedder_web_contents()->GetDelegate()->OpenColorChooser(
-      web_contents, color, suggestions);
-}
-
 void WebViewGuest::NavigateGuest(const std::string& src,
                                  bool force_navigation) {
-  if (!attached())
-    return;
-
   if (src.empty())
     return;
 
   GURL url = ResolveURL(src);
 
-  // Do not allow navigating a guest to schemes other than known safe schemes.
-  // This will block the embedder trying to load unwanted schemes, e.g.
-  // chrome://settings.
-  bool scheme_is_blocked =
-      (!content::ChildProcessSecurityPolicy::GetInstance()->IsWebSafeScheme(
-           url.scheme()) &&
-       !url.SchemeIs(url::kAboutScheme)) ||
-      url.SchemeIs(url::kJavaScriptScheme);
-  if (scheme_is_blocked || !url.is_valid()) {
-    LoadAbort(true /* is_top_level */, url,
-              net::ErrorToShortString(net::ERR_ABORTED));
-    return;
-  }
-  if (!force_navigation && (src_ == url))
-    return;
-
-  GURL validated_url(url);
-  web_contents()->GetRenderProcessHost()->FilterURL(false, &validated_url);
-  // As guests do not swap processes on navigation, only navigations to
-  // normal web URLs are supported.  No protocol handlers are installed for
-  // other schemes (e.g., WebUI or extensions), and no permissions or bindings
-  // can be granted to the guest process.
-  LoadURLWithParams(validated_url,
-                    content::Referrer(),
+  LoadURLWithParams(url, content::Referrer(),
                     ui::PAGE_TRANSITION_AUTO_TOPLEVEL,
-                    web_contents());
+                    force_navigation);
 }
 
 bool WebViewGuest::HandleKeyboardShortcuts(
     const content::NativeWebKeyboardEvent& event) {
+  // <webview> outside of Chrome Apps do not handle keyboard shortcuts.
+  if (!in_extension())
+    return false;
+
   if (event.type != blink::WebInputEvent::RawKeyDown)
     return false;
 
@@ -1022,6 +1001,62 @@ bool WebViewGuest::HandleKeyboardShortcuts(
   return false;
 }
 
+void WebViewGuest::ApplyAttributes(const base::DictionaryValue& params) {
+  std::string name;
+  if (params.GetString(webview::kAttributeName, &name)) {
+    // If the guest window's name is empty, then the WebView tag's name is
+    // assigned. Otherwise, the guest window's name takes precedence over the
+    // WebView tag's name.
+    if (name_.empty())
+      SetName(name);
+  }
+  if (attached())
+    ReportFrameNameChange(name_);
+
+  std::string user_agent_override;
+  params.GetString(webview::kParameterUserAgentOverride, &user_agent_override);
+  SetUserAgentOverride(user_agent_override);
+
+  bool allow_transparency = false;
+  if (params.GetBoolean(webview::kAttributeAllowTransparency,
+      &allow_transparency)) {
+    // We need to set the background opaque flag after navigation to ensure that
+    // there is a RenderWidgetHostView available.
+    SetAllowTransparency(allow_transparency);
+  }
+
+  bool allow_scaling = false;
+  if (params.GetBoolean(webview::kAttributeAllowScaling, &allow_scaling))
+    SetAllowScaling(allow_scaling);
+
+  bool is_pending_new_window = false;
+  if (GetOpener()) {
+    // We need to do a navigation here if the target URL has changed between
+    // the time the WebContents was created and the time it was attached.
+    // We also need to do an initial navigation if a RenderView was never
+    // created for the new window in cases where there is no referrer.
+    auto it = GetOpener()->pending_new_windows_.find(this);
+    if (it != GetOpener()->pending_new_windows_.end()) {
+      const NewWindowInfo& new_window_info = it->second;
+      if (new_window_info.changed || !web_contents()->HasOpener())
+        NavigateGuest(new_window_info.url.spec(), false /* force_navigation */);
+
+      // Once a new guest is attached to the DOM of the embedder page, then the
+      // lifetime of the new guest is no longer managed by the opener guest.
+      GetOpener()->pending_new_windows_.erase(this);
+
+      is_pending_new_window = true;
+    }
+  }
+
+  // Only read the src attribute if this is not a New Window API flow.
+  if (!is_pending_new_window) {
+    std::string src;
+    params.GetString(webview::kAttributeSrc, &src);
+    NavigateGuest(src, false /* force_navigation */);
+  }
+}
+
 void WebViewGuest::ShowContextMenu(
     int request_id,
     const WebViewGuestDelegate::MenuItemVector* items) {
@@ -1038,37 +1073,37 @@ void WebViewGuest::SetName(const std::string& name) {
 }
 
 void WebViewGuest::SetZoom(double zoom_factor) {
-  ui_zoom::ZoomController* zoom_controller =
-      ui_zoom::ZoomController::FromWebContents(web_contents());
+  auto zoom_controller = ZoomController::FromWebContents(web_contents());
   DCHECK(zoom_controller);
   double zoom_level = content::ZoomFactorToZoomLevel(zoom_factor);
   zoom_controller->SetZoomLevel(zoom_level);
+}
 
-  scoped_ptr<base::DictionaryValue> args(new base::DictionaryValue());
-  args->SetDouble(webview::kOldZoomFactor, current_zoom_factor_);
-  args->SetDouble(webview::kNewZoomFactor, zoom_factor);
-  DispatchEventToEmbedder(
-      new GuestViewBase::Event(webview::kEventZoomChange, args.Pass()));
-  current_zoom_factor_ = zoom_factor;
+void WebViewGuest::SetZoomMode(ZoomController::ZoomMode zoom_mode) {
+  ZoomController::FromWebContents(web_contents())->SetZoomMode(zoom_mode);
 }
 
 void WebViewGuest::SetAllowTransparency(bool allow) {
-  if (guest_opaque_ != allow)
+  if (allow_transparency_ == allow)
     return;
 
-  guest_opaque_ = !allow;
+  allow_transparency_ = allow;
   if (!web_contents()->GetRenderViewHost()->GetView())
     return;
 
-  if (guest_opaque_) {
+  if (allow_transparency_) {
+    web_contents()->GetRenderViewHost()->GetView()->SetBackgroundColor(
+        SK_ColorTRANSPARENT);
+  } else {
     web_contents()
         ->GetRenderViewHost()
         ->GetView()
         ->SetBackgroundColorToDefault();
-  } else {
-    web_contents()->GetRenderViewHost()->GetView()->SetBackgroundColor(
-        SK_ColorTRANSPARENT);
   }
+}
+
+void WebViewGuest::SetAllowScaling(bool allow) {
+  allow_scaling_ = allow;
 }
 
 bool WebViewGuest::LoadDataWithBaseURL(const std::string& data_url,
@@ -1109,7 +1144,7 @@ bool WebViewGuest::LoadDataWithBaseURL(const std::string& data_url,
       content::NavigationController::UA_OVERRIDE_INHERIT;
 
   // Navigate to the data URL.
-  web_contents()->GetController().LoadURLWithParams(load_params);
+  GuestViewBase::LoadURLWithParams(load_params);
 
   return true;
 }
@@ -1117,13 +1152,13 @@ bool WebViewGuest::LoadDataWithBaseURL(const std::string& data_url,
 void WebViewGuest::AddNewContents(content::WebContents* source,
                                   content::WebContents* new_contents,
                                   WindowOpenDisposition disposition,
-                                  const gfx::Rect& initial_pos,
+                                  const gfx::Rect& initial_rect,
                                   bool user_gesture,
                                   bool* was_blocked) {
   if (was_blocked)
     *was_blocked = false;
   RequestNewWindowPermission(disposition,
-                             initial_pos,
+                             initial_rect,
                              user_gesture,
                              new_contents);
 }
@@ -1131,6 +1166,23 @@ void WebViewGuest::AddNewContents(content::WebContents* source,
 content::WebContents* WebViewGuest::OpenURLFromTab(
     content::WebContents* source,
     const content::OpenURLParams& params) {
+  // There are two use cases to consider from a security perspective:
+  // 1.) Renderer-initiated navigation to chrome:// must always be blocked even
+  //     if the <webview> is in WebUI. This is handled by
+  //     WebViewGuest::LoadURLWithParams. WebViewGuest::NavigateGuest will also
+  //     call LoadURLWithParams. CreateNewGuestWebViewWindow creates a new
+  //     WebViewGuest which will call NavigateGuest in DidInitialize.
+  // 2.) The Language Settings context menu item should always work, both in
+  //     Chrome Apps and WebUI. This is a browser initiated request and so
+  //     we pass it along to the embedder's WebContentsDelegate to get the
+  //     browser to perform the action for the <webview>.
+  if (!params.is_renderer_initiated) {
+    if (!owner_web_contents()->GetDelegate())
+      return nullptr;
+    return owner_web_contents()->GetDelegate()->OpenURLFromTab(
+        owner_web_contents(), params);
+  }
+
   // If the guest wishes to navigate away prior to attachment then we save the
   // navigation to perform upon attachment. Navigation initializes a lot of
   // state that assumes an embedder exists, such as RenderWidgetHostViewGuest.
@@ -1138,24 +1190,36 @@ content::WebContents* WebViewGuest::OpenURLFromTab(
   // until attachment.
   if (!attached()) {
     WebViewGuest* opener = GetOpener();
-    PendingWindowMap::iterator it =
-        opener->pending_new_windows_.find(this);
+    auto it = opener->pending_new_windows_.find(this);
     if (it == opener->pending_new_windows_.end())
-      return NULL;
+      return nullptr;
     const NewWindowInfo& info = it->second;
     NewWindowInfo new_window_info(params.url, info.name);
     new_window_info.changed = new_window_info.url != info.url;
     it->second = new_window_info;
-    return NULL;
-  }
-  if (params.disposition == CURRENT_TAB) {
-    // This can happen for cross-site redirects.
-    LoadURLWithParams(params.url, params.referrer, params.transition, source);
-    return source;
+    return nullptr;
   }
 
+  // This code path is taken if RenderFrameImpl::DecidePolicyForNavigation
+  // decides that a fork should happen. At the time of writing this comment,
+  // the only way a well behaving guest could hit this code path is if it
+  // navigates to a URL that's associated with the default search engine.
+  // This list of URLs is generated by chrome::GetSearchURLs. Validity checks
+  // are performed inside LoadURLWithParams such that if the guest attempts
+  // to navigate to a URL that it is not allowed to navigate to, a 'loadabort'
+  // event will fire in the embedder, and the guest will be navigated to
+  // about:blank.
+  if (params.disposition == CURRENT_TAB) {
+    LoadURLWithParams(params.url, params.referrer, params.transition,
+                      true /* force_navigation */);
+    return web_contents();
+  }
+
+  // This code path is taken if Ctrl+Click, middle click or any of the
+  // keyboard/mouse combinations are used to open a link in a new tab/window.
+  // This code path is also taken on client-side redirects from about:blank.
   CreateNewGuestWebViewWindow(params);
-  return NULL;
+  return nullptr;
 }
 
 void WebViewGuest::WebContentsCreated(WebContents* source_contents,
@@ -1163,7 +1227,7 @@ void WebViewGuest::WebContentsCreated(WebContents* source_contents,
                                       const base::string16& frame_name,
                                       const GURL& target_url,
                                       content::WebContents* new_contents) {
-  WebViewGuest* guest = WebViewGuest::FromWebContents(new_contents);
+  auto guest = WebViewGuest::FromWebContents(new_contents);
   CHECK(guest);
   guest->SetOpener(this);
   std::string guest_name = base::UTF16ToUTF8(frame_name);
@@ -1172,11 +1236,65 @@ void WebViewGuest::WebContentsCreated(WebContents* source_contents,
       std::make_pair(guest, NewWindowInfo(target_url, guest_name)));
 }
 
+void WebViewGuest::EnterFullscreenModeForTab(content::WebContents* web_contents,
+                                             const GURL& origin) {
+  // Ask the embedder for permission.
+  base::DictionaryValue request_info;
+  request_info.SetString(webview::kOrigin, origin.spec());
+  web_view_permission_helper_->RequestPermission(
+      WEB_VIEW_PERMISSION_TYPE_FULLSCREEN, request_info,
+      base::Bind(&WebViewGuest::OnFullscreenPermissionDecided,
+                 weak_ptr_factory_.GetWeakPtr()),
+      false /* allowed_by_default */);
+
+  // TODO(lazyboy): Right now the guest immediately goes fullscreen within its
+  // bounds. If the embedder denies the permission then we will see a flicker.
+  // Once we have the ability to "cancel" a renderer/ fullscreen request:
+  // http://crbug.com/466854 this won't be necessary and we should be
+  // Calling SetFullscreenState(true) once the embedder allowed the request.
+  // Otherwise we would cancel renderer/ fullscreen if the embedder denied.
+  SetFullscreenState(true);
+}
+
+void WebViewGuest::ExitFullscreenModeForTab(
+    content::WebContents* web_contents) {
+  SetFullscreenState(false);
+}
+
+bool WebViewGuest::IsFullscreenForTabOrPending(
+    const content::WebContents* web_contents) const {
+  return is_guest_fullscreen_;
+}
+
 void WebViewGuest::LoadURLWithParams(const GURL& url,
                                      const content::Referrer& referrer,
                                      ui::PageTransition transition_type,
-                                     content::WebContents* web_contents) {
-  content::NavigationController::LoadURLParams load_url_params(url);
+                                     bool force_navigation) {
+  // Do not allow navigating a guest to schemes other than known safe schemes.
+  // This will block the embedder trying to load unwanted schemes, e.g.
+  // chrome://.
+  bool scheme_is_blocked =
+      (!content::ChildProcessSecurityPolicy::GetInstance()->IsWebSafeScheme(
+           url.scheme()) &&
+       !url.SchemeIs(url::kAboutScheme)) ||
+      url.SchemeIs(url::kJavaScriptScheme);
+  if (scheme_is_blocked || !url.is_valid()) {
+    LoadAbort(true /* is_top_level */, url,
+              net::ErrorToShortString(net::ERR_ABORTED));
+    NavigateGuest(url::kAboutBlankURL, true /* force_navigation */);
+    return;
+  }
+
+  if (!force_navigation && (src_ == url))
+    return;
+
+  GURL validated_url(url);
+  web_contents()->GetRenderProcessHost()->FilterURL(false, &validated_url);
+  // As guests do not swap processes on navigation, only navigations to
+  // normal web URLs are supported.  No protocol handlers are installed for
+  // other schemes (e.g., WebUI or extensions), and no permissions or bindings
+  // can be granted to the guest process.
+  content::NavigationController::LoadURLParams load_url_params(validated_url);
   load_url_params.referrer = referrer;
   load_url_params.transition_type = transition_type;
   load_url_params.extra_headers = std::string();
@@ -1184,7 +1302,9 @@ void WebViewGuest::LoadURLWithParams(const GURL& url,
     load_url_params.override_user_agent =
         content::NavigationController::UA_OVERRIDE_TRUE;
   }
-  web_contents->GetController().LoadURLWithParams(load_url_params);
+  GuestViewBase::LoadURLWithParams(load_url_params);
+
+  src_ = validated_url;
 }
 
 void WebViewGuest::RequestNewWindowPermission(
@@ -1192,10 +1312,10 @@ void WebViewGuest::RequestNewWindowPermission(
     const gfx::Rect& initial_bounds,
     bool user_gesture,
     content::WebContents* new_contents) {
-  WebViewGuest* guest = WebViewGuest::FromWebContents(new_contents);
+  auto guest = WebViewGuest::FromWebContents(new_contents);
   if (!guest)
     return;
-  PendingWindowMap::iterator it = pending_new_windows_.find(guest);
+  auto it = pending_new_windows_.find(guest);
   if (it == pending_new_windows_.end())
     return;
   const NewWindowInfo& new_window_info = it->second;
@@ -1229,9 +1349,8 @@ void WebViewGuest::RequestNewWindowPermission(
 }
 
 GURL WebViewGuest::ResolveURL(const std::string& src) {
-  if (!in_extension()) {
+  if (!in_extension())
     return GURL(src);
-  }
 
   GURL default_url(base::StringPrintf("%s://%s/",
                                       kExtensionScheme,
@@ -1243,7 +1362,7 @@ void WebViewGuest::OnWebViewNewWindowResponse(
     int new_window_instance_id,
     bool allow,
     const std::string& user_input) {
-  WebViewGuest* guest =
+  auto guest =
       WebViewGuest::From(owner_web_contents()->GetRenderProcessHost()->GetID(),
                          new_window_instance_id);
   if (!guest)
@@ -1251,6 +1370,38 @@ void WebViewGuest::OnWebViewNewWindowResponse(
 
   if (!allow)
     guest->Destroy();
+}
+
+void WebViewGuest::OnFullscreenPermissionDecided(
+    bool allowed,
+    const std::string& user_input) {
+  last_fullscreen_permission_was_allowed_by_embedder_ = allowed;
+  SetFullscreenState(allowed);
+}
+
+bool WebViewGuest::GuestMadeEmbedderFullscreen() const {
+  return last_fullscreen_permission_was_allowed_by_embedder_ &&
+         is_embedder_fullscreen_;
+}
+
+void WebViewGuest::SetFullscreenState(bool is_fullscreen) {
+  if (is_fullscreen == is_guest_fullscreen_)
+    return;
+
+  bool was_fullscreen = is_guest_fullscreen_;
+  is_guest_fullscreen_ = is_fullscreen;
+  // If the embedder entered fullscreen because of us, it should exit fullscreen
+  // when we exit fullscreen.
+  if (was_fullscreen && GuestMadeEmbedderFullscreen()) {
+    // Dispatch a message so we can call document.webkitCancelFullscreen()
+    // on the embedder.
+    scoped_ptr<base::DictionaryValue> args(new base::DictionaryValue());
+    DispatchEventToView(
+        new GuestViewBase::Event(webview::kEventExitFullscreen, args.Pass()));
+  }
+  // Since we changed fullscreen state, sending a Resize message ensures that
+  // renderer/ sees the change.
+  web_contents()->GetRenderViewHost()->WasResized();
 }
 
 }  // namespace extensions

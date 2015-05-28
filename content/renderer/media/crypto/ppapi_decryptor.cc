@@ -24,11 +24,13 @@ namespace content {
 
 scoped_ptr<PpapiDecryptor> PpapiDecryptor::Create(
     const std::string& key_system,
+    bool allow_distinctive_identifier,
+    bool allow_persistent_state,
     const GURL& security_origin,
     const CreatePepperCdmCB& create_pepper_cdm_cb,
     const media::SessionMessageCB& session_message_cb,
     const media::SessionClosedCB& session_closed_cb,
-    const media::SessionErrorCB& session_error_cb,
+    const media::LegacySessionErrorCB& legacy_session_error_cb,
     const media::SessionKeysChangeCB& session_keys_change_cb,
     const media::SessionExpirationUpdateCB& session_expiration_update_cb) {
   std::string plugin_type = media::GetPepperType(key_system);
@@ -40,28 +42,27 @@ scoped_ptr<PpapiDecryptor> PpapiDecryptor::Create(
     return scoped_ptr<PpapiDecryptor>();
   }
 
-  return scoped_ptr<PpapiDecryptor>(
-      new PpapiDecryptor(key_system,
-                         pepper_cdm_wrapper.Pass(),
-                         session_message_cb,
-                         session_closed_cb,
-                         session_error_cb,
-                         session_keys_change_cb,
-                         session_expiration_update_cb));
+  return scoped_ptr<PpapiDecryptor>(new PpapiDecryptor(
+      key_system, allow_distinctive_identifier, allow_persistent_state,
+      pepper_cdm_wrapper.Pass(), session_message_cb, session_closed_cb,
+      legacy_session_error_cb, session_keys_change_cb,
+      session_expiration_update_cb));
 }
 
 PpapiDecryptor::PpapiDecryptor(
     const std::string& key_system,
+    bool allow_distinctive_identifier,
+    bool allow_persistent_state,
     scoped_ptr<PepperCdmWrapper> pepper_cdm_wrapper,
     const media::SessionMessageCB& session_message_cb,
     const media::SessionClosedCB& session_closed_cb,
-    const media::SessionErrorCB& session_error_cb,
+    const media::LegacySessionErrorCB& legacy_session_error_cb,
     const media::SessionKeysChangeCB& session_keys_change_cb,
     const media::SessionExpirationUpdateCB& session_expiration_update_cb)
     : pepper_cdm_wrapper_(pepper_cdm_wrapper.Pass()),
       session_message_cb_(session_message_cb),
       session_closed_cb_(session_closed_cb),
-      session_error_cb_(session_error_cb),
+      legacy_session_error_cb_(legacy_session_error_cb),
       session_keys_change_cb_(session_keys_change_cb),
       session_expiration_update_cb_(session_expiration_update_cb),
       render_loop_proxy_(base::MessageLoopProxy::current()),
@@ -69,16 +70,16 @@ PpapiDecryptor::PpapiDecryptor(
   DCHECK(pepper_cdm_wrapper_.get());
   DCHECK(!session_message_cb_.is_null());
   DCHECK(!session_closed_cb_.is_null());
-  DCHECK(!session_error_cb_.is_null());
+  DCHECK(!legacy_session_error_cb_.is_null());
   DCHECK(!session_keys_change_cb.is_null());
   DCHECK(!session_expiration_update_cb.is_null());
 
   base::WeakPtr<PpapiDecryptor> weak_this = weak_ptr_factory_.GetWeakPtr();
   CdmDelegate()->Initialize(
-      key_system,
+      key_system, allow_distinctive_identifier, allow_persistent_state,
       base::Bind(&PpapiDecryptor::OnSessionMessage, weak_this),
       base::Bind(&PpapiDecryptor::OnSessionClosed, weak_this),
-      base::Bind(&PpapiDecryptor::OnSessionError, weak_this),
+      base::Bind(&PpapiDecryptor::OnLegacySessionError, weak_this),
       base::Bind(&PpapiDecryptor::OnSessionKeysChange, weak_this),
       base::Bind(&PpapiDecryptor::OnSessionExpirationUpdate, weak_this),
       base::Bind(&PpapiDecryptor::OnFatalPluginError, weak_this));
@@ -106,7 +107,7 @@ void PpapiDecryptor::SetServerCertificate(
 
 void PpapiDecryptor::CreateSessionAndGenerateRequest(
     SessionType session_type,
-    const std::string& init_data_type,
+    media::EmeInitDataType init_data_type,
     const uint8* init_data,
     int init_data_length,
     scoped_ptr<media::NewSessionCdmPromise> promise) {
@@ -125,7 +126,7 @@ void PpapiDecryptor::CreateSessionAndGenerateRequest(
 
 void PpapiDecryptor::LoadSession(
     SessionType session_type,
-    const std::string& web_session_id,
+    const std::string& session_id,
     scoped_ptr<media::NewSessionCdmPromise> promise) {
   DVLOG(2) << __FUNCTION__;
   DCHECK(render_loop_proxy_->BelongsToCurrentThread());
@@ -134,11 +135,11 @@ void PpapiDecryptor::LoadSession(
     promise->reject(INVALID_STATE_ERROR, 0, "CdmDelegate() does not exist.");
     return;
   }
-  CdmDelegate()->LoadSession(session_type, web_session_id, promise.Pass());
+  CdmDelegate()->LoadSession(session_type, session_id, promise.Pass());
 }
 
 void PpapiDecryptor::UpdateSession(
-    const std::string& web_session_id,
+    const std::string& session_id,
     const uint8* response,
     int response_length,
     scoped_ptr<media::SimpleCdmPromise> promise) {
@@ -148,11 +149,11 @@ void PpapiDecryptor::UpdateSession(
     promise->reject(INVALID_STATE_ERROR, 0, "CdmDelegate() does not exist.");
     return;
   }
-  CdmDelegate()->UpdateSession(web_session_id, response, response_length,
+  CdmDelegate()->UpdateSession(session_id, response, response_length,
                                promise.Pass());
 }
 
-void PpapiDecryptor::CloseSession(const std::string& web_session_id,
+void PpapiDecryptor::CloseSession(const std::string& session_id,
                                   scoped_ptr<media::SimpleCdmPromise> promise) {
   DCHECK(render_loop_proxy_->BelongsToCurrentThread());
 
@@ -161,11 +162,11 @@ void PpapiDecryptor::CloseSession(const std::string& web_session_id,
     return;
   }
 
-  CdmDelegate()->CloseSession(web_session_id, promise.Pass());
+  CdmDelegate()->CloseSession(session_id, promise.Pass());
 }
 
 void PpapiDecryptor::RemoveSession(
-    const std::string& web_session_id,
+    const std::string& session_id,
     scoped_ptr<media::SimpleCdmPromise> promise) {
   DCHECK(render_loop_proxy_->BelongsToCurrentThread());
 
@@ -174,7 +175,7 @@ void PpapiDecryptor::RemoveSession(
     return;
   }
 
-  CdmDelegate()->RemoveSession(web_session_id, promise.Pass());
+  CdmDelegate()->RemoveSession(session_id, promise.Pass());
 }
 
 media::CdmContext* PpapiDecryptor::GetCdmContext() {
@@ -183,6 +184,10 @@ media::CdmContext* PpapiDecryptor::GetCdmContext() {
 
 media::Decryptor* PpapiDecryptor::GetDecryptor() {
   return this;
+}
+
+int PpapiDecryptor::GetCdmId() const {
+  return kInvalidCdmId;
 }
 
 void PpapiDecryptor::RegisterNewKeyCB(StreamType stream_type,
@@ -386,16 +391,16 @@ void PpapiDecryptor::OnDecoderInitialized(StreamType stream_type,
   }
 }
 
-void PpapiDecryptor::OnSessionMessage(const std::string& web_session_id,
+void PpapiDecryptor::OnSessionMessage(const std::string& session_id,
                                       MessageType message_type,
                                       const std::vector<uint8>& message,
                                       const GURL& legacy_destination_url) {
   DCHECK(render_loop_proxy_->BelongsToCurrentThread());
-  session_message_cb_.Run(web_session_id, message_type, message,
+  session_message_cb_.Run(session_id, message_type, message,
                           legacy_destination_url);
 }
 
-void PpapiDecryptor::OnSessionKeysChange(const std::string& web_session_id,
+void PpapiDecryptor::OnSessionKeysChange(const std::string& session_id,
                                          bool has_additional_usable_key,
                                          media::CdmKeysInfo keys_info) {
   DCHECK(render_loop_proxy_->BelongsToCurrentThread());
@@ -405,29 +410,30 @@ void PpapiDecryptor::OnSessionKeysChange(const std::string& web_session_id,
   if (has_additional_usable_key)
     AttemptToResumePlayback();
 
-  session_keys_change_cb_.Run(web_session_id, has_additional_usable_key,
+  session_keys_change_cb_.Run(session_id, has_additional_usable_key,
                               keys_info.Pass());
 }
 
 void PpapiDecryptor::OnSessionExpirationUpdate(
-    const std::string& web_session_id,
+    const std::string& session_id,
     const base::Time& new_expiry_time) {
   DCHECK(render_loop_proxy_->BelongsToCurrentThread());
-  session_expiration_update_cb_.Run(web_session_id, new_expiry_time);
+  session_expiration_update_cb_.Run(session_id, new_expiry_time);
 }
 
-void PpapiDecryptor::OnSessionClosed(const std::string& web_session_id) {
+void PpapiDecryptor::OnSessionClosed(const std::string& session_id) {
   DCHECK(render_loop_proxy_->BelongsToCurrentThread());
-  session_closed_cb_.Run(web_session_id);
+  session_closed_cb_.Run(session_id);
 }
 
-void PpapiDecryptor::OnSessionError(const std::string& web_session_id,
-                                    MediaKeys::Exception exception_code,
-                                    uint32 system_code,
-                                    const std::string& error_description) {
+void PpapiDecryptor::OnLegacySessionError(
+    const std::string& session_id,
+    MediaKeys::Exception exception_code,
+    uint32 system_code,
+    const std::string& error_description) {
   DCHECK(render_loop_proxy_->BelongsToCurrentThread());
-  session_error_cb_.Run(
-      web_session_id, exception_code, system_code, error_description);
+  legacy_session_error_cb_.Run(session_id, exception_code, system_code,
+                               error_description);
 }
 
 void PpapiDecryptor::AttemptToResumePlayback() {

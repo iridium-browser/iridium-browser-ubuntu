@@ -23,7 +23,7 @@ public:
 
     virtual PassOwnPtrWillBeRawPtr<InterpolableValue> clone() const = 0;
 
-    virtual void trace(Visitor*) { }
+    DEFINE_INLINE_VIRTUAL_TRACE() { }
 
 private:
     virtual void interpolate(const InterpolableValue& to, const double progress, InterpolableValue& result) const = 0;
@@ -116,7 +116,7 @@ public:
     size_t length() const { return m_size; }
     virtual PassOwnPtrWillBeRawPtr<InterpolableValue> clone() const override final { return create(*this); }
 
-    virtual void trace(Visitor*) override;
+    DECLARE_VIRTUAL_TRACE();
 
 private:
     virtual void interpolate(const InterpolableValue& to, const double progress, InterpolableValue& result) const override final;
@@ -137,7 +137,7 @@ private:
     }
 
     size_t m_size;
-    WillBeHeapVector<OwnPtrWillBeMember<InterpolableValue> > m_values;
+    WillBeHeapVector<OwnPtrWillBeMember<InterpolableValue>> m_values;
 };
 
 // FIXME: Remove this when we can.
@@ -152,7 +152,7 @@ public:
     AnimatableValue* value() const { return m_value.get(); }
     virtual PassOwnPtrWillBeRawPtr<InterpolableValue> clone() const override final { return create(m_value); }
 
-    virtual void trace(Visitor*) override;
+    DECLARE_VIRTUAL_TRACE();
 
 private:
     virtual void interpolate(const InterpolableValue &to, const double progress, InterpolableValue& result) const override final;

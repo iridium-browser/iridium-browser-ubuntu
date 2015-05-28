@@ -66,9 +66,9 @@ KeyedService* CreateService(content::BrowserContext* context) {
 class FileSystemProviderFileStreamWriter : public testing::Test {
  protected:
   FileSystemProviderFileStreamWriter() {}
-  virtual ~FileSystemProviderFileStreamWriter() {}
+  ~FileSystemProviderFileStreamWriter() override {}
 
-  virtual void SetUp() override {
+  void SetUp() override {
     ASSERT_TRUE(data_dir_.CreateUniqueTempDir());
     profile_manager_.reset(
         new TestingProfileManager(TestingBrowserProcess::GetGlobal()));
@@ -99,7 +99,7 @@ class FileSystemProviderFileStreamWriter : public testing::Test {
     ASSERT_TRUE(wrong_file_url_.is_valid());
   }
 
-  virtual void TearDown() override {
+  void TearDown() override {
     // Setting the testing factory to NULL will destroy the created service
     // associated with the testing profile.
     ServiceFactory::GetInstance()->SetTestingFactory(profile_, NULL);
@@ -185,6 +185,22 @@ TEST_F(FileSystemProviderFileStreamWriter, Cancel) {
   EXPECT_EQ(0u, write_log.size());
   ASSERT_EQ(1u, cancel_log.size());
   EXPECT_EQ(net::OK, cancel_log[0]);
+}
+
+TEST_F(FileSystemProviderFileStreamWriter, Cancel_NotRunning) {
+  std::vector<int> write_log;
+
+  const int64 initial_offset = 0;
+  FileStreamWriter writer(file_url_, initial_offset);
+  scoped_refptr<net::IOBuffer> io_buffer(new net::StringIOBuffer(kTextToWrite));
+
+  std::vector<int> cancel_log;
+  const int cancel_result = writer.Cancel(base::Bind(&LogValue, &cancel_log));
+  EXPECT_EQ(net::ERR_UNEXPECTED, cancel_result);
+  base::RunLoop().RunUntilIdle();
+
+  EXPECT_EQ(0u, write_log.size());
+  EXPECT_EQ(0u, cancel_log.size());  // Result returned synchronously.
 }
 
 TEST_F(FileSystemProviderFileStreamWriter, Write_WrongFile) {

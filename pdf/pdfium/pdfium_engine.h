@@ -20,6 +20,7 @@
 #include "ppapi/cpp/dev/buffer_dev.h"
 #include "ppapi/cpp/image_data.h"
 #include "ppapi/cpp/point.h"
+#include "ppapi/cpp/var_array.h"
 #include "third_party/pdfium/fpdfsdk/include/fpdf_dataavail.h"
 #include "third_party/pdfium/fpdfsdk/include/fpdf_progressive.h"
 #include "third_party/pdfium/fpdfsdk/include/fpdfformfill.h"
@@ -28,6 +29,7 @@
 namespace pp {
 class KeyboardInputEvent;
 class MouseInputEvent;
+class VarDictionary;
 }
 
 namespace chrome_pdf {
@@ -78,6 +80,7 @@ class PDFiumEngine : public PDFEngine,
   virtual bool HasPermission(DocumentPermission permission) const;
   virtual void SelectAll();
   virtual int GetNumberOfPages();
+  virtual pp::VarArray GetBookmarks();
   virtual int GetNamedDestinationPage(const std::string& destination);
   virtual int GetFirstVisiblePage();
   virtual int GetMostVisiblePage();
@@ -90,6 +93,8 @@ class PDFiumEngine : public PDFEngine,
   virtual std::string GetPageAsJSON(int index);
   virtual bool GetPrintScaling();
   virtual int GetCopiesToPrint();
+  virtual int GetDuplexType();
+  virtual bool GetPageSizeAndUniformity(pp::Size* size);
   virtual void AppendBlankPages(int num_pages);
   virtual void AppendPage(PDFEngine* engine, int index);
   virtual pp::Point GetScrollPosition();
@@ -307,10 +312,12 @@ class PDFiumEngine : public PDFEngine,
   PDFiumPage::Area GetCharIndex(const pp::MouseInputEvent& event,
                                 int* page_index,
                                 int* char_index,
+                                int* form_type,
                                 PDFiumPage::LinkTarget* target);
   PDFiumPage::Area GetCharIndex(const pp::Point& point,
                                 int* page_index,
                                 int* char_index,
+                                int* form_type,
                                 PDFiumPage::LinkTarget* target);
 
   void OnSingleClick(int page_index, int char_index);
@@ -418,6 +425,9 @@ class PDFiumEngine : public PDFEngine,
 
   // Common code shared by RotateClockwise() and RotateCounterclockwise().
   void RotateInternal();
+
+  // Setting selection status of document.
+  void SetSelecting(bool selecting);
 
   // FPDF_FORMFILLINFO callbacks.
   static void Form_Invalidate(FPDF_FORMFILLINFO* param,
@@ -687,7 +697,7 @@ class PDFiumEngine : public PDFEngine,
     int page_index;
     // Temporary used to figure out if in a series of Paint() calls whether this
     // pending paint was updated or not.
-    int painted_;
+    bool painted_;
   };
   std::vector<ProgressivePaint> progressive_paints_;
 
@@ -704,6 +714,8 @@ class PDFiumEngine : public PDFEngine,
   // Set to true if the user is being prompted for their password. Will be set
   // to false after the user finishes getting their password.
   bool getting_password_;
+
+  DISALLOW_COPY_AND_ASSIGN(PDFiumEngine);
 };
 
 // Create a local variable of this when calling PDFium functions which can call

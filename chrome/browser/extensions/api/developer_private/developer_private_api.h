@@ -13,16 +13,12 @@
 #include "chrome/browser/extensions/api/file_system/file_system_api.h"
 #include "chrome/browser/extensions/chrome_extension_function.h"
 #include "chrome/browser/extensions/error_console/error_console.h"
-#include "chrome/browser/extensions/extension_install_prompt.h"
 #include "chrome/browser/extensions/extension_uninstall_dialog.h"
 #include "chrome/browser/extensions/pack_extension_job.h"
-#include "chrome/browser/extensions/requirements_checker.h"
-#include "content/public/browser/notification_observer.h"
-#include "content/public/browser/notification_registrar.h"
-#include "content/public/browser/render_view_host.h"
 #include "extensions/browser/browser_context_keyed_api_factory.h"
 #include "extensions/browser/event_router.h"
 #include "extensions/browser/extension_registry_observer.h"
+#include "extensions/browser/process_manager_observer.h"
 #include "storage/browser/fileapi/file_system_context.h"
 #include "storage/browser/fileapi/file_system_operation.h"
 #include "ui/shell_dialogs/select_file_dialog.h"
@@ -35,6 +31,8 @@ class ExtensionError;
 class ExtensionRegistry;
 class ExtensionSystem;
 class ManagementPolicy;
+class ProcessManager;
+class RequirementsChecker;
 
 namespace api {
 
@@ -47,6 +45,10 @@ struct ItemInfo;
 struct ItemInspectView;
 struct ProjectInfo;
 
+namespace RequestFileSource {
+struct Params;
+}
+
 }  // namespace developer_private
 
 }  // namespace api
@@ -58,9 +60,9 @@ typedef std::vector<linked_ptr<developer::ProjectInfo> > ProjectInfoList;
 typedef std::vector<linked_ptr<developer::ItemInspectView> >
     ItemInspectViewList;
 
-class DeveloperPrivateEventRouter : public content::NotificationObserver,
-                                    public ExtensionRegistryObserver,
-                                    public ErrorConsole::Observer {
+class DeveloperPrivateEventRouter : public ExtensionRegistryObserver,
+                                    public ErrorConsole::Observer,
+                                    public ProcessManagerObserver {
  public:
   explicit DeveloperPrivateEventRouter(Profile* profile);
   ~DeveloperPrivateEventRouter() override;
@@ -70,12 +72,7 @@ class DeveloperPrivateEventRouter : public content::NotificationObserver,
   void RemoveExtensionId(const std::string& extension_id);
 
  private:
-  // content::NotificationObserver implementation.
-  void Observe(int type,
-               const content::NotificationSource& source,
-               const content::NotificationDetails& details) override;
-
-  // ExtensionRegistryObserver implementation.
+  // ExtensionRegistryObserver:
   void OnExtensionLoaded(content::BrowserContext* browser_context,
                          const Extension* extension) override;
   void OnExtensionUnloaded(content::BrowserContext* browser_context,
@@ -90,14 +87,22 @@ class DeveloperPrivateEventRouter : public content::NotificationObserver,
                               const Extension* extension,
                               extensions::UninstallReason reason) override;
 
-  // ErrorConsole::Observer implementation.
+  // ErrorConsole::Observer:
   void OnErrorAdded(const ExtensionError* error) override;
 
-  content::NotificationRegistrar registrar_;
+  // ProcessManagerObserver:
+  void OnExtensionFrameRegistered(
+      const std::string& extension_id,
+      content::RenderFrameHost* render_frame_host) override;
+  void OnExtensionFrameUnregistered(
+      const std::string& extension_id,
+      content::RenderFrameHost* render_frame_host) override;
 
-  ScopedObserver<extensions::ExtensionRegistry,
-                 extensions::ExtensionRegistryObserver>
+  ScopedObserver<ExtensionRegistry, ExtensionRegistryObserver>
       extension_registry_observer_;
+  ScopedObserver<ErrorConsole, ErrorConsole::Observer> error_console_observer_;
+  ScopedObserver<ProcessManager, ProcessManagerObserver>
+      process_manager_observer_;
 
   Profile* profile_;
 
@@ -162,6 +167,15 @@ class DeveloperPrivateAPI : public BrowserContextKeyedAPI,
 
 namespace api {
 
+class DeveloperPrivateAPIFunction : public UIThreadExtensionFunction {
+ protected:
+  ~DeveloperPrivateAPIFunction() override;
+
+  // Returns the extension with the given |id| from the registry, including
+  // all possible extensions (enabled, disabled, terminated, etc).
+  const Extension* GetExtensionById(const std::string& id);
+};
+
 class DeveloperPrivateAutoUpdateFunction : public ChromeSyncExtensionFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("developerPrivate.autoUpdate",
@@ -175,85 +189,57 @@ class DeveloperPrivateAutoUpdateFunction : public ChromeSyncExtensionFunction {
 };
 
 class DeveloperPrivateGetItemsInfoFunction
-    : public ChromeAsyncExtensionFunction {
+    : public DeveloperPrivateAPIFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("developerPrivate.getItemsInfo",
                              DEVELOPERPRIVATE_GETITEMSINFO)
-
- protected:
-  ~DeveloperPrivateGetItemsInfoFunction() override;
-
-  // ExtensionFunction:
-  bool RunAsync() override;
+  DeveloperPrivateGetItemsInfoFunction();
 
  private:
-  scoped_ptr<developer::ItemInfo> CreateItemInfo(const Extension& item,
-                                                 bool item_is_enabled);
+  ~DeveloperPrivateGetItemsInfoFunction() override;
+  ResponseAction Run() override;
 
   void GetIconsOnFileThread(
-      ItemInfoList item_list,
-      std::map<std::string, ExtensionResource> itemIdToIconResourceMap);
+      std::map<std::string, ExtensionResource> resource_map);
+  void Finish();
 
-  // Helper that lists the current inspectable html pages for the extension.
-  void GetInspectablePagesForExtensionProcess(
-      const Extension* extension,
-      const std::set<content::RenderViewHost*>& views,
-      ItemInspectViewList* result);
-
-  ItemInspectViewList GetInspectablePagesForExtension(
-      const Extension* extension,
-      bool extension_is_enabled);
-
-  void GetAppWindowPagesForExtensionProfile(const Extension* extension,
-                                            ItemInspectViewList* result);
-
-  linked_ptr<developer::ItemInspectView> constructInspectView(
-      const GURL& url,
-      int render_process_id,
-      int render_view_id,
-      bool incognito,
-      bool generated_background_page);
+  ItemInfoList item_list_;
 };
 
-class DeveloperPrivateInspectFunction : public ChromeSyncExtensionFunction {
+class DeveloperPrivateGetExtensionsInfoFunction
+    : public DeveloperPrivateAPIFunction {
  public:
-  DECLARE_EXTENSION_FUNCTION("developerPrivate.inspect",
-                             DEVELOPERPRIVATE_INSPECT)
+  DECLARE_EXTENSION_FUNCTION("developerPrivate.getExtensionsInfo",
+                             DEVELOPERPRIVATE_GETEXTENSIONSINFO);
+
+ private:
+  ~DeveloperPrivateGetExtensionsInfoFunction() override;
+  ResponseAction Run() override;
+};
+
+class DeveloperPrivateGetExtensionInfoFunction
+    : public DeveloperPrivateAPIFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("developerPrivate.getExtensionInfo",
+                             DEVELOPERPRIVATE_GETEXTENSIONINFO);
+
+ private:
+  ~DeveloperPrivateGetExtensionInfoFunction() override;
+  ResponseAction Run() override;
+};
+
+class DeveloperPrivateUpdateExtensionConfigurationFunction
+    : public DeveloperPrivateAPIFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("developerPrivate.updateExtensionConfiguration",
+                             DEVELOPERPRIVATE_UPDATEEXTENSIONCONFIGURATION);
 
  protected:
-  ~DeveloperPrivateInspectFunction() override;
-
-  // ExtensionFunction:
-  bool RunSync() override;
+  ~DeveloperPrivateUpdateExtensionConfigurationFunction() override;
+  ResponseAction Run() override;
 };
 
-class DeveloperPrivateAllowFileAccessFunction
-    : public ChromeSyncExtensionFunction {
- public:
-  DECLARE_EXTENSION_FUNCTION("developerPrivate.allowFileAccess",
-                             DEVELOPERPRIVATE_ALLOWFILEACCESS);
-
- protected:
-  ~DeveloperPrivateAllowFileAccessFunction() override;
-
-  // ExtensionFunction:
-  bool RunSync() override;
-};
-
-class DeveloperPrivateAllowIncognitoFunction
-    : public ChromeSyncExtensionFunction {
- public:
-  DECLARE_EXTENSION_FUNCTION("developerPrivate.allowIncognito",
-                             DEVELOPERPRIVATE_ALLOWINCOGNITO);
-
- protected:
-  ~DeveloperPrivateAllowIncognitoFunction() override;
-
-  // ExtensionFunction:
-  bool RunSync() override;
-};
-
-class DeveloperPrivateReloadFunction : public ChromeSyncExtensionFunction {
+class DeveloperPrivateReloadFunction : public DeveloperPrivateAPIFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("developerPrivate.reload",
                              DEVELOPERPRIVATE_RELOAD);
@@ -262,67 +248,34 @@ class DeveloperPrivateReloadFunction : public ChromeSyncExtensionFunction {
   ~DeveloperPrivateReloadFunction() override;
 
   // ExtensionFunction:
-  bool RunSync() override;
+  ResponseAction Run() override;
 };
 
 class DeveloperPrivateShowPermissionsDialogFunction
-    : public ChromeSyncExtensionFunction,
-      public ExtensionInstallPrompt::Delegate {
+    : public DeveloperPrivateAPIFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("developerPrivate.showPermissionsDialog",
                              DEVELOPERPRIVATE_PERMISSIONS);
-
   DeveloperPrivateShowPermissionsDialogFunction();
+
  protected:
+  // DeveloperPrivateAPIFunction:
   ~DeveloperPrivateShowPermissionsDialogFunction() override;
+  ResponseAction Run() override;
 
-  // ExtensionFunction:
-  bool RunSync() override;
+  void Finish();
 
-  // Overridden from ExtensionInstallPrompt::Delegate
-  void InstallUIProceed() override;
-  void InstallUIAbort(bool user_initiated) override;
-
-  scoped_ptr<ExtensionInstallPrompt> prompt_;
-  std::string extension_id_;
+  DISALLOW_COPY_AND_ASSIGN(DeveloperPrivateShowPermissionsDialogFunction);
 };
 
-class DeveloperPrivateEnableFunction
-    : public ChromeSyncExtensionFunction,
-      public base::SupportsWeakPtr<DeveloperPrivateEnableFunction> {
- public:
-  DECLARE_EXTENSION_FUNCTION("developerPrivate.enable",
-                             DEVELOPERPRIVATE_ENABLE);
-
-  DeveloperPrivateEnableFunction();
-
- protected:
-  ~DeveloperPrivateEnableFunction() override;
-
-  // Callback for requirements checker.
-  void OnRequirementsChecked(const std::string& extension_id,
-                             std::vector<std::string> requirements_errors);
-  // ExtensionFunction:
-  bool RunSync() override;
-
- private:
-  scoped_ptr<RequirementsChecker> requirements_checker_;
-};
-
-class DeveloperPrivateChooseEntryFunction : public ChromeAsyncExtensionFunction,
+class DeveloperPrivateChooseEntryFunction : public UIThreadExtensionFunction,
                                             public EntryPickerClient {
  protected:
   ~DeveloperPrivateChooseEntryFunction() override;
-  bool RunAsync() override;
   bool ShowPicker(ui::SelectFileDialog::Type picker_type,
-                  const base::FilePath& last_directory,
                   const base::string16& select_title,
                   const ui::SelectFileDialog::FileTypeInfo& info,
                   int file_type_index);
-
-  // EntryPickerClient functions.
-  void FileSelected(const base::FilePath& path) override = 0;
-  void FileSelectionCanceled() override = 0;
 };
 
 
@@ -331,14 +284,24 @@ class DeveloperPrivateLoadUnpackedFunction
  public:
   DECLARE_EXTENSION_FUNCTION("developerPrivate.loadUnpacked",
                              DEVELOPERPRIVATE_LOADUNPACKED);
+  DeveloperPrivateLoadUnpackedFunction();
 
  protected:
   ~DeveloperPrivateLoadUnpackedFunction() override;
-  bool RunAsync() override;
+  ResponseAction Run() override;
 
-  // EntryPickerCLient implementation.
+  // EntryPickerClient:
   void FileSelected(const base::FilePath& path) override;
   void FileSelectionCanceled() override;
+
+  // Callback for the UnpackedLoader.
+  void OnLoadComplete(const Extension* extension,
+                      const base::FilePath& file_path,
+                      const std::string& error);
+
+ private:
+  // Whether or not we should fail quietly in the event of a load error.
+  bool fail_quietly_;
 };
 
 class DeveloperPrivateChoosePathFunction
@@ -349,15 +312,15 @@ class DeveloperPrivateChoosePathFunction
 
  protected:
   ~DeveloperPrivateChoosePathFunction() override;
-  bool RunAsync() override;
+  ResponseAction Run() override;
 
-  // EntryPickerClient functions.
+  // EntryPickerClient:
   void FileSelected(const base::FilePath& path) override;
   void FileSelectionCanceled() override;
 };
 
 class DeveloperPrivatePackDirectoryFunction
-    : public ChromeAsyncExtensionFunction,
+    : public DeveloperPrivateAPIFunction,
       public PackExtensionJob::Client {
 
  public:
@@ -374,7 +337,7 @@ class DeveloperPrivatePackDirectoryFunction
 
  protected:
   ~DeveloperPrivatePackDirectoryFunction() override;
-  bool RunAsync() override;
+  ResponseAction Run() override;
 
  private:
   scoped_refptr<PackExtensionJob> pack_job_;
@@ -452,36 +415,43 @@ class DeveloperPrivateLoadDirectoryFunction
 };
 
 class DeveloperPrivateRequestFileSourceFunction
-    : public ChromeAsyncExtensionFunction {
+    : public DeveloperPrivateAPIFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("developerPrivate.requestFileSource",
                              DEVELOPERPRIVATE_REQUESTFILESOURCE);
-
   DeveloperPrivateRequestFileSourceFunction();
 
  protected:
   ~DeveloperPrivateRequestFileSourceFunction() override;
-
-  // ExtensionFunction:
-  bool RunAsync() override;
+  ResponseAction Run() override;
 
  private:
-  void LaunchCallback(const base::DictionaryValue& results);
+  void Finish(const std::string& file_contents);
+
+  scoped_ptr<api::developer_private::RequestFileSource::Params> params_;
 };
 
 class DeveloperPrivateOpenDevToolsFunction
-    : public ChromeAsyncExtensionFunction {
+    : public DeveloperPrivateAPIFunction {
  public:
   DECLARE_EXTENSION_FUNCTION("developerPrivate.openDevTools",
                              DEVELOPERPRIVATE_OPENDEVTOOLS);
-
   DeveloperPrivateOpenDevToolsFunction();
 
  protected:
   ~DeveloperPrivateOpenDevToolsFunction() override;
+  ResponseAction Run() override;
+};
 
-  // ExtensionFunction:
-  bool RunAsync() override;
+class DeveloperPrivateDeleteExtensionErrorsFunction
+    : public DeveloperPrivateAPIFunction {
+ public:
+  DECLARE_EXTENSION_FUNCTION("developerPrivate.deleteExtensionErrors",
+                             DEVELOPERPRIVATE_DELETEEXTENSIONERRORS);
+
+ protected:
+  ~DeveloperPrivateDeleteExtensionErrorsFunction() override;
+  ResponseAction Run() override;
 };
 
 }  // namespace api

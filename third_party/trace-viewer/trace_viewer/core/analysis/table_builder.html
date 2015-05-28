@@ -54,6 +54,13 @@ found in the LICENSE file.
         text-align: left;
       }
 
+      table > thead.hidden {
+        height: 0px;
+      }
+      table > thead.hidden > tr > td {
+        padding: 0;
+      }
+
       table > tfoot {
         background-color: #bbbbbb;
         font-weight: bold;
@@ -63,6 +70,7 @@ found in the LICENSE file.
         -webkit-user-select: none;
         display: inline-block;
         cursor: pointer;
+        font-size: 9px;
       }
 
       .button-expanded {
@@ -80,7 +88,7 @@ found in the LICENSE file.
   </template>
   <script>
   'use strict';
-  (function () {
+  (function() {
     var RIGHT_ARROW = String.fromCharCode(0x25b6);
     var UNSORTED_ARROW = String.fromCharCode(0x25BF);
     var ASCENDING_ARROW = String.fromCharCode(0x25BE);
@@ -88,7 +96,7 @@ found in the LICENSE file.
 
 
     Polymer({
-      created: function (){
+      created: function() {
         this.tableColumns_ = [];
         this.tableRows_ = [];
         this.tableRowsInfo_ = [];
@@ -111,11 +119,25 @@ found in the LICENSE file.
         this.headerCells_ = [];
       },
 
+      get showHeader() {
+        return !this.$.head.classList.contains('hidden');
+      },
+
+      set showHeader(showHeader) {
+        if (showHeader)
+          this.$.head.classList.remove('hidden');
+        else
+          this.$.head.classList.add('hidden');
+        this.scheduleRebuildHeaders_();
+      },
+
       /**
-       * @param {Array} columns An array of objects with the following fields:
+       * Data objects should have the following fields:
        *   mandatory: title, value
        *   optional: width {string}, cmp {function}, colSpan {number},
        *             showExpandButtons {boolean}
+       *
+       * @param {Array} columns An array of data objects.
        */
       set tableColumns(columns) {
         this.tableColumns_ = columns;
@@ -245,7 +267,10 @@ found in the LICENSE file.
             td.style.width = this.tableColumns_[i].width;
 
           var headerCell = new TracingAnalysisHeaderCell();
-          headerCell.cellTitle = this.tableColumns_[i].title;
+          if (this.showHeader)
+            headerCell.cellTitle = this.tableColumns_[i].title;
+          else
+            headerCell.cellTitle = '';
           // If the table can be sorted by this column, attach a tap callback
           // to the column.
           if (this.tableColumns_[i].cmp) {
@@ -311,8 +336,11 @@ found in the LICENSE file.
           if (this.columnsWithExpandButtons_.indexOf(i) != -1) {
             if (row.subRows.length > 0) {
               td.style.paddingLeft = INDENT_SPACE + 'px';
-              var expandButton = this.appendNewElementAfter_(td, 'expand-button');
+              var expandButton = this.appendNewElementAfter_(td,
+                  'expand-button');
               expandButton.textContent = RIGHT_ARROW;
+              if (row.isExpanded)
+                expandButton.classList.add('button-expanded');
               this.addToggleListenerForRowToButton_(tableSection, row,
                   expandButton);
             } else {
@@ -330,7 +358,7 @@ found in the LICENSE file.
       },
 
       addToggleListenerForRowToButton_: function(tableSection, row, button) {
-        button.addEventListener('click', function() {
+        button.parentElement.addEventListener('click', function() {
           row.isExpanded = !row.isExpanded;
 
           if (row.isExpanded) {
@@ -359,34 +387,44 @@ found in the LICENSE file.
       },
 
       scheduleRebuildHeaders_: function() {
-        if (this.headerDirty_)
-          return;
         this.headerDirty_ = true;
-        setTimeout(function() {
-          this.generateHeaderColumns_();
-          this.headerDirty_ = false;
-        }.bind(this), 0);
+        this.scheduleRebuild_();
       },
 
       scheduleRebuildBody_: function() {
-        if (this.bodyDirty_)
-          return;
         this.bodyDirty_ = true;
-        setTimeout(function() {
-          this.generateTableRowNodes_(this.$.body, this.tableRowsInfo_, 0);
-          this.bodyDirty_ = false;
-        }.bind(this), 0);
+        this.scheduleRebuild_();
       },
 
       scheduleRebuildFooter_: function() {
-        if (this.footerDirty_)
-          return;
         this.footerDirty_ = true;
+        this.scheduleRebuild_();
+      },
+
+      scheduleRebuild_: function() {
+        if (this.rebuildPending_)
+          return;
+        this.rebuildPending_ = true;
         setTimeout(function() {
+          this.rebuildPending_ = false;
+          this.rebuild();
+        }.bind(this), 0);
+      },
+
+      rebuild: function() {
+        if (this.headerDirty_) {
+          this.generateHeaderColumns_();
+          this.headerDirty_ = false;
+        }
+        if (this.bodyDirty_) {
+          this.generateTableRowNodes_(this.$.body, this.tableRowsInfo_, 0);
+          this.bodyDirty_ = false;
+        }
+        if (this.footerDirty_) {
           this.generateTableRowNodes_(this.$.foot, this.tableFooterRowsInfo_,
                                       0);
           this.footerDirty_ = false;
-        }.bind(this), 0);
+        }
       },
 
       createTableRowsInfo_: function(rows, containerForResults) {
@@ -399,7 +437,7 @@ found in the LICENSE file.
             userRow: rows[i],
             htmlNode: undefined,
             subRows: subRowsArray,
-            isExpanded: false
+            isExpanded: rows[i].isExpanded || false
           });
         }
       },
@@ -455,7 +493,7 @@ found in the LICENSE file.
   Polymer({
     created: function() {
       this.tapCallback_ = undefined;
-      this.cellTitle_ = 'No Title';
+      this.cellTitle_ = '';
     },
 
     set cellTitle(value) {

@@ -21,11 +21,12 @@ class MEDIA_EXPORT BrowserCdmFactory {
 
   virtual scoped_ptr<BrowserCdm> CreateBrowserCdm(
       const std::string& key_system,
-      const BrowserCdm::SessionCreatedCB& session_created_cb,
-      const BrowserCdm::SessionMessageCB& session_message_cb,
-      const BrowserCdm::SessionReadyCB& session_ready_cb,
-      const BrowserCdm::SessionClosedCB& session_closed_cb,
-      const BrowserCdm::SessionErrorCB& session_error_cb) = 0;
+      bool use_secure_surface,
+      const SessionMessageCB& session_message_cb,
+      const SessionClosedCB& session_closed_cb,
+      const LegacySessionErrorCB& legacy_session_error_cb,
+      const SessionKeysChangeCB& session_keys_change_cb,
+      const SessionExpirationUpdateCB& session_expiration_update_cb) = 0;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(BrowserCdmFactory);
@@ -37,14 +38,17 @@ void SetBrowserCdmFactory(BrowserCdmFactory* factory);
 
 // Creates a BrowserCdm for |key_system|. Returns NULL if the CDM cannot be
 // created.
+// |use_secure_surface| indicates that the CDM should be configured to output
+// to a secure surface (for platforms that support it).
 // TODO(xhwang): Add ifdef for IPC based CDM.
 scoped_ptr<BrowserCdm> MEDIA_EXPORT
-    CreateBrowserCdm(const std::string& key_system,
-                     const BrowserCdm::SessionCreatedCB& session_created_cb,
-                     const BrowserCdm::SessionMessageCB& session_message_cb,
-                     const BrowserCdm::SessionReadyCB& session_ready_cb,
-                     const BrowserCdm::SessionClosedCB& session_closed_cb,
-                     const BrowserCdm::SessionErrorCB& session_error_cb);
+CreateBrowserCdm(const std::string& key_system,
+                 bool use_secure_surface,
+                 const SessionMessageCB& session_message_cb,
+                 const SessionClosedCB& session_closed_cb,
+                 const LegacySessionErrorCB& legacy_session_error_cb,
+                 const SessionKeysChangeCB& session_keys_change_cb,
+                 const SessionExpirationUpdateCB& session_expiration_update_cb);
 
 }  // namespace media
 

@@ -8,7 +8,6 @@
 #include "base/bind_helpers.h"
 #include "base/thread_task_runner_handle.h"
 #include "dbus/bus.h"
-#include "dbus/exported_object.h"
 #include "dbus/message.h"
 #include "net/base/load_flags.h"
 #include "net/base/net_errors.h"
@@ -56,7 +55,7 @@ class ProxyResolverImpl : public ProxyResolverInterface {
         weak_ptr_factory_(this) {
   }
 
-  virtual ~ProxyResolverImpl() {
+  ~ProxyResolverImpl() override {
     DCHECK(OnOriginThread());
 
     for (std::set<Request*>::iterator iter = all_requests_.begin();
@@ -68,7 +67,7 @@ class ProxyResolverImpl : public ProxyResolverInterface {
   }
 
   // ProxyResolverInterface override.
-  virtual void ResolveProxy(
+  void ResolveProxy(
       const std::string& source_url,
       const std::string& signal_interface,
       const std::string& signal_name,

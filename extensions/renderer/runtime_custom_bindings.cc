@@ -7,9 +7,9 @@
 #include "base/bind.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/values.h"
+#include "content/public/child/v8_value_converter.h"
 #include "content/public/renderer/render_frame.h"
 #include "content/public/renderer/render_view.h"
-#include "content/public/renderer/v8_value_converter.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_messages.h"
 #include "extensions/common/features/feature.h"
@@ -135,8 +135,6 @@ void RuntimeCustomBindings::GetExtensionViews(
   ViewType view_type = VIEW_TYPE_INVALID;
   if (view_type_string == kViewTypeBackgroundPage) {
     view_type = VIEW_TYPE_EXTENSION_BACKGROUND_PAGE;
-  } else if (view_type_string == kViewTypeInfobar) {
-    view_type = VIEW_TYPE_EXTENSION_INFOBAR;
   } else if (view_type_string == kViewTypeTabContents) {
     view_type = VIEW_TYPE_TAB_CONTENTS;
   } else if (view_type_string == kViewTypePopup) {

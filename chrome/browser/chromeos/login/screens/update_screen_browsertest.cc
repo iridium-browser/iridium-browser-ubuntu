@@ -8,6 +8,7 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chromeos/login/screens/mock_base_screen_delegate.h"
 #include "chrome/browser/chromeos/login/screens/mock_error_screen.h"
+#include "chrome/browser/chromeos/login/screens/network_error.h"
 #include "chrome/browser/chromeos/login/screens/update_screen.h"
 #include "chrome/browser/chromeos/login/startup_utils.h"
 #include "chrome/browser/chromeos/login/test/wizard_in_process_browser_test.h"
@@ -45,7 +46,7 @@ class UpdateScreenTest : public WizardInProcessBrowserTest {
   }
 
  protected:
-  virtual void SetUpInProcessBrowserTestFixture() override {
+  void SetUpInProcessBrowserTestFixture() override {
     fake_update_engine_client_ = new FakeUpdateEngineClient;
     chromeos::DBusThreadManager::GetSetterForTesting()->SetUpdateEngineClient(
         scoped_ptr<UpdateEngineClient>(fake_update_engine_client_));
@@ -65,13 +66,13 @@ class UpdateScreenTest : public WizardInProcessBrowserTest {
     SetDetectionResults(kStubWifiGuid, online_state);
   }
 
-  virtual void SetUpOnMainThread() override {
+  void SetUpOnMainThread() override {
     WizardInProcessBrowserTest::SetUpOnMainThread();
 
     mock_base_screen_delegate_.reset(new MockBaseScreenDelegate());
-    mock_error_screen_actor_.reset(new MockErrorScreenActor());
+    mock_network_error_view_.reset(new MockNetworkErrorView());
     mock_error_screen_.reset(new MockErrorScreen(
-        mock_base_screen_delegate_.get(), mock_error_screen_actor_.get()));
+        mock_base_screen_delegate_.get(), mock_network_error_view_.get()));
     EXPECT_CALL(*mock_base_screen_delegate_, ShowCurrentScreen())
         .Times(AnyNumber());
     EXPECT_CALL(*mock_base_screen_delegate_, GetErrorScreen())
@@ -86,13 +87,13 @@ class UpdateScreenTest : public WizardInProcessBrowserTest {
     update_screen_->base_screen_delegate_ = mock_base_screen_delegate_.get();
   }
 
-  virtual void TearDownOnMainThread() override {
+  void TearDownOnMainThread() override {
     mock_error_screen_.reset();
-    mock_error_screen_actor_.reset();
+    mock_network_error_view_.reset();
     WizardInProcessBrowserTest::TearDownOnMainThread();
   }
 
-  virtual void TearDownInProcessBrowserTestFixture() override {
+  void TearDownInProcessBrowserTestFixture() override {
     NetworkPortalDetector::Shutdown();
     WizardInProcessBrowserTest::TearDownInProcessBrowserTestFixture();
   }
@@ -116,7 +117,7 @@ class UpdateScreenTest : public WizardInProcessBrowserTest {
 
   FakeUpdateEngineClient* fake_update_engine_client_;
   scoped_ptr<MockBaseScreenDelegate> mock_base_screen_delegate_;
-  scoped_ptr<MockErrorScreenActor> mock_error_screen_actor_;
+  scoped_ptr<MockNetworkErrorView> mock_network_error_view_;
   scoped_ptr<MockErrorScreen> mock_error_screen_;
   UpdateScreen* update_screen_;
   NetworkPortalDetectorTestImpl* network_portal_detector_;
@@ -126,7 +127,7 @@ class UpdateScreenTest : public WizardInProcessBrowserTest {
 };
 
 IN_PROC_BROWSER_TEST_F(UpdateScreenTest, TestBasic) {
-  ASSERT_TRUE(update_screen_->actor_ != NULL);
+  ASSERT_TRUE(update_screen_->view_ != NULL);
 }
 
 IN_PROC_BROWSER_TEST_F(UpdateScreenTest, TestNoUpdate) {
@@ -239,19 +240,26 @@ IN_PROC_BROWSER_TEST_F(UpdateScreenTest, TestTemproraryOfflineNetwork) {
   portal_state.response_code = 200;
   SetDetectionResults(kStubEthernetGuid, portal_state);
 
-  // Update screen will show error message about portal state because
+  // Update screen will delay error message about portal state because
   // ethernet is behind captive portal.
-  EXPECT_CALL(*mock_error_screen_actor_,
-              SetUIState(ErrorScreen::UI_STATE_UPDATE))
-      .Times(1);
-  EXPECT_CALL(*mock_error_screen_actor_,
-              SetErrorState(ErrorScreen::ERROR_STATE_PORTAL, std::string()))
-      .Times(1);
-  EXPECT_CALL(*mock_error_screen_actor_, FixCaptivePortal())
-      .Times(1);
+  EXPECT_CALL(*mock_error_screen_,
+              MockSetUIState(NetworkError::UI_STATE_UPDATE)).Times(1);
+  EXPECT_CALL(*mock_error_screen_,
+              MockSetErrorState(NetworkError::ERROR_STATE_PORTAL,
+                                std::string())).Times(1);
+  EXPECT_CALL(*mock_error_screen_, MockFixCaptivePortal()).Times(1);
   EXPECT_CALL(*mock_base_screen_delegate_, ShowErrorScreen()).Times(1);
 
   update_screen_->StartNetworkCheck();
+
+  // Force timer expiration.
+  {
+    base::Closure timed_callback =
+        update_screen_->GetErrorMessageTimerForTesting().user_task();
+    ASSERT_FALSE(timed_callback.is_null());
+    update_screen_->GetErrorMessageTimerForTesting().Reset();
+    timed_callback.Run();
+  }
 
   NetworkPortalDetector::CaptivePortalState online_state;
   online_state.status = NetworkPortalDetector::CAPTIVE_PORTAL_STATUS_ONLINE;
@@ -283,19 +291,26 @@ IN_PROC_BROWSER_TEST_F(UpdateScreenTest, TestTwoOfflineNetworks) {
   portal_state.response_code = 200;
   SetDetectionResults(kStubEthernetGuid, portal_state);
 
-  // Update screen will show error message about portal state because
+  // Update screen will delay error message about portal state because
   // ethernet is behind captive portal.
-  EXPECT_CALL(*mock_error_screen_actor_,
-              SetUIState(ErrorScreen::UI_STATE_UPDATE))
-      .Times(1);
-  EXPECT_CALL(*mock_error_screen_actor_,
-              SetErrorState(ErrorScreen::ERROR_STATE_PORTAL, std::string()))
-      .Times(1);
-  EXPECT_CALL(*mock_error_screen_actor_, FixCaptivePortal())
-      .Times(1);
+  EXPECT_CALL(*mock_error_screen_,
+              MockSetUIState(NetworkError::UI_STATE_UPDATE)).Times(1);
+  EXPECT_CALL(*mock_error_screen_,
+              MockSetErrorState(NetworkError::ERROR_STATE_PORTAL,
+                                std::string())).Times(1);
+  EXPECT_CALL(*mock_error_screen_, MockFixCaptivePortal()).Times(1);
   EXPECT_CALL(*mock_base_screen_delegate_, ShowErrorScreen()).Times(1);
 
   update_screen_->StartNetworkCheck();
+
+  // Force timer expiration.
+  {
+    base::Closure timed_callback =
+        update_screen_->GetErrorMessageTimerForTesting().user_task();
+    ASSERT_FALSE(timed_callback.is_null());
+    update_screen_->GetErrorMessageTimerForTesting().Reset();
+    timed_callback.Run();
+  }
 
   // Change active network to the wifi behind proxy.
   NetworkPortalDetector::CaptivePortalState proxy_state;
@@ -307,8 +322,8 @@ IN_PROC_BROWSER_TEST_F(UpdateScreenTest, TestTwoOfflineNetworks) {
 
   // Update screen will show message about proxy error because wifie
   // network requires proxy authentication.
-  EXPECT_CALL(*mock_error_screen_actor_,
-              SetErrorState(ErrorScreen::ERROR_STATE_PROXY, std::string()))
+  EXPECT_CALL(*mock_error_screen_,
+              MockSetErrorState(NetworkError::ERROR_STATE_PROXY, std::string()))
       .Times(1);
 
   NotifyPortalDetectionCompleted();
@@ -324,23 +339,18 @@ IN_PROC_BROWSER_TEST_F(UpdateScreenTest, TestVoidNetwork) {
 
   // First portal detection attempt returns NULL network and undefined
   // results, so detection is restarted.
-  EXPECT_CALL(*mock_error_screen_actor_,
-              SetUIState(_))
-      .Times(Exactly(0));
-  EXPECT_CALL(*mock_error_screen_actor_,
-              SetErrorState(_, _))
-      .Times(Exactly(0));
+  EXPECT_CALL(*mock_error_screen_, MockSetUIState(_)).Times(Exactly(0));
+  EXPECT_CALL(*mock_error_screen_, MockSetErrorState(_, _)).Times(Exactly(0));
   EXPECT_CALL(*mock_base_screen_delegate_, ShowErrorScreen()).Times(Exactly(0));
   update_screen_->StartNetworkCheck();
 
   // Second portal detection also returns NULL network and undefined
   // results.  In this case, offline message should be displayed.
-  EXPECT_CALL(*mock_error_screen_actor_,
-              SetUIState(ErrorScreen::UI_STATE_UPDATE))
-      .Times(1);
-  EXPECT_CALL(*mock_error_screen_actor_,
-              SetErrorState(ErrorScreen::ERROR_STATE_OFFLINE, std::string()))
-      .Times(1);
+  EXPECT_CALL(*mock_error_screen_,
+              MockSetUIState(NetworkError::UI_STATE_UPDATE)).Times(1);
+  EXPECT_CALL(*mock_error_screen_,
+              MockSetErrorState(NetworkError::ERROR_STATE_OFFLINE,
+                                std::string())).Times(1);
   EXPECT_CALL(*mock_base_screen_delegate_, ShowErrorScreen()).Times(1);
   base::MessageLoop::current()->RunUntilIdle();
   NotifyPortalDetectionCompleted();
@@ -357,19 +367,26 @@ IN_PROC_BROWSER_TEST_F(UpdateScreenTest, TestAPReselection) {
   portal_state.response_code = 200;
   SetDetectionResults(kStubEthernetGuid, portal_state);
 
-  // Update screen will show error message about portal state because
+  // Update screen will delay error message about portal state because
   // ethernet is behind captive portal.
-  EXPECT_CALL(*mock_error_screen_actor_,
-              SetUIState(ErrorScreen::UI_STATE_UPDATE))
-      .Times(1);
-  EXPECT_CALL(*mock_error_screen_actor_,
-              SetErrorState(ErrorScreen::ERROR_STATE_PORTAL, std::string()))
-      .Times(1);
-  EXPECT_CALL(*mock_error_screen_actor_, FixCaptivePortal())
-      .Times(1);
+  EXPECT_CALL(*mock_error_screen_,
+              MockSetUIState(NetworkError::UI_STATE_UPDATE)).Times(1);
+  EXPECT_CALL(*mock_error_screen_,
+              MockSetErrorState(NetworkError::ERROR_STATE_PORTAL,
+                                std::string())).Times(1);
+  EXPECT_CALL(*mock_error_screen_, MockFixCaptivePortal()).Times(1);
   EXPECT_CALL(*mock_base_screen_delegate_, ShowErrorScreen()).Times(1);
 
   update_screen_->StartNetworkCheck();
+
+  // Force timer expiration.
+  {
+    base::Closure timed_callback =
+        update_screen_->GetErrorMessageTimerForTesting().user_task();
+    ASSERT_FALSE(timed_callback.is_null());
+    update_screen_->GetErrorMessageTimerForTesting().Reset();
+    timed_callback.Run();
+  }
 
   // User re-selects the same network manually. In this case, hide
   // offline message and skip network check. Since ethernet is still

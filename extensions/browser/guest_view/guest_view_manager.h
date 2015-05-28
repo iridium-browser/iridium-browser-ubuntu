@@ -57,23 +57,22 @@ class GuestViewManager : public content::BrowserPluginGuestManager,
   // Associates the Browser Plugin with |element_instance_id| to a
   // guest that has ID of |guest_instance_id| and sets initialization
   // parameters, |params| for it.
-  void AttachGuest(int embedder_render_process_id,
-                   int embedder_routing_id,
+  void AttachGuest(int embedder_process_id,
                    int element_instance_id,
                    int guest_instance_id,
                    const base::DictionaryValue& attach_params);
 
   // Removes the association between |element_instance_id| and a guest instance
   // ID if one exists.
-  void DetachGuest(GuestViewBase* guest, int element_instance_id);
+  void DetachGuest(GuestViewBase* guest);
 
   int GetNextInstanceID();
   int GetGuestInstanceIDForElementID(
-      content::WebContents* owner_web_contents,
+      int owner_process_id,
       int element_instance_id);
 
-  typedef base::Callback<void(content::WebContents*)>
-      WebContentsCreatedCallback;
+  using WebContentsCreatedCallback =
+      base::Callback<void(content::WebContents*)>;
   void CreateGuest(const std::string& view_type,
                    content::WebContents* owner_web_contents,
                    const base::DictionaryValue& create_params,
@@ -89,7 +88,7 @@ class GuestViewManager : public content::BrowserPluginGuestManager,
 
   // BrowserPluginGuestManager implementation.
   content::WebContents* GetGuestByInstanceID(
-      content::WebContents* owner_web_contents,
+      int owner_process_id,
       int element_instance_id) override;
   bool ForEachGuest(content::WebContents* owner_web_contents,
                     const GuestCallback& callback) override;
@@ -124,38 +123,26 @@ class GuestViewManager : public content::BrowserPluginGuestManager,
   static GuestViewManagerFactory* factory_;
 
   // Contains guests' WebContents, mapping from their instance ids.
-  typedef std::map<int, content::WebContents*> GuestInstanceMap;
+  using GuestInstanceMap = std::map<int, content::WebContents*>;
   GuestInstanceMap guest_web_contents_by_instance_id_;
 
   struct ElementInstanceKey {
-    content::WebContents* owner_web_contents;
+    int embedder_process_id;
     int element_instance_id;
 
-    ElementInstanceKey()
-        : owner_web_contents(nullptr),
-          element_instance_id(0) {}
+    ElementInstanceKey();
+    ElementInstanceKey(int embedder_process_id,
+                       int element_instance_id);
 
-    ElementInstanceKey(content::WebContents* owner_web_contents,
-                       int element_instance_id)
-        : owner_web_contents(owner_web_contents),
-          element_instance_id(element_instance_id) {}
-
-    bool operator<(const ElementInstanceKey& other) const {
-      if (owner_web_contents != other.owner_web_contents)
-        return owner_web_contents < other.owner_web_contents;
-      return element_instance_id < other.element_instance_id;
-    }
-
-    bool operator==(const ElementInstanceKey& other) const {
-      return (owner_web_contents == other.owner_web_contents) &&
-          (element_instance_id == other.element_instance_id);
-    }
+    bool operator<(const ElementInstanceKey& other) const;
+    bool operator==(const ElementInstanceKey& other) const;
   };
 
-  typedef std::map<ElementInstanceKey, int> GuestInstanceIDMap;
+  using GuestInstanceIDMap = std::map<ElementInstanceKey, int>;
   GuestInstanceIDMap instance_id_map_;
+
   // The reverse map of GuestInstanceIDMap.
-  typedef std::map<int, ElementInstanceKey> GuestInstanceIDReverseMap;
+  using GuestInstanceIDReverseMap = std::map<int, ElementInstanceKey>;
   GuestInstanceIDReverseMap reverse_instance_id_map_;
 
   int current_instance_id_;

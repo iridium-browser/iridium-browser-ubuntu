@@ -17,7 +17,6 @@
 #include "webrtc/modules/rtp_rtcp/test/BWEStandAlone/TestLoadGenerator.h"
 #include "webrtc/system_wrappers/interface/critical_section_wrapper.h"
 #include "webrtc/system_wrappers/interface/event_wrapper.h"
-#include "webrtc/system_wrappers/interface/thread_wrapper.h"
 #include "webrtc/system_wrappers/interface/tick_util.h"
 #include "webrtc/test/channel_transport/udp_transport.h"
 
@@ -40,7 +39,6 @@ TestSenderReceiver::TestSenderReceiver (void)
 :
 _critSect(CriticalSectionWrapper::CreateCriticalSection()),
 _eventPtr(NULL),
-_procThread(NULL),
 _running(false),
 _payloadType(0),
 _loadGenerator(NULL),
@@ -165,12 +163,8 @@ int32_t TestSenderReceiver::Start()
         exit(1);
     }
 
-    _procThread = ThreadWrapper::CreateThread(ProcThreadFunction, this, kRealtimePriority, "TestSenderReceiver");
-    if (_procThread == NULL)
-    {
-        throw "Unable to create process thread";
-        exit(1);
-    }
+    _procThread = ThreadWrapper::CreateThread(ProcThreadFunction, this,
+                                              "TestSenderReceiver");
 
     _running = true;
 
@@ -183,8 +177,8 @@ int32_t TestSenderReceiver::Start()
         }
     }
 
-    unsigned int tid;
-    _procThread->Start(tid);
+    _procThread->Start();
+    _procThread->SetPriority(kRealtimePriority);
 
     return 0;
 
@@ -199,21 +193,14 @@ int32_t TestSenderReceiver::Stop ()
 
     if (_procThread)
     {
-        _procThread->SetNotAlive();
         _running = false;
         _eventPtr->Set();
 
-        while (!_procThread->Stop())
-        {
-            ;
-        }
+        _procThread->Stop();
+        _procThread.reset();
 
         delete _eventPtr;
-
-        delete _procThread;
     }
-
-    _procThread = NULL;
 
     return (0);
 }

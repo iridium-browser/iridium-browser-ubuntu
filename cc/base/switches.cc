@@ -24,9 +24,6 @@ const char kDisableMainFrameBeforeActivation[] =
 const char kEnableMainFrameBeforeActivation[] =
     "enable-main-frame-before-activation";
 
-const char kEnableTopControlsPositionCalculation[] =
-    "enable-top-controls-position-calculation";
-
 // Percentage of the top controls need to be hidden before they will auto hide.
 const char kTopControlsHideThreshold[] = "top-controls-hide-threshold";
 
@@ -57,6 +54,11 @@ const char kStrictLayerPropertyChangeChecking[] =
 // Virtual viewport for fixed-position elements, scrollbars during pinch.
 const char kEnablePinchVirtualViewport[] = "enable-pinch-virtual-viewport";
 const char kDisablePinchVirtualViewport[] = "disable-pinch-virtual-viewport";
+
+// Ensures that the draw properties computed via the property trees match those
+// computed by CalcDrawProperties.
+const char kEnablePropertyTreeVerification[] =
+    "enable-property-tree-verification";
 
 // Disable partial swap which is needed for some OpenGL drivers / emulators.
 const char kUIDisablePartialSwap[] = "ui-disable-partial-swap";
@@ -98,16 +100,6 @@ const char kUIShowScreenSpaceRects[] = "ui-show-screenspace-rects";
 const char kShowReplicaScreenSpaceRects[] = "show-replica-screenspace-rects";
 const char kUIShowReplicaScreenSpaceRects[] =
     "ui-show-replica-screenspace-rects";
-
-// Show rects in the HUD wherever something is known to be drawn opaque and is
-// considered occluding the pixels behind it.
-const char kShowOccludingRects[] = "show-occluding-rects";
-const char kUIShowOccludingRects[] = "ui-show-occluding-rects";
-
-// Show rects in the HUD wherever something is not known to be drawn opaque and
-// is not considered to be occluding the pixels behind it.
-const char kShowNonOccludingRects[] = "show-nonoccluding-rects";
-const char kUIShowNonOccludingRects[] = "ui-show-nonoccluding-rects";
 
 // Prevents the layer tree unit tests from timing out.
 const char kCCLayerTreeTestNoTimeout[] = "cc-layer-tree-test-no-timeout";

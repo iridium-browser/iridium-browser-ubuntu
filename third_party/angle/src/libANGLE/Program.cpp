@@ -9,19 +9,18 @@
 
 #include "libANGLE/Program.h"
 
+#include <algorithm>
+
+#include "common/debug.h"
+#include "common/platform.h"
+#include "common/utilities.h"
+#include "common/version.h"
+#include "compiler/translator/blocklayout.h"
 #include "libANGLE/Data.h"
 #include "libANGLE/ResourceManager.h"
 #include "libANGLE/features.h"
 #include "libANGLE/renderer/Renderer.h"
 #include "libANGLE/renderer/ProgramImpl.h"
-
-#include "common/debug.h"
-#include "common/version.h"
-#include "common/utilities.h"
-#include "common/platform.h"
-#include "common/blocklayout.h"
-
-#include <algorithm>
 
 namespace gl
 {
@@ -612,7 +611,7 @@ GLuint Program::getAttributeLocation(const std::string &name)
         }
     }
 
-    return -1;
+    return static_cast<GLuint>(-1);
 }
 
 int Program::getSemanticIndex(int attributeIndex)
@@ -1002,9 +1001,9 @@ Error Program::applyUniforms()
     return mProgram->applyUniforms();
 }
 
-Error Program::applyUniformBuffers(const std::vector<gl::Buffer*> boundBuffers, const Caps &caps)
+Error Program::applyUniformBuffers(const gl::Data &data)
 {
-    return mProgram->applyUniformBuffers(boundBuffers, caps);
+    return mProgram->applyUniformBuffers(data, mUniformBlockBindings);
 }
 
 void Program::flagForDeletion()
@@ -1141,6 +1140,11 @@ GLint Program::getActiveUniformBlockMaxLength()
 GLuint Program::getUniformBlockIndex(const std::string &name)
 {
     return mProgram->getUniformBlockIndex(name);
+}
+
+const UniformBlock *Program::getUniformBlockByIndex(GLuint index) const
+{
+    return mProgram->getUniformBlockByIndex(index);
 }
 
 void Program::bindUniformBlock(GLuint uniformBlockIndex, GLuint uniformBlockBinding)
@@ -1544,7 +1548,7 @@ bool Program::linkValidateVaryings(InfoLog &infoLog, const std::string &varyingN
         return false;
     }
 
-    if (vertexVarying.interpolation != fragmentVarying.interpolation)
+    if (!sh::InterpolationTypesMatch(vertexVarying.interpolation, fragmentVarying.interpolation))
     {
         infoLog.append("Interpolation types for %s differ between vertex and fragment shaders", varyingName.c_str());
         return false;

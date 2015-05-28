@@ -33,6 +33,7 @@ const CGFloat kMenuXOffsetAdjust = 2.0;
 @interface AvatarBaseController (Private)
 // Shows the avatar bubble.
 - (IBAction)buttonClicked:(id)sender;
+- (IBAction)buttonRightClicked:(id)sender;
 
 - (void)bubbleWillClose:(NSNotification*)notif;
 
@@ -177,7 +178,7 @@ class ProfileInfoUpdateObserver : public ProfileInfoCacheObserver,
       NSMaxX([anchor bounds]) - kMenuXOffsetAdjust :
       NSMidX([anchor bounds]);
   NSPoint point = NSMakePoint(anchorX,
-                              NSMaxY([anchor bounds]) - kMenuYOffsetAdjust);
+                              NSMaxY([anchor bounds]) + kMenuYOffsetAdjust);
   point = [anchor convertPoint:point toView:nil];
   point = [[anchor window] convertBaseToScreen:point];
 
@@ -187,6 +188,14 @@ class ProfileInfoUpdateObserver : public ProfileInfoCacheObserver,
     profiles::TutorialMode tutorialMode;
     profiles::BubbleViewModeFromAvatarBubbleMode(
         mode, &viewMode, &tutorialMode);
+    // Don't start creating the view if it would be an empty fast user switcher.
+    // It has to happen here to prevent the view system from creating an empty
+    // container.
+    if (viewMode == profiles::BUBBLE_VIEW_MODE_FAST_PROFILE_CHOOSER &&
+        profiles::HasProfileSwitchTargets(browser_->profile())) {
+      return;
+    }
+
     menuController_ =
         [[ProfileChooserController alloc] initWithBrowser:browser_
                                                anchoredAt:point
@@ -210,8 +219,20 @@ class ProfileInfoUpdateObserver : public ProfileInfoCacheObserver,
 }
 
 - (IBAction)buttonClicked:(id)sender {
+  BrowserWindow::AvatarBubbleMode mode =
+      BrowserWindow::AVATAR_BUBBLE_MODE_DEFAULT;
+
   [self showAvatarBubbleAnchoredAt:button_
-                          withMode:BrowserWindow::AVATAR_BUBBLE_MODE_DEFAULT
+                          withMode:mode
+                   withServiceType:signin::GAIA_SERVICE_TYPE_NONE];
+}
+
+- (IBAction)buttonRightClicked:(id)sender {
+  BrowserWindow::AvatarBubbleMode mode =
+      BrowserWindow::AVATAR_BUBBLE_MODE_FAST_USER_SWITCH;
+
+  [self showAvatarBubbleAnchoredAt:button_
+                          withMode:mode
                    withServiceType:signin::GAIA_SERVICE_TYPE_NONE];
 }
 

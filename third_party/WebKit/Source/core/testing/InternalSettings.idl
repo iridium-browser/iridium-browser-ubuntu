@@ -41,10 +41,12 @@
     [RaisesException] void setTextAutosizingWindowSizeOverride(long width, long height);
     [RaisesException] void setAccessibilityFontScaleFactor(float fontScaleFactor);
     [RaisesException] void setMediaTypeOverride(DOMString mediaTypeOverride);
+    [RaisesException] void setDisplayModeOverride(DOMString displayModeOverride);
     [RaisesException] void setEditingBehavior(DOMString behavior);
     [RaisesException] void setImagesEnabled(boolean enabled);
     [RaisesException] void setDefaultVideoPosterURL(DOMString poster);
     [RaisesException] void setViewportEnabled(boolean enabled);
+    [RaisesException] void setViewportMetaEnabled(boolean enabled);
     [RaisesException] void setAvailablePointerTypes(DOMString pointers);
     [RaisesException] void setPrimaryPointerType(DOMString pointer);
     [RaisesException] void setAvailableHoverTypes(DOMString types);
@@ -60,4 +62,6 @@
     void setExperimentalContentSecurityPolicyFeaturesEnabled(boolean enabled);
     void setPseudoClassesInMatchingCriteriaInAuthorShadowTreesEnabled(boolean enabled);
     void setImageColorProfilesEnabled(boolean enabled);
+    void setScrollTopLeftInteropEnabled(boolean enabled);
+    void setLinkHeaderEnabled(boolean enabled);
 };

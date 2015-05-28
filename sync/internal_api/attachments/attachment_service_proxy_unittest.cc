@@ -7,7 +7,6 @@
 #include "base/bind.h"
 #include "base/memory/ref_counted_memory.h"
 #include "base/memory/scoped_ptr.h"
-#include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/synchronization/lock.h"
 #include "base/synchronization/waitable_event.h"
@@ -34,8 +33,6 @@ class StubAttachmentService : public AttachmentService,
 
   ~StubAttachmentService() override {}
 
-  AttachmentStore* GetStore() override { return NULL; }
-
   void GetOrDownloadAttachments(
       const AttachmentIdList& attachment_ids,
       const GetOrDownloadCallback& callback) override {
@@ -49,15 +46,7 @@ class StubAttachmentService : public AttachmentService,
                    base::Passed(&attachments)));
   }
 
-  void DropAttachments(const AttachmentIdList& attachment_ids,
-                       const DropCallback& callback) override {
-    CalledOnValidThread();
-    Increment();
-    base::MessageLoop::current()->PostTask(
-        FROM_HERE, base::Bind(callback, AttachmentService::DROP_SUCCESS));
-  }
-
-  void UploadAttachments(const AttachmentIdSet& attachments_ids) override {
+  void UploadAttachments(const AttachmentIdList& attachments_ids) override {
     CalledOnValidThread();
     Increment();
   }
@@ -102,10 +91,7 @@ class AttachmentServiceProxyTest : public testing::Test,
     callback_get_or_download =
         base::Bind(&AttachmentServiceProxyTest::IncrementGetOrDownload,
                    base::Unretained(this));
-    callback_drop = base::Bind(&AttachmentServiceProxyTest::IncrementDrop,
-                               base::Unretained(this));
     count_callback_get_or_download = 0;
-    count_callback_drop = 0;
   }
 
   void TearDown() override {
@@ -125,12 +111,6 @@ class AttachmentServiceProxyTest : public testing::Test,
     ++count_callback_get_or_download;
   }
 
-  // a DropCallback
-  void IncrementDrop(const AttachmentService::DropResult&) {
-    CalledOnValidThread();
-    ++count_callback_drop;
-  }
-
   void WaitForStubThread() {
     base::WaitableEvent done(false, false);
     stub_thread->message_loop()->PostTask(
@@ -145,36 +125,27 @@ class AttachmentServiceProxyTest : public testing::Test,
   scoped_ptr<AttachmentServiceProxy> proxy;
 
   AttachmentService::GetOrDownloadCallback callback_get_or_download;
-  AttachmentService::DropCallback callback_drop;
 
   // number of times callback_get_or_download was invoked
   int count_callback_get_or_download;
-  // number of times callback_drop was invoked
-  int count_callback_drop;
 };
-
-TEST_F(AttachmentServiceProxyTest, GetStore) {
-  EXPECT_EQ(NULL, proxy->GetStore());
-}
 
 // Verify that each of AttachmentServiceProxy's methods are invoked on the stub.
 // Verify that the methods that take callbacks invoke passed callbacks on this
 // thread.
 TEST_F(AttachmentServiceProxyTest, MethodsAreProxied) {
   proxy->GetOrDownloadAttachments(AttachmentIdList(), callback_get_or_download);
-  proxy->DropAttachments(AttachmentIdList(), callback_drop);
-  proxy->UploadAttachments(AttachmentIdSet());
+  proxy->UploadAttachments(AttachmentIdList());
   // Wait for the posted calls to execute in the stub thread.
   WaitForStubThread();
-  EXPECT_EQ(3, stub->GetCallCount());
+  EXPECT_EQ(2, stub->GetCallCount());
   // At this point the stub thread has finished executed the calls. However, the
   // result callbacks it has posted may not have executed yet. Wait a second
   // time to ensure the stub thread has executed the posted result callbacks.
   WaitForStubThread();
 
-  loop.RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
   EXPECT_EQ(1, count_callback_get_or_download);
-  EXPECT_EQ(1, count_callback_drop);
 }
 
 // Verify that it's safe to use an AttachmentServiceProxy even after its wrapped
@@ -188,7 +159,7 @@ TEST_F(AttachmentServiceProxyTest, WrappedIsDestroyed) {
   // callbacks.
   WaitForStubThread();
 
-  loop.RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
   EXPECT_EQ(1, count_callback_get_or_download);
 
   // Destroy the stub and call GetOrDownloadAttachments again.
@@ -200,7 +171,7 @@ TEST_F(AttachmentServiceProxyTest, WrappedIsDestroyed) {
   proxy->GetOrDownloadAttachments(AttachmentIdList(), callback_get_or_download);
   WaitForStubThread();
   WaitForStubThread();
-  loop.RunUntilIdle();
+  base::RunLoop().RunUntilIdle();
   EXPECT_EQ(1, count_callback_get_or_download);
 }
 

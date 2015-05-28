@@ -185,23 +185,23 @@ TEST(NACKStringBuilderTest, TestCase13) {
   EXPECT_EQ(std::string("5-6,9"), builder.GetResult());
 }
 
-void CreateRtpPacket(const bool marker_bit, const uint8_t payload,
+void CreateRtpPacket(const bool marker_bit, const uint8_t payload_type,
     const uint16_t seq_num, const uint32_t timestamp,
     const uint32_t ssrc, uint8_t* array,
     size_t* cur_pos) {
-  ASSERT_TRUE(payload <= 127);
+  ASSERT_LE(payload_type, 127);
   array[(*cur_pos)++] = 0x80;
-  array[(*cur_pos)++] = payload | (marker_bit ? 0x80 : 0);
+  array[(*cur_pos)++] = payload_type | (marker_bit ? 0x80 : 0);
   array[(*cur_pos)++] = seq_num >> 8;
-  array[(*cur_pos)++] = seq_num;
+  array[(*cur_pos)++] = seq_num & 0xFF;
   array[(*cur_pos)++] = timestamp >> 24;
-  array[(*cur_pos)++] = timestamp >> 16;
-  array[(*cur_pos)++] = timestamp >> 8;
-  array[(*cur_pos)++] = timestamp;
+  array[(*cur_pos)++] = (timestamp >> 16) & 0xFF;
+  array[(*cur_pos)++] = (timestamp >> 8) & 0xFF;
+  array[(*cur_pos)++] = timestamp & 0xFF;
   array[(*cur_pos)++] = ssrc >> 24;
-  array[(*cur_pos)++] = ssrc >> 16;
-  array[(*cur_pos)++] = ssrc >> 8;
-  array[(*cur_pos)++] = ssrc;
+  array[(*cur_pos)++] = (ssrc >> 16) & 0xFF;
+  array[(*cur_pos)++] = (ssrc >> 8) & 0xFF;
+  array[(*cur_pos)++] = ssrc & 0xFF;
   // VP8 payload header
   array[(*cur_pos)++] = 0x90;  // X bit = 1
   array[(*cur_pos)++] = 0x20;  // T bit = 1
@@ -227,15 +227,13 @@ class TestTransport : public Transport,
   void SetRTCPReceiver(RTCPReceiver* rtcp_receiver) {
     rtcp_receiver_ = rtcp_receiver;
   }
-  virtual int SendPacket(int /*ch*/,
-                         const void* /*data*/,
-                         size_t /*len*/) OVERRIDE {
+  int SendPacket(int /*ch*/, const void* /*data*/, size_t /*len*/) override {
     return -1;
   }
 
-  virtual int SendRTCPPacket(int /*ch*/,
-                             const void *packet,
-                             size_t packet_len) OVERRIDE {
+  int SendRTCPPacket(int /*ch*/,
+                     const void* packet,
+                     size_t packet_len) override {
     RTCPUtility::RTCPParserV2 rtcpParser((uint8_t*)packet,
                                          packet_len,
                                          true); // Allow non-compound RTCP
@@ -265,9 +263,9 @@ class TestTransport : public Transport,
     return static_cast<int>(packet_len);
   }
 
-  virtual int OnReceivedPayloadData(const uint8_t* payloadData,
-                                    const size_t payloadSize,
-                                    const WebRtcRTPHeader* rtpHeader) OVERRIDE {
+  int OnReceivedPayloadData(const uint8_t* payloadData,
+                            const size_t payloadSize,
+                            const WebRtcRTPHeader* rtpHeader) override {
     return 0;
   }
   RTCPReceiver* rtcp_receiver_;
@@ -304,8 +302,9 @@ class RtcpSenderTest : public ::testing::Test {
     rtp_receiver_.reset(RtpReceiver::CreateVideoReceiver(
         0, &clock_, test_transport_, NULL, rtp_payload_registry_.get()));
     rtcp_sender_ =
-        new RTCPSender(0, false, &clock_, receive_statistics_.get());
-    rtcp_receiver_ = new RTCPReceiver(0, &clock_, rtp_rtcp_impl_);
+        new RTCPSender(0, false, &clock_, receive_statistics_.get(), NULL);
+    rtcp_receiver_ = new RTCPReceiver(0, &clock_, NULL, NULL, NULL,
+                                      rtp_rtcp_impl_);
     test_transport_->SetRTCPReceiver(rtcp_receiver_);
     // Initialize
     EXPECT_EQ(0, rtcp_sender_->RegisterSendTransport(test_transport_));
@@ -325,15 +324,15 @@ class RtcpSenderTest : public ::testing::Test {
 
   OverUseDetectorOptions over_use_detector_options_;
   SimulatedClock clock_;
-  scoped_ptr<RTPPayloadRegistry> rtp_payload_registry_;
-  scoped_ptr<RtpReceiver> rtp_receiver_;
+  rtc::scoped_ptr<RTPPayloadRegistry> rtp_payload_registry_;
+  rtc::scoped_ptr<RtpReceiver> rtp_receiver_;
   ModuleRtpRtcpImpl* rtp_rtcp_impl_;
   RTCPSender* rtcp_sender_;
   RTCPReceiver* rtcp_receiver_;
   TestTransport* test_transport_;
   MockRemoteBitrateObserver remote_bitrate_observer_;
-  scoped_ptr<RemoteBitrateEstimator> remote_bitrate_estimator_;
-  scoped_ptr<ReceiveStatistics> receive_statistics_;
+  rtc::scoped_ptr<RemoteBitrateEstimator> remote_bitrate_estimator_;
+  rtc::scoped_ptr<ReceiveStatistics> receive_statistics_;
 
   enum {kMaxPacketLength = 1500};
   uint8_t packet_[kMaxPacketLength];
@@ -353,19 +352,19 @@ TEST_F(RtcpSenderTest, IJStatus) {
 
 TEST_F(RtcpSenderTest, TestCompound) {
   const bool marker_bit = false;
-  const uint8_t payload = 100;
+  const uint8_t payload_type = 100;
   const uint16_t seq_num = 11111;
   const uint32_t timestamp = 1234567;
   const uint32_t ssrc = 0x11111111;
   size_t packet_length = 0;
-  CreateRtpPacket(marker_bit, payload, seq_num, timestamp, ssrc, packet_,
+  CreateRtpPacket(marker_bit, payload_type, seq_num, timestamp, ssrc, packet_,
       &packet_length);
   EXPECT_EQ(25u, packet_length);
 
   VideoCodec codec_inst;
   strncpy(codec_inst.plName, "VP8", webrtc::kPayloadNameSize - 1);
   codec_inst.codecType = webrtc::kVideoCodecVP8;
-  codec_inst.plType = payload;
+  codec_inst.plType = payload_type;
   EXPECT_EQ(0, rtp_receiver_->RegisterReceivePayload(codec_inst.plName,
                                                      codec_inst.plType,
                                                      90000,
@@ -373,7 +372,7 @@ TEST_F(RtcpSenderTest, TestCompound) {
                                                      codec_inst.maxBitrate));
 
   // Make sure RTP packet has been received.
-  scoped_ptr<RtpHeaderParser> parser(RtpHeaderParser::Create());
+  rtc::scoped_ptr<RtpHeaderParser> parser(RtpHeaderParser::Create());
   RTPHeader header;
   EXPECT_TRUE(parser->Parse(packet_, packet_length, &header));
   PayloadUnion payload_specific;

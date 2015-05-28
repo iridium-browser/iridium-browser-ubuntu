@@ -14,7 +14,7 @@
 namespace {
 
 const int kTileSize = 90;
-const int kTileHorizontalPadding = 10;
+const int kIconTitleSpacing = 6;
 
 }  // namespace
 
@@ -27,7 +27,7 @@ TileItemView::TileItemView()
       title_(new views::Label),
       selected_(false) {
   views::BoxLayout* layout_manager = new views::BoxLayout(
-      views::BoxLayout::kVertical, kTileHorizontalPadding, 0, 0);
+      views::BoxLayout::kVertical, 0, 0, kIconTitleSpacing);
   layout_manager->set_main_axis_alignment(
       views::BoxLayout::MAIN_AXIS_ALIGNMENT_CENTER);
   SetLayoutManager(layout_manager);
@@ -41,6 +41,7 @@ TileItemView::TileItemView()
   title_->SetEnabledColor(kGridTitleColor);
   title_->SetFontList(rb.GetFontList(kItemTextFontStyle));
   title_->SetHorizontalAlignment(gfx::ALIGN_CENTER);
+  title_->SetHandlesTooltips(false);
 
   AddChildView(icon_);
   AddChildView(title_);
@@ -55,6 +56,9 @@ void TileItemView::SetSelected(bool selected) {
 
   selected_ = selected;
   UpdateBackgroundColor();
+
+  if (selected)
+    NotifyAccessibilityEvent(ui::AX_EVENT_FOCUS, true);
 }
 
 void TileItemView::SetParentBackgroundColor(SkColor color) {
@@ -68,6 +72,7 @@ void TileItemView::SetIcon(const gfx::ImageSkia& icon) {
 
 void TileItemView::SetTitle(const base::string16& title) {
   title_->SetText(title);
+  SetAccessibleName(title);
 }
 
 void TileItemView::StateChanged() {
@@ -97,6 +102,18 @@ void TileItemView::UpdateBackgroundColor() {
 
 gfx::Size TileItemView::GetPreferredSize() const {
   return gfx::Size(kTileSize, kTileSize);
+}
+
+bool TileItemView::GetTooltipText(const gfx::Point& p,
+                                  base::string16* tooltip) const {
+  // Use the label to generate a tooltip, so that it will consider its text
+  // truncation in making the tooltip. We do not want the label itself to have a
+  // tooltip, so we only temporarily enable it to get the tooltip text from the
+  // label, then disable it again.
+  title_->SetHandlesTooltips(true);
+  bool handled = title_->GetTooltipText(p, tooltip);
+  title_->SetHandlesTooltips(false);
+  return handled;
 }
 
 }  // namespace app_list

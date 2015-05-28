@@ -50,6 +50,7 @@
 #include "third_party/WebKit/public/platform/WebSize.h"
 #include "third_party/WebKit/public/platform/WebString.h"
 #include "third_party/WebKit/public/platform/WebThread.h"
+#include "third_party/WebKit/public/platform/WebTraceLocation.h"
 #include "third_party/WebKit/public/platform/WebURL.h"
 #include "third_party/WebKit/public/platform/WebURLError.h"
 #include "third_party/WebKit/public/platform/WebURLRequest.h"
@@ -89,6 +90,7 @@ using blink::WebURLError;
 using blink::WebURLRequest;
 using blink::WebScreenOrientationType;
 using blink::WebTestingSupport;
+using blink::WebTraceLocation;
 using blink::WebThread;
 using blink::WebVector;
 using blink::WebView;
@@ -254,11 +256,13 @@ void WebKitTestRunner::PrintMessage(const std::string& message) {
 
 void WebKitTestRunner::PostTask(WebTask* task) {
   Platform::current()->currentThread()->postTask(
+      WebTraceLocation(__FUNCTION__, __FILE__),
       new InvokeTaskHelper(make_scoped_ptr(task)));
 }
 
 void WebKitTestRunner::PostDelayedTask(WebTask* task, long long ms) {
   Platform::current()->currentThread()->postDelayedTask(
+      WebTraceLocation(__FUNCTION__, __FILE__),
       new InvokeTaskHelper(make_scoped_ptr(task)), ms);
 }
 
@@ -655,8 +659,6 @@ void WebKitTestRunner::Reset() {
   render_view()->ClearEditCommands();
   render_view()->GetWebView()->mainFrame()->setName(WebString());
   render_view()->GetWebView()->mainFrame()->clearOpener();
-  render_view()->GetWebView()->setPageScaleFactorLimits(1, 4);
-  render_view()->GetWebView()->setPageScaleFactor(1, WebPoint(0, 0));
 
   // Resetting the internals object also overrides the WebPreferences, so we
   // have to sync them to WebKit again.

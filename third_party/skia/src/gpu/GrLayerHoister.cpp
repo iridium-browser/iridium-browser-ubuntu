@@ -10,6 +10,8 @@
 #include "GrRecordReplaceDraw.h"
 
 #include "SkCanvas.h"
+#include "SkDeviceImageFilterProxy.h"
+#include "SkDeviceProperties.h"
 #include "SkGpuDevice.h"
 #include "SkGrPixelRef.h"
 #include "SkLayerInfo.h"
@@ -82,8 +84,7 @@ static void prepare_for_hoisting(GrLayerCache* layerCache,
     hl->fPreMat.preConcat(info.fPreMat);
 }
 
-// Compute the source rect if possible and return false if further processing 
-// on the layer should be abandoned based on its source rect.
+// Compute the source rect and return false if it is empty.
 static bool compute_source_rect(const SkLayerInfo::BlockInfo& info, const SkMatrix& initialMat,
                                 const SkIRect& dstIR, SkIRect* srcIR) {
     SkIRect clipBounds = dstIR;
@@ -107,10 +108,6 @@ static bool compute_source_rect(const SkLayerInfo::BlockInfo& info, const SkMatr
         }
     } else {
         *srcIR = clipBounds;
-    }
-
-    if (!GrLayerCache::PlausiblyAtlasable(srcIR->width(), srcIR->height())) {
-        return false;
     }
 
     return true;
@@ -170,7 +167,8 @@ void GrLayerHoister::FindLayersToAtlas(GrContext* context,
 
         SkIRect srcIR;
 
-        if (!compute_source_rect(info, initialMat, dstIR, &srcIR)) {
+        if (!compute_source_rect(info, initialMat, dstIR, &srcIR) ||
+            !GrLayerCache::PlausiblyAtlasable(srcIR.width(), srcIR.height())) {
             continue;
         }
 
@@ -278,13 +276,21 @@ void GrLayerHoister::DrawLayersToAtlas(GrContext* context,
     }
 }
 
+SkBitmap wrap_texture(GrTexture* texture) {
+    SkASSERT(texture);
+
+    SkBitmap result;
+    result.setInfo(texture->surfacePriv().info());
+    result.setPixelRef(SkNEW_ARGS(SkGrPixelRef, (result.info(), texture)))->unref();
+    return result;
+}
+
 void GrLayerHoister::FilterLayer(GrContext* context,
                                  SkGpuDevice* device,
                                  const GrHoistedLayer& info) {
     GrCachedLayer* layer = info.fLayer;
 
     SkASSERT(layer->filter());
-    SkASSERT(layer->filter()->canFilterImageGPU());
 
     static const int kDefaultCacheSize = 32 * 1024 * 1024;
 
@@ -298,7 +304,6 @@ void GrLayerHoister::FilterLayer(GrContext* context,
     totMat.preConcat(info.fLocalMat);
     totMat.postTranslate(-SkIntToScalar(filterOffset.fX), -SkIntToScalar(filterOffset.fY));
 
-
     SkASSERT(0 == layer->rect().fLeft && 0 == layer->rect().fTop);
     SkIRect clipBounds = layer->rect();
 
@@ -307,9 +312,11 @@ void GrLayerHoister::FilterLayer(GrContext* context,
     SkAutoTUnref<SkImageFilter::Cache> cache(SkImageFilter::Cache::Create(kDefaultCacheSize));
     SkImageFilter::Context filterContext(totMat, clipBounds, cache);
 
-    if (!device->filterTexture(context, layer->texture(), layer->filter(),
-                               filterContext, &filteredBitmap, &offset)) {
-        // Filtering failed. Press on with the unfiltered version
+    SkDeviceImageFilterProxy proxy(device, SkSurfaceProps(0, kUnknown_SkPixelGeometry));
+    const SkBitmap src = wrap_texture(layer->texture());
+
+    if (!layer->filter()->filterImage(&proxy, src, filterContext, &filteredBitmap, &offset)) {
+        // Filtering failed. Press on with the unfiltered version.
         return;
     }
 

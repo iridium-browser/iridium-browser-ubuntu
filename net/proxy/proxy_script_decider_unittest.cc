@@ -12,10 +12,10 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/time/time.h"
 #include "net/base/net_errors.h"
-#include "net/base/net_log.h"
-#include "net/base/net_log_unittest.h"
 #include "net/base/test_completion_callback.h"
 #include "net/dns/mock_host_resolver.h"
+#include "net/log/net_log.h"
+#include "net/log/net_log_unittest.h"
 #include "net/proxy/dhcp_proxy_script_fetcher.h"
 #include "net/proxy/mock_proxy_script_fetcher.h"
 #include "net/proxy/proxy_config.h"
@@ -426,6 +426,16 @@ TEST_F(ProxyScriptDeciderQuickCheckTest, ExplicitPacUrl) {
   callback_.WaitForResult();
   EXPECT_TRUE(decider_->effective_config().has_pac_url());
   EXPECT_EQ(rule.url, decider_->effective_config().pac_url());
+}
+
+// Regression test for http://crbug.com/409698.
+// This test lets the state machine get into state QUICK_CHECK_COMPLETE, then
+// destroys the decider, causing a cancel.
+TEST_F(ProxyScriptDeciderQuickCheckTest, CancelPartway) {
+  resolver_.set_synchronous_mode(false);
+  resolver_.set_ondemand_mode(true);
+  EXPECT_EQ(ERR_IO_PENDING, StartDecider());
+  decider_.reset(NULL);
 }
 
 // Fails at WPAD (downloading), but succeeds in choosing the custom PAC.

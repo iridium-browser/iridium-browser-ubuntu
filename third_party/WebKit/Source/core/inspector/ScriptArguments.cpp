@@ -99,8 +99,12 @@ private:
             && !value->IsDate()
             && !value->IsFunction()
             && !value->IsNativeError()
-            && !value->IsRegExp())
-            return append(v8::Local<v8::Object>::Cast(value)->ObjectProtoToString());
+            && !value->IsRegExp()) {
+            v8::Local<v8::Object> object = v8::Local<v8::Object>::Cast(value);
+            v8::Local<v8::String> stringValue;
+            if (object->ObjectProtoToString(m_isolate->GetCurrentContext()).ToLocal(&stringValue))
+                return append(stringValue);
+        }
         return append(value->ToString(m_isolate));
     }
 
@@ -162,8 +166,6 @@ private:
 
 } // namespace
 
-DEFINE_EMPTY_DESTRUCTOR_WILL_BE_REMOVED(ScriptArguments)
-
 PassRefPtrWillBeRawPtr<ScriptArguments> ScriptArguments::create(ScriptState* scriptState, Vector<ScriptValue>& arguments)
 {
     return adoptRefWillBeNoop(new ScriptArguments(scriptState, arguments));
@@ -173,6 +175,10 @@ ScriptArguments::ScriptArguments(ScriptState* scriptState, Vector<ScriptValue>& 
     : m_scriptState(scriptState)
 {
     m_arguments.swap(arguments);
+}
+
+ScriptArguments::~ScriptArguments()
+{
 }
 
 const ScriptValue &ScriptArguments::argumentAt(size_t index) const

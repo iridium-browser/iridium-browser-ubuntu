@@ -53,40 +53,54 @@ PictureLayerTilingSet::PictureLayerTilingSet(
 PictureLayerTilingSet::~PictureLayerTilingSet() {
 }
 
-void PictureLayerTilingSet::UpdateTilingsToCurrentRasterSource(
+void PictureLayerTilingSet::CopyTilingsAndPropertiesFromPendingTwin(
+    const PictureLayerTilingSet* pending_twin_set,
+    const scoped_refptr<RasterSource>& raster_source) {
+  if (pending_twin_set->tilings_.empty()) {
+    // If the twin (pending) tiling set is empty, it was not updated for the
+    // current frame. So we drop tilings from our set as well, instead of
+    // leaving behind unshared tilings that are all non-ideal.
+    RemoveAllTilings();
+    return;
+  }
+
+  bool tiling_sort_required = false;
+  for (PictureLayerTiling* pending_twin_tiling : pending_twin_set->tilings_) {
+    float contents_scale = pending_twin_tiling->contents_scale();
+    PictureLayerTiling* this_tiling = FindTilingWithScale(contents_scale);
+    if (!this_tiling) {
+      scoped_ptr<PictureLayerTiling> new_tiling = PictureLayerTiling::Create(
+          contents_scale, raster_source, client_, max_tiles_for_interest_area_,
+          skewport_target_time_in_seconds_,
+          skewport_extrapolation_limit_in_content_pixels_);
+      tilings_.push_back(new_tiling.Pass());
+      this_tiling = tilings_.back();
+      tiling_sort_required = true;
+    }
+    this_tiling->CloneTilesAndPropertiesFrom(*pending_twin_tiling);
+  }
+
+  if (tiling_sort_required)
+    tilings_.sort(LargestToSmallestScaleFunctor());
+}
+
+void PictureLayerTilingSet::UpdateTilingsToCurrentRasterSourceForActivation(
     scoped_refptr<RasterSource> raster_source,
-    const PictureLayerTilingSet* twin_set,
+    const PictureLayerTilingSet* pending_twin_set,
     const Region& layer_invalidation,
     float minimum_contents_scale,
     float maximum_contents_scale) {
   RemoveTilingsBelowScale(minimum_contents_scale);
   RemoveTilingsAboveScale(maximum_contents_scale);
 
-  // Copy over tilings that are shared with the |twin_set| tiling set (if it
-  // exists).
-  if (twin_set) {
-    for (PictureLayerTiling* twin_tiling : twin_set->tilings_) {
-      float contents_scale = twin_tiling->contents_scale();
-      DCHECK_GE(contents_scale, minimum_contents_scale);
-      DCHECK_LE(contents_scale, maximum_contents_scale);
+  // Copy over tilings that are shared with the |pending_twin_set| tiling set.
+  // Also, copy all of the properties from twin tilings.
+  CopyTilingsAndPropertiesFromPendingTwin(pending_twin_set, raster_source);
 
-      PictureLayerTiling* this_tiling = FindTilingWithScale(contents_scale);
-      if (!this_tiling) {
-        scoped_ptr<PictureLayerTiling> new_tiling = PictureLayerTiling::Create(
-            contents_scale, raster_source, client_,
-            max_tiles_for_interest_area_, skewport_target_time_in_seconds_,
-            skewport_extrapolation_limit_in_content_pixels_);
-        tilings_.push_back(new_tiling.Pass());
-        this_tiling = tilings_.back();
-      }
-      this_tiling->CloneTilesAndPropertiesFrom(*twin_tiling);
-    }
-  }
-
-  // For unshared tilings, invalidate tiles and update them to the new raster
-  // source.
+  // If the tiling is not shared (FindTilingWithScale returns nullptr), then
+  // invalidate tiles and update them to the new raster source.
   for (PictureLayerTiling* tiling : tilings_) {
-    if (twin_set && twin_set->FindTilingWithScale(tiling->contents_scale()))
+    if (pending_twin_set->FindTilingWithScale(tiling->contents_scale()))
       continue;
 
     tiling->SetRasterSourceAndResize(raster_source);
@@ -97,14 +111,47 @@ void PictureLayerTilingSet::UpdateTilingsToCurrentRasterSource(
     // raster source.
     tiling->CreateMissingTilesInLiveTilesRect();
 
-    // If |twin_set| is present, use the resolutions from there. Otherwise leave
-    // all resolutions as they are.
-    if (twin_set)
-      tiling->set_resolution(NON_IDEAL_RESOLUTION);
+    // |this| is active set and |tiling| is not in the pending set, which means
+    // it is now NON_IDEAL_RESOLUTION.
+    tiling->set_resolution(NON_IDEAL_RESOLUTION);
   }
 
-  tilings_.sort(LargestToSmallestScaleFunctor());
+  VerifyTilings(pending_twin_set);
+}
 
+void PictureLayerTilingSet::UpdateTilingsToCurrentRasterSourceForCommit(
+    scoped_refptr<RasterSource> raster_source,
+    const Region& layer_invalidation,
+    float minimum_contents_scale,
+    float maximum_contents_scale) {
+  RemoveTilingsBelowScale(minimum_contents_scale);
+  RemoveTilingsAboveScale(maximum_contents_scale);
+
+  // Invalidate tiles and update them to the new raster source.
+  for (PictureLayerTiling* tiling : tilings_) {
+    tiling->SetRasterSourceAndResize(raster_source);
+    tiling->Invalidate(layer_invalidation);
+    tiling->SetRasterSourceOnTiles();
+    // This is needed for cases where the live tiles rect didn't change but
+    // recordings exist in the raster source that did not exist on the last
+    // raster source.
+    tiling->CreateMissingTilesInLiveTilesRect();
+  }
+  VerifyTilings(nullptr /* pending_twin_set */);
+}
+
+void PictureLayerTilingSet::UpdateRasterSourceDueToLCDChange(
+    const scoped_refptr<RasterSource>& raster_source,
+    const Region& layer_invalidation) {
+  for (PictureLayerTiling* tiling : tilings_) {
+    tiling->SetRasterSourceAndResize(raster_source);
+    tiling->Invalidate(layer_invalidation);
+    tiling->VerifyAllTilesHaveCurrentRasterSource();
+  }
+}
+
+void PictureLayerTilingSet::VerifyTilings(
+    const PictureLayerTilingSet* pending_twin_set) const {
 #if DCHECK_IS_ON()
   for (PictureLayerTiling* tiling : tilings_) {
     DCHECK(tiling->tile_size() ==
@@ -116,15 +163,17 @@ void PictureLayerTilingSet::UpdateTilingsToCurrentRasterSource(
   }
 
   if (!tilings_.empty()) {
-    size_t num_high_res = std::count_if(tilings_.begin(), tilings_.end(),
-                                        [](PictureLayerTiling* tiling) {
-      return tiling->resolution() == HIGH_RESOLUTION;
-    });
-    DCHECK_LE(num_high_res, 1u);
+    DCHECK_LE(NumHighResTilings(), 1);
     // When commiting from the main thread the high res tiling may get dropped,
     // but when cloning to the active tree, there should always be one.
-    if (twin_set)
-      DCHECK_EQ(1u, num_high_res);
+    if (pending_twin_set) {
+      DCHECK_EQ(1, NumHighResTilings())
+          << " num tilings on active: " << tilings_.size()
+          << " num tilings on pending: " << pending_twin_set->tilings_.size()
+          << " num high res on pending: "
+          << pending_twin_set->NumHighResTilings()
+          << " are on active tree: " << (client_->GetTree() == ACTIVE_TREE);
+    }
   }
 #endif
 }
@@ -214,12 +263,10 @@ PictureLayerTiling* PictureLayerTilingSet::AddTiling(
 }
 
 int PictureLayerTilingSet::NumHighResTilings() const {
-  int num_high_res = 0;
-  for (size_t i = 0; i < tilings_.size(); ++i) {
-    if (tilings_[i]->resolution() == HIGH_RESOLUTION)
-      num_high_res++;
-  }
-  return num_high_res;
+  return std::count_if(tilings_.begin(), tilings_.end(),
+                       [](PictureLayerTiling* tiling) {
+    return tiling->resolution() == HIGH_RESOLUTION;
+  });
 }
 
 PictureLayerTiling* PictureLayerTilingSet::FindTilingWithScale(
@@ -316,10 +363,10 @@ bool PictureLayerTilingSet::UpdateTilePriorities(
   return updated;
 }
 
-void PictureLayerTilingSet::GetAllTilesForTracing(
-    std::set<const Tile*>* tiles) const {
+void PictureLayerTilingSet::GetAllTilesAndPrioritiesForTracing(
+    std::map<const Tile*, TilePriority>* tile_map) const {
   for (auto* tiling : tilings_)
-    tiling->GetAllTilesForTracing(tiles);
+    tiling->GetAllTilesAndPrioritiesForTracing(tile_map);
 }
 
 PictureLayerTilingSet::CoverageIterator::CoverageIterator(
@@ -480,7 +527,8 @@ PictureLayerTilingSet::CoverageIterator::operator bool() const {
       region_iter_.has_rect();
 }
 
-void PictureLayerTilingSet::AsValueInto(base::debug::TracedValue* state) const {
+void PictureLayerTilingSet::AsValueInto(
+    base::trace_event::TracedValue* state) const {
   for (size_t i = 0; i < tilings_.size(); ++i) {
     state->BeginDictionary();
     tilings_[i]->AsValueInto(state);

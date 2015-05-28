@@ -6,8 +6,10 @@
 
 #include <utility>
 
+#include "base/atomic_sequence_num.h"
 #include "base/bind.h"
 #include "base/command_line.h"
+#include "base/lazy_instance.h"
 #include "base/message_loop/message_loop.h"
 #include "base/stl_util.h"
 #include "base/values.h"
@@ -48,22 +50,19 @@ void DoNothing(ExtensionHost* host) {}
 // registered from its lazy background page.
 const char kFilteredEvents[] = "filtered_events";
 
-// Sends a notification about an event to the API activity monitor on the
-// UI thread. Can be called from any thread.
-void NotifyApiEventDispatched(void* browser_context_id,
-                              const std::string& extension_id,
-                              const std::string& event_name,
-                              scoped_ptr<ListValue> args) {
+// Sends a notification about an event to the API activity monitor and the
+// ExtensionHost for |extension_id| on the UI thread. Can be called from any
+// thread.
+void NotifyEventDispatched(void* browser_context_id,
+                           const std::string& extension_id,
+                           const std::string& event_name,
+                           scoped_ptr<ListValue> args) {
   // The ApiActivityMonitor can only be accessed from the UI thread.
   if (!BrowserThread::CurrentlyOn(BrowserThread::UI)) {
     BrowserThread::PostTask(
-        BrowserThread::UI,
-        FROM_HERE,
-        base::Bind(&NotifyApiEventDispatched,
-                   browser_context_id,
-                   extension_id,
-                   event_name,
-                   base::Passed(&args)));
+        BrowserThread::UI, FROM_HERE,
+        base::Bind(&NotifyEventDispatched, browser_context_id, extension_id,
+                   event_name, base::Passed(&args)));
     return;
   }
 
@@ -76,6 +75,9 @@ void NotifyApiEventDispatched(void* browser_context_id,
   if (monitor)
     monitor->OnApiEventDispatched(extension_id, event_name, args.Pass());
 }
+
+// A global identifier used to distinguish extension events.
+base::StaticAtomicSequenceNumber g_extension_event_id;
 
 }  // namespace
 
@@ -102,19 +104,21 @@ struct EventRouter::ListenerProcess {
 void EventRouter::DispatchExtensionMessage(IPC::Sender* ipc_sender,
                                            void* browser_context_id,
                                            const std::string& extension_id,
+                                           int event_id,
                                            const std::string& event_name,
                                            ListValue* event_args,
                                            UserGestureState user_gesture,
                                            const EventFilteringInfo& info) {
-  NotifyApiEventDispatched(browser_context_id,
-                           extension_id,
-                           event_name,
-                           make_scoped_ptr(event_args->DeepCopy()));
+  NotifyEventDispatched(browser_context_id, extension_id, event_name,
+                        make_scoped_ptr(event_args->DeepCopy()));
 
+  // TODO(chirantan): Make event dispatch a separate IPC so that it doesn't
+  // piggyback off MessageInvoke, which is used for other things.
   ListValue args;
   args.Set(0, new base::StringValue(event_name));
   args.Set(1, event_args);
   args.Set(2, info.AsValue().release());
+  args.Set(3, new base::FundamentalValue(event_id));
   ipc_sender->Send(new ExtensionMsg_MessageInvoke(
       MSG_ROUTING_CONTROL,
       extension_id,
@@ -149,20 +153,16 @@ void EventRouter::DispatchEvent(IPC::Sender* ipc_sender,
                                 scoped_ptr<ListValue> event_args,
                                 UserGestureState user_gesture,
                                 const EventFilteringInfo& info) {
-  DispatchExtensionMessage(ipc_sender,
-                           browser_context_id,
-                           extension_id,
-                           event_name,
-                           event_args.get(),
-                           user_gesture,
+  int event_id = g_extension_event_id.GetNext();
+
+  DispatchExtensionMessage(ipc_sender, browser_context_id, extension_id,
+                           event_id, event_name, event_args.get(), user_gesture,
                            info);
 
   BrowserThread::PostTask(
-      BrowserThread::UI,
-      FROM_HERE,
-      base::Bind(&EventRouter::IncrementInFlightEventsOnUI,
-                  browser_context_id,
-                  extension_id));
+      BrowserThread::UI, FROM_HERE,
+      base::Bind(&EventRouter::IncrementInFlightEventsOnUI, browser_context_id,
+                 extension_id, event_id, event_name));
 }
 
 EventRouter::EventRouter(BrowserContext* browser_context,
@@ -599,16 +599,15 @@ void EventRouter::DispatchEventToProcess(const std::string& extension_id,
     return;
   }
 
-  DispatchExtensionMessage(process,
-                           listener_context,
-                           extension_id,
-                           event->event_name,
-                           event->event_args.get(),
-                           event->user_gesture,
-                           event->filter_info);
+  int event_id = g_extension_event_id.GetNext();
+  DispatchExtensionMessage(process, listener_context, extension_id, event_id,
+                           event->event_name, event->event_args.get(),
+                           event->user_gesture, event->filter_info);
 
-  if (extension)
-    IncrementInFlightEvents(listener_context, extension);
+  if (extension) {
+    IncrementInFlightEvents(listener_context, extension, event_id,
+                            event->event_name);
+  }
 }
 
 bool EventRouter::CanDispatchEventToBrowserContext(
@@ -661,9 +660,10 @@ bool EventRouter::MaybeLoadLazyBackgroundPageToDispatchEvent(
 }
 
 // static
-void EventRouter::IncrementInFlightEventsOnUI(
-    void* browser_context_id,
-    const std::string& extension_id) {
+void EventRouter::IncrementInFlightEventsOnUI(void* browser_context_id,
+                                              const std::string& extension_id,
+                                              int event_id,
+                                              const std::string& event_name) {
   DCHECK_CURRENTLY_ON(BrowserThread::UI);
   BrowserContext* browser_context =
       reinterpret_cast<BrowserContext*>(browser_context_id);
@@ -677,18 +677,26 @@ void EventRouter::IncrementInFlightEventsOnUI(
           extension_id);
   if (!extension)
     return;
-  event_router->IncrementInFlightEvents(browser_context, extension);
+  event_router->IncrementInFlightEvents(browser_context, extension, event_id,
+                                        event_name);
 }
 
 void EventRouter::IncrementInFlightEvents(BrowserContext* context,
-                                          const Extension* extension) {
+                                          const Extension* extension,
+                                          int event_id,
+                                          const std::string& event_name) {
+  // TODO(chirantan): Turn this on once crbug.com/464513 is fixed.
+  // DCHECK_CURRENTLY_ON(BrowserThread::UI);
+
   // Only increment in-flight events if the lazy background page is active,
   // because that's the only time we'll get an ACK.
   if (BackgroundInfo::HasLazyBackgroundPage(extension)) {
     ProcessManager* pm = ProcessManager::Get(context);
     ExtensionHost* host = pm->GetBackgroundHostForExtension(extension->id());
-    if (host)
+    if (host) {
       pm->IncrementLazyKeepaliveCount(extension);
+      host->OnBackgroundEventDispatched(event_name, event_id);
+    }
   }
 }
 

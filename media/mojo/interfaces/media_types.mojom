@@ -4,7 +4,7 @@
 
 module mojo;
 
-import "mojo/services/geometry/public/interfaces/geometry.mojom";
+import "third_party/mojo_services/src/geometry/public/interfaces/geometry.mojom";
 
 // See media/base/buffering_state.h for descriptions.
 // Kept in sync with media::BufferingState via static_asserts.
@@ -31,7 +31,8 @@ enum AudioCodec {
   Opus = 12,
   // EAC3 = 13,
   PCM_ALAW = 14,
-  MAX = PCM_ALAW,
+  ALAC = 15,
+  MAX = ALAC,
 };
 
 // See media/base/channel_layout.h for descriptions.
@@ -84,7 +85,8 @@ enum SampleFormat {
   F32,
   PlanarS16,
   PlanarF32,
-  Max = PlanarF32,
+  PlanarS32,
+  Max = PlanarS32,
 };
 
 // See media/base/video_frame.h for descriptions.
@@ -101,7 +103,8 @@ enum VideoFormat {
   NV12,
   YV24,
   ARGB,
-  FORMAT_MAX = ARGB,
+  YV12HD,
+  FORMAT_MAX = YV12HD,
 };
 
 // See media/base/video_decoder_config.h for descriptions.

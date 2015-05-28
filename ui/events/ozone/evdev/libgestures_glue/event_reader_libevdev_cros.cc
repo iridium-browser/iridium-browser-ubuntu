@@ -31,11 +31,21 @@ EventReaderLibevdevCros::EventReaderLibevdevCros(int fd,
                                                  InputDeviceType type,
                                                  const EventDeviceInfo& devinfo,
                                                  scoped_ptr<Delegate> delegate)
-    : EventConverterEvdev(fd, path, id, type),
+    : EventConverterEvdev(fd,
+                          path,
+                          id,
+                          type,
+                          devinfo.name(),
+                          devinfo.vendor_id(),
+                          devinfo.product_id()),
       has_keyboard_(devinfo.HasKeyboard()),
       has_mouse_(devinfo.HasMouse()),
       has_touchpad_(devinfo.HasTouchpad()),
+      has_caps_lock_led_(devinfo.HasLedEvent(LED_CAPSL)),
       delegate_(delegate.Pass()) {
+  // This class assumes it does not deal with internal keyboards.
+  CHECK(!has_keyboard_ || type != INPUT_DEVICE_INTERNAL);
+
   memset(&evdev_, 0, sizeof(evdev_));
   evdev_.log = OnLogMessage;
   evdev_.log_udata = this;
@@ -82,11 +92,22 @@ bool EventReaderLibevdevCros::HasTouchpad() const {
   return has_touchpad_;
 }
 
+bool EventReaderLibevdevCros::HasCapsLockLed() const {
+  return has_caps_lock_led_;
+}
+
+void EventReaderLibevdevCros::OnStopped() {
+  delegate_->OnLibEvdevCrosStopped(&evdev_, &evstate_);
+}
+
 // static
 void EventReaderLibevdevCros::OnSynReport(void* data,
                                           EventStateRec* evstate,
                                           struct timeval* tv) {
   EventReaderLibevdevCros* reader = static_cast<EventReaderLibevdevCros*>(data);
+  if (reader->ignore_events_)
+    return;
+
   reader->delegate_->OnLibEvdevCrosEvent(&reader->evdev_, evstate, *tv);
 }
 

@@ -13,6 +13,7 @@ sys.path.append(os.path.join(SRC, 'third_party', 'pymock'))
 
 import bisect_perf_regression
 import bisect_utils
+import fetch_build
 import mock
 import source_control
 
@@ -69,31 +70,31 @@ CLEAR_REGRESSION = [
 MULTIPLE_VALUES = [
     [
         [18.916, 22.371, 8.527, 5.877, 5.407, 9.476, 8.100, 5.334,
-        4.507, 4.842, 8.485, 8.308, 27.490, 4.560, 4.804, 23.068, 17.577,
-        17.346, 26.738, 60.330, 32.307, 5.468, 27.803, 27.373, 17.823,
-        5.158, 27.439, 5.236, 11.413],
+         4.507, 4.842, 8.485, 8.308, 27.490, 4.560, 4.804, 23.068, 17.577,
+         17.346, 26.738, 60.330, 32.307, 5.468, 27.803, 27.373, 17.823,
+         5.158, 27.439, 5.236, 11.413],
         [18.999, 22.642, 8.158, 5.995, 5.495, 9.499, 8.092, 5.324,
-        4.468, 4.788, 8.248, 7.853, 27.533, 4.410, 4.622, 22.341, 22.313,
-        17.072, 26.731, 57.513, 33.001, 5.500, 28.297, 27.277, 26.462,
-        5.009, 27.361, 5.130, 10.955]
+         4.468, 4.788, 8.248, 7.853, 27.533, 4.410, 4.622, 22.341, 22.313,
+         17.072, 26.731, 57.513, 33.001, 5.500, 28.297, 27.277, 26.462,
+         5.009, 27.361, 5.130, 10.955]
     ],
     [
         [18.238, 22.365, 8.555, 5.939, 5.437, 9.463, 7.047, 5.345, 4.517,
-        4.796, 8.593, 7.901, 27.499, 4.378, 5.040, 4.904, 4.816, 4.828,
-        4.853, 57.363, 34.184, 5.482, 28.190, 27.290, 26.694, 5.099,
-        4.905, 5.290, 4.813],
+         4.796, 8.593, 7.901, 27.499, 4.378, 5.040, 4.904, 4.816, 4.828,
+         4.853, 57.363, 34.184, 5.482, 28.190, 27.290, 26.694, 5.099,
+         4.905, 5.290, 4.813],
         [18.301, 22.522, 8.035, 6.021, 5.565, 9.037, 6.998, 5.321, 4.485,
-        4.768, 8.397, 7.865, 27.636, 4.640, 5.015, 4.962, 4.933, 4.977,
-        4.961, 60.648, 34.593, 5.538, 28.454, 27.297, 26.490, 5.099, 5,
-        5.247, 4.945],
+         4.768, 8.397, 7.865, 27.636, 4.640, 5.015, 4.962, 4.933, 4.977,
+         4.961, 60.648, 34.593, 5.538, 28.454, 27.297, 26.490, 5.099, 5,
+         5.247, 4.945],
         [18.907, 23.368, 8.100, 6.169, 5.621, 9.971, 8.161, 5.331, 4.513,
-        4.837, 8.255, 7.852, 26.209, 4.388, 5.045, 5.029, 5.032, 4.946,
-        4.973, 60.334, 33.377, 5.499, 28.275, 27.550, 26.103, 5.108,
-        4.951, 5.285, 4.910],
+         4.837, 8.255, 7.852, 26.209, 4.388, 5.045, 5.029, 5.032, 4.946,
+         4.973, 60.334, 33.377, 5.499, 28.275, 27.550, 26.103, 5.108,
+         4.951, 5.285, 4.910],
         [18.715, 23.748, 8.128, 6.148, 5.691, 9.361, 8.106, 5.334, 4.528,
-        4.965, 8.261, 7.851, 27.282, 4.391, 4.949, 4.981, 4.964, 4.935,
-        4.933, 60.231, 33.361, 5.489, 28.106, 27.457, 26.648, 5.108,
-        4.963, 5.272, 4.954]
+         4.965, 8.261, 7.851, 27.282, 4.391, 4.949, 4.981, 4.964, 4.935,
+         4.933, 60.231, 33.361, 5.489, 28.106, 27.457, 26.648, 5.108,
+         4.963, 5.272, 4.954]
     ]
 ]
 
@@ -114,8 +115,7 @@ DEFAULT_OPTIONS = {
 _MockResultsGenerator = (x for x in [])
 
 
-def _MockRunTests(*args, **kwargs):
-  _, _ = args, kwargs
+def _MockRunTests(*args, **kwargs):  # pylint: disable=unused-argument
   return _FakeTestResult(_MockResultsGenerator.next())
 
 
@@ -151,10 +151,12 @@ def _GenericDryRun(options, print_results=False):
   Returns:
     The results dictionary as returned by the bisect Run method.
   """
+  _AbortIfThereAreStagedChanges()
   # Disable rmtree to avoid deleting local trees.
   old_rmtree = shutil.rmtree
+  shutil.rmtree = lambda path, on_error: None
+  # git reset HEAD may be run during the dry run, which removes staged changes.
   try:
-    shutil.rmtree = lambda path, onerror: None
     bisect_instance = _GetBisectPerformanceMetricsInstance(options)
     results = bisect_instance.Run(
         bisect_instance.opts.command, bisect_instance.opts.bad_revision,
@@ -168,6 +170,21 @@ def _GenericDryRun(options, print_results=False):
     shutil.rmtree = old_rmtree
 
 
+def _AbortIfThereAreStagedChanges():
+  """Exits the test prematurely if there are staged changes."""
+  # The output of "git status --short" will be an empty string if there are
+  # no staged changes in the current branch. Untracked files are ignored
+  # because when running the presubmit on the trybot there are sometimes
+  # untracked changes to the run-perf-test.cfg and bisect.cfg files.
+  status_output = bisect_utils.CheckRunGit(
+      ['status', '--short', '--untracked-files=no'])
+  if status_output:
+    print 'There are un-committed changes in the current branch.'
+    print 'Aborting the tests to avoid destroying local changes. Changes:'
+    print status_output
+    sys.exit(1)
+
+
 class BisectPerfRegressionTest(unittest.TestCase):
   """Test case for other functions and classes in bisect-perf-regression.py."""
 
@@ -178,6 +195,12 @@ class BisectPerfRegressionTest(unittest.TestCase):
 
   def tearDown(self):
     os.chdir(self.cwd)
+
+  def testBisectOptionsCanPrintHelp(self):
+    """Tests that the argument parser can be made and can print help."""
+    bisect_options = bisect_perf_regression.BisectOptions()
+    parser = bisect_options._CreateCommandLineParser()
+    parser.format_help()
 
   def testParseDEPSStringManually(self):
     """Tests DEPS parsing."""
@@ -355,7 +378,7 @@ class BisectPerfRegressionTest(unittest.TestCase):
     bisect_class.RunPerformanceTestAndParseResults = _MockRunTests
 
     try:
-      _GenericDryRun(_GetExtendedOptions(0, 0, False))
+      dry_run_results = _GenericDryRun(_GetExtendedOptions(0, 0, False))
     except StopIteration:
       # If StopIteration was raised, that means that the next value after
       # the first two values was requested, so the job was not aborted.
@@ -364,23 +387,23 @@ class BisectPerfRegressionTest(unittest.TestCase):
       bisect_class.RunPerformanceTestAndParseResults = original_run_tests
 
     # If the job was aborted, there should be a warning about it.
-    assert [w for w in results.warnings
+    assert [w for w in dry_run_results.warnings
             if 'could not reproduce the regression' in w]
     return True
 
-  def testBisectStopsOnClearUnclearRegression(self):
+  def testBisectAbortedOnClearNonRegression(self):
     self.assertTrue(self._CheckAbortsEarly(CLEAR_NON_REGRESSION))
 
-  def testBisectStopsOnClearUnclearRegression(self):
+  def testBisectNotAborted_AlmostRegression(self):
     self.assertFalse(self._CheckAbortsEarly(ALMOST_REGRESSION))
 
-  def testBisectStopsOnClearUnclearRegression(self):
+  def testBisectNotAborted_ClearRegression(self):
     self.assertFalse(self._CheckAbortsEarly(CLEAR_REGRESSION))
 
-  def testBisectStopsOnClearUnclearRegression(self):
+  def testBisectNotAborted_BarelyRegression(self):
     self.assertFalse(self._CheckAbortsEarly(BARELY_REGRESSION))
 
-  def testBisectStopsOnClearUnclearRegression(self):
+  def testBisectNotAborted_MultipleValues(self):
     self.assertFalse(self._CheckAbortsEarly(MULTIPLE_VALUES))
 
   def testGetCommitPosition(self):
@@ -406,7 +429,7 @@ class BisectPerfRegressionTest(unittest.TestCase):
 
   def testGetCommitPositionForSkia(self):
     bisect_instance = _GetBisectPerformanceMetricsInstance(DEFAULT_OPTIONS)
-    skia_rev = 'a94d028e0f2c77f159b3dac95eb90c3b4cf48c61'
+    skia_rev = 'a94d028eCheckAbortsEarly0f2c77f159b3dac95eb90c3b4cf48c61'
     depot_path = os.path.join(bisect_instance.src_cwd, 'third_party', 'skia')
     # Skia doesn't use commit positions, and GetCommitPosition should
     # return None for repos that don't use commit positions.
@@ -433,6 +456,7 @@ class BisectPerfRegressionTest(unittest.TestCase):
   @mock.patch('bisect_utils.RunGClient')
   def testSyncToRevisionForChromium(self, mock_RunGClient):
     bisect_instance = _GetBisectPerformanceMetricsInstance(DEFAULT_OPTIONS)
+    mock_RunGClient.return_value = 0
     bisect_instance._SyncRevision(
         'chromium', 'e6db23a037cad47299a94b155b95eebd1ee61a58', 'gclient')
     expected_params = [
@@ -442,8 +466,8 @@ class BisectPerfRegressionTest(unittest.TestCase):
         '--force',
         '--delete_unversioned_trees',
         '--revision',
-        'src@e6db23a037cad47299a94b155b95eebd1ee61a58'
-        ]
+        'src@e6db23a037cad47299a94b155b95eebd1ee61a58',
+    ]
 
     mock_RunGClient.assert_called_with(expected_params, cwd=None)
 
@@ -452,9 +476,53 @@ class BisectPerfRegressionTest(unittest.TestCase):
     bisect_instance = _GetBisectPerformanceMetricsInstance(DEFAULT_OPTIONS)
     mock_RunGit.return_value = None, None
     bisect_instance._SyncRevision(
-        'webkit', 'a94d028e0f2c77f159b3dac95eb90c3b4cf48c61' , None)
+        'webkit', 'a94d028e0f2c77f159b3dac95eb90c3b4cf48c61', None)
     expected_params = ['checkout', 'a94d028e0f2c77f159b3dac95eb90c3b4cf48c61']
     mock_RunGit.assert_called_with(expected_params)
+
+  def testTryJobSvnRepo_PerfBuilderType_ReturnsRepoUrl(self):
+    self.assertEqual(
+        bisect_perf_regression.PERF_SVN_REPO_URL,
+        bisect_perf_regression._TryJobSvnRepo(fetch_build.PERF_BUILDER))
+
+  def testTryJobSvnRepo_FullBuilderType_ReturnsRepoUrl(self):
+    self.assertEqual(
+        bisect_perf_regression.FULL_SVN_REPO_URL,
+        bisect_perf_regression._TryJobSvnRepo(fetch_build.FULL_BUILDER))
+
+  def testTryJobSvnRepo_WithUnknownBuilderType_ThrowsError(self):
+    with self.assertRaises(NotImplementedError):
+      bisect_perf_regression._TryJobSvnRepo('foo')
+
+  def _CheckIsDownloadable(self, depot, target_platform='chromium',
+                           builder_type='perf'):
+    opts = dict(DEFAULT_OPTIONS)
+    opts.update({'target_platform': target_platform,
+                 'builder_type': builder_type})
+    bisect_instance = _GetBisectPerformanceMetricsInstance(opts)
+    return bisect_instance.IsDownloadable(depot)
+
+  def testIsDownloadable_ChromiumDepot_ReturnsTrue(self):
+    self.assertTrue(self._CheckIsDownloadable(depot='chromium'))
+
+  def testIsDownloadable_DEPSDepot_ReturnsTrue(self):
+    self.assertTrue(self._CheckIsDownloadable(depot='v8'))
+
+  def testIsDownloadable_AndroidChromeDepot_ReturnsTrue(self):
+    self.assertTrue(self._CheckIsDownloadable(
+        depot='android-chrome', target_platform='android-chrome'))
+
+  def testIsDownloadable_AndroidChromeWithDEPSChromium_ReturnsFalse(self):
+    self.assertFalse(self._CheckIsDownloadable(
+        depot='chromium', target_platform='android-chrome'))
+
+  def testIsDownloadable_AndroidChromeWithDEPSV8_ReturnsFalse(self):
+    self.assertFalse(self._CheckIsDownloadable(
+        depot='v8', target_platform='android-chrome'))
+
+  def testIsDownloadable_NoBuilderType_ReturnsFalse(self):
+    self.assertFalse(
+        self._CheckIsDownloadable(depot='chromium', builder_type=''))
 
 
 class DepotDirectoryRegistryTest(unittest.TestCase):
@@ -583,7 +651,7 @@ class GitTryJobTestCases(unittest.TestCase):
                                  bisect_perf_regression._PrepareBisectBranch,
                                  parent_branch, new_branch)
 
-  def testBuilderTryJobForException(self):
+  def testStartBuilderTryJobForException(self):
     git_revision = 'ac4a9f31fe2610bd146857bbd55d7a260003a888'
     bot_name = 'linux_perf_bisect_builder'
     bisect_job_name = 'testBisectJobname'
@@ -601,16 +669,17 @@ class GitTryJobTestCases(unittest.TestCase):
         (['branch', '--set-upstream-to', parent_branch],
          ('Setuptream fails', 0)),
         (['try',
-          '-b', bot_name,
-          '-r', git_revision,
-          '-n', bisect_job_name,
-          '--svn_repo=%s' % bisect_perf_regression.SVN_REPO_URL,
-          '--diff=%s' % patch_content
-         ], (None, 1)),
+          '--bot=%s' % bot_name,
+          '--revision=%s' % git_revision,
+          '--name=%s' % bisect_job_name,
+          '--svn_repo=%s' % bisect_perf_regression.PERF_SVN_REPO_URL,
+          '--diff=%s' % patch_content],
+         (None, 1)),
     ]
-    self._AssertRunGitExceptions(try_cmd,
-                                 bisect_perf_regression._BuilderTryjob,
-                                 git_revision, bot_name, bisect_job_name, patch)
+    self._AssertRunGitExceptions(
+        try_cmd, bisect_perf_regression._StartBuilderTryJob,
+        fetch_build.PERF_BUILDER, git_revision, bot_name, bisect_job_name,
+        patch)
 
   def testBuilderTryJob(self):
     git_revision = 'ac4a9f31fe2610bd146857bbd55d7a260003a888'
@@ -630,18 +699,18 @@ class GitTryJobTestCases(unittest.TestCase):
         (['branch', '--set-upstream-to', parent_branch],
          ('Setuptream fails', 0)),
         (['try',
-          '-b', bot_name,
-          '-r', git_revision,
-          '-n', bisect_job_name,
-          '--svn_repo=%s' % bisect_perf_regression.SVN_REPO_URL,
-          '--diff=%s' % patch_content
-         ], (None, 0)),
+          '--bot=%s' % bot_name,
+          '--revision=%s' % git_revision,
+          '--name=%s' % bisect_job_name,
+          '--svn_repo=%s' % bisect_perf_regression.PERF_SVN_REPO_URL,
+          '--diff=%s' % patch_content],
+         (None, 0)),
     ]
     self._SetupRunGitMock(try_cmd)
-    bisect_perf_regression._BuilderTryjob(
-        git_revision, bot_name, bisect_job_name, patch)
+    bisect_perf_regression._StartBuilderTryJob(
+        fetch_build.PERF_BUILDER, git_revision, bot_name, bisect_job_name,
+        patch)
 
 
 if __name__ == '__main__':
   unittest.main()
-

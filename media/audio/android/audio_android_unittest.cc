@@ -19,6 +19,7 @@
 #include "media/audio/android/audio_manager_android.h"
 #include "media/audio/audio_io.h"
 #include "media/audio/audio_manager_base.h"
+#include "media/audio/audio_unittest_util.h"
 #include "media/audio/mock_audio_source_callback.h"
 #include "media/base/decoder_buffer.h"
 #include "media/base/seekable_buffer.h"
@@ -172,14 +173,13 @@ class FileAudioSource : public AudioOutputStream::AudioSourceCallback {
     DVLOG(0) << "Reading from file: " << file_path.value().c_str();
   }
 
-  virtual ~FileAudioSource() {}
+  ~FileAudioSource() override {}
 
   // AudioOutputStream::AudioSourceCallback implementation.
 
   // Use samples read from a data file and fill up the audio buffer
   // provided to us in the callback.
-  virtual int OnMoreData(AudioBus* audio_bus,
-                         uint32 total_bytes_delay) override {
+  int OnMoreData(AudioBus* audio_bus, uint32 total_bytes_delay) override {
     bool stop_playing = false;
     int max_size =
         audio_bus->frames() * audio_bus->channels() * kBytesPerSample;
@@ -207,7 +207,7 @@ class FileAudioSource : public AudioOutputStream::AudioSourceCallback {
     return frames;
   }
 
-  virtual void OnError(AudioOutputStream* stream) override {}
+  void OnError(AudioOutputStream* stream) override {}
 
   int file_size() { return file_->data_size(); }
 
@@ -243,7 +243,7 @@ class FileAudioSink : public AudioInputStream::AudioInputCallback {
     DVLOG(0) << "Writing to file: " << file_path.value().c_str();
   }
 
-  virtual ~FileAudioSink() {
+  ~FileAudioSink() override {
     int bytes_written = 0;
     while (bytes_written < buffer_->forward_capacity()) {
       const uint8* chunk;
@@ -263,10 +263,10 @@ class FileAudioSink : public AudioInputStream::AudioInputCallback {
   }
 
   // AudioInputStream::AudioInputCallback implementation.
-  virtual void OnData(AudioInputStream* stream,
-                      const AudioBus* src,
-                      uint32 hardware_delay_bytes,
-                      double volume) override {
+  void OnData(AudioInputStream* stream,
+              const AudioBus* src,
+              uint32 hardware_delay_bytes,
+              double volume) override {
     const int num_samples = src->frames() * src->channels();
     scoped_ptr<int16> interleaved(new int16[num_samples]);
     const int bytes_per_sample = sizeof(*interleaved);
@@ -280,7 +280,7 @@ class FileAudioSink : public AudioInputStream::AudioInputCallback {
       event_->Signal();
   }
 
-  virtual void OnError(AudioInputStream* stream) override {}
+  void OnError(AudioInputStream* stream) override {}
 
  private:
   base::WaitableEvent* event_;
@@ -308,13 +308,13 @@ class FullDuplexAudioSinkSource
     buffer_.reset(new uint8[params_.GetBytesPerBuffer()]);
   }
 
-  virtual ~FullDuplexAudioSinkSource() {}
+  ~FullDuplexAudioSinkSource() override {}
 
   // AudioInputStream::AudioInputCallback implementation
-  virtual void OnData(AudioInputStream* stream,
-                      const AudioBus* src,
-                      uint32 hardware_delay_bytes,
-                      double volume) override {
+  void OnData(AudioInputStream* stream,
+              const AudioBus* src,
+              uint32 hardware_delay_bytes,
+              double volume) override {
     const base::TimeTicks now_time = base::TimeTicks::Now();
     const int diff = (now_time - previous_time_).InMilliseconds();
 
@@ -351,11 +351,10 @@ class FullDuplexAudioSinkSource
     }
   }
 
-  virtual void OnError(AudioInputStream* stream) override {}
+  void OnError(AudioInputStream* stream) override {}
 
   // AudioOutputStream::AudioSourceCallback implementation
-  virtual int OnMoreData(AudioBus* dest,
-                         uint32 total_bytes_delay) override {
+  int OnMoreData(AudioBus* dest, uint32 total_bytes_delay) override {
     const int size_in_bytes =
         (params_.bits_per_sample() / 8) * dest->frames() * dest->channels();
     EXPECT_EQ(size_in_bytes, params_.GetBytesPerBuffer());
@@ -383,7 +382,7 @@ class FullDuplexAudioSinkSource
     return dest->frames();
   }
 
-  virtual void OnError(AudioOutputStream* stream) override {}
+  void OnError(AudioOutputStream* stream) override {}
 
  private:
   // Converts from bytes to milliseconds given number of bytes and existing
@@ -414,8 +413,7 @@ class AudioAndroidOutputTest : public testing::Test {
         audio_output_stream_(NULL) {
   }
 
-  virtual ~AudioAndroidOutputTest() {
-  }
+  ~AudioAndroidOutputTest() override {}
 
  protected:
   AudioManager* audio_manager() { return audio_manager_.get(); }
@@ -733,8 +731,7 @@ TEST_F(AudioAndroidOutputTest, GetDefaultOutputStreamParameters) {
 
 // Verify input device enumeration.
 TEST_F(AudioAndroidInputTest, GetAudioInputDeviceNames) {
-  if (!audio_manager()->HasAudioInputDevices())
-    return;
+  ABORT_AUDIO_TEST_IF_NOT(audio_manager()->HasAudioInputDevices());
   AudioDeviceNames devices;
   RunOnAudioThread(
       base::Bind(&AudioManager::GetAudioInputDeviceNames,
@@ -745,8 +742,7 @@ TEST_F(AudioAndroidInputTest, GetAudioInputDeviceNames) {
 
 // Verify output device enumeration.
 TEST_F(AudioAndroidOutputTest, GetAudioOutputDeviceNames) {
-  if (!audio_manager()->HasAudioOutputDevices())
-    return;
+  ABORT_AUDIO_TEST_IF_NOT(audio_manager()->HasAudioOutputDevices());
   AudioDeviceNames devices;
   RunOnAudioThread(
       base::Bind(&AudioManager::GetAudioOutputDeviceNames,

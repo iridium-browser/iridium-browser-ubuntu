@@ -24,6 +24,7 @@
 #include "chrome/browser/ui/bookmarks/bookmark_tab_helper_delegate.h"
 #include "chrome/browser/ui/browser_navigator.h"
 #include "chrome/browser/ui/chrome_web_modal_dialog_manager_delegate.h"
+#include "chrome/browser/ui/exclusive_access/exclusive_access_manager.h"
 #include "chrome/browser/ui/host_desktop.h"
 #include "chrome/browser/ui/search/search_tab_helper_delegate.h"
 #include "chrome/browser/ui/search_engines/search_engine_tab_helper_delegate.h"
@@ -33,6 +34,7 @@
 #include "components/content_settings/core/common/content_settings.h"
 #include "components/content_settings/core/common/content_settings_types.h"
 #include "components/sessions/session_id.h"
+#include "components/translate/content/browser/content_translate_driver.h"
 #include "components/ui/zoom/zoom_observer.h"
 #include "content/public/browser/notification_observer.h"
 #include "content/public/browser/notification_registrar.h"
@@ -50,14 +52,12 @@
 #endif
 
 class BrowserContentSettingBubbleModelDelegate;
-class BrowserContentTranslateDriverObserver;
 class BrowserInstantController;
 class BrowserSyncedWindowDelegate;
 class BrowserToolbarModelDelegate;
 class BrowserTabRestoreServiceDelegate;
 class BrowserWindow;
 class FindBarController;
-class FullscreenController;
 class PrefService;
 class Profile;
 class SearchDelegate;
@@ -65,13 +65,13 @@ class SearchModel;
 class StatusBubble;
 class TabStripModel;
 class TabStripModelDelegate;
+class ValidationMessageBubble;
 struct WebApplicationInfo;
 
 namespace chrome {
 class BrowserCommandController;
 class FastUnloadController;
 class UnloadController;
-class ValidationMessageBubble;
 }
 
 namespace content {
@@ -114,6 +114,7 @@ class Browser : public TabStripModelObserver,
 #if defined(ENABLE_EXTENSIONS)
                 public extensions::ExtensionRegistryObserver,
 #endif
+                public translate::ContentTranslateDriver::Observer,
                 public ui::SelectFileDialog::Listener {
  public:
   // SessionService::WindowType mirrors these values.  If you add to this
@@ -475,8 +476,8 @@ class Browser : public TabStripModelObserver,
   // Show a download on the download shelf.
   void ShowDownload(content::DownloadItem* download);
 
-  FullscreenController* fullscreen_controller() const {
-    return fullscreen_controller_.get();
+  ExclusiveAccessManager* exclusive_access_manager() {
+    return exclusive_access_manager_.get();
   }
 
   extensions::WindowController* extension_window_controller() const {
@@ -548,7 +549,7 @@ class Browser : public TabStripModelObserver,
   void AddNewContents(content::WebContents* source,
                       content::WebContents* new_contents,
                       WindowOpenDisposition disposition,
-                      const gfx::Rect& initial_pos,
+                      const gfx::Rect& initial_rect,
                       bool user_gesture,
                       bool* was_blocked) override;
   void ActivateContents(content::WebContents* contents) override;
@@ -572,7 +573,6 @@ class Browser : public TabStripModelObserver,
                          bool* proceed_to_fire_unload) override;
   bool ShouldFocusLocationBarByDefault(content::WebContents* source) override;
   void SetFocusToLocationBar(bool select_all) override;
-  int GetExtraRenderViewHeight() const override;
   void ViewSourceForTab(content::WebContents* source,
                         const GURL& page_url) override;
   void ViewSourceForFrame(content::WebContents* source,
@@ -598,7 +598,6 @@ class Browser : public TabStripModelObserver,
   void WorkerCrashed(content::WebContents* source) override;
   void DidNavigateMainFramePostCommit(
       content::WebContents* web_contents) override;
-  void DidNavigateToPendingEntry(content::WebContents* web_contents) override;
   content::JavaScriptDialogManager* GetJavaScriptDialogManager(
       content::WebContents* source) override;
   content::ColorChooser* OpenColorChooser(
@@ -611,8 +610,9 @@ class Browser : public TabStripModelObserver,
                           int request_id,
                           const base::FilePath& path) override;
   bool EmbedsFullscreenWidget() const override;
-  void ToggleFullscreenModeForTab(content::WebContents* web_contents,
-                                  bool enter_fullscreen) override;
+  void EnterFullscreenModeForTab(content::WebContents* web_contents,
+                                 const GURL& origin) override;
+  void ExitFullscreenModeForTab(content::WebContents* web_contents) override;
   bool IsFullscreenForTabOrPending(
       const content::WebContents* web_contents) const override;
   void RegisterProtocolHandler(content::WebContents* web_contents,
@@ -713,6 +713,10 @@ class Browser : public TabStripModelObserver,
       const extensions::Extension* extension,
       extensions::UnloadedExtensionInfo::Reason reason) override;
 #endif
+
+  // Overridden from translate::ContentTranslateDriver::Observer:
+  void OnIsPageTranslatedChanged(content::WebContents* source) override;
+  void OnTranslateEnabledChanged(content::WebContents* source) override;
 
   // Command and state updating ///////////////////////////////////////////////
 
@@ -953,7 +957,7 @@ class Browser : public TabStripModelObserver,
 
   BookmarkBar::State bookmark_bar_state_;
 
-  scoped_ptr<FullscreenController> fullscreen_controller_;
+  scoped_ptr<ExclusiveAccessManager> exclusive_access_manager_;
 
   scoped_ptr<extensions::WindowController> extension_window_controller_;
 
@@ -962,9 +966,7 @@ class Browser : public TabStripModelObserver,
   // True if the browser window has been shown at least once.
   bool window_has_shown_;
 
-  scoped_ptr<BrowserContentTranslateDriverObserver> translate_driver_observer_;
-
-  scoped_ptr<chrome::ValidationMessageBubble> validation_message_bubble_;
+  scoped_ptr<ValidationMessageBubble> validation_message_bubble_;
 
   // The following factory is used for chrome update coalescing.
   base::WeakPtrFactory<Browser> chrome_updater_factory_;

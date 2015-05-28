@@ -5,6 +5,8 @@
 #ifndef CC_SURFACES_DISPLAY_H_
 #define CC_SURFACES_DISPLAY_H_
 
+#include <vector>
+
 #include "base/memory/scoped_ptr.h"
 #include "cc/output/output_surface_client.h"
 #include "cc/output/renderer.h"
@@ -13,6 +15,11 @@
 #include "cc/surfaces/surface_id.h"
 #include "cc/surfaces/surface_manager.h"
 #include "cc/surfaces/surfaces_export.h"
+#include "ui/events/latency_info.h"
+
+namespace gpu {
+class GpuMemoryBufferManager;
+}
 
 namespace gfx {
 class Size;
@@ -77,12 +84,13 @@ class CC_SURFACES_EXPORT Display : public OutputSurfaceClient,
       bool resourceless_software_draw) override {}
   void SetMemoryPolicy(const ManagedMemoryPolicy& policy) override;
   void SetTreeActivationCallback(const base::Closure& callback) override {}
+  void OnDraw() override;
 
   // RendererClient implementation.
   void SetFullRootLayerDamage() override {}
 
   // SurfaceDamageObserver implementation.
-  void OnSurfaceDamaged(SurfaceId surface) override;
+  void OnSurfaceDamaged(SurfaceId surface, bool* changed) override;
 
  private:
   void InitializeRenderer();
@@ -101,6 +109,7 @@ class CC_SURFACES_EXPORT Display : public OutputSurfaceClient,
   scoped_ptr<DirectRenderer> renderer_;
   scoped_ptr<BlockingTaskRunner> blocking_main_thread_task_runner_;
   scoped_ptr<TextureMailboxDeleter> texture_mailbox_deleter_;
+  std::vector<ui::LatencyInfo> stored_latency_info_;
 
   DISALLOW_COPY_AND_ASSIGN(Display);
 };

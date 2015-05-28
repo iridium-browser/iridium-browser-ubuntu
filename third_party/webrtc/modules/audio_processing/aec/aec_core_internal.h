@@ -11,10 +11,10 @@
 #ifndef WEBRTC_MODULES_AUDIO_PROCESSING_AEC_AEC_CORE_INTERNAL_H_
 #define WEBRTC_MODULES_AUDIO_PROCESSING_AEC_AEC_CORE_INTERNAL_H_
 
+#include "webrtc/common_audio/ring_buffer.h"
 #include "webrtc/common_audio/wav_file.h"
 #include "webrtc/modules/audio_processing/aec/aec_common.h"
 #include "webrtc/modules/audio_processing/aec/aec_core.h"
-#include "webrtc/modules/audio_processing/utility/ring_buffer.h"
 #include "webrtc/typedefs.h"
 
 // Number of partitions for the extended filter mode. The first one is an enum
@@ -59,13 +59,13 @@ struct AecCore {
   RingBuffer* nearFrBuf;
   RingBuffer* outFrBuf;
 
-  RingBuffer* nearFrBufH;
-  RingBuffer* outFrBufH;
+  RingBuffer* nearFrBufH[NUM_HIGH_BANDS_MAX];
+  RingBuffer* outFrBufH[NUM_HIGH_BANDS_MAX];
 
   float dBuf[PART_LEN2];  // nearend
   float eBuf[PART_LEN2];  // error
 
-  float dBufH[PART_LEN2];  // nearend
+  float dBufH[NUM_HIGH_BANDS_MAX][PART_LEN2];  // nearend
 
   float xPow[PART_LEN1];
   float dPow[PART_LEN1];
@@ -101,6 +101,7 @@ struct AecCore {
 
   int mult;  // sampling frequency multiple
   int sampFreq;
+  int num_bands;
   uint32_t seed;
 
   float normal_mu;               // stepsize
@@ -125,7 +126,12 @@ struct AecCore {
   int flag_Hband_cn;     // for comfort noise
   float cn_scale_Hband;  // scale for comfort noise in H band
 
+  int delay_metrics_delivered;
   int delay_histogram[kHistorySizeBlocks];
+  int num_delay_values;
+  int delay_median;
+  int delay_std;
+  float fraction_poor_delays;
   int delay_logging_enabled;
   void* delay_estimator_farend;
   void* delay_estimator;

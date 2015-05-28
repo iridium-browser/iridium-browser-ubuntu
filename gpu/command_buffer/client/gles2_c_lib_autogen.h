@@ -27,6 +27,13 @@ void GLES2BindBuffer(GLenum target, GLuint buffer) {
 void GLES2BindBufferBase(GLenum target, GLuint index, GLuint buffer) {
   gles2::GetGLContext()->BindBufferBase(target, index, buffer);
 }
+void GLES2BindBufferRange(GLenum target,
+                          GLuint index,
+                          GLuint buffer,
+                          GLintptr offset,
+                          GLsizeiptr size) {
+  gles2::GetGLContext()->BindBufferRange(target, index, buffer, offset, size);
+}
 void GLES2BindFramebuffer(GLenum target, GLuint framebuffer) {
   gles2::GetGLContext()->BindFramebuffer(target, framebuffer);
 }
@@ -81,6 +88,25 @@ GLenum GLES2CheckFramebufferStatus(GLenum target) {
 void GLES2Clear(GLbitfield mask) {
   gles2::GetGLContext()->Clear(mask);
 }
+void GLES2ClearBufferfi(GLenum buffer,
+                        GLint drawbuffers,
+                        GLfloat depth,
+                        GLint stencil) {
+  gles2::GetGLContext()->ClearBufferfi(buffer, drawbuffers, depth, stencil);
+}
+void GLES2ClearBufferfv(GLenum buffer,
+                        GLint drawbuffers,
+                        const GLfloat* value) {
+  gles2::GetGLContext()->ClearBufferfv(buffer, drawbuffers, value);
+}
+void GLES2ClearBufferiv(GLenum buffer, GLint drawbuffers, const GLint* value) {
+  gles2::GetGLContext()->ClearBufferiv(buffer, drawbuffers, value);
+}
+void GLES2ClearBufferuiv(GLenum buffer,
+                         GLint drawbuffers,
+                         const GLuint* value) {
+  gles2::GetGLContext()->ClearBufferuiv(buffer, drawbuffers, value);
+}
 void GLES2ClearColor(GLclampf red,
                      GLclampf green,
                      GLclampf blue,
@@ -92,6 +118,9 @@ void GLES2ClearDepthf(GLclampf depth) {
 }
 void GLES2ClearStencil(GLint s) {
   gles2::GetGLContext()->ClearStencil(s);
+}
+GLenum GLES2ClientWaitSync(GLsync sync, GLbitfield flags, GLuint64 timeout) {
+  return gles2::GetGLContext()->ClientWaitSync(sync, flags, timeout);
 }
 void GLES2ColorMask(GLboolean red,
                     GLboolean green,
@@ -155,6 +184,18 @@ void GLES2CopyTexSubImage2D(GLenum target,
   gles2::GetGLContext()->CopyTexSubImage2D(target, level, xoffset, yoffset, x,
                                            y, width, height);
 }
+void GLES2CopyTexSubImage3D(GLenum target,
+                            GLint level,
+                            GLint xoffset,
+                            GLint yoffset,
+                            GLint zoffset,
+                            GLint x,
+                            GLint y,
+                            GLsizei width,
+                            GLsizei height) {
+  gles2::GetGLContext()->CopyTexSubImage3D(target, level, xoffset, yoffset,
+                                           zoffset, x, y, width, height);
+}
 GLuint GLES2CreateProgram() {
   return gles2::GetGLContext()->CreateProgram();
 }
@@ -178,6 +219,9 @@ void GLES2DeleteRenderbuffers(GLsizei n, const GLuint* renderbuffers) {
 }
 void GLES2DeleteSamplers(GLsizei n, const GLuint* samplers) {
   gles2::GetGLContext()->DeleteSamplers(n, samplers);
+}
+void GLES2DeleteSync(GLsync sync) {
+  gles2::GetGLContext()->DeleteSync(sync);
 }
 void GLES2DeleteShader(GLuint shader) {
   gles2::GetGLContext()->DeleteShader(shader);
@@ -215,11 +259,23 @@ void GLES2DrawElements(GLenum mode,
                        const void* indices) {
   gles2::GetGLContext()->DrawElements(mode, count, type, indices);
 }
+void GLES2DrawRangeElements(GLenum mode,
+                            GLuint start,
+                            GLuint end,
+                            GLsizei count,
+                            GLenum type,
+                            const void* indices) {
+  gles2::GetGLContext()->DrawRangeElements(mode, start, end, count, type,
+                                           indices);
+}
 void GLES2Enable(GLenum cap) {
   gles2::GetGLContext()->Enable(cap);
 }
 void GLES2EnableVertexAttribArray(GLuint index) {
   gles2::GetGLContext()->EnableVertexAttribArray(index);
+}
+GLsync GLES2FenceSync(GLenum condition, GLbitfield flags) {
+  return gles2::GetGLContext()->FenceSync(condition, flags);
 }
 void GLES2Finish() {
   gles2::GetGLContext()->Finish();
@@ -294,6 +350,28 @@ void GLES2GetActiveUniform(GLuint program,
   gles2::GetGLContext()->GetActiveUniform(program, index, bufsize, length, size,
                                           type, name);
 }
+void GLES2GetActiveUniformBlockiv(GLuint program,
+                                  GLuint index,
+                                  GLenum pname,
+                                  GLint* params) {
+  gles2::GetGLContext()->GetActiveUniformBlockiv(program, index, pname, params);
+}
+void GLES2GetActiveUniformBlockName(GLuint program,
+                                    GLuint index,
+                                    GLsizei bufsize,
+                                    GLsizei* length,
+                                    char* name) {
+  gles2::GetGLContext()->GetActiveUniformBlockName(program, index, bufsize,
+                                                   length, name);
+}
+void GLES2GetActiveUniformsiv(GLuint program,
+                              GLsizei count,
+                              const GLuint* indices,
+                              GLenum pname,
+                              GLint* params) {
+  gles2::GetGLContext()->GetActiveUniformsiv(program, count, indices, pname,
+                                             params);
+}
 void GLES2GetAttachedShaders(GLuint program,
                              GLsizei maxcount,
                              GLsizei* count,
@@ -314,6 +392,9 @@ GLenum GLES2GetError() {
 }
 void GLES2GetFloatv(GLenum pname, GLfloat* params) {
   gles2::GetGLContext()->GetFloatv(pname, params);
+}
+GLint GLES2GetFragDataLocation(GLuint program, const char* name) {
+  return gles2::GetGLContext()->GetFragDataLocation(program, name);
 }
 void GLES2GetFramebufferAttachmentParameteriv(GLenum target,
                                               GLenum attachment,
@@ -378,17 +459,43 @@ void GLES2GetShaderSource(GLuint shader,
 const GLubyte* GLES2GetString(GLenum name) {
   return gles2::GetGLContext()->GetString(name);
 }
+void GLES2GetSynciv(GLsync sync,
+                    GLenum pname,
+                    GLsizei bufsize,
+                    GLsizei* length,
+                    GLint* values) {
+  gles2::GetGLContext()->GetSynciv(sync, pname, bufsize, length, values);
+}
 void GLES2GetTexParameterfv(GLenum target, GLenum pname, GLfloat* params) {
   gles2::GetGLContext()->GetTexParameterfv(target, pname, params);
 }
 void GLES2GetTexParameteriv(GLenum target, GLenum pname, GLint* params) {
   gles2::GetGLContext()->GetTexParameteriv(target, pname, params);
 }
+void GLES2GetTransformFeedbackVarying(GLuint program,
+                                      GLuint index,
+                                      GLsizei bufsize,
+                                      GLsizei* length,
+                                      GLsizei* size,
+                                      GLenum* type,
+                                      char* name) {
+  gles2::GetGLContext()->GetTransformFeedbackVarying(program, index, bufsize,
+                                                     length, size, type, name);
+}
+GLuint GLES2GetUniformBlockIndex(GLuint program, const char* name) {
+  return gles2::GetGLContext()->GetUniformBlockIndex(program, name);
+}
 void GLES2GetUniformfv(GLuint program, GLint location, GLfloat* params) {
   gles2::GetGLContext()->GetUniformfv(program, location, params);
 }
 void GLES2GetUniformiv(GLuint program, GLint location, GLint* params) {
   gles2::GetGLContext()->GetUniformiv(program, location, params);
+}
+void GLES2GetUniformIndices(GLuint program,
+                            GLsizei count,
+                            const char* const* names,
+                            GLuint* indices) {
+  gles2::GetGLContext()->GetUniformIndices(program, count, names, indices);
 }
 GLint GLES2GetUniformLocation(GLuint program, const char* name) {
   return gles2::GetGLContext()->GetUniformLocation(program, name);
@@ -440,6 +547,9 @@ GLboolean GLES2IsSampler(GLuint sampler) {
 }
 GLboolean GLES2IsShader(GLuint shader) {
   return gles2::GetGLContext()->IsShader(shader);
+}
+GLboolean GLES2IsSync(GLsync sync) {
+  return gles2::GetGLContext()->IsSync(sync);
 }
 GLboolean GLES2IsTexture(GLuint texture) {
   return gles2::GetGLContext()->IsTexture(texture);
@@ -527,6 +637,9 @@ void GLES2ShallowFinishCHROMIUM() {
 }
 void GLES2ShallowFlushCHROMIUM() {
   gles2::GetGLContext()->ShallowFlushCHROMIUM();
+}
+void GLES2OrderingBarrierCHROMIUM() {
+  gles2::GetGLContext()->OrderingBarrierCHROMIUM();
 }
 void GLES2StencilFunc(GLenum func, GLint ref, GLuint mask) {
   gles2::GetGLContext()->StencilFunc(func, ref, mask);
@@ -626,6 +739,13 @@ void GLES2TexSubImage3D(GLenum target,
                                        width, height, depth, format, type,
                                        pixels);
 }
+void GLES2TransformFeedbackVaryings(GLuint program,
+                                    GLsizei count,
+                                    const char* const* varyings,
+                                    GLenum buffermode) {
+  gles2::GetGLContext()->TransformFeedbackVaryings(program, count, varyings,
+                                                   buffermode);
+}
 void GLES2Uniform1f(GLint location, GLfloat x) {
   gles2::GetGLContext()->Uniform1f(location, x);
 }
@@ -701,6 +821,9 @@ void GLES2Uniform4ui(GLint location, GLuint x, GLuint y, GLuint z, GLuint w) {
 }
 void GLES2Uniform4uiv(GLint location, GLsizei count, const GLuint* v) {
   gles2::GetGLContext()->Uniform4uiv(location, count, v);
+}
+void GLES2UniformBlockBinding(GLuint program, GLuint index, GLuint binding) {
+  gles2::GetGLContext()->UniformBlockBinding(program, index, binding);
 }
 void GLES2UniformMatrix2fv(GLint location,
                            GLsizei count,
@@ -825,6 +948,9 @@ void GLES2VertexAttribPointer(GLuint indx,
 void GLES2Viewport(GLint x, GLint y, GLsizei width, GLsizei height) {
   gles2::GetGLContext()->Viewport(x, y, width, height);
 }
+void GLES2WaitSync(GLsync sync, GLbitfield flags, GLuint64 timeout) {
+  gles2::GetGLContext()->WaitSync(sync, flags, timeout);
+}
 void GLES2BlitFramebufferCHROMIUM(GLint srcX0,
                                   GLint srcY0,
                                   GLint srcX1,
@@ -948,6 +1074,15 @@ void* GLES2MapBufferSubDataCHROMIUM(GLuint target,
 void GLES2UnmapBufferSubDataCHROMIUM(const void* mem) {
   gles2::GetGLContext()->UnmapBufferSubDataCHROMIUM(mem);
 }
+void* GLES2MapBufferRange(GLenum target,
+                          GLintptr offset,
+                          GLsizeiptr size,
+                          GLbitfield access) {
+  return gles2::GetGLContext()->MapBufferRange(target, offset, size, access);
+}
+GLboolean GLES2UnmapBuffer(GLenum target) {
+  return gles2::GetGLContext()->UnmapBuffer(target);
+}
 void* GLES2MapTexSubImage2DCHROMIUM(GLenum target,
                                     GLint level,
                                     GLint xoffset,
@@ -980,6 +1115,25 @@ void GLES2GetProgramInfoCHROMIUM(GLuint program,
                                  GLsizei* size,
                                  void* info) {
   gles2::GetGLContext()->GetProgramInfoCHROMIUM(program, bufsize, size, info);
+}
+void GLES2GetUniformBlocksCHROMIUM(GLuint program,
+                                   GLsizei bufsize,
+                                   GLsizei* size,
+                                   void* info) {
+  gles2::GetGLContext()->GetUniformBlocksCHROMIUM(program, bufsize, size, info);
+}
+void GLES2GetTransformFeedbackVaryingsCHROMIUM(GLuint program,
+                                               GLsizei bufsize,
+                                               GLsizei* size,
+                                               void* info) {
+  gles2::GetGLContext()->GetTransformFeedbackVaryingsCHROMIUM(program, bufsize,
+                                                              size, info);
+}
+void GLES2GetUniformsES3CHROMIUM(GLuint program,
+                                 GLsizei bufsize,
+                                 GLsizei* size,
+                                 void* info) {
+  gles2::GetGLContext()->GetUniformsES3CHROMIUM(program, bufsize, size, info);
 }
 GLuint GLES2CreateStreamTextureCHROMIUM(GLuint texture) {
   return gles2::GetGLContext()->CreateStreamTextureCHROMIUM(texture);
@@ -1022,11 +1176,18 @@ void GLES2TexImageIOSurface2DCHROMIUM(GLenum target,
 void GLES2CopyTextureCHROMIUM(GLenum target,
                               GLenum source_id,
                               GLenum dest_id,
-                              GLint level,
                               GLint internalformat,
                               GLenum dest_type) {
-  gles2::GetGLContext()->CopyTextureCHROMIUM(target, source_id, dest_id, level,
+  gles2::GetGLContext()->CopyTextureCHROMIUM(target, source_id, dest_id,
                                              internalformat, dest_type);
+}
+void GLES2CopySubTextureCHROMIUM(GLenum target,
+                                 GLenum source_id,
+                                 GLenum dest_id,
+                                 GLint xoffset,
+                                 GLint yoffset) {
+  gles2::GetGLContext()->CopySubTextureCHROMIUM(target, source_id, dest_id,
+                                                xoffset, yoffset);
 }
 void GLES2DrawArraysInstancedANGLE(GLenum mode,
                                    GLint first,
@@ -1210,6 +1371,10 @@ extern const NameToFunc g_gles2_function_table[] = {
      reinterpret_cast<GLES2FunctionPointer>(glBindBufferBase),
     },
     {
+     "glBindBufferRange",
+     reinterpret_cast<GLES2FunctionPointer>(glBindBufferRange),
+    },
+    {
      "glBindFramebuffer",
      reinterpret_cast<GLES2FunctionPointer>(glBindFramebuffer),
     },
@@ -1266,6 +1431,22 @@ extern const NameToFunc g_gles2_function_table[] = {
      reinterpret_cast<GLES2FunctionPointer>(glClear),
     },
     {
+     "glClearBufferfi",
+     reinterpret_cast<GLES2FunctionPointer>(glClearBufferfi),
+    },
+    {
+     "glClearBufferfv",
+     reinterpret_cast<GLES2FunctionPointer>(glClearBufferfv),
+    },
+    {
+     "glClearBufferiv",
+     reinterpret_cast<GLES2FunctionPointer>(glClearBufferiv),
+    },
+    {
+     "glClearBufferuiv",
+     reinterpret_cast<GLES2FunctionPointer>(glClearBufferuiv),
+    },
+    {
      "glClearColor",
      reinterpret_cast<GLES2FunctionPointer>(glClearColor),
     },
@@ -1276,6 +1457,10 @@ extern const NameToFunc g_gles2_function_table[] = {
     {
      "glClearStencil",
      reinterpret_cast<GLES2FunctionPointer>(glClearStencil),
+    },
+    {
+     "glClientWaitSync",
+     reinterpret_cast<GLES2FunctionPointer>(glClientWaitSync),
     },
     {
      "glColorMask",
@@ -1304,6 +1489,10 @@ extern const NameToFunc g_gles2_function_table[] = {
     {
      "glCopyTexSubImage2D",
      reinterpret_cast<GLES2FunctionPointer>(glCopyTexSubImage2D),
+    },
+    {
+     "glCopyTexSubImage3D",
+     reinterpret_cast<GLES2FunctionPointer>(glCopyTexSubImage3D),
     },
     {
      "glCreateProgram",
@@ -1336,6 +1525,10 @@ extern const NameToFunc g_gles2_function_table[] = {
     {
      "glDeleteSamplers",
      reinterpret_cast<GLES2FunctionPointer>(glDeleteSamplers),
+    },
+    {
+     "glDeleteSync",
+     reinterpret_cast<GLES2FunctionPointer>(glDeleteSync),
     },
     {
      "glDeleteShader",
@@ -1382,12 +1575,20 @@ extern const NameToFunc g_gles2_function_table[] = {
      reinterpret_cast<GLES2FunctionPointer>(glDrawElements),
     },
     {
+     "glDrawRangeElements",
+     reinterpret_cast<GLES2FunctionPointer>(glDrawRangeElements),
+    },
+    {
      "glEnable",
      reinterpret_cast<GLES2FunctionPointer>(glEnable),
     },
     {
      "glEnableVertexAttribArray",
      reinterpret_cast<GLES2FunctionPointer>(glEnableVertexAttribArray),
+    },
+    {
+     "glFenceSync",
+     reinterpret_cast<GLES2FunctionPointer>(glFenceSync),
     },
     {
      "glFinish",
@@ -1450,6 +1651,18 @@ extern const NameToFunc g_gles2_function_table[] = {
      reinterpret_cast<GLES2FunctionPointer>(glGetActiveUniform),
     },
     {
+     "glGetActiveUniformBlockiv",
+     reinterpret_cast<GLES2FunctionPointer>(glGetActiveUniformBlockiv),
+    },
+    {
+     "glGetActiveUniformBlockName",
+     reinterpret_cast<GLES2FunctionPointer>(glGetActiveUniformBlockName),
+    },
+    {
+     "glGetActiveUniformsiv",
+     reinterpret_cast<GLES2FunctionPointer>(glGetActiveUniformsiv),
+    },
+    {
      "glGetAttachedShaders",
      reinterpret_cast<GLES2FunctionPointer>(glGetAttachedShaders),
     },
@@ -1472,6 +1685,10 @@ extern const NameToFunc g_gles2_function_table[] = {
     {
      "glGetFloatv",
      reinterpret_cast<GLES2FunctionPointer>(glGetFloatv),
+    },
+    {
+     "glGetFragDataLocation",
+     reinterpret_cast<GLES2FunctionPointer>(glGetFragDataLocation),
     },
     {
      "glGetFramebufferAttachmentParameteriv",
@@ -1527,6 +1744,10 @@ extern const NameToFunc g_gles2_function_table[] = {
      reinterpret_cast<GLES2FunctionPointer>(glGetString),
     },
     {
+     "glGetSynciv",
+     reinterpret_cast<GLES2FunctionPointer>(glGetSynciv),
+    },
+    {
      "glGetTexParameterfv",
      reinterpret_cast<GLES2FunctionPointer>(glGetTexParameterfv),
     },
@@ -1535,12 +1756,24 @@ extern const NameToFunc g_gles2_function_table[] = {
      reinterpret_cast<GLES2FunctionPointer>(glGetTexParameteriv),
     },
     {
+     "glGetTransformFeedbackVarying",
+     reinterpret_cast<GLES2FunctionPointer>(glGetTransformFeedbackVarying),
+    },
+    {
+     "glGetUniformBlockIndex",
+     reinterpret_cast<GLES2FunctionPointer>(glGetUniformBlockIndex),
+    },
+    {
      "glGetUniformfv",
      reinterpret_cast<GLES2FunctionPointer>(glGetUniformfv),
     },
     {
      "glGetUniformiv",
      reinterpret_cast<GLES2FunctionPointer>(glGetUniformiv),
+    },
+    {
+     "glGetUniformIndices",
+     reinterpret_cast<GLES2FunctionPointer>(glGetUniformIndices),
     },
     {
      "glGetUniformLocation",
@@ -1597,6 +1830,10 @@ extern const NameToFunc g_gles2_function_table[] = {
     {
      "glIsShader",
      reinterpret_cast<GLES2FunctionPointer>(glIsShader),
+    },
+    {
+     "glIsSync",
+     reinterpret_cast<GLES2FunctionPointer>(glIsSync),
     },
     {
      "glIsTexture",
@@ -1687,6 +1924,10 @@ extern const NameToFunc g_gles2_function_table[] = {
      reinterpret_cast<GLES2FunctionPointer>(glShallowFlushCHROMIUM),
     },
     {
+     "glOrderingBarrierCHROMIUM",
+     reinterpret_cast<GLES2FunctionPointer>(glOrderingBarrierCHROMIUM),
+    },
+    {
      "glStencilFunc",
      reinterpret_cast<GLES2FunctionPointer>(glStencilFunc),
     },
@@ -1745,6 +1986,10 @@ extern const NameToFunc g_gles2_function_table[] = {
     {
      "glTexSubImage3D",
      reinterpret_cast<GLES2FunctionPointer>(glTexSubImage3D),
+    },
+    {
+     "glTransformFeedbackVaryings",
+     reinterpret_cast<GLES2FunctionPointer>(glTransformFeedbackVaryings),
     },
     {
      "glUniform1f",
@@ -1841,6 +2086,10 @@ extern const NameToFunc g_gles2_function_table[] = {
     {
      "glUniform4uiv",
      reinterpret_cast<GLES2FunctionPointer>(glUniform4uiv),
+    },
+    {
+     "glUniformBlockBinding",
+     reinterpret_cast<GLES2FunctionPointer>(glUniformBlockBinding),
     },
     {
      "glUniformMatrix2fv",
@@ -1945,6 +2194,10 @@ extern const NameToFunc g_gles2_function_table[] = {
     {
      "glViewport",
      reinterpret_cast<GLES2FunctionPointer>(glViewport),
+    },
+    {
+     "glWaitSync",
+     reinterpret_cast<GLES2FunctionPointer>(glWaitSync),
     },
     {
      "glBlitFramebufferCHROMIUM",
@@ -2062,6 +2315,14 @@ extern const NameToFunc g_gles2_function_table[] = {
      reinterpret_cast<GLES2FunctionPointer>(glUnmapBufferSubDataCHROMIUM),
     },
     {
+     "glMapBufferRange",
+     reinterpret_cast<GLES2FunctionPointer>(glMapBufferRange),
+    },
+    {
+     "glUnmapBuffer",
+     reinterpret_cast<GLES2FunctionPointer>(glUnmapBuffer),
+    },
+    {
      "glMapTexSubImage2DCHROMIUM",
      reinterpret_cast<GLES2FunctionPointer>(glMapTexSubImage2DCHROMIUM),
     },
@@ -2089,6 +2350,19 @@ extern const NameToFunc g_gles2_function_table[] = {
     {
      "glGetProgramInfoCHROMIUM",
      reinterpret_cast<GLES2FunctionPointer>(glGetProgramInfoCHROMIUM),
+    },
+    {
+     "glGetUniformBlocksCHROMIUM",
+     reinterpret_cast<GLES2FunctionPointer>(glGetUniformBlocksCHROMIUM),
+    },
+    {
+     "glGetTransformFeedbackVaryingsCHROMIUM",
+     reinterpret_cast<GLES2FunctionPointer>(
+         glGetTransformFeedbackVaryingsCHROMIUM),
+    },
+    {
+     "glGetUniformsES3CHROMIUM",
+     reinterpret_cast<GLES2FunctionPointer>(glGetUniformsES3CHROMIUM),
     },
     {
      "glCreateStreamTextureCHROMIUM",
@@ -2122,6 +2396,10 @@ extern const NameToFunc g_gles2_function_table[] = {
     {
      "glCopyTextureCHROMIUM",
      reinterpret_cast<GLES2FunctionPointer>(glCopyTextureCHROMIUM),
+    },
+    {
+     "glCopySubTextureCHROMIUM",
+     reinterpret_cast<GLES2FunctionPointer>(glCopySubTextureCHROMIUM),
     },
     {
      "glDrawArraysInstancedANGLE",

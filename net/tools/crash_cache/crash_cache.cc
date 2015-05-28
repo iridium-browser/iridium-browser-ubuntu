@@ -84,12 +84,12 @@ namespace disk_cache {
 NET_EXPORT_PRIVATE extern RankCrashes g_rankings_crash;
 }
 
-const char* kCrashEntryName = "the first key";
+const char kCrashEntryName[] = "the first key";
 
 // Creates the destinaton folder for this run, and returns it on full_path.
 bool CreateTargetFolder(const base::FilePath& path, RankCrashes action,
                         base::FilePath* full_path) {
-  const char* folders[] = {
+  const char* const folders[] = {
     "",
     "insert_empty1",
     "insert_empty2",
@@ -114,7 +114,7 @@ bool CreateTargetFolder(const base::FilePath& path, RankCrashes action,
     "remove_load2",
     "remove_load3"
   };
-  COMPILE_ASSERT(arraysize(folders) == disk_cache::MAX_CRASH, sync_folders);
+  static_assert(arraysize(folders) == disk_cache::MAX_CRASH, "sync folders");
   DCHECK(action > disk_cache::NO_CRASH && action < disk_cache::MAX_CRASH);
 
   *full_path = path.AppendASCII(folders[action]);

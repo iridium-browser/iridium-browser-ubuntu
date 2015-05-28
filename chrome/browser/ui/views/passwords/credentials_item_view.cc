@@ -4,11 +4,12 @@
 
 #include "chrome/browser/ui/views/passwords/credentials_item_view.h"
 
-#include "chrome/browser/browser_process.h"
-#include "chrome/browser/profiles/profile_avatar_icon_util.h"
-#include "chrome/browser/profiles/profile_info_cache.h"
-#include "chrome/browser/profiles/profile_manager.h"
+#include "base/strings/utf_string_conversions.h"
+#include "chrome/browser/ui/passwords/manage_passwords_view_utils.h"
+#include "chrome/grit/generated_resources.h"
+#include "components/autofill/core/common/password_form.h"
 #include "grit/theme_resources.h"
+#include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/canvas.h"
 #include "ui/gfx/image/image.h"
@@ -18,17 +19,43 @@
 #include "ui/views/controls/label.h"
 
 namespace {
-const int kIconSize = 50;
 // The default spacing between the icon and text.
 const int kSpacing = 5;
 
-gfx::Size GetTextLabelsSize(const views::Label* full_name_label,
-                            const views::Label* username_label) {
-  gfx::Size full_name = full_name_label->GetPreferredSize();
-  gfx::Size username = username_label ? username_label->GetPreferredSize() :
-                                         gfx::Size();
-  return gfx::Size(std::max(full_name.width(), username.width()),
-                   full_name.height() + username.height());
+gfx::Size GetTextLabelsSize(const views::Label* upper_label,
+                            const views::Label* lower_label) {
+  gfx::Size upper_label_size = upper_label->GetPreferredSize();
+  gfx::Size lower_label_size = lower_label ? lower_label->GetPreferredSize() :
+                                             gfx::Size();
+  return gfx::Size(std::max(upper_label_size.width(), lower_label_size.width()),
+                   upper_label_size.height() + lower_label_size.height());
+}
+
+// Returns the bold upper text for the button.
+base::string16 GetUpperLabelText(const autofill::PasswordForm& form,
+                                 CredentialsItemView::Style style) {
+  const base::string16& name = form.display_name.empty() ? form.username_value
+                                                         : form.display_name;
+  switch (style) {
+    case CredentialsItemView::ACCOUNT_CHOOSER:
+      return name;
+    case CredentialsItemView::AUTO_SIGNIN:
+      return l10n_util::GetStringFUTF16(IDS_MANAGE_PASSWORDS_AUTO_SIGNIN_TITLE,
+                                        name);
+  }
+  NOTREACHED();
+  return base::string16();
+}
+
+// Returns the lower text for the button.
+base::string16 GetLowerLabelText(const autofill::PasswordForm& form,
+                                 CredentialsItemView::Style style) {
+  if (!form.federation_url.is_empty()) {
+    return l10n_util::GetStringFUTF16(
+        IDS_MANAGE_PASSWORDS_IDENTITY_PROVIDER,
+        base::UTF8ToUTF16(form.federation_url.host()));
+  }
+  return form.display_name.empty() ? base::string16() : form.username_value;
 }
 
 class CircularImageView : public views::ImageView {
@@ -56,39 +83,51 @@ void CircularImageView::OnPaint(gfx::Canvas* canvas) {
 
 }  // namespace
 
-CredentialsItemView::CredentialsItemView(views::ButtonListener* button_listener,
-                                         const autofill::PasswordForm& form)
+CredentialsItemView::CredentialsItemView(
+    views::ButtonListener* button_listener,
+    const autofill::PasswordForm* form,
+    password_manager::CredentialType credential_type,
+    Style style,
+    net::URLRequestContextGetter* request_context)
     : LabelButton(button_listener, base::string16()),
-      form_(form) {
+      form_(form),
+      credential_type_(credential_type),
+      upper_label_(nullptr),
+      lower_label_(nullptr),
+      weak_ptr_factory_(this) {
   set_notify_enter_exit_on_child(true);
   // Create an image-view for the avatar. Make sure it ignores events so that
   // the parent can receive the events instead.
   image_view_ = new CircularImageView;
   image_view_->set_interactive(false);
-
-  // TODO(vasilii): temporary code below shows the built-in profile icon instead
-  // of avatar.
-  const ProfileInfoCache& cache =
-      g_browser_process->profile_manager()->GetProfileInfoCache();
-  const gfx::Image& image = cache.GetAvatarIconOfProfileAtIndex(0);
-  image_view_->SetImage(profiles::GetSizedAvatarIcon(
-      image, true, kIconSize, kIconSize).ToImageSkia());
+  gfx::Image image = ResourceBundle::GetSharedInstance().GetImageNamed(
+      IDR_PROFILE_AVATAR_PLACEHOLDER_LARGE);
+  DCHECK(image.Width() >= kAvatarImageSize &&
+         image.Height() >= kAvatarImageSize);
+  UpdateAvatar(image.AsImageSkia());
+  if (form_->avatar_url.is_valid()) {
+    // Fetch the actual avatar.
+    AccountAvatarFetcher* fetcher = new AccountAvatarFetcher(
+        form_->avatar_url, weak_ptr_factory_.GetWeakPtr());
+    fetcher->Start(request_context);
+  }
   AddChildView(image_view_);
 
-  // Add a label to show the full name.
-  // TODO(vasilii): temporarily the label shows username.
   ui::ResourceBundle* rb = &ui::ResourceBundle::GetSharedInstance();
-  full_name_label_ = new views::Label(
-      form_.username_value, rb->GetFontList(ui::ResourceBundle::BoldFont));
-  full_name_label_->SetHorizontalAlignment(gfx::ALIGN_LEFT);
-  AddChildView(full_name_label_);
+  upper_label_ = new views::Label(
+      GetUpperLabelText(*form_, style),
+      rb->GetFontList(ui::ResourceBundle::BoldFont));
+  upper_label_->SetHorizontalAlignment(gfx::ALIGN_LEFT);
+  AddChildView(upper_label_);
 
-  // Add a label to show the user name.
-  username_label_ = new views::Label(
-      form_.username_value, rb->GetFontList(ui::ResourceBundle::SmallFont));
-  username_label_->SetHorizontalAlignment(gfx::ALIGN_LEFT);
-  username_label_->SetEnabled(false);
-  AddChildView(username_label_);
+  base::string16 lower_text = GetLowerLabelText(*form_, style);
+  if (!lower_text.empty()) {
+    lower_label_ = new views::Label(
+        lower_text, rb->GetFontList(ui::ResourceBundle::SmallFont));
+    lower_label_->SetHorizontalAlignment(gfx::ALIGN_LEFT);
+    lower_label_->SetEnabled(false);
+    AddChildView(lower_label_);
+  }
 
   SetFocusable(true);
 }
@@ -96,9 +135,9 @@ CredentialsItemView::CredentialsItemView(views::ButtonListener* button_listener,
 CredentialsItemView::~CredentialsItemView() = default;
 
 gfx::Size CredentialsItemView::GetPreferredSize() const {
-  gfx::Size labels_size = GetTextLabelsSize(full_name_label_, username_label_);
-  gfx::Size size = gfx::Size(kIconSize + labels_size.width(),
-                             std::max(kIconSize, labels_size.height()));
+  gfx::Size labels_size = GetTextLabelsSize(upper_label_, lower_label_);
+  gfx::Size size = gfx::Size(kAvatarImageSize + labels_size.width(),
+                             std::max(kAvatarImageSize, labels_size.height()));
   const gfx::Insets insets(GetInsets());
   size.Enlarge(insets.width(), insets.height());
   size.Enlarge(kSpacing, 0);
@@ -122,16 +161,20 @@ void CredentialsItemView::Layout() {
   image_origin.Offset(0, (child_area.height() - image_size.height()) / 2);
   image_view_->SetBoundsRect(gfx::Rect(image_origin, image_size));
 
-  gfx::Size full_name_size = full_name_label_->GetPreferredSize();
+  gfx::Size full_name_size = upper_label_->GetPreferredSize();
   gfx::Size username_size =
-      username_label_ ? username_label_->GetPreferredSize() : gfx::Size();
+      lower_label_ ? lower_label_->GetPreferredSize() : gfx::Size();
   int y_offset = (child_area.height() -
       (full_name_size.height() + username_size.height())) / 2;
   gfx::Point label_origin(image_origin.x() + image_size.width() + kSpacing,
                           child_area.origin().y() + y_offset);
-  full_name_label_->SetBoundsRect(gfx::Rect(label_origin, full_name_size));
-  if (username_label_) {
+  upper_label_->SetBoundsRect(gfx::Rect(label_origin, full_name_size));
+  if (lower_label_) {
     label_origin.Offset(0, full_name_size.height());
-    username_label_->SetBoundsRect(gfx::Rect(label_origin, username_size));
+    lower_label_->SetBoundsRect(gfx::Rect(label_origin, username_size));
   }
+}
+
+void CredentialsItemView::UpdateAvatar(const gfx::ImageSkia& image) {
+  image_view_->SetImage(ScaleImageForAccountAvatar(image));
 }

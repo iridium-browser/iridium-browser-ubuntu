@@ -12,7 +12,7 @@ enum OverviewAnimationType {
   // TODO(bruthig): Remove OVERVIEW_ANIMATION_NONE value and replace it with
   // correct animation type actions.
   OVERVIEW_ANIMATION_NONE,
-  // Used to fade in the close button and label when entering overview mode.
+  // Used to fade in the close button and label.
   OVERVIEW_ANIMATION_ENTER_OVERVIEW_MODE_FADE_IN,
   // Used to position windows when entering/exiting overview mode and when a
   // window is closed while overview mode is active.

@@ -100,6 +100,22 @@ const char kReportDeviceUsers[] = "cros.device_status.report_users";
 const char kReportDeviceHardwareStatus[] =
     "cros.device_status.report_hardware_status";
 
+// Determines whether the device reports kiosk session status (app IDs,
+// versions, etc) in device status reports to the device management server.
+const char kReportDeviceSessionStatus[] =
+    "cros.device_status.report_session_status";
+
+// How frequently device status reports are uploaded, in milliseconds.
+const char kReportUploadFrequency[] =
+    "cros.device_status.report_upload_frequency";
+
+// Determines whether heartbeats should be sent to the policy service via
+// the GCM channel.
+const char kHeartbeatEnabled[] = "cros.device_status.heartbeat_enabled";
+
+// How frequently heartbeats are sent up, in milliseconds.
+const char kHeartbeatFrequency[] = "cros.device_status.heartbeat_frequency";
+
 // This policy should not appear in the protobuf ever but is used internally to
 // signal that we are running in a "safe-mode" for policy recovery.
 const char kPolicyMissingMitigationMode[] =
@@ -145,5 +161,9 @@ const char kDeviceDisabledMessage[] = "cros.disabled_state.message";
 // the user initiates a shutdown via an UI element.  If set to true, all
 // shutdown buttons in the UI will be replaced by reboot buttons.
 const char kRebootOnShutdown[] = "cros.device.reboot_on_shutdown";
+
+// An integer pref that specifies the limit of the device's extension cache
+// size in bytes.
+const char kExtensionCacheSize[] = "cros.device.extension_cache_size";
 
 }  // namespace chromeos

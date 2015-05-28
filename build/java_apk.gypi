@@ -24,9 +24,8 @@
 # Optional/automatic variables:
 #  additional_input_paths - These paths will be included in the 'inputs' list to
 #    ensure that this target is rebuilt when one of these paths changes.
-#  additional_res_dirs - Additional directories containing Android resources.
-#  additional_res_packages - Package names of the R.java files corresponding to
-#    each directory in additional_res_dirs.
+#  additional_res_packages - Package names of R.java files generated in addition
+#    to the default package name defined in AndroidManifest.xml.
 #  additional_src_dirs - Additional directories with .java files to be compiled
 #    and included in the output of this target.
 #  additional_bundled_libs - Additional libraries what will be stripped and
@@ -104,6 +103,8 @@
     'lint_result': '<(intermediate_dir)/lint_result.xml',
     'lint_config': '<(intermediate_dir)/lint_config.xml',
     'never_lint%': 0,
+    'findbugs_stamp': '<(intermediate_dir)/findbugs.stamp',
+    'run_findbugs%': 0,
     'java_in_dir_suffix%': '/src',
     'instr_stamp': '<(intermediate_dir)/instr.stamp',
     'jar_stamp': '<(intermediate_dir)/jar.stamp',
@@ -559,6 +560,32 @@
         '<(DEPTH)/tools/android/android_tools.gyp:android_tools',
       ]
     }],
+    ['run_findbugs == 1', {
+      'actions': [
+        {
+          'action_name': 'findbugs_<(_target_name)',
+          'message': 'Running findbugs on <(_target_name)',
+          'inputs': [
+            '<(DEPTH)/build/android/findbugs_diff.py',
+            '<(DEPTH)/build/android/findbugs_filter/findbugs_exclude.xml',
+            '<(DEPTH)/build/android/pylib/utils/findbugs.py',
+            '>@(input_jars_paths)',
+            '<(jar_path)',
+            '<(compile_stamp)',
+          ],
+          'outputs': [
+            '<(findbugs_stamp)',
+          ],
+          'action': [
+            'python', '<(DEPTH)/build/android/findbugs_diff.py',
+            '--auxclasspath-gyp', '>(input_jars_paths)',
+            '--stamp', '<(findbugs_stamp)',
+            '<(jar_path)',
+          ],
+        },
+      ],
+    },
+    ]
   ],
   'dependencies': [
     '<(DEPTH)/tools/android/md5sum/md5sum.gyp:md5sum',
@@ -812,7 +839,7 @@
         ['is_test_apk == 1 and tested_apk_dex_path != "/"', {
           'variables': {
             'dex_additional_options': [
-              '--excluded-paths-file', '>(tested_apk_dex_path).inputs'
+              '--excluded-paths', '@FileArg(>(tested_apk_dex_path).inputs)'
             ],
           },
           'inputs': [

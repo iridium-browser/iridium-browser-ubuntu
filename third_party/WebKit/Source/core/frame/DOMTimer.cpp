@@ -30,7 +30,6 @@
 #include "core/dom/ExecutionContext.h"
 #include "core/inspector/InspectorInstrumentation.h"
 #include "core/inspector/InspectorTraceEvents.h"
-#include "platform/Logging.h"
 #include "platform/TraceEvent.h"
 #include "wtf/CurrentTime.h"
 
@@ -66,29 +65,25 @@ double DOMTimer::visiblePageAlignmentInterval()
     return 0;
 }
 
-int DOMTimer::install(ExecutionContext* context, PassOwnPtr<ScheduledAction> action, int timeout, bool singleShot)
+int DOMTimer::install(ExecutionContext* context, PassOwnPtrWillBeRawPtr<ScheduledAction> action, int timeout, bool singleShot)
 {
-    int timeoutID = context->installNewTimeout(action, timeout, singleShot);
+    int timeoutID = context->timers()->installNewTimeout(context, action, timeout, singleShot);
     TRACE_EVENT_INSTANT1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline"), "TimerInstall", "data", InspectorTimerInstallEvent::data(context, timeoutID, timeout, singleShot));
-    // FIXME(361045): remove InspectorInstrumentation calls once DevTools Timeline migrates to tracing.
     InspectorInstrumentation::didInstallTimer(context, timeoutID, timeout, singleShot);
-    WTF_LOG(Timers, "DOMTimer::install: timeoutID = %d, timeout = %d, singleShot = %d", timeoutID, timeout, singleShot ? 1 : 0);
     return timeoutID;
 }
 
 void DOMTimer::removeByID(ExecutionContext* context, int timeoutID)
 {
-    WTF_LOG(Timers, "DOMTimer::removeByID: timeoutID = %d", timeoutID);
-    context->removeTimeoutByID(timeoutID);
+    context->timers()->removeTimeoutByID(timeoutID);
     TRACE_EVENT_INSTANT1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline"), "TimerRemove", "data", InspectorTimerRemoveEvent::data(context, timeoutID));
-    // FIXME(361045): remove InspectorInstrumentation calls once DevTools Timeline migrates to tracing.
     InspectorInstrumentation::didRemoveTimer(context, timeoutID);
 }
 
-DOMTimer::DOMTimer(ExecutionContext* context, PassOwnPtr<ScheduledAction> action, int interval, bool singleShot, int timeoutID)
+DOMTimer::DOMTimer(ExecutionContext* context, PassOwnPtrWillBeRawPtr<ScheduledAction> action, int interval, bool singleShot, int timeoutID)
     : SuspendableTimer(context)
     , m_timeoutID(timeoutID)
-    , m_nestingLevel(context->timerNestingLevel() + 1)
+    , m_nestingLevel(context->timers()->timerNestingLevel() + 1)
     , m_action(action)
 {
     ASSERT(timeoutID > 0);
@@ -115,22 +110,16 @@ void DOMTimer::dispose()
     stop();
 }
 
-int DOMTimer::timeoutID() const
-{
-    return m_timeoutID;
-}
-
 void DOMTimer::fired()
 {
     ExecutionContext* context = executionContext();
     ASSERT(context);
-    context->setTimerNestingLevel(m_nestingLevel);
+    context->timers()->setTimerNestingLevel(m_nestingLevel);
     ASSERT(!context->activeDOMObjectsAreSuspended());
     // Only the first execution of a multi-shot timer should get an affirmative user gesture indicator.
     UserGestureIndicator gestureIndicator(m_userGestureToken.release());
 
     TRACE_EVENT1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline"), "TimerFire", "data", InspectorTimerFireEvent::data(context, m_timeoutID));
-    // FIXME(361045): remove InspectorInstrumentation calls once DevTools Timeline migrates to tracing.
     InspectorInstrumentationCookie cookie = InspectorInstrumentation::willFireTimer(context, m_timeoutID);
 
     // Simple case for non-one-shot timers.
@@ -141,8 +130,6 @@ void DOMTimer::fired()
                 augmentRepeatInterval(minimumInterval - repeatInterval());
         }
 
-        WTF_LOG(Timers, "DOMTimer::fired: m_timeoutID = %d, repeatInterval = %f, m_action = %p", m_timeoutID, repeatInterval(), m_action.get());
-
         // No access to member variables after this point, it can delete the timer.
         m_action->execute(context);
 
@@ -151,14 +138,12 @@ void DOMTimer::fired()
         return;
     }
 
-    WTF_LOG(Timers, "DOMTimer::fired: m_timeoutID = %d, one-shot, m_action = %p", m_timeoutID, m_action.get());
-
     RefPtrWillBeRawPtr<DOMTimer> protect(this);
 
     // Unregister the timer from ExecutionContext before executing the action
     // for one-shot timers.
-    OwnPtr<ScheduledAction> action = m_action.release();
-    context->removeTimeoutByID(m_timeoutID);
+    OwnPtrWillBeRawPtr<ScheduledAction> action = m_action.release();
+    context->timers()->removeTimeoutByID(m_timeoutID);
 
     action->execute(context);
 
@@ -167,7 +152,7 @@ void DOMTimer::fired()
 
     // ExecutionContext might be already gone when we executed action->execute().
     if (executionContext())
-        executionContext()->setTimerNestingLevel(0);
+        executionContext()->timers()->setTimerNestingLevel(0);
 }
 
 void DOMTimer::stop()
@@ -215,8 +200,9 @@ double DOMTimer::alignedFireTime(double fireTime) const
     return fireTime;
 }
 
-void DOMTimer::trace(Visitor* visitor)
+DEFINE_TRACE(DOMTimer)
 {
+    visitor->trace(m_action);
     SuspendableTimer::trace(visitor);
 }
 

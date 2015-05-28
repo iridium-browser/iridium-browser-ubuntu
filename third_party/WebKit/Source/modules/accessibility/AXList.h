@@ -29,19 +29,19 @@
 #ifndef AXList_h
 #define AXList_h
 
-#include "modules/accessibility/AXRenderObject.h"
+#include "modules/accessibility/AXLayoutObject.h"
 
 namespace blink {
 
 class AXObjectCacheImpl;
 
-class AXList final : public AXRenderObject {
+class AXList final : public AXLayoutObject {
 
 private:
-    AXList(RenderObject*, AXObjectCacheImpl*);
+    AXList(LayoutObject*, AXObjectCacheImpl*);
 
 public:
-    static PassRefPtr<AXList> create(RenderObject*, AXObjectCacheImpl*);
+    static PassRefPtr<AXList> create(LayoutObject*, AXObjectCacheImpl*);
     virtual ~AXList();
 
     virtual bool isList() const override { return true; }

@@ -29,7 +29,6 @@
 
 #include "core/fetch/Resource.h"
 #include "core/fetch/ResourceLoaderOptions.h"
-#include "core/frame/UseCounter.h"
 #include "platform/network/HTTPParsers.h"
 #include "platform/network/ResourceRequest.h"
 #include "platform/network/ResourceResponse.h"
@@ -57,9 +56,9 @@ static PassOwnPtr<HTTPHeaderSet> createAllowedCrossOriginResponseHeadersSet()
 
 bool isOnAccessControlResponseHeaderWhitelist(const String& name)
 {
-    AtomicallyInitializedStatic(HTTPHeaderSet*, allowedCrossOriginResponseHeaders = createAllowedCrossOriginResponseHeadersSet().leakPtr());
+    AtomicallyInitializedStaticReference(HTTPHeaderSet, allowedCrossOriginResponseHeaders, (createAllowedCrossOriginResponseHeadersSet().leakPtr()));
 
-    return allowedCrossOriginResponseHeaders->contains(name);
+    return allowedCrossOriginResponseHeaders.contains(name);
 }
 
 void updateRequestForAccessControl(ResourceRequest& request, SecurityOrigin* securityOrigin, StoredCredentials allowCredentials)
@@ -85,18 +84,27 @@ ResourceRequest createAccessControlPreflightRequest(const ResourceRequest& reque
     const HTTPHeaderMap& requestHeaderFields = request.httpHeaderFields();
 
     if (requestHeaderFields.size() > 0) {
-        StringBuilder headerBuffer;
-        HTTPHeaderMap::const_iterator it = requestHeaderFields.begin();
-        headerBuffer.append(it->key);
-        ++it;
-
-        HTTPHeaderMap::const_iterator end = requestHeaderFields.end();
-        for (; it != end; ++it) {
-            headerBuffer.appendLiteral(", ");
-            headerBuffer.append(it->key);
+        // Sort header names lexicographically: https://crbug.com/452391
+        // Fetch API Spec:
+        //   https://fetch.spec.whatwg.org/#cors-preflight-fetch-0
+        Vector<String> headers;
+        for (const auto& header : requestHeaderFields) {
+            if (equalIgnoringCase(header.key, "referer")) {
+                // When the request is from a Worker, referrer header was added
+                // by WorkerThreadableLoader. But it should not be added to
+                // Access-Control-Request-Headers header.
+                continue;
+            }
+            headers.append(header.key.lower());
         }
-
-        preflightRequest.setHTTPHeaderField("Access-Control-Request-Headers", AtomicString(headerBuffer.toString().lower()));
+        std::sort(headers.begin(), headers.end(), WTF::codePointCompareLessThan);
+        StringBuilder headerBuffer;
+        for (const String& header : headers) {
+            if (!headerBuffer.isEmpty())
+                headerBuffer.appendLiteral(", ");
+            headerBuffer.append(header);
+        }
+        preflightRequest.setHTTPHeaderField("Access-Control-Request-Headers", AtomicString(headerBuffer.toString()));
     }
 
     return preflightRequest;
@@ -115,10 +123,10 @@ static bool isInterestingStatusCode(int statusCode)
     return statusCode >= 400;
 }
 
-bool passesAccessControlCheck(ExecutionContext* context, const ResourceResponse& response, StoredCredentials includeCredentials, SecurityOrigin* securityOrigin, String& errorDescription)
+bool passesAccessControlCheck(const ResourceResponse& response, StoredCredentials includeCredentials, SecurityOrigin* securityOrigin, String& errorDescription)
 {
-    AtomicallyInitializedStatic(AtomicString&, accessControlAllowOrigin = *new AtomicString("access-control-allow-origin", AtomicString::ConstructFromLiteral));
-    AtomicallyInitializedStatic(AtomicString&, accessControlAllowCredentials = *new AtomicString("access-control-allow-credentials", AtomicString::ConstructFromLiteral));
+    AtomicallyInitializedStaticReference(AtomicString, accessControlAllowOrigin, (new AtomicString("access-control-allow-origin", AtomicString::ConstructFromLiteral)));
+    AtomicallyInitializedStaticReference(AtomicString, accessControlAllowCredentials, (new AtomicString("access-control-allow-credentials", AtomicString::ConstructFromLiteral)));
 
     if (!response.httpStatusCode()) {
         errorDescription = "Received an invalid response. Origin '" + securityOrigin->toString() + "' is therefore not allowed access.";
@@ -159,8 +167,6 @@ bool passesAccessControlCheck(ExecutionContext* context, const ResourceResponse&
             errorDescription = "Credentials flag is 'true', but the 'Access-Control-Allow-Credentials' header is '" + accessControlCredentialsString + "'. It must be 'true' to allow credentials.";
             return false;
         }
-        if (accessControlOriginString == "null")
-            UseCounter::count(context, UseCounter::CORSCredentialedNullOriginAccessAllowed);
     }
 
     return true;
@@ -168,7 +174,13 @@ bool passesAccessControlCheck(ExecutionContext* context, const ResourceResponse&
 
 bool passesPreflightStatusCheck(const ResourceResponse& response, String& errorDescription)
 {
-    if (response.httpStatusCode() < 200 || response.httpStatusCode() >= 400) {
+    // CORS preflight with 3XX is considered network error in
+    // Fetch API Spec:
+    //   https://fetch.spec.whatwg.org/#cors-preflight-fetch
+    // CORS Spec:
+    //   http://www.w3.org/TR/cors/#cross-origin-request-with-preflight-0
+    // https://crbug.com/452394
+    if (response.httpStatusCode() < 200 || response.httpStatusCode() >= 300) {
         errorDescription = "Invalid HTTP status code " + String::number(response.httpStatusCode());
         return false;
     }
@@ -203,7 +215,7 @@ bool CrossOriginAccessControl::isLegalRedirectLocation(const KURL& requestURL, S
     return true;
 }
 
-bool CrossOriginAccessControl::handleRedirect(ExecutionContext* context, Resource* resource, SecurityOrigin* securityOrigin, ResourceRequest& request, const ResourceResponse& redirectResponse, ResourceLoaderOptions& options, String& errorMessage)
+bool CrossOriginAccessControl::handleRedirect(SecurityOrigin* securityOrigin, ResourceRequest& request, const ResourceResponse& redirectResponse, StoredCredentials withCredentials, ResourceLoaderOptions& options, String& errorMessage)
 {
     // http://www.w3.org/TR/cors/#redirect-steps terminology:
     const KURL& originalURL = redirectResponse.url();
@@ -220,8 +232,7 @@ bool CrossOriginAccessControl::handleRedirect(ExecutionContext* context, Resourc
         bool allowRedirect = isLegalRedirectLocation(requestURL, errorDescription);
         if (allowRedirect) {
             // Step 5: perform resource sharing access check.
-            StoredCredentials withCredentials = resource->lastResourceRequest().allowStoredCredentials() ? AllowStoredCredentials : DoNotAllowStoredCredentials;
-            allowRedirect = passesAccessControlCheck(context, redirectResponse, withCredentials, securityOrigin, errorDescription);
+            allowRedirect = passesAccessControlCheck(redirectResponse, withCredentials, securityOrigin, errorDescription);
             if (allowRedirect) {
                 RefPtr<SecurityOrigin> originalOrigin = SecurityOrigin::create(originalURL);
                 // Step 6: if the request URL origin is not same origin as the original URL's,

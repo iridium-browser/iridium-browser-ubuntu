@@ -3,9 +3,7 @@
 // found in the LICENSE file.
 
 #include "config.h"
-
 #if ENABLE(WEB_AUDIO)
-
 #include "modules/webaudio/StereoPannerNode.h"
 
 #include "bindings/core/v8/ExceptionMessages.h"
@@ -20,14 +18,14 @@
 
 namespace blink {
 
-StereoPannerNode::StereoPannerNode(AudioContext* context, float sampleRate)
-    : AudioNode(NodeTypeStereoPanner, context, sampleRate)
-    , m_sampleAccuratePanValues(AudioNode::ProcessingSizeInFrames)
+StereoPannerHandler::StereoPannerHandler(AudioNode& node, float sampleRate)
+    : AudioHandler(NodeTypeStereoPanner, node, sampleRate)
+    , m_sampleAccuratePanValues(ProcessingSizeInFrames)
 {
-    m_pan = AudioParam::create(context, 0);
+    m_pan = AudioParam::create(context(), 0);
 
     addInput();
-    addOutput(AudioNodeOutput::create(this, 2));
+    addOutput(2);
 
     // The node-specific default mixing rules declare that StereoPannerNode
     // can handle mono to stereo and stereo to stereo conversion.
@@ -38,18 +36,18 @@ StereoPannerNode::StereoPannerNode(AudioContext* context, float sampleRate)
     initialize();
 }
 
-StereoPannerNode::~StereoPannerNode()
+StereoPannerHandler::~StereoPannerHandler()
 {
     ASSERT(!isInitialized());
 }
 
-void StereoPannerNode::dispose()
+void StereoPannerHandler::dispose()
 {
     uninitialize();
-    AudioNode::dispose();
+    AudioHandler::dispose();
 }
 
-void StereoPannerNode::process(size_t framesToProcess)
+void StereoPannerHandler::process(size_t framesToProcess)
 {
     AudioBus* outputBus = output(0)->bus();
 
@@ -64,12 +62,12 @@ void StereoPannerNode::process(size_t framesToProcess)
         return;
     }
 
-    if (pan()->hasSampleAccurateValues()) {
+    if (pan()->handler().hasSampleAccurateValues()) {
         // Apply sample-accurate panning specified by AudioParam automation.
         ASSERT(framesToProcess <= m_sampleAccuratePanValues.size());
         if (framesToProcess <= m_sampleAccuratePanValues.size()) {
             float* panValues = m_sampleAccuratePanValues.data();
-            pan()->calculateSampleAccurateValues(panValues, framesToProcess);
+            pan()->handler().calculateSampleAccurateValues(panValues, framesToProcess);
             m_stereoPanner->panWithSampleAccurateValues(inputBus, outputBus, panValues, framesToProcess);
         }
     } else {
@@ -77,27 +75,27 @@ void StereoPannerNode::process(size_t framesToProcess)
     }
 }
 
-void StereoPannerNode::initialize()
+void StereoPannerHandler::initialize()
 {
     if (isInitialized())
         return;
 
     m_stereoPanner = Spatializer::create(Spatializer::PanningModelEqualPower, sampleRate());
 
-    AudioNode::initialize();
+    AudioHandler::initialize();
 }
 
-void StereoPannerNode::uninitialize()
+void StereoPannerHandler::uninitialize()
 {
     if (!isInitialized())
         return;
 
     m_stereoPanner.clear();
 
-    AudioNode::uninitialize();
+    AudioHandler::uninitialize();
 }
 
-void StereoPannerNode::setChannelCount(unsigned long channelCount, ExceptionState& exceptionState)
+void StereoPannerHandler::setChannelCount(unsigned long channelCount, ExceptionState& exceptionState)
 {
     ASSERT(isMainThread());
     AudioContext::AutoLocker locker(context());
@@ -122,7 +120,7 @@ void StereoPannerNode::setChannelCount(unsigned long channelCount, ExceptionStat
     }
 }
 
-void StereoPannerNode::setChannelCountMode(const String& mode, ExceptionState& exceptionState)
+void StereoPannerHandler::setChannelCountMode(const String& mode, ExceptionState& exceptionState)
 {
     ASSERT(isMainThread());
     AudioContext::AutoLocker locker(context());
@@ -149,14 +147,31 @@ void StereoPannerNode::setChannelCountMode(const String& mode, ExceptionState& e
     }
 
     if (m_newChannelCountMode != oldMode)
-        context()->addChangedChannelCountMode(this);
+        context()->handler().addChangedChannelCountMode(this);
 }
 
-void StereoPannerNode::trace(Visitor* visitor)
+DEFINE_TRACE(StereoPannerHandler)
 {
-    visitor->trace(m_stereoPanner);
     visitor->trace(m_pan);
-    AudioNode::trace(visitor);
+    AudioHandler::trace(visitor);
+}
+
+// ----------------------------------------------------------------
+
+StereoPannerNode::StereoPannerNode(AudioContext& context, float sampleRate)
+    : AudioNode(context)
+{
+    setHandler(new StereoPannerHandler(*this, sampleRate));
+}
+
+StereoPannerNode* StereoPannerNode::create(AudioContext* context, float sampleRate)
+{
+    return new StereoPannerNode(*context, sampleRate);
+}
+
+AudioParam* StereoPannerNode::pan() const
+{
+    return static_cast<StereoPannerHandler&>(handler()).pan();
 }
 
 } // namespace blink

@@ -1,22 +1,17 @@
-#!/usr/bin/python
 # Copyright (c) 2012 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
 """Unittests for the gs.py module."""
 
-# pylint: disable=bad-continuation
-
 from __future__ import print_function
 
 import contextlib
 import functools
 import datetime
+import mock
 import os
-import string # pylint: disable=W0402
-import sys
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(
-    os.path.abspath(__file__)))))
+import string
 
 from chromite.cbuildbot import constants
 from chromite.lib import cros_build_lib
@@ -26,10 +21,6 @@ from chromite.lib import gs
 from chromite.lib import osutils
 from chromite.lib import partial_mock
 from chromite.lib import retry_stats
-
-# TODO(build): Finish test wrapper (http://crosbug.com/37517).
-# Until then, this has to be after the chromite imports.
-import mock
 
 
 def PatchGS(*args, **kwargs):
@@ -45,10 +36,11 @@ class GSContextMock(partial_mock.PartialCmdMock):
            'DEFAULT_GSUTIL_BUILDER_BIN', 'GSUTIL_URL')
   DEFAULT_ATTR = 'DoCommand'
 
-  GSResponsePreconditionFailed = """
-[Setting Content-Type=text/x-python]
-        GSResponseError:: status=412, code=PreconditionFailed,
-        reason=Precondition Failed."""
+  GSResponsePreconditionFailed = """\
+Copying file:///dev/null [Content-Type=application/octet-stream]...
+Uploading   gs://chromeos-throw-away-bucket/vapier/null:         0 B    \r\
+Uploading   gs://chromeos-throw-away-bucket/vapier/null:         0 B    \r\
+PreconditionException: 412 Precondition Failed"""
 
   DEFAULT_SLEEP_TIME = 0
   DEFAULT_RETRIES = 2
@@ -70,7 +62,7 @@ class GSContextMock(partial_mock.PartialCmdMock):
     self.GSUTIL_URL = 'file://%s' % gsutil_path
 
   def PreStart(self):
-    os.environ.pop("BOTO_CONFIG", None)
+    os.environ.pop('BOTO_CONFIG', None)
     # Set it here for now, instead of mocking out Cached() directly because
     # python-mock has a bug with mocking out class methods with autospec=True.
     # TODO(rcui): Change this when this is fixed in PartialMock.
@@ -82,7 +74,7 @@ class GSContextMock(partial_mock.PartialCmdMock):
 
   def DoCommand(self, inst, gsutil_cmd, **kwargs):
     result = self._results['DoCommand'].LookupResult(
-        (gsutil_cmd,), hook_args=(inst, gsutil_cmd,), hook_kwargs=kwargs)
+        (gsutil_cmd,), hook_args=(inst, gsutil_cmd), hook_kwargs=kwargs)
 
     rc_mock = cros_build_lib_unittest.RunCommandMock()
     rc_mock.AddCmdResult(
@@ -399,12 +391,12 @@ class CopyTest(AbstractGSContextTest, cros_test_lib.TempDirTestCase):
     self.gs_mock.AddCmdResult(partial_mock.In('cp'), returncode=1)
     self.assertRaises(cros_build_lib.RunCommandError, self.Copy)
 
-  def testGSContextException(self):
-    """GSContextException is raised properly."""
+  def testGSContextPreconditionFailed(self):
+    """GSContextPreconditionFailed is raised properly."""
     self.gs_mock.AddCmdResult(
         partial_mock.In('cp'), returncode=1,
         error=self.gs_mock.GSResponsePreconditionFailed)
-    self.assertRaises(gs.GSContextException, self.Copy)
+    self.assertRaises(gs.GSContextPreconditionFailed, self.Copy)
 
   def testNonRecursive(self):
     """Test non-recursive copy."""
@@ -448,18 +440,18 @@ class CopyTest(AbstractGSContextTest, cros_test_lib.TempDirTestCase):
     error = (
         # This is a bit verbose, but it's from real output, so should be fine.
         'Copying file:///tmp/tmpyUUPg1 [Content-Type=application/octet-stream]'
-          '...\n'
+        '...\n'
         'Uploading   ...recovery-R38-6158.66.0-mccloud.instructions.lock:'
-          ' 0 B/38 B    \r'
+        ' 0 B/38 B    \r'
         'Uploading   ...recovery-R38-6158.66.0-mccloud.instructions.lock:'
-          ' 38 B/38 B    \r'
+        ' 38 B/38 B    \r'
         'NotFoundException: 404 Attempt to get key for "gs://chromeos-releases'
-          '/tobesigned/50,beta-\n'
+        '/tobesigned/50,beta-\n'
         'channel,mccloud,6158.66.0,ChromeOS-\n'
         'recovery-R38-6158.66.0-mccloud.instructions.lock" failed. This can '
-          'happen if the\n'
+        'happen if the\n'
         'URI refers to a non-existent object or if you meant to operate on a '
-          'directory\n'
+        'directory\n'
         '(e.g., leaving off -R option on gsutil cp, mv, or ls of a bucket)\n'
     )
     self.gs_mock.AddCmdResult(partial_mock.In('cp'), returncode=1, error=error)
@@ -665,12 +657,11 @@ class MoveTest(AbstractGSContextTest, cros_test_lib.TempDirTestCase):
         ['mv', '--', self.local_path, self.EXPECTED_REMOTE])
 
 
-#pylint: disable=E1101,W0212
 class GSContextInitTest(cros_test_lib.MockTempDirTestCase):
   """Tests GSContext.__init__() functionality."""
 
   def setUp(self):
-    os.environ.pop("BOTO_CONFIG", None)
+    os.environ.pop('BOTO_CONFIG', None)
     self.bad_path = os.path.join(self.tempdir, 'nonexistent')
 
     file_list = ['gsutil_bin', 'boto_file', 'acl_file']
@@ -795,6 +786,7 @@ class GSDoCommandTest(cros_test_lib.TestCase):
         cmd += ['-r', '-e']
       cmd += ['--', '/blah', 'gs://foon']
 
+      # pylint: disable=protected-access
       retry_stats.RetryWithStats.assert_called_once_with(
           retry_stats.GSUTIL,
           ctx._RetryFilter, retries,
@@ -826,13 +818,15 @@ class GSDoCommandTest(cros_test_lib.TestCase):
 class GSRetryFilterTest(cros_test_lib.TestCase):
   """Verifies that we filter and process gsutil errors correctly."""
 
+  # pylint: disable=protected-access
+
   LOCAL_PATH = '/tmp/file'
   REMOTE_PATH = ('gs://chromeos-prebuilt/board/beltino/paladin-R33-4926.0.0'
                  '-rc2/packages/chromeos-base/autotest-tests-0.0.1-r4679.tbz2')
   GSUTIL_TRACKER_DIR = '/foo'
   UPLOAD_TRACKER_FILE = (
       'upload_TRACKER_9263880a80e4a582aec54eaa697bfcdd9c5621ea.9.tbz2__JSON.url'
-      )
+  )
   DOWNLOAD_TRACKER_FILE = (
       'download_TRACKER_5a695131f3ef6e4c903f594783412bb996a7f375._file__JSON.'
       'etag')
@@ -1354,6 +1348,8 @@ class DryRunTest(cros_build_lib_unittest.RunCommandTestCase):
 class InitBotoTest(AbstractGSContextTest):
   """Test boto file interactive initialization."""
 
+  # pylint: disable=protected-access
+
   GS_LS_ERROR = """\
 You are attempting to access protected data with no configured credentials.
 Please see http://code.google.com/apis/storage/docs/signup.html for
@@ -1548,7 +1544,3 @@ class UnmockedGSCounterTest(cros_test_lib.TestCase):
     with self._Counter() as counter:
       self._SetCounter(counter, 100)
       self.assertEqual(counter.StreakDecrement(), -1)
-
-
-if __name__ == '__main__':
-  cros_test_lib.main()

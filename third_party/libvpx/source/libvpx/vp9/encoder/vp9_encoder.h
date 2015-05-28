@@ -17,9 +17,12 @@
 #include "vpx/internal/vpx_codec_internal.h"
 #include "vpx/vp8cx.h"
 
+#include "vp9/common/vp9_alloccommon.h"
 #include "vp9/common/vp9_ppflags.h"
 #include "vp9/common/vp9_entropymode.h"
+#include "vp9/common/vp9_thread_common.h"
 #include "vp9/common/vp9_onyxc_int.h"
+#include "vp9/common/vp9_thread.h"
 
 #include "vp9/encoder/vp9_aq_cyclicrefresh.h"
 #include "vp9/encoder/vp9_context_tree.h"
@@ -35,6 +38,7 @@
 #include "vp9/encoder/vp9_svc_layercontext.h"
 #include "vp9/encoder/vp9_tokenize.h"
 #include "vp9/encoder/vp9_variance.h"
+
 #if CONFIG_VP9_TEMPORAL_DENOISING
 #include "vp9/encoder/vp9_denoiser.h"
 #endif
@@ -44,7 +48,6 @@ extern "C" {
 #endif
 
 #define DEFAULT_GF_INTERVAL         10
-#define INVALID_REF_BUFFER_IDX      -1  // Marks an invalid reference buffer id.
 
 typedef struct {
   int nmvjointcost[MV_JOINTS];
@@ -216,6 +219,8 @@ typedef struct VP9EncoderConfig {
   int tile_columns;
   int tile_rows;
 
+  int max_threads;
+
   vpx_fixed_buf_t two_pass_stats_in;
   struct vpx_codec_pkt_list *output_pkt_list;
 
@@ -228,6 +233,7 @@ typedef struct VP9EncoderConfig {
 #if CONFIG_VP9_HIGHBITDEPTH
   int use_highbitdepth;
 #endif
+  vpx_color_space_t color_space;
 } VP9EncoderConfig;
 
 static INLINE int is_lossless_requested(const VP9EncoderConfig *cfg) {
@@ -258,9 +264,19 @@ typedef struct ThreadData {
   PC_TREE *pc_root;
 } ThreadData;
 
+struct EncWorkerData;
+
+typedef struct ActiveMap {
+  int enabled;
+  int update;
+  unsigned char *map;
+} ActiveMap;
+
 typedef struct VP9_COMP {
   QUANTS quants;
   ThreadData td;
+  DECLARE_ALIGNED(16, int16_t, y_dequant[QINDEX_RANGE][8]);
+  DECLARE_ALIGNED(16, int16_t, uv_dequant[QINDEX_RANGE][8]);
   VP9_COMMON common;
   VP9EncoderConfig oxcf;
   struct lookahead_ctx    *lookahead;
@@ -301,7 +317,7 @@ typedef struct VP9_COMP {
   unsigned int tok_count[4][1 << 6];
 
   // Ambient reconstruction err target for force key frames
-  int ambient_err;
+  int64_t ambient_err;
 
   RD_OPT rd;
 
@@ -311,9 +327,6 @@ typedef struct VP9_COMP {
   int *nmvcosts_hp[2];
   int *nmvsadcosts[2];
   int *nmvsadcosts_hp[2];
-
-  int zbin_mode_boost;
-  int zbin_mode_boost_enabled;
 
   int64_t last_time_stamp_seen;
   int64_t last_end_time_stamp_seen;
@@ -336,6 +349,8 @@ typedef struct VP9_COMP {
   unsigned int max_mv_magnitude;
   int mv_step_param;
 
+  int allow_comp_inter_inter;
+
   // Default value is 1. From first pass stats, encode_breakout may be disabled.
   ENCODE_BREAKOUT_TYPE allow_encode_breakout;
 
@@ -348,9 +363,8 @@ typedef struct VP9_COMP {
   // segment threashold for encode breakout
   int  segment_encode_breakout[MAX_SEGMENTS];
 
-  unsigned char *complexity_map;
-
   CYCLIC_REFRESH *cyclic_refresh;
+  ActiveMap active_map;
 
   fractional_mv_step_fp *find_fractional_mv_step;
   vp9_full_search_fn_t full_search_sad;
@@ -442,11 +456,27 @@ typedef struct VP9_COMP {
 #if CONFIG_VP9_TEMPORAL_DENOISING
   VP9_DENOISER denoiser;
 #endif
+
+  int resize_pending;
+
+  // VAR_BASED_PARTITION thresholds
+  int64_t vbp_threshold;
+  int64_t vbp_threshold_bsize_min;
+  int64_t vbp_threshold_bsize_max;
+  int64_t vbp_threshold_16x16;
+  BLOCK_SIZE vbp_bsize_min;
+
+  // Multi-threading
+  int num_workers;
+  VP9Worker *workers;
+  struct EncWorkerData *tile_thr_data;
+  VP9LfSync lf_row_sync;
 } VP9_COMP;
 
-void vp9_initialize_enc();
+void vp9_initialize_enc(void);
 
-struct VP9_COMP *vp9_create_compressor(VP9EncoderConfig *oxcf);
+struct VP9_COMP *vp9_create_compressor(VP9EncoderConfig *oxcf,
+                                       BufferPool *const pool);
 void vp9_remove_compressor(VP9_COMP *cpi);
 
 void vp9_change_config(VP9_COMP *cpi, const VP9EncoderConfig *oxcf);
@@ -494,8 +524,8 @@ static INLINE int frame_is_kf_gf_arf(const VP9_COMP *cpi) {
          (cpi->refresh_golden_frame && !cpi->rc.is_src_frame_alt_ref);
 }
 
-static INLINE int get_ref_frame_idx(const VP9_COMP *cpi,
-                                    MV_REFERENCE_FRAME ref_frame) {
+static INLINE int get_ref_frame_map_idx(const VP9_COMP *cpi,
+                                        MV_REFERENCE_FRAME ref_frame) {
   if (ref_frame == LAST_FRAME) {
     return cpi->lst_fb_idx;
   } else if (ref_frame == GOLDEN_FRAME) {
@@ -505,11 +535,19 @@ static INLINE int get_ref_frame_idx(const VP9_COMP *cpi,
   }
 }
 
+static INLINE int get_ref_frame_buf_idx(const VP9_COMP *const cpi,
+                                        int ref_frame) {
+  const VP9_COMMON *const cm = &cpi->common;
+  const int map_idx = get_ref_frame_map_idx(cpi, ref_frame);
+  return (map_idx != INVALID_IDX) ? cm->ref_frame_map[map_idx] : INVALID_IDX;
+}
+
 static INLINE YV12_BUFFER_CONFIG *get_ref_frame_buffer(
     VP9_COMP *cpi, MV_REFERENCE_FRAME ref_frame) {
-  VP9_COMMON * const cm = &cpi->common;
-  return &cm->frame_bufs[cm->ref_frame_map[get_ref_frame_idx(cpi, ref_frame)]]
-      .buf;
+  VP9_COMMON *const cm = &cpi->common;
+  const int buf_idx = get_ref_frame_buf_idx(cpi, ref_frame);
+  return
+      buf_idx != INVALID_IDX ? &cm->buffer_pool->frame_bufs[buf_idx].buf : NULL;
 }
 
 static INLINE int get_token_alloc(int mb_rows, int mb_cols) {
@@ -530,11 +568,10 @@ static INLINE int allocated_tokens(TileInfo tile) {
   return get_token_alloc(tile_mb_rows, tile_mb_cols);
 }
 
-int vp9_get_y_sse(const YV12_BUFFER_CONFIG *a, const YV12_BUFFER_CONFIG *b);
+int64_t vp9_get_y_sse(const YV12_BUFFER_CONFIG *a, const YV12_BUFFER_CONFIG *b);
 #if CONFIG_VP9_HIGHBITDEPTH
-int vp9_highbd_get_y_sse(const YV12_BUFFER_CONFIG *a,
-                         const YV12_BUFFER_CONFIG *b,
-                         vpx_bit_depth_t bit_depth);
+int64_t vp9_highbd_get_y_sse(const YV12_BUFFER_CONFIG *a,
+                             const YV12_BUFFER_CONFIG *b);
 #endif  // CONFIG_VP9_HIGHBITDEPTH
 
 void vp9_alloc_compressor_data(VP9_COMP *cpi);
@@ -580,6 +617,8 @@ static INLINE int get_chessboard_index(const int frame_index) {
 static INLINE int *cond_cost_list(const struct VP9_COMP *cpi, int *cost_list) {
   return cpi->sf.mv.subpel_search_method != SUBPEL_TREE ? cost_list : NULL;
 }
+
+void vp9_new_framerate(VP9_COMP *cpi, double framerate);
 
 #ifdef __cplusplus
 }  // extern "C"

@@ -4,10 +4,10 @@
 
 #include "ui/views/widget/widget.h"
 
-#include "base/debug/trace_event.h"
 #include "base/logging.h"
 #include "base/message_loop/message_loop.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/trace_event/trace_event.h"
 #include "ui/base/cursor/cursor.h"
 #include "ui/base/default_theme_provider.h"
 #include "ui/base/hit_test.h"
@@ -15,7 +15,9 @@
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/compositor/compositor.h"
 #include "ui/compositor/layer.h"
+#include "ui/compositor/paint_context.h"
 #include "ui/events/event.h"
+#include "ui/events/event_utils.h"
 #include "ui/gfx/image/image_skia.h"
 #include "ui/gfx/screen.h"
 #include "ui/views/controls/menu/menu_controller.h"
@@ -111,7 +113,7 @@ Widget::InitParams::InitParams()
       parent(NULL),
       native_widget(NULL),
       desktop_window_tree_host(NULL),
-      layer_type(aura::WINDOW_LAYER_TEXTURED),
+      layer_type(ui::LAYER_TEXTURED),
       context(NULL),
       force_show_in_taskbar(false) {
 }
@@ -134,7 +136,7 @@ Widget::InitParams::InitParams(Type type)
       parent(NULL),
       native_widget(NULL),
       desktop_window_tree_host(NULL),
-      layer_type(aura::WINDOW_LAYER_TEXTURED),
+      layer_type(ui::LAYER_TEXTURED),
       context(NULL),
       force_show_in_taskbar(false) {
 }
@@ -356,8 +358,10 @@ void Widget::Init(const InitParams& in_params) {
     non_client_view_->set_client_view(widget_delegate_->CreateClientView(this));
     non_client_view_->SetOverlayView(widget_delegate_->CreateOverlayView());
     SetContentsView(non_client_view_);
-    // Initialize the window's title before setting the window's initial bounds;
-    // the frame view's preferred height may depend on the presence of a title.
+    // Initialize the window's icon and title before setting the window's
+    // initial bounds; the frame view's preferred height may depend on the
+    // presence of an icon or a title.
+    UpdateWindowIcon();
     UpdateWindowTitle();
     non_client_view_->ResetWindowControls();
     SetInitialBounds(params.bounds);
@@ -439,9 +443,9 @@ void Widget::NotifyNativeViewHierarchyChanged() {
 }
 
 void Widget::NotifyWillRemoveView(View* view) {
-    FOR_EACH_OBSERVER(WidgetRemovalsObserver,
-                      removals_observers_,
-                      OnWillRemoveView(this, view));
+  FOR_EACH_OBSERVER(WidgetRemovalsObserver,
+                    removals_observers_,
+                    OnWillRemoveView(this, view));
 }
 
 // Converted methods (see header) ----------------------------------------------
@@ -599,7 +603,9 @@ bool Widget::IsClosed() const {
 }
 
 void Widget::Show() {
-  TRACE_EVENT0("views", "Widget::Show");
+  const ui::Layer* layer = GetLayer();
+  TRACE_EVENT1("views", "Widget::Show", "layer",
+               layer ? layer->name() : "none");
   if (non_client_view_) {
     // While initializing, the kiosk mode will go to full screen before the
     // widget gets shown. In that case we stay in full screen mode, regardless
@@ -756,6 +762,12 @@ const FocusManager* Widget::GetFocusManager() const {
   return toplevel_widget ? toplevel_widget->focus_manager_.get() : NULL;
 }
 
+ui::TextInputClient* Widget::GetFocusedTextInputClient() {
+  FocusManager* focus_manager = GetFocusManager();
+  View* view = focus_manager ? focus_manager->GetFocusedView() : nullptr;
+  return view ? view->GetTextInputClient() : nullptr;
+}
+
 InputMethod* Widget::GetInputMethod() {
   return const_cast<InputMethod*>(
       const_cast<const Widget*>(this)->GetInputMethod());
@@ -859,6 +871,10 @@ void Widget::ThemeChanged() {
 
 void Widget::LocaleChanged() {
   root_view_->LocaleChanged();
+}
+
+void Widget::DeviceScaleFactorChanged(float device_scale_factor) {
+  root_view_->DeviceScaleFactorChanged(device_scale_factor);
 }
 
 void Widget::SetFocusTraversableParent(FocusTraversable* parent) {
@@ -979,9 +995,8 @@ gfx::Rect Widget::GetWorkAreaBoundsInScreen() const {
 
 void Widget::SynthesizeMouseMoveEvent() {
   last_mouse_event_was_move_ = false;
-  ui::MouseEvent mouse_event(ui::ET_MOUSE_MOVED,
-                             last_mouse_event_position_,
-                             last_mouse_event_position_,
+  ui::MouseEvent mouse_event(ui::ET_MOUSE_MOVED, last_mouse_event_position_,
+                             last_mouse_event_position_, ui::EventTimeForNow(),
                              ui::EF_IS_SYNTHESIZED, 0);
   root_view_->OnMouseMoved(mouse_event);
 }
@@ -1052,14 +1067,12 @@ void Widget::OnNativeWidgetActivationChanged(bool active) {
     non_client_view()->frame_view()->SchedulePaint();
 }
 
-void Widget::OnNativeFocus(gfx::NativeView old_focused_view) {
-  WidgetFocusManager::GetInstance()->OnWidgetFocusEvent(old_focused_view,
-                                                        GetNativeView());
+void Widget::OnNativeFocus() {
+  WidgetFocusManager::GetInstance()->OnNativeFocusChanged(GetNativeView());
 }
 
-void Widget::OnNativeBlur(gfx::NativeView new_focused_view) {
-  WidgetFocusManager::GetInstance()->OnWidgetFocusEvent(GetNativeView(),
-                                                        new_focused_view);
+void Widget::OnNativeBlur() {
+  WidgetFocusManager::GetInstance()->OnNativeFocusChanged(nullptr);
 }
 
 void Widget::OnNativeWidgetVisibilityChanging(bool visible) {
@@ -1167,11 +1180,12 @@ bool Widget::OnNativeWidgetPaintAccelerated(const gfx::Rect& dirty_region) {
   return true;
 }
 
-void Widget::OnNativeWidgetPaint(gfx::Canvas* canvas) {
+void Widget::OnNativeWidgetPaint(const ui::PaintContext& context) {
   // On Linux Aura, we can get here during Init() because of the
   // SetInitialBounds call.
-  if (native_widget_initialized_)
-    GetRootView()->Paint(canvas, CullSet());
+  if (!native_widget_initialized_)
+    return;
+  GetRootView()->Paint(context);
 }
 
 int Widget::GetNonClientComponent(const gfx::Point& point) {

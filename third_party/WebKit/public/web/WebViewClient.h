@@ -134,7 +134,6 @@ public:
     // indicating that the default action should be suppressed.
     virtual bool handleCurrentKeyboardEvent() { return false; }
 
-
     // Dialogs -------------------------------------------------------------
 
     // This method returns immediately after showing the dialog. When the
@@ -154,13 +153,15 @@ public:
     // Show a notification popup for the specified form vaidation messages
     // besides the anchor rectangle. An implementation of this function should
     // not hide the popup until hideValidationMessage call.
-    virtual void showValidationMessage(const WebRect& anchorInRootView, const WebString& mainText, WebTextDirection mainTextDir, const WebString& supplementalText, WebTextDirection supplementalTextDir) { }
+    // FIXME: Clarify anchor coordinates in variable name on Chromium-side.
+    virtual void showValidationMessage(const WebRect& anchorInViewport, const WebString& mainText, WebTextDirection mainTextDir, const WebString& supplementalText, WebTextDirection supplementalTextDir) { }
 
     // Hide notifation popup for form validation messages.
     virtual void hideValidationMessage() { }
 
     // Move the existing notifation popup to the new anchor position.
-    virtual void moveValidationMessage(const WebRect& anchorInRootView) { }
+    // FIXME: Clarify anchor coordinates in variable name on Chromium-side.
+    virtual void moveValidationMessage(const WebRect& anchorInViewport) { }
 
 
     // UI ------------------------------------------------------------------
@@ -186,8 +187,9 @@ public:
     virtual void focusNext() { }
     virtual void focusPrevious() { }
 
-    // Called when a new node gets focused.
-    virtual void focusedNodeChanged(const WebNode&) { }
+    // Called when a new node gets focused. |fromNode| is the previously focused node, |toNode|
+    // is the newly focused node. Either can be null.
+    virtual void focusedNodeChanged(const WebNode& fromNode, const WebNode& toNode) { }
 
     // Indicates two things:
     //   1) This view may have a new layout now.
@@ -247,6 +249,8 @@ public:
     // action that wasn't initiated by the client.
     virtual void zoomLevelChanged() { }
 
+    // Informs the browser that the page scale has changed.
+    virtual void pageScaleFactorChanged() { }
 
     // Navigator Content Utils  --------------------------------------------
 

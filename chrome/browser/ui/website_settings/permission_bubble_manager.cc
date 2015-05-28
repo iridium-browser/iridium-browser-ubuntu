@@ -5,6 +5,7 @@
 #include "chrome/browser/ui/website_settings/permission_bubble_manager.h"
 
 #include "base/command_line.h"
+#include "base/metrics/field_trial.h"
 #include "base/metrics/user_metrics_action.h"
 #include "chrome/browser/ui/website_settings/permission_bubble_request.h"
 #include "chrome/common/chrome_switches.h"
@@ -13,6 +14,11 @@
 #include "content/public/browser/user_metrics.h"
 
 namespace {
+
+// String constants to control whether bubbles are enabled by default.
+const char kTrialName[] = "PermissionBubbleRollout";
+const char kEnabled[] = "Enabled";
+const char kDisabled[] = "Disabled";
 
 class CancelledRequest : public PermissionBubbleRequest {
  public:
@@ -53,12 +59,18 @@ DEFINE_WEB_CONTENTS_USER_DATA_KEY(PermissionBubbleManager);
 
 // static
 bool PermissionBubbleManager::Enabled() {
+  // Command line flags take precedence.
   if (base::CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kEnablePermissionsBubbles))
     return true;
-
   if (base::CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kDisablePermissionsBubbles))
+    return false;
+
+  std::string group(base::FieldTrialList::FindFullName(kTrialName));
+  if (group == kEnabled)
+    return true;
+  if (group == kDisabled)
     return false;
 
   return false;
@@ -67,10 +79,10 @@ bool PermissionBubbleManager::Enabled() {
 PermissionBubbleManager::PermissionBubbleManager(
     content::WebContents* web_contents)
   : content::WebContentsObserver(web_contents),
+    require_user_gesture_(false),
     bubble_showing_(false),
     view_(NULL),
     request_url_has_loaded_(false),
-    customization_mode_(false),
     weak_factory_(this) {}
 
 PermissionBubbleManager::~PermissionBubbleManager() {
@@ -135,7 +147,7 @@ void PermissionBubbleManager::AddRequest(PermissionBubbleRequest* request) {
     queued_frame_requests_.push_back(request);
   }
 
-  if (request->HasUserGesture())
+  if (!require_user_gesture_ || request->HasUserGesture())
     ScheduleShowBubble();
 }
 
@@ -202,6 +214,10 @@ void PermissionBubbleManager::SetView(PermissionBubbleView* view) {
   TriggerShowBubble();
 }
 
+void PermissionBubbleManager::RequireUserGesture(bool required) {
+  require_user_gesture_ = required;
+}
+
 void PermissionBubbleManager::DocumentOnLoadCompletedInMainFrame() {
   request_url_has_loaded_ = true;
   // This is scheduled because while all calls to the browser have been
@@ -252,12 +268,6 @@ void PermissionBubbleManager::WebContentsDestroyed() {
 void PermissionBubbleManager::ToggleAccept(int request_index, bool new_value) {
   DCHECK(request_index < static_cast<int>(accept_states_.size()));
   accept_states_[request_index] = new_value;
-}
-
-void PermissionBubbleManager::SetCustomizationMode() {
-  customization_mode_ = true;
-  if (view_)
-    view_->Show(requests_, accept_states_, customization_mode_);
 }
 
 void PermissionBubbleManager::Accept() {
@@ -335,7 +345,7 @@ void PermissionBubbleManager::TriggerShowBubble() {
   // Note: this should appear above Show() for testing, since in that
   // case we may do in-line calling of finalization.
   bubble_showing_ = true;
-  view_->Show(requests_, accept_states_, customization_mode_);
+  view_->Show(requests_, accept_states_);
 }
 
 void PermissionBubbleManager::FinalizeBubble() {

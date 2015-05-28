@@ -4,10 +4,15 @@
 
 #include "chromeos/dbus/dbus_client_bundle.h"
 
+#include <vector>
+
 #include "base/command_line.h"
 #include "base/strings/string_split.h"
 #include "base/strings/string_util.h"
 #include "chromeos/chromeos_switches.h"
+#include "chromeos/dbus/amplifier_client.h"
+#include "chromeos/dbus/ap_manager_client.h"
+#include "chromeos/dbus/audio_dsp_client.h"
 #include "chromeos/dbus/bluetooth_adapter_client.h"
 #include "chromeos/dbus/bluetooth_agent_manager_client.h"
 #include "chromeos/dbus/bluetooth_device_client.h"
@@ -24,6 +29,9 @@
 #include "chromeos/dbus/cryptohome_client.h"
 #include "chromeos/dbus/debug_daemon_client.h"
 #include "chromeos/dbus/easy_unlock_client.h"
+#include "chromeos/dbus/fake_amplifier_client.h"
+#include "chromeos/dbus/fake_ap_manager_client.h"
+#include "chromeos/dbus/fake_audio_dsp_client.h"
 #include "chromeos/dbus/fake_bluetooth_adapter_client.h"
 #include "chromeos/dbus/fake_bluetooth_agent_manager_client.h"
 #include "chromeos/dbus/fake_bluetooth_device_client.h"
@@ -42,6 +50,7 @@
 #include "chromeos/dbus/fake_gsm_sms_client.h"
 #include "chromeos/dbus/fake_image_burner_client.h"
 #include "chromeos/dbus/fake_introspectable_client.h"
+#include "chromeos/dbus/fake_leadership_daemon_manager_client.h"
 #include "chromeos/dbus/fake_lorgnette_manager_client.h"
 #include "chromeos/dbus/fake_modem_messaging_client.h"
 #include "chromeos/dbus/fake_nfc_adapter_client.h"
@@ -51,7 +60,7 @@
 #include "chromeos/dbus/fake_nfc_tag_client.h"
 #include "chromeos/dbus/fake_peer_daemon_manager_client.h"
 #include "chromeos/dbus/fake_permission_broker_client.h"
-#include "chromeos/dbus/fake_privet_daemon_client.h"
+#include "chromeos/dbus/fake_privet_daemon_manager_client.h"
 #include "chromeos/dbus/fake_shill_device_client.h"
 #include "chromeos/dbus/fake_shill_ipconfig_client.h"
 #include "chromeos/dbus/fake_shill_manager_client.h"
@@ -63,7 +72,9 @@
 #include "chromeos/dbus/gsm_sms_client.h"
 #include "chromeos/dbus/image_burner_client.h"
 #include "chromeos/dbus/introspectable_client.h"
+#include "chromeos/dbus/leadership_daemon_manager_client.h"
 #include "chromeos/dbus/lorgnette_manager_client.h"
+#include "chromeos/dbus/metronome_client.h"
 #include "chromeos/dbus/modem_messaging_client.h"
 #include "chromeos/dbus/nfc_adapter_client.h"
 #include "chromeos/dbus/nfc_device_client.h"
@@ -74,7 +85,7 @@
 #include "chromeos/dbus/permission_broker_client.h"
 #include "chromeos/dbus/power_manager_client.h"
 #include "chromeos/dbus/power_policy_controller.h"
-#include "chromeos/dbus/privet_daemon_client.h"
+#include "chromeos/dbus/privet_daemon_manager_client.h"
 #include "chromeos/dbus/session_manager_client.h"
 #include "chromeos/dbus/shill_device_client.h"
 #include "chromeos/dbus/shill_ipconfig_client.h"
@@ -95,13 +106,18 @@ const struct {
   const char* param_name;
   DBusClientBundle::DBusClientType client_type;
 } client_type_map[] = {
+    { "amplifier",  DBusClientBundle::AMPLIFIER },
+    { "ap",  DBusClientBundle::AP_MANAGER },
+    { "audio_dsp",  DBusClientBundle::AUDIO_DSP },
     { "bluetooth",  DBusClientBundle::BLUETOOTH },
     { "cras",  DBusClientBundle::CRAS },
     { "cros_disks",  DBusClientBundle::CROS_DISKS },
     { "cryptohome",  DBusClientBundle::CRYPTOHOME },
     { "debug_daemon",  DBusClientBundle::DEBUG_DAEMON },
     { "easy_unlock",  DBusClientBundle::EASY_UNLOCK },
+    { "leadership_daemon",  DBusClientBundle::LEADERSHIP_DAEMON },
     { "lorgnette_manager",  DBusClientBundle::LORGNETTE_MANAGER },
+    { "metronome",  DBusClientBundle::METRONOME },
     { "shill",  DBusClientBundle::SHILL },
     { "gsm_sms",  DBusClientBundle::GSM_SMS },
     { "image_burner",  DBusClientBundle::IMAGE_BURNER },
@@ -111,7 +127,7 @@ const struct {
     { "peer_daemon",  DBusClientBundle::PEER_DAEMON },
     { "permission_broker",  DBusClientBundle::PERMISSION_BROKER },
     { "power_manager",  DBusClientBundle::POWER_MANAGER },
-    { "privet_daemon",  DBusClientBundle::PRIVET_DAEMON },
+    { "privet_daemon", DBusClientBundle::PRIVET_DAEMON },
     { "session_manager",  DBusClientBundle::SESSION_MANAGER },
     { "sms",  DBusClientBundle::SMS },
     { "system_clock",  DBusClientBundle::SYSTEM_CLOCK },
@@ -133,6 +149,16 @@ DBusClientBundle::DBusClientType GetDBusClientType(
 
 DBusClientBundle::DBusClientBundle(DBusClientTypeMask unstub_client_mask)
     : unstub_client_mask_(unstub_client_mask) {
+  if (!IsUsingStub(AMPLIFIER))
+    amplifier_client_.reset(AmplifierClient::Create());
+  else
+    amplifier_client_.reset(new FakeAmplifierClient);
+
+  if (!IsUsingStub(AUDIO_DSP))
+    audio_dsp_client_.reset(AudioDspClient::Create());
+  else
+    audio_dsp_client_.reset(new FakeAudioDspClient);
+
   if (!IsUsingStub(BLUETOOTH)) {
     bluetooth_adapter_client_.reset(BluetoothAdapterClient::Create());
     bluetooth_agent_manager_client_.reset(
@@ -198,6 +224,10 @@ DBusClientBundle::DBusClientBundle(DBusClientTypeMask unstub_client_mask)
     lorgnette_manager_client_.reset(LorgnetteManagerClient::Create());
   else
     lorgnette_manager_client_.reset(new FakeLorgnetteManagerClient);
+
+  metronome_client_.reset(MetronomeClient::Create(
+      IsUsingStub(METRONOME) ? STUB_DBUS_CLIENT_IMPLEMENTATION
+                             : REAL_DBUS_CLIENT_IMPLEMENTATION));
 
   if (!IsUsingStub(SHILL)) {
     shill_manager_client_.reset(ShillManagerClient::Create());
@@ -271,9 +301,22 @@ DBusClientBundle::DBusClientBundle(DBusClientTypeMask unstub_client_mask)
     permission_broker_client_.reset(new FakePermissionBrokerClient);
 
   if (!IsUsingStub(PRIVET_DAEMON))
-    privet_daemon_client_.reset(PrivetDaemonClient::Create());
+    privet_daemon_manager_client_.reset(PrivetDaemonManagerClient::Create());
   else
-    privet_daemon_client_.reset(new FakePrivetDaemonClient);
+    privet_daemon_manager_client_.reset(new FakePrivetDaemonManagerClient);
+
+  if (!IsUsingStub(LEADERSHIP_DAEMON)) {
+    leadership_daemon_manager_client_.reset(
+        LeadershipDaemonManagerClient::Create());
+  } else {
+    leadership_daemon_manager_client_.reset(
+        new FakeLeadershipDaemonManagerClient);
+  }
+
+  if (!IsUsingStub(AP_MANAGER))
+    ap_manager_client_.reset(ApManagerClient::Create());
+  else
+    ap_manager_client_.reset(new FakeApManagerClient);
 
   power_manager_client_.reset(PowerManagerClient::Create(
       IsUsingStub(POWER_MANAGER) ? STUB_DBUS_CLIENT_IMPLEMENTATION

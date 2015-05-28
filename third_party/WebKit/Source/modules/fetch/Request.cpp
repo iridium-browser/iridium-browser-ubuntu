@@ -26,7 +26,7 @@ FetchRequestData* createCopyOfFetchRequestDataForFetch(ExecutionContext* context
     FetchRequestData* request = FetchRequestData::create();
     request->setURL(original->url());
     request->setMethod(original->method());
-    request->setHeaderList(original->headerList()->createCopy());
+    request->setHeaderList(original->headerList()->clone());
     request->setUnsafeRequestFlag(true);
     request->setBlobDataHandle(original->blobDataHandle());
     // FIXME: Set client.
@@ -51,7 +51,7 @@ Request* Request::createRequestWithRequestOrString(ExecutionContext* context, Re
             return 0;
         }
         // "2. Set input's used flag."
-        inputRequest->setBodyUsed();
+        inputRequest->lockBody(PassBody);
     }
 
     // "2. Let |request| be |input|'s associated request, if |input| is a
@@ -64,6 +64,17 @@ Request* Request::createRequestWithRequestOrString(ExecutionContext* context, Re
     // context is fetch, mode is |request|'s mode, credentials mode is
     // |request|'s credentials mode, and cache mode is |request|'s cache mode."
     FetchRequestData* request = createCopyOfFetchRequestDataForFetch(context, inputRequest ? inputRequest->request() : FetchRequestData::create());
+
+    if (inputRequest && inputRequest->blobDataHandle() && inputRequest->isBodyConsumed()) {
+        // Currently the only methods that can consume body data without
+        // setting 'body passed' flag consume entire body (e.g. text()). Thus
+        // we can set an empty blob to the new request instead of creating a
+        // draining stream.
+        // TODO(yhirano): Fix this once Request.body is introduced.
+        OwnPtr<BlobData> blobData = BlobData::create();
+        blobData->setContentType(inputRequest->blobDataHandle()->type());
+        request->setBlobDataHandle(BlobDataHandle::create(blobData.release(), 0));
+    }
 
     // "4. Let |fallbackMode| be null."
     // "5. Let |fallbackCredentials| be null."
@@ -124,7 +135,7 @@ Request* Request::createRequestWithRequestOrString(ExecutionContext* context, Re
 
     // "14. If |init|'s method member is present, let |method| be it and run
     // these substeps:"
-    if (!init.method.isEmpty()) {
+    if (!init.method.isNull()) {
         // "1. If |method| is not a method or method is a forbidden method,
         // throw a TypeError."
         if (!isValidHTTPToken(init.method)) {
@@ -149,7 +160,7 @@ Request* Request::createRequestWithRequestOrString(ExecutionContext* context, Re
     // is present.
     Headers* headers = 0;
     if (!init.headers && init.headersDictionary.isUndefinedOrNull()) {
-        headers = r->headers()->createCopy();
+        headers = r->headers()->clone();
     }
     // "18. Empty |r|'s request's header list."
     r->clearHeaderList();
@@ -179,13 +190,18 @@ Request* Request::createRequestWithRequestOrString(ExecutionContext* context, Re
 
     // "21. If |init|'s body member is present, run these substeps:"
     if (init.bodyBlobHandle) {
-        // "1. Let |stream| and |Content-Type| be the result of extracting
-        // |init|'s body member."
-        // "2. Set |r|'s request's body to |stream|."
-        // "3.If |Content-Type| is non-null and |r|'s request's header list
+        // "1. If request's method is `GET` or `HEAD`, throw a TypeError."
+        // "2. Let |stream| and |Content-Type| be the result of extracting
+        //  |init|'s body member."
+        // "3. Set |r|'s request's body to |stream|."
+        // "4. If |Content-Type| is non-null and |r|'s request's header list
         //  contains no header named `Content-Type`, append
-        // `Content-Type`/|Content-Type| to |r|'s Headers object. Rethrow any
-        // exception."
+        //  `Content-Type`/|Content-Type| to |r|'s Headers object. Rethrow any
+        //  exception."
+        if (request->method() == "GET" || request->method() == "HEAD") {
+            exceptionState.throwTypeError("Request with GET/HEAD method cannot have body.");
+            return 0;
+        }
         r->setBodyBlobHandle(init.bodyBlobHandle);
         if (!init.bodyBlobHandle->type().isEmpty() && !r->headers()->has("Content-Type", exceptionState)) {
             r->headers()->append("Content-Type", init.bodyBlobHandle->type(), exceptionState);
@@ -195,7 +211,7 @@ Request* Request::createRequestWithRequestOrString(ExecutionContext* context, Re
     }
     // "22. Set |r|'s MIME type to the result of extracting a MIME type from
     // |r|'s request's header list."
-    // FIXME: We don't have MIME type in Request object yet.
+    r->m_request->setMIMEType(r->m_request->headerList()->extractMIMEType());
 
     // "23. Return |r|."
     return r;
@@ -244,16 +260,12 @@ Request::Request(ExecutionContext* context, FetchRequestData* request)
     m_headers->setGuard(Headers::RequestGuard);
 }
 
+Request::Request(ExecutionContext* context, FetchRequestData* request, Headers* headers)
+    : Body(context) , m_request(request) , m_headers(headers) { }
+
 Request* Request::create(ExecutionContext* context, const WebServiceWorkerRequest& webRequest)
 {
     Request* r = new Request(context, webRequest);
-    r->suspendIfNeeded();
-    return r;
-}
-
-Request* Request::create(const Request& copyFrom)
-{
-    Request* r = new Request(copyFrom);
     r->suspendIfNeeded();
     return r;
 }
@@ -265,14 +277,6 @@ Request::Request(ExecutionContext* context, const WebServiceWorkerRequest& webRe
 {
     m_headers->setGuard(Headers::RequestGuard);
 }
-
-Request::Request(const Request& copy_from)
-    : Body(copy_from)
-    , m_request(copy_from.m_request->createCopy())
-    , m_headers(Headers::create(m_request->headerList()))
-{
-}
-
 
 String Request::method() const
 {
@@ -342,12 +346,31 @@ Request* Request::clone(ExceptionState& exceptionState) const
         exceptionState.throwTypeError("Request body is already used");
         return nullptr;
     }
-    if (streamAccessed()) {
-        // FIXME: Support clone() of the stream accessed Request.
-        exceptionState.throwTypeError("clone() of the Request which .body is accessed is not supported.");
-        return nullptr;
+
+    FetchRequestData* request = m_request->clone();
+    if (blobDataHandle() && isBodyConsumed()) {
+        // Currently the only methods that can consume body data without
+        // setting 'body passed' flag consume entire body (e.g. text()). Thus
+        // we can set an empty blob to the new request instead of creating a
+        // draining stream.
+        // TODO(yhirano): Fix this once Request.body is introduced.
+        OwnPtr<BlobData> blobData = BlobData::create();
+        blobData->setContentType(blobDataHandle()->type());
+        request->setBlobDataHandle(BlobDataHandle::create(blobData.release(), 0));
     }
-    return Request::create(*this);
+
+    Headers* headers = Headers::create(request->headerList());
+    headers->setGuard(m_headers->guard());
+    Request* r = new Request(executionContext(), request, headers);
+    r->suspendIfNeeded();
+    return r;
+}
+
+FetchRequestData* Request::passRequestData()
+{
+    ASSERT(!bodyUsed());
+    lockBody(PassBody);
+    return m_request->pass();
 }
 
 void Request::populateWebServiceWorkerRequest(WebServiceWorkerRequest& webRequest) const
@@ -384,17 +407,16 @@ PassRefPtr<BlobDataHandle> Request::blobDataHandle() const
 
 BodyStreamBuffer* Request::buffer() const
 {
+    // We don't support BodyStreamBuffer for Request yet.
     return nullptr;
 }
 
-String Request::contentTypeForBuffer() const
+String Request::mimeType() const
 {
-    // We don't support BodyStreamBuffer for Request yet.
-    ASSERT_NOT_REACHED();
-    return String();
+    return m_request->mimeType();
 }
 
-void Request::trace(Visitor* visitor)
+DEFINE_TRACE(Request)
 {
     Body::trace(visitor);
     visitor->trace(m_request);

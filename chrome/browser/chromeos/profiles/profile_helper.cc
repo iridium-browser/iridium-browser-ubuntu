@@ -4,10 +4,12 @@
 
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 
+#include "base/barrier_closure.h"
 #include "base/callback.h"
 #include "base/command_line.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browsing_data/browsing_data_helper.h"
+#include "chrome/browser/chromeos/login/helper.h"
 #include "chrome/browser/chromeos/login/signin/oauth2_login_manager_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
@@ -18,6 +20,10 @@
 #include "components/user_manager/user.h"
 #include "components/user_manager/user_manager.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/storage_partition.h"
+#include "content/public/browser/web_contents.h"
+#include "extensions/browser/guest_view/guest_view_manager.h"
+#include "extensions/browser/guest_view/web_view/web_view_guest.h"
 
 namespace chromeos {
 
@@ -58,7 +64,7 @@ bool ProfileHelper::always_return_primary_user_for_testing = false;
 // ProfileHelper, public
 
 ProfileHelper::ProfileHelper()
-    : signin_profile_clear_requested_(false) {
+    : browsing_data_remover_(nullptr), weak_factory_(this) {
 }
 
 ProfileHelper::~ProfileHelper() {
@@ -66,6 +72,12 @@ ProfileHelper::~ProfileHelper() {
   // when ScopedTestUserManager is used.
   if (user_manager::UserManager::IsInitialized())
     user_manager::UserManager::Get()->RemoveSessionStateObserver(this);
+
+  if (browsing_data_remover_) {
+    browsing_data_remover_->RemoveObserver(this);
+    // BrowsingDataRemover deletes itself.
+    browsing_data_remover_ = nullptr;
+  }
 }
 
 // static
@@ -109,7 +121,7 @@ Profile* ProfileHelper::GetSigninProfile() {
 }
 
 // static
-std::string ProfileHelper::GetUserIdHashFromProfile(Profile* profile) {
+std::string ProfileHelper::GetUserIdHashFromProfile(const Profile* profile) {
   if (!profile)
     return std::string();
 
@@ -140,15 +152,17 @@ base::FilePath ProfileHelper::GetUserProfileDir(
 }
 
 // static
-bool ProfileHelper::IsSigninProfile(Profile* profile) {
-  return profile->GetPath().BaseName().value() == chrome::kInitialProfile;
+bool ProfileHelper::IsSigninProfile(const Profile* profile) {
+  return profile &&
+         profile->GetPath().BaseName().value() == chrome::kInitialProfile;
 }
 
 // static
 bool ProfileHelper::IsOwnerProfile(Profile* profile) {
   if (!profile)
     return false;
-  user_manager::User* user = ProfileHelper::Get()->GetUserByProfile(profile);
+  const user_manager::User* user =
+      ProfileHelper::Get()->GetUserByProfile(profile);
   if (!user)
     return false;
 
@@ -156,10 +170,11 @@ bool ProfileHelper::IsOwnerProfile(Profile* profile) {
 }
 
 // static
-bool ProfileHelper::IsPrimaryProfile(Profile* profile) {
+bool ProfileHelper::IsPrimaryProfile(const Profile* profile) {
   if (!profile)
     return false;
-  user_manager::User* user = ProfileHelper::Get()->GetUserByProfile(profile);
+  const user_manager::User* user =
+      ProfileHelper::Get()->GetUserByProfile(profile);
   if (!user)
     return false;
   return user == user_manager::UserManager::Get()->GetPrimaryUser();
@@ -196,20 +211,37 @@ void ProfileHelper::Initialize() {
 
 void ProfileHelper::ClearSigninProfile(const base::Closure& on_clear_callback) {
   on_clear_callbacks_.push_back(on_clear_callback);
-  if (signin_profile_clear_requested_)
+
+  // Profile is already clearing.
+  if (on_clear_callbacks_.size() > 1)
     return;
+
+  on_clear_profile_stage_finished_ =
+      base::BarrierClosure(2, base::Bind(&ProfileHelper::OnSigninProfileCleared,
+                                         weak_factory_.GetWeakPtr()));
+
   ProfileManager* profile_manager = g_browser_process->profile_manager();
   // Check if signin profile was loaded.
-  if (!profile_manager->GetProfileByPath(GetSigninProfileDir())) {
-    OnBrowsingDataRemoverDone();
-    return;
+  if (profile_manager->GetProfileByPath(GetSigninProfileDir())) {
+    LOG_ASSERT(!browsing_data_remover_);
+    browsing_data_remover_ =
+        BrowsingDataRemover::CreateForUnboundedRange(GetSigninProfile());
+    browsing_data_remover_->AddObserver(this);
+    browsing_data_remover_->Remove(BrowsingDataRemover::REMOVE_SITE_DATA,
+                                   BrowsingDataHelper::ALL);
+  } else {
+    on_clear_profile_stage_finished_.Run();
   }
-  signin_profile_clear_requested_ = true;
-  BrowsingDataRemover* remover =
-      BrowsingDataRemover::CreateForUnboundedRange(GetSigninProfile());
-  remover->AddObserver(this);
-  remover->Remove(BrowsingDataRemover::REMOVE_SITE_DATA,
-                  BrowsingDataHelper::ALL);
+
+  if (content::StoragePartition* partition = login::GetSigninPartition()) {
+    partition->ClearData(
+        content::StoragePartition::REMOVE_DATA_MASK_ALL,
+        content::StoragePartition::QUOTA_MANAGED_STORAGE_MASK_ALL, GURL(),
+        content::StoragePartition::OriginMatcherFunction(), base::Time(),
+        base::Time::Now(), on_clear_profile_stage_finished_);
+  } else {
+    on_clear_profile_stage_finished_.Run();
+  }
 }
 
 Profile* ProfileHelper::GetProfileByUser(const user_manager::User* user) {
@@ -260,14 +292,14 @@ Profile* ProfileHelper::GetProfileByUserUnsafe(const user_manager::User* user) {
   return profile;
 }
 
-user_manager::User* ProfileHelper::GetUserByProfile(Profile* profile) {
+const user_manager::User* ProfileHelper::GetUserByProfile(
+    const Profile* profile) const {
   // This map is non-empty only in tests.
   if (enable_profile_to_user_testing || !user_list_for_testing_.empty()) {
     if (always_return_primary_user_for_testing)
-      return const_cast<user_manager::User*>(
-          user_manager::UserManager::Get()->GetPrimaryUser());
+      return user_manager::UserManager::Get()->GetPrimaryUser();
 
-    const std::string& user_name = profile->GetProfileName();
+    const std::string& user_name = profile->GetProfileUserName();
     for (user_manager::UserList::const_iterator it =
              user_list_for_testing_.begin();
          it != user_list_for_testing_.end();
@@ -277,8 +309,7 @@ user_manager::User* ProfileHelper::GetUserByProfile(Profile* profile) {
     }
 
     // In case of test setup we should always default to primary user.
-    return const_cast<user_manager::User*>(
-        user_manager::UserManager::Get()->GetPrimaryUser());
+    return user_manager::UserManager::Get()->GetPrimaryUser();
   }
 
   DCHECK(!content::BrowserThread::IsThreadInitialized(
@@ -314,20 +345,34 @@ user_manager::User* ProfileHelper::GetUserByProfile(Profile* profile) {
   return active_user &&
                  ProfileHelper::GetProfilePathByUserIdHash(
                      active_user->username_hash()) == profile->GetPath()
-             ? const_cast<user_manager::User*>(active_user)
+             ? active_user
              : NULL;
+}
+
+user_manager::User* ProfileHelper::GetUserByProfile(Profile* profile) const {
+  return const_cast<user_manager::User*>(
+      GetUserByProfile(static_cast<const Profile*>(profile)));
+}
+
+void ProfileHelper::OnSigninProfileCleared() {
+  std::vector<base::Closure> callbacks;
+  callbacks.swap(on_clear_callbacks_);
+  for (const base::Closure& callback : callbacks) {
+    if (!callback.is_null())
+      callback.Run();
+  }
 }
 
 ////////////////////////////////////////////////////////////////////////////////
 // ProfileHelper, BrowsingDataRemover::Observer implementation:
 
 void ProfileHelper::OnBrowsingDataRemoverDone() {
-  signin_profile_clear_requested_ = false;
-  for (size_t i = 0; i < on_clear_callbacks_.size(); ++i) {
-    if (!on_clear_callbacks_[i].is_null())
-      on_clear_callbacks_[i].Run();
-  }
-  on_clear_callbacks_.clear();
+  LOG_ASSERT(browsing_data_remover_);
+  browsing_data_remover_->RemoveObserver(this);
+  // BrowsingDataRemover deletes itself.
+  browsing_data_remover_ = nullptr;
+
+  on_clear_profile_stage_finished_.Run();
 }
 
 ////////////////////////////////////////////////////////////////////////////////

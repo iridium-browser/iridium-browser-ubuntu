@@ -38,6 +38,21 @@ class DefaultExtensionsClient : public JavaScriptDialogExtensionsClient {
   DISALLOW_COPY_AND_ASSIGN(DefaultExtensionsClient);
 };
 
+bool ShouldDisplaySuppressCheckbox(
+    ChromeJavaScriptDialogExtraData* extra_data) {
+  base::TimeDelta time_since_last_message = base::TimeTicks::Now() -
+      extra_data->last_javascript_message_dismissal_;
+
+  // If a WebContents is impolite and displays a second JavaScript
+  // alert within kJavaScriptMessageExpectedDelay of a previous
+  // JavaScript alert being dismissed, show a checkbox offering to
+  // suppress future alerts from this WebContents.
+  const int kJavaScriptMessageExpectedDelay = 1000;
+
+  return time_since_last_message <
+      base::TimeDelta::FromMilliseconds(kJavaScriptMessageExpectedDelay);
+}
+
 }  // namespace
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -87,22 +102,6 @@ void JavaScriptDialogManager::RunJavaScriptDialog(
     return;
   }
 
-  base::TimeDelta time_since_last_message = base::TimeTicks::Now() -
-      extra_data->last_javascript_message_dismissal_;
-  bool display_suppress_checkbox = false;
-  // If a WebContents is impolite and displays a second JavaScript
-  // alert within kJavaScriptMessageExpectedDelay of a previous
-  // JavaScript alert being dismissed, show a checkbox offering to
-  // suppress future alerts from this WebContents.
-  const int kJavaScriptMessageExpectedDelay = 1000;
-
-  if (time_since_last_message <
-      base::TimeDelta::FromMilliseconds(kJavaScriptMessageExpectedDelay)) {
-    display_suppress_checkbox = true;
-  } else {
-    display_suppress_checkbox = false;
-  }
-
   bool is_alert = message_type == content::JAVASCRIPT_MESSAGE_TYPE_ALERT;
   base::string16 dialog_title =
       GetTitle(web_contents, origin_url, accept_lang, is_alert);
@@ -116,7 +115,7 @@ void JavaScriptDialogManager::RunJavaScriptDialog(
       message_type,
       message_text,
       default_prompt_text,
-      display_suppress_checkbox,
+      ShouldDisplaySuppressCheckbox(extra_data),
       false,  // is_before_unload_dialog
       false,  // is_reload
       base::Bind(&JavaScriptDialogManager::OnDialogClosed,
@@ -128,6 +127,16 @@ void JavaScriptDialogManager::RunBeforeUnloadDialog(
     const base::string16& message_text,
     bool is_reload,
     const DialogClosedCallback& callback) {
+  ChromeJavaScriptDialogExtraData* extra_data =
+      &javascript_dialog_extra_data_[web_contents];
+
+  if (extra_data->suppress_javascript_messages_) {
+    // If a site harassed the user enough for them to put it on mute, then it
+    // lost its privilege to deny unloading.
+    callback.Run(true, base::string16());
+    return;
+  }
+
   const base::string16 title = l10n_util::GetStringUTF16(is_reload ?
       IDS_BEFORERELOAD_MESSAGEBOX_TITLE : IDS_BEFOREUNLOAD_MESSAGEBOX_TITLE);
   const base::string16 footer = l10n_util::GetStringUTF16(is_reload ?
@@ -145,7 +154,7 @@ void JavaScriptDialogManager::RunBeforeUnloadDialog(
       content::JAVASCRIPT_MESSAGE_TYPE_CONFIRM,
       full_message,
       base::string16(),  // default_prompt_text
-      false,       // display_suppress_checkbox
+      ShouldDisplaySuppressCheckbox(extra_data),
       true,        // is_before_unload_dialog
       is_reload,
       base::Bind(&JavaScriptDialogManager::OnDialogClosed,
@@ -174,7 +183,7 @@ bool JavaScriptDialogManager::HandleJavaScriptDialog(
   return true;
 }
 
-void JavaScriptDialogManager::WebContentsDestroyed(
+void JavaScriptDialogManager::ResetDialogState(
     content::WebContents* web_contents) {
   CancelActiveAndPendingDialogs(web_contents);
   javascript_dialog_extra_data_.erase(web_contents);

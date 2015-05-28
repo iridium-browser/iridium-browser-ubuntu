@@ -32,15 +32,15 @@ class FileTaskExecutorDelegateImpl : public FileTaskExecutorDelegate {
   explicit FileTaskExecutorDelegateImpl(Profile* profile) : profile_(profile) {
   }
 
-  virtual FileSystemInterface* GetFileSystem() override {
+  FileSystemInterface* GetFileSystem() override {
     return util::GetFileSystemByProfile(profile_);
   }
 
-  virtual DriveServiceInterface* GetDriveService() override {
+  DriveServiceInterface* GetDriveService() override {
     return util::GetDriveServiceByProfile(profile_);
   }
 
-  virtual void OpenBrowserWindow(const GURL& open_link) override {
+  void OpenBrowserWindow(const GURL& open_link) override {
     chrome::ScopedTabbedBrowserDisplayer displayer(
          profile_, chrome::HOST_DESKTOP_TYPE_ASH);
     chrome::AddSelectedTabWithURL(displayer.browser(), open_link,
@@ -134,7 +134,7 @@ void FileTaskExecutor::OnFileEntryFetched(FileError error,
 }
 
 void FileTaskExecutor::OnAppAuthorized(const std::string& resource_id,
-                                       google_apis::GDataErrorCode error,
+                                       google_apis::DriveApiErrorCode error,
                                        const GURL& open_link) {
   DCHECK(content::BrowserThread::CurrentlyOn(content::BrowserThread::UI));
 

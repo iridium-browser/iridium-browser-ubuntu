@@ -5,7 +5,6 @@
 #ifndef CONTENT_SHELL_BROWSER_LAYOUT_TEST_LAYOUT_TEST_CONTENT_BROWSER_CLIENT_H_
 #define CONTENT_SHELL_BROWSER_LAYOUT_TEST_LAYOUT_TEST_CONTENT_BROWSER_CLIENT_H_
 
-#include "content/public/browser/permission_type.h"
 #include "content/shell/browser/shell_content_browser_client.h"
 
 namespace content {
@@ -28,14 +27,10 @@ class LayoutTestContentBrowserClient : public ShellContentBrowserClient {
 
   // ContentBrowserClient overrides.
   void RenderProcessWillLaunch(RenderProcessHost* host) override;
-  void RequestPermission(
-      PermissionType permission,
-      WebContents* web_contents,
-      int bridge_id,
-      const GURL& requesting_frame,
-      bool user_gesture,
-      const base::Callback<void(bool)>& result_callback) override;
+
   PlatformNotificationService* GetPlatformNotificationService() override;
+  void GetAdditionalNavigatorConnectServices(
+      const scoped_refptr<NavigatorConnectContext>& context) override;
 
  private:
   scoped_ptr<LayoutTestNotificationManager> layout_test_notification_manager_;

@@ -41,24 +41,23 @@ class ExtensionToolbarModel : public content::NotificationObserver,
   // delegate.
   class Observer {
    public:
-    // TODO(devlin): Rename these methods to be OnFoo.
     // Signals that an |extension| has been added to the toolbar at |index|.
     // This will *only* be called after the toolbar model has been initialized.
-    virtual void ToolbarExtensionAdded(const Extension* extension,
-                                       int index) = 0;
+    virtual void OnToolbarExtensionAdded(const Extension* extension,
+                                         int index) = 0;
 
     // Signals that the given |extension| has been removed from the toolbar.
-    virtual void ToolbarExtensionRemoved(const Extension* extension) = 0;
+    virtual void OnToolbarExtensionRemoved(const Extension* extension) = 0;
 
     // Signals that the given |extension| has been moved to |index|. |index| is
     // the desired *final* index of the extension (that is, in the adjusted
     // order, extension should be at |index|).
-    virtual void ToolbarExtensionMoved(const Extension* extension,
-                                       int index) = 0;
+    virtual void OnToolbarExtensionMoved(const Extension* extension,
+                                         int index) = 0;
 
     // Signals that the browser action for the given |extension| has been
     // updated.
-    virtual void ToolbarExtensionUpdated(const Extension* extension) = 0;
+    virtual void OnToolbarExtensionUpdated(const Extension* extension) = 0;
 
     // Signals the |extension| to show the popup now in the active window.
     // If |grant_active_tab| is true, then active tab permissions should be
@@ -69,7 +68,7 @@ class ExtensionToolbarModel : public content::NotificationObserver,
 
     // Signals when the container needs to be redrawn because of a size change,
     // and when the model has finished loading.
-    virtual void ToolbarVisibleCountChanged() = 0;
+    virtual void OnToolbarVisibleCountChanged() = 0;
 
     // Signals that the model has entered or exited highlighting mode, or that
     // the extensions being highlighted have (probably*) changed. Highlighting
@@ -78,7 +77,7 @@ class ExtensionToolbarModel : public content::NotificationObserver,
     // * probably, because if we are in highlight mode and receive a call to
     //   highlight a new set of extensions, we do not compare the current set
     //   with the new set (and just assume the new set is different).
-    virtual void ToolbarHighlightModeChanged(bool is_highlighting) = 0;
+    virtual void OnToolbarHighlightModeChanged(bool is_highlighting) = 0;
 
     // Signals that the toolbar model has been initialized, so that if any
     // observers were postponing animation during the initialization stage, they
@@ -156,6 +155,10 @@ class ExtensionToolbarModel : public content::NotificationObserver,
   // number of visible icons will be reset to what it was before highlighting.
   void StopHighlighting();
 
+  // Returns true if the toolbar model is running with the redesign and is
+  // showing new icons as a result.
+  bool RedesignIsShowingNewIcons() const;
+
  private:
   // content::NotificationObserver:
   void Observe(int type,
@@ -187,7 +190,7 @@ class ExtensionToolbarModel : public content::NotificationObserver,
   // takes the shortcut - looking at the regular model's content and modifying
   // it.
   void InitializeExtensionList();
-  void Populate(const ExtensionIdList& positions);
+  void Populate(ExtensionIdList* positions);
   void IncognitoPopulate();
 
   // Save the model to prefs.

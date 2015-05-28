@@ -32,7 +32,7 @@
 #ifndef WebPluginContainerImpl_h
 #define WebPluginContainerImpl_h
 
-#include "core/frame/FrameDestructionObserver.h"
+#include "core/frame/LocalFrameLifecycleObserver.h"
 #include "core/plugins/PluginView.h"
 #include "platform/Widget.h"
 #include "public/web/WebPluginContainer.h"
@@ -62,7 +62,7 @@ class Widget;
 struct WebPrintParams;
 struct WebPrintPresetOptions;
 
-class WebPluginContainerImpl final : public PluginView, public WebPluginContainer, public FrameDestructionObserver {
+class WebPluginContainerImpl final : public PluginView, public WebPluginContainer, public LocalFrameLifecycleObserver {
     WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(WebPluginContainerImpl);
 public:
     static PassRefPtrWillBeRawPtr<WebPluginContainerImpl> create(HTMLPlugInElement* element, WebPlugin* webPlugin)
@@ -81,9 +81,10 @@ public:
 
     // Widget methods
     virtual void setFrameRect(const IntRect&) override;
+    virtual void layoutWidgetIfPossible() override;
     virtual void paint(GraphicsContext*, const IntRect&) override;
     virtual void invalidateRect(const IntRect&) override;
-    virtual void setFocus(bool) override;
+    virtual void setFocus(bool, WebFocusType) override;
     virtual void show() override;
     virtual void hide() override;
     virtual void handleEvent(Event*) override;
@@ -111,8 +112,8 @@ public:
     virtual bool isRectTopmost(const WebRect&) override;
     virtual void requestTouchEventType(TouchEventRequestType) override;
     virtual void setWantsWheelEvents(bool) override;
-    virtual WebPoint windowToLocalPoint(const WebPoint&) override;
-    virtual WebPoint localToWindowPoint(const WebPoint&) override;
+    virtual WebPoint rootFrameToLocalPoint(const WebPoint&) override;
+    virtual WebPoint localToRootFramePoint(const WebPoint&) override;
 
     // This cannot be null.
     virtual WebPlugin* plugin() override { return m_webPlugin; }
@@ -163,7 +164,7 @@ public:
 
     bool paintCustomOverhangArea(GraphicsContext*, const IntRect&, const IntRect&, const IntRect&);
 
-    virtual void trace(Visitor*) override;
+    DECLARE_VIRTUAL_TRACE();
     virtual void dispose() override;
 
 #if ENABLE(OILPAN)
@@ -187,11 +188,10 @@ private:
     void focusPlugin();
 
     void calculateGeometry(
-        const IntRect& frameRect,
         IntRect& windowRect,
         IntRect& clipRect,
+        IntRect& unobscuredRect,
         Vector<IntRect>& cutOutRects);
-    IntRect windowClipRect() const;
     void windowCutOutRects(
         const IntRect& frameRect,
         Vector<IntRect>& cutOutRects);

@@ -26,6 +26,7 @@
 #ifndef NetworkStateNotifier_h
 #define NetworkStateNotifier_h
 
+#include "core/CoreExport.h"
 #include "public/platform/WebConnectionType.h"
 #include "wtf/FastAllocBase.h"
 #include "wtf/HashMap.h"
@@ -37,8 +38,8 @@ namespace blink {
 
 class ExecutionContext;
 
-class NetworkStateNotifier {
-    WTF_MAKE_NONCOPYABLE(NetworkStateNotifier); WTF_MAKE_FAST_ALLOCATED;
+class CORE_EXPORT NetworkStateNotifier {
+    WTF_MAKE_NONCOPYABLE(NetworkStateNotifier); WTF_MAKE_FAST_ALLOCATED(NetworkStateNotifier);
 public:
     class NetworkStateObserver {
     public:
@@ -115,7 +116,7 @@ private:
     bool m_testUpdatesOnly;
 };
 
-NetworkStateNotifier& networkStateNotifier();
+CORE_EXPORT NetworkStateNotifier& networkStateNotifier();
 
 } // namespace blink
 

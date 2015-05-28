@@ -1,3 +1,4 @@
+{% from 'conversions.cpp' import declare_enum_validation_variable %}
 // Copyright 2014 The Chromium Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
@@ -13,8 +14,7 @@
 
 namespace blink {
 
-{% macro convert_and_set_member(member) %}
-{% endmacro %}
+{% from 'conversions.cpp' import v8_value_to_local_cpp_value %}
 void {{v8_class}}::toImpl(v8::Isolate* isolate, v8::Local<v8::Value> v8Value, {{cpp_class}}& impl, ExceptionState& exceptionState)
 {
     if (isUndefinedOrNull(v8Value))
@@ -22,10 +22,11 @@ void {{v8_class}}::toImpl(v8::Isolate* isolate, v8::Local<v8::Value> v8Value, {{
     if (!v8Value->IsObject()) {
         {% if use_permissive_dictionary_conversion %}
         // Do nothing.
+        return;
         {% else %}
         exceptionState.throwTypeError("cannot convert to dictionary.");
-        {% endif %}
         return;
+        {% endif %}
     }
 
     {% if parent_v8_class %}
@@ -46,7 +47,12 @@ void {{v8_class}}::toImpl(v8::Isolate* isolate, v8::Local<v8::Value> v8Value, {{
         return;
     }
     if ({{member.name}}Value.IsEmpty() || {{member.name}}Value->IsUndefined()) {
+        {% if member.is_required %}
+        exceptionState.throwTypeError("required member {{member.name}} is undefined.");
+        return;
+        {% else %}
         // Do nothing.
+        {% endif %}
     {% if member.is_nullable %}
     } else if ({{member.name}}Value->IsNull()) {
         impl.{{member.null_setter_name}}();
@@ -55,22 +61,17 @@ void {{v8_class}}::toImpl(v8::Isolate* isolate, v8::Local<v8::Value> v8Value, {{
         {% if member.deprecate_as %}
         UseCounter::countDeprecationIfNotPrivateScript(isolate, callingExecutionContext(isolate), UseCounter::{{member.deprecate_as}});
         {% endif %}
-        {% if member.use_output_parameter_for_result %}
-        {{member.cpp_type}} {{member.name}};
-        {% endif %}
-        {{member.v8_value_to_local_cpp_value}};
+        {{v8_value_to_local_cpp_value(member) | indent(8)}}
         {% if member.is_interface_type %}
         if (!{{member.name}} && !{{member.name}}Value->IsNull()) {
             exceptionState.throwTypeError("member {{member.name}} is not of type {{member.idl_type}}.");
             return;
         }
         {% endif %}
-        {% if member.enum_validation_expression %}
-        String string = {{member.name}};
-        if (!({{member.enum_validation_expression}})) {
-            exceptionState.throwTypeError("member {{member.name}} ('" + string + "') is not a valid enum value.");
+        {% if member.enum_values %}
+        {{declare_enum_validation_variable(member.enum_values) | indent(8)}}
+        if (!isValidEnum({{member.name}}, validValues, WTF_ARRAY_LENGTH(validValues), "{{member.enum_type}}", exceptionState))
             return;
-        }
         {% elif member.is_object %}
         if (!{{member.name}}.isObject()) {
             exceptionState.throwTypeError("member {{member.name}} is not an object.");
@@ -104,13 +105,16 @@ void toV8{{cpp_class}}(const {{cpp_class}}& impl, v8::Local<v8::Object> dictiona
     {% if member.v8_default_value %}
     } else {
         dictionary->Set(v8String(isolate, "{{member.name}}"), {{member.v8_default_value}});
+    {% elif member.is_required %}
+    } else {
+        ASSERT_NOT_REACHED();
     {% endif %}
     }
 
     {% endfor %}
 }
 
-{{cpp_class}} NativeValueTraits<{{cpp_class}}>::nativeValue(const v8::Local<v8::Value>& value, v8::Isolate* isolate, ExceptionState& exceptionState)
+{{cpp_class}} NativeValueTraits<{{cpp_class}}>::nativeValue(v8::Isolate* isolate, v8::Local<v8::Value> value, ExceptionState& exceptionState)
 {
     {{cpp_class}} impl;
     {{v8_class}}::toImpl(isolate, value, impl, exceptionState);

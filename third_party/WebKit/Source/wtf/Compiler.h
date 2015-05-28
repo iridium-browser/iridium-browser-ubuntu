@@ -40,11 +40,6 @@
 /* COMPILER(CLANG) - Clang  */
 #if defined(__clang__)
 #define WTF_COMPILER_CLANG 1
-
-/* Specific compiler features */
-
-#define WTF_COMPILER_SUPPORTS_CXX_EXPLICIT_CONVERSIONS __has_feature(cxx_explicit_conversions)
-
 #endif
 
 /* COMPILER(MSVC) - Microsoft Visual C++ */
@@ -61,11 +56,6 @@
 /* Define this for !GCC compilers, just so we can write things like GCC_VERSION_AT_LEAST(4, 1, 0). */
 #define GCC_VERSION_AT_LEAST(major, minor, patch) 0
 #endif
-
-/* Specific compiler features */
-#if COMPILER(GCC) && !COMPILER(CLANG)
-#define WTF_COMPILER_SUPPORTS_CXX_EXPLICIT_CONVERSIONS 1
-#endif /* COMPILER(GCC) */
 
 /* ==== Compiler features ==== */
 
@@ -143,16 +133,6 @@
 /* ALLOW_UNUSED_LOCAL */
 
 #define ALLOW_UNUSED_LOCAL(x) false ? (void)x : (void)0
-
-/* REFERENCED_FROM_ASM */
-
-#ifndef REFERENCED_FROM_ASM
-#if COMPILER(GCC)
-#define REFERENCED_FROM_ASM __attribute__((used))
-#else
-#define REFERENCED_FROM_ASM
-#endif
-#endif
 
 
 /* OBJC_CLASS */

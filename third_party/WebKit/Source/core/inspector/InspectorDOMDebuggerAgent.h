@@ -41,7 +41,6 @@
 
 namespace blink {
 
-class Document;
 class Element;
 class Event;
 class EventListener;
@@ -49,12 +48,13 @@ class EventTarget;
 class InspectorDOMAgent;
 class InspectorDebuggerAgent;
 class JSONObject;
+class LocalFrame;
 class Node;
 
 typedef String ErrorString;
 
 class InspectorDOMDebuggerAgent final
-    : public InspectorBaseAgent<InspectorDOMDebuggerAgent>
+    : public InspectorBaseAgent<InspectorDOMDebuggerAgent, InspectorFrontend::DOMDebugger>
     , public InspectorDebuggerAgent::Listener
     , public InspectorDOMAgent::Listener
     , public InspectorBackendDispatcher::DOMDebuggerCommandHandler {
@@ -64,7 +64,7 @@ public:
     static PassOwnPtrWillBeRawPtr<InspectorDOMDebuggerAgent> create(InspectorDOMAgent*, InspectorDebuggerAgent*);
 
     ~InspectorDOMDebuggerAgent() override;
-    void trace(Visitor*) override;
+    DECLARE_VIRTUAL_TRACE();
 
     // DOMDebugger API for InspectorFrontend
     void setXHRBreakpoint(ErrorString*, const String& url) override;
@@ -82,20 +82,22 @@ public:
     void willRemoveDOMNode(Node*);
     void didRemoveDOMNode(Node*);
     void willModifyDOMAttr(Element*, const AtomicString&, const AtomicString&);
+    void willSetInnerHTML();
     void willSendXMLHttpRequest(const String& url);
     void didInstallTimer(ExecutionContext*, int timerId, int timeout, bool singleShot);
     void didRemoveTimer(ExecutionContext*, int timerId);
     void willFireTimer(ExecutionContext*, int timerId);
-    void didRequestAnimationFrame(Document*, int callbackId);
-    void didCancelAnimationFrame(Document*, int callbackId);
-    void willFireAnimationFrame(Document*, int callbackId);
+    void didRequestAnimationFrame(ExecutionContext*, int callbackId);
+    void didCancelAnimationFrame(ExecutionContext*, int callbackId);
+    void willFireAnimationFrame(ExecutionContext*, int callbackId);
     void willHandleEvent(EventTarget*, Event*, EventListener*, bool useCapture);
+    void willEvaluateScript(LocalFrame*, const String& url, int lineNumber);
     void didFireWebGLError(const String& errorName);
     void didFireWebGLWarning();
     void didFireWebGLErrorOrWarning(const String& message);
     void willCloseWindow();
 
-    void clearFrontend() override;
+    void disable(ErrorString*) override;
     void discardAgent() override;
 
 private:
@@ -115,7 +117,6 @@ private:
     void didCreatePromise() override;
     void didResolvePromise() override;
     void didRejectPromise() override;
-    void disable();
 
     void descriptionForDOMEvent(Node* target, int breakpointType, bool insertion, JSONObject* description);
     void updateSubtreeBreakpoints(Node*, uint32_t rootMask, bool set);

@@ -21,7 +21,7 @@
 #include "config.h"
 #include "core/svg/SVGPolyElement.h"
 
-#include "core/rendering/svg/RenderSVGShape.h"
+#include "core/layout/svg/LayoutSVGShape.h"
 #include "core/svg/SVGAnimatedPointList.h"
 #include "core/svg/SVGParserUtilities.h"
 
@@ -34,15 +34,10 @@ SVGPolyElement::SVGPolyElement(const QualifiedName& tagName, Document& document)
     addToPropertyMap(m_points);
 }
 
-void SVGPolyElement::trace(Visitor* visitor)
+DEFINE_TRACE(SVGPolyElement)
 {
     visitor->trace(m_points);
     SVGGeometryElement::trace(visitor);
-}
-
-void SVGPolyElement::parseAttribute(const QualifiedName& name, const AtomicString& value)
-{
-    parseAttributeNew(name, value);
 }
 
 void SVGPolyElement::svgAttributeChanged(const QualifiedName& attrName)
@@ -54,7 +49,7 @@ void SVGPolyElement::svgAttributeChanged(const QualifiedName& attrName)
 
     SVGElement::InvalidationGuard invalidationGuard(this);
 
-    RenderSVGShape* renderer = toRenderSVGShape(this->renderer());
+    LayoutSVGShape* renderer = toLayoutSVGShape(this->layoutObject());
     if (!renderer)
         return;
 

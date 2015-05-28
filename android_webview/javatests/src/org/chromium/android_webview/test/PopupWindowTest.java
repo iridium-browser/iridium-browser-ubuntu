@@ -4,27 +4,24 @@
 
 package org.chromium.android_webview.test;
 
+import android.os.Build;
 import android.test.suitebuilder.annotation.SmallTest;
 
 import org.chromium.android_webview.AwContents;
-import org.chromium.android_webview.test.util.AwTestTouchUtils;
 import org.chromium.android_webview.test.util.CommonResources;
 import org.chromium.base.test.util.Feature;
+import org.chromium.base.test.util.MinAndroidSdkLevel;
+import org.chromium.content.browser.test.util.TestCallbackHelperContainer;
 import org.chromium.net.test.util.TestWebServer;
-
-import java.util.concurrent.Callable;
-import java.util.concurrent.TimeUnit;
 
 /**
  * Tests for pop up window flow.
  */
+@MinAndroidSdkLevel(Build.VERSION_CODES.KITKAT)
 public class PopupWindowTest extends AwTestBase {
     private TestAwContentsClient mParentContentsClient;
     private AwTestContainerView mParentContainerView;
     private AwContents mParentContents;
-    private TestAwContentsClient mPopupContentsClient;
-    private AwTestContainerView mPopupContainerView;
-    private AwContents mPopupContents;
     private TestWebServer mWebServer;
 
     private static final String POPUP_TITLE = "Popup Window";
@@ -46,67 +43,45 @@ public class PopupWindowTest extends AwTestBase {
         super.tearDown();
     }
 
-    private void triggerPopup() throws Throwable {
-        enableJavaScriptOnUiThread(mParentContents);
-        getInstrumentation().runOnMainSync(new Runnable() {
-            @Override
-            public void run() {
-                mParentContents.getSettings().setSupportMultipleWindows(true);
-                mParentContents.getSettings().setJavaScriptCanOpenWindowsAutomatically(true);
-            }
-        });
-
+    @SmallTest
+    @Feature({"AndroidWebView"})
+    public void testPopupWindow() throws Throwable {
         final String popupPath = "/popup.html";
-
-        final String parentPageHtml = CommonResources.makeHtmlPageFrom("",
-                "<script>"
+        final String parentPageHtml = CommonResources.makeHtmlPageFrom("", "<script>"
                         + "function tryOpenWindow() {"
                         + "  var newWindow = window.open('" + popupPath + "');"
-                        + "}</script>"
-                        + "<a class=\"full_view\" onclick=\"tryOpenWindow();\">Click me!</a>");
+                        + "}</script>");
+
         final String popupPageHtml = CommonResources.makeHtmlPageFrom(
                 "<title>" + POPUP_TITLE + "</title>",
                 "This is a popup window");
 
-        final String parentUrl = mWebServer.setResponse("/popupParent.html", parentPageHtml, null);
-        mWebServer.setResponse(popupPath, popupPageHtml, null);
-
-        mParentContentsClient.getOnCreateWindowHelper().setReturnValue(true);
-        loadUrlSync(mParentContents,
-                    mParentContentsClient.getOnPageFinishedHelper(),
-                    parentUrl);
-
-        TestAwContentsClient.OnCreateWindowHelper onCreateWindowHelper =
-                mParentContentsClient.getOnCreateWindowHelper();
-        int currentCallCount = onCreateWindowHelper.getCallCount();
-        AwTestTouchUtils.simulateTouchCenterOfView(mParentContainerView);
-        onCreateWindowHelper.waitForCallback(currentCallCount, 1, WAIT_TIMEOUT_MS,
-                TimeUnit.MILLISECONDS);
-    }
-
-    private void connectPendingPopup() throws Exception {
-        mPopupContentsClient = new TestAwContentsClient();
-        mPopupContainerView = createAwTestContainerViewOnMainSync(mPopupContentsClient);
-        mPopupContents = mPopupContainerView.getAwContents();
-
-        getInstrumentation().runOnMainSync(new Runnable() {
-            @Override
-            public void run() {
-                mParentContents.supplyContentsForPopup(mPopupContents);
-            }
-        });
+        triggerPopup(mParentContents, mParentContentsClient, mWebServer, parentPageHtml,
+                popupPageHtml, popupPath, "tryOpenWindow()");
+        AwContents popupContents = connectPendingPopup(mParentContents).popupContents;
+        assertEquals(POPUP_TITLE, getTitleOnUiThread(popupContents));
     }
 
     @SmallTest
     @Feature({"AndroidWebView"})
-    public void testPopupWindow() throws Throwable {
-        triggerPopup();
-        connectPendingPopup();
-        poll(new Callable<Boolean>() {
-            @Override
-            public Boolean call() throws Exception {
-                return POPUP_TITLE.equals(getTitleOnUiThread(mPopupContents));
-            }
-        });
+    public void testOnPageFinishedCalledOnDomModificationAfterNavigation() throws Throwable {
+        final String popupPath = "/popup.html";
+        final String parentPageHtml = CommonResources.makeHtmlPageFrom("", "<script>"
+                        + "function tryOpenWindow() {"
+                        + "  window.popupWindow = window.open('" + popupPath + "');"
+                        + "}"
+                        + "function modifyDomOfPopup() {"
+                        + "  window.popupWindow.document.body.innerHTML = 'Hello from the parent!';"
+                        + "}</script>");
+
+        triggerPopup(mParentContents, mParentContentsClient, mWebServer, parentPageHtml,
+                null, popupPath, "tryOpenWindow()");
+        TestCallbackHelperContainer.OnPageFinishedHelper onPageFinishedHelper =
+                connectPendingPopup(mParentContents).popupContentsClient.getOnPageFinishedHelper();
+        final int onPageFinishedCallCount = onPageFinishedHelper.getCallCount();
+        executeJavaScriptAndWaitForResult(mParentContents, mParentContentsClient,
+                "modifyDomOfPopup()");
+        onPageFinishedHelper.waitForCallback(onPageFinishedCallCount);
+        assertEquals("about:blank", onPageFinishedHelper.getUrl());
     }
 }

@@ -45,7 +45,7 @@ class SharedWorkerGlobalScope final : public WorkerGlobalScope {
     DEFINE_WRAPPERTYPEINFO();
 public:
     typedef WorkerGlobalScope Base;
-    static PassRefPtrWillBeRawPtr<SharedWorkerGlobalScope> create(const String& name, SharedWorkerThread*, PassOwnPtrWillBeRawPtr<WorkerThreadStartupData>);
+    static PassRefPtrWillBeRawPtr<SharedWorkerGlobalScope> create(const String& name, SharedWorkerThread*, PassOwnPtr<WorkerThreadStartupData>);
     virtual ~SharedWorkerGlobalScope();
 
     virtual bool isSharedWorkerGlobalScope() const override { return true; }
@@ -59,7 +59,7 @@ public:
 
     SharedWorkerThread* thread();
 
-    virtual void trace(Visitor*) override;
+    DECLARE_VIRTUAL_TRACE();
 
 private:
     SharedWorkerGlobalScope(const String& name, const KURL&, const String& userAgent, SharedWorkerThread*, const SecurityOrigin*, PassOwnPtrWillBeRawPtr<WorkerClients>);

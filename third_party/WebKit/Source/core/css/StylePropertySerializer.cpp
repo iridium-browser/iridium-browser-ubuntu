@@ -111,9 +111,6 @@ bool StylePropertySerializer::StylePropertySetForSerializer::shouldProcessProper
     // and so on) either.
     if (isShorthandProperty(propertyID) || propertyID == CSSPropertyAll)
         return false;
-    // We should not serialize internal properties.
-    if (isInternalProperty(propertyID))
-        return false;
 
     // The all property is a shorthand that resets all CSS properties except
     // direction and unicode-bidi. It only accepts the CSS-wide keywords.
@@ -203,8 +200,8 @@ String StylePropertySerializer::asText() const
 
         StylePropertySerializer::PropertyValueForSerializer property = m_propertySet.propertyAt(n);
         CSSPropertyID propertyID = property.id();
-        // Only enabled or internal properties should be part of the style.
-        ASSERT(CSSPropertyMetadata::isEnabledProperty(propertyID) || isInternalProperty(propertyID));
+        // Only enabled properties should be part of the style.
+        ASSERT(CSSPropertyMetadata::isEnabledProperty(propertyID));
         CSSPropertyID shorthandPropertyID = CSSPropertyInvalid;
         CSSPropertyID borderFallbackShorthandProperty = CSSPropertyInvalid;
         String value;
@@ -223,10 +220,6 @@ String StylePropertySerializer::asText() const
         case CSSPropertyBackgroundRepeatY:
             shorthandPropertyAppeared.set(CSSPropertyBackground - firstCSSProperty);
             continue;
-        case CSSPropertyContent:
-            if (property.value()->isValueList())
-                value = toCSSValueList(property.value())->customCSSText(AlwaysQuoteCSSString);
-            break;
         case CSSPropertyBorderTopWidth:
         case CSSPropertyBorderRightWidth:
         case CSSPropertyBorderBottomWidth:
@@ -289,7 +282,7 @@ String StylePropertySerializer::asText() const
             shorthandPropertyID = CSSPropertyMargin;
             break;
         case CSSPropertyMotionPath:
-        case CSSPropertyMotionPosition:
+        case CSSPropertyMotionOffset:
         case CSSPropertyMotionRotation:
             shorthandPropertyID = CSSPropertyMotion;
             break;
@@ -401,7 +394,7 @@ String StylePropertySerializer::getPropertyValue(CSSPropertyID propertyID) const
     case CSSPropertyBackgroundRepeat:
         return backgroundRepeatPropertyValue();
     case CSSPropertyBackground:
-        return getLayeredShorthandValue(backgroundShorthand());
+        return getLayeredShorthandValue(backgroundShorthand(), true);
     case CSSPropertyBorder:
         return borderPropertyValue(OmitUncommonValues);
     case CSSPropertyBorderTop:
@@ -576,21 +569,20 @@ String StylePropertySerializer::get4Values(const StylePropertyShorthand& shortha
     PropertyValueForSerializer bottom = m_propertySet.propertyAt(bottomValueIndex);
     PropertyValueForSerializer left = m_propertySet.propertyAt(leftValueIndex);
 
-        // All 4 properties must be specified.
+    // All 4 properties must be specified.
     if (!top.value() || !right.value() || !bottom.value() || !left.value())
+        return String();
+
+    if (top.isImportant() != right.isImportant() || right.isImportant() != bottom.isImportant() || bottom.isImportant() != left.isImportant())
         return String();
 
     if (top.isInherited() && right.isInherited() && bottom.isInherited() && left.isInherited())
         return getValueName(CSSValueInherit);
 
-    if (top.value()->isInitialValue() || right.value()->isInitialValue() || bottom.value()->isInitialValue() || left.value()->isInitialValue()) {
-        if (top.value()->isInitialValue() && right.value()->isInitialValue() && bottom.value()->isInitialValue() && left.value()->isInitialValue() && !top.isImplicit()) {
-            // All components are "initial" and "top" is not implicit.
-            return getValueName(CSSValueInitial);
-        }
-        return String();
-    }
-    if (top.isImportant() != right.isImportant() || right.isImportant() != bottom.isImportant() || bottom.isImportant() != left.isImportant())
+    unsigned numInitial = top.value()->isInitialValue() + right.value()->isInitialValue() + bottom.value()->isInitialValue() + left.value()->isInitialValue();
+    if (numInitial == 4)
+        return getValueName(CSSValueInitial);
+    if (numInitial > 0)
         return String();
 
     bool showLeft = !right.value()->equals(*left.value());

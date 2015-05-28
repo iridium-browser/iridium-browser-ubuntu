@@ -28,12 +28,17 @@
       'conditions': [
         ['use_custom_libcxx==1', {
           'dependencies!': [
-            '../../third_party/libc++/libc++.gyp:libcxx_proxy',
+            '../../buildtools/third_party/libc++/libc++.gyp:libcxx_proxy',
           ],
         }],
         ['tsan==1', {
           'sources': [
             'tsan_suppressions.cc',
+          ],
+        }],
+        ['lsan==1', {
+          'sources': [
+            'lsan_suppressions.cc',
           ],
         }],
       ],

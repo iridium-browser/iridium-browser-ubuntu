@@ -12,7 +12,6 @@
 #include "base/lazy_instance.h"
 #include "base/memory/singleton.h"
 #include "base/message_loop/message_loop.h"
-#include "base/metrics/stats_counters.h"
 #include "base/profiler/scoped_tracker.h"
 #include "base/stl_util.h"
 #include "base/strings/utf_string_conversions.h"
@@ -24,12 +23,12 @@
 #include "net/base/load_flags.h"
 #include "net/base/load_timing_info.h"
 #include "net/base/net_errors.h"
-#include "net/base/net_log.h"
 #include "net/base/network_change_notifier.h"
 #include "net/base/network_delegate.h"
 #include "net/base/upload_data_stream.h"
 #include "net/http/http_response_headers.h"
 #include "net/http/http_util.h"
+#include "net/log/net_log.h"
 #include "net/ssl/ssl_cert_request_info.h"
 #include "net/url_request/redirect_info.h"
 #include "net/url_request/url_request_context.h"
@@ -38,6 +37,8 @@
 #include "net/url_request/url_request_job_manager.h"
 #include "net/url_request/url_request_netlog_params.h"
 #include "net/url_request/url_request_redirect_job.h"
+#include "url/gurl.h"
+#include "url/origin.h"
 
 using base::Time;
 using std::string;
@@ -55,6 +56,8 @@ void StripPostSpecificHeaders(HttpRequestHeaders* headers) {
   // These are headers that may be attached to a POST.
   headers->RemoveHeader(HttpRequestHeaders::kContentLength);
   headers->RemoveHeader(HttpRequestHeaders::kContentType);
+  // TODO(jww): This is Origin header removal is probably layering violation and
+  // should be refactored into //content. See https://crbug.com/471397.
   headers->RemoveHeader(HttpRequestHeaders::kOrigin);
 }
 
@@ -158,7 +161,7 @@ void URLRequest::Delegate::OnAuthRequired(URLRequest* request,
 void URLRequest::Delegate::OnCertificateRequested(
     URLRequest* request,
     SSLCertRequestInfo* cert_request_info) {
-  request->Cancel();
+  request->CancelWithError(ERR_SSL_CLIENT_AUTH_CERT_NEEDED);
 }
 
 void URLRequest::Delegate::OnSSLCertificateError(URLRequest* request,
@@ -210,12 +213,10 @@ void URLRequest::AppendChunkToUpload(const char* bytes,
                                      bool is_last_chunk) {
   DCHECK(upload_data_stream_);
   DCHECK(upload_data_stream_->is_chunked());
-  DCHECK_GT(bytes_len, 0);
   upload_chunked_data_stream_->AppendData(bytes, bytes_len, is_last_chunk);
 }
 
 void URLRequest::set_upload(scoped_ptr<UploadDataStream> upload) {
-  DCHECK(!upload->is_chunked());
   upload_data_stream_ = upload.Pass();
 }
 
@@ -225,12 +226,6 @@ const UploadDataStream* URLRequest::get_upload() const {
 
 bool URLRequest::has_upload() const {
   return upload_data_stream_.get() != NULL;
-}
-
-void URLRequest::SetExtraRequestHeaderById(int id, const string& value,
-                                           bool overwrite) {
-  DCHECK(!is_pending_ || is_redirecting_);
-  NOTREACHED() << "implement me!";
 }
 
 void URLRequest::SetExtraRequestHeaderByName(const string& name,
@@ -378,26 +373,12 @@ UploadProgress URLRequest::GetUploadProgress() const {
   return job_->GetUploadProgress();
 }
 
-void URLRequest::GetResponseHeaderById(int id, string* value) {
-  DCHECK(job_.get());
-  NOTREACHED() << "implement me!";
-}
-
 void URLRequest::GetResponseHeaderByName(const string& name, string* value) {
   DCHECK(value);
   if (response_info_.headers.get()) {
     response_info_.headers->GetNormalizedHeader(name, value);
   } else {
     value->clear();
-  }
-}
-
-void URLRequest::GetAllResponseHeaders(string* headers) {
-  DCHECK(headers);
-  if (response_info_.headers.get()) {
-    response_info_.headers->GetNormalizedHeaders(headers);
-  } else {
-    headers->clear();
   }
 }
 
@@ -486,26 +467,6 @@ void URLRequest::set_method(const std::string& method) {
   method_ = method;
 }
 
-// static
-std::string URLRequest::ComputeMethodForRedirect(
-    const std::string& method,
-    int http_status_code) {
-  // For 303 redirects, all request methods except HEAD are converted to GET,
-  // as per the latest httpbis draft.  The draft also allows POST requests to
-  // be converted to GETs when following 301/302 redirects, for historical
-  // reasons. Most major browsers do this and so shall we.  Both RFC 2616 and
-  // the httpbis draft say to prompt the user to confirm the generation of new
-  // requests, other than GET and HEAD requests, but IE omits these prompts and
-  // so shall we.
-  // See:  https://tools.ietf.org/html/draft-ietf-httpbis-p2-semantics-17#section-7.3
-  if ((http_status_code == 303 && method != "HEAD") ||
-      ((http_status_code == 301 || http_status_code == 302) &&
-       method == "POST")) {
-    return "GET";
-  }
-  return method;
-}
-
 void URLRequest::SetReferrer(const std::string& referrer) {
   DCHECK(!is_pending_);
   GURL referrer_url(referrer);
@@ -562,13 +523,12 @@ URLRequest::URLRequest(const GURL& url,
                        RequestPriority priority,
                        Delegate* delegate,
                        const URLRequestContext* context,
-                       CookieStore* cookie_store,
                        NetworkDelegate* network_delegate)
     : context_(context),
       network_delegate_(network_delegate ? network_delegate
                                          : context->network_delegate()),
-      net_log_(BoundNetLog::Make(context->net_log(),
-                                 NetLog::SOURCE_URL_REQUEST)),
+      net_log_(
+          BoundNetLog::Make(context->net_log(), NetLog::SOURCE_URL_REQUEST)),
       url_chain_(1, url),
       method_("GET"),
       referrer_policy_(CLEAR_REFERRER_ON_TRANSITION_FROM_SECURE_TO_INSECURE),
@@ -587,10 +547,7 @@ URLRequest::URLRequest(const GURL& url,
       has_notified_completion_(false),
       received_response_content_length_(0),
       creation_time_(base::TimeTicks::Now()),
-      notified_before_network_start_(false),
-      cookie_store_(cookie_store ? cookie_store : context->cookie_store()) {
-  SIMPLE_STATS_COUNTER("URLRequestCount");
-
+      notified_before_network_start_(false) {
   // Sanity check out environment.
   DCHECK(base::MessageLoop::current())
       << "The current base::MessageLoop must exist";
@@ -987,6 +944,29 @@ int URLRequest::Redirect(const RedirectInfo& redirect_info) {
     method_ = redirect_info.new_method;
   }
 
+  // Cross-origin redirects should not result in an Origin header value that is
+  // equal to the original request's Origin header. This is necessary to prevent
+  // a reflection of POST requests to bypass CSRF protections. If the header was
+  // not set to "null", a POST request from origin A to a malicious origin M
+  // could be redirected by M back to A.
+  //
+  // In the Section 4.2, Step 4.10 of the Fetch spec
+  // (https://fetch.spec.whatwg.org/#concept-http-fetch), it states that on
+  // cross-origin 301, 302, 303, 307, and 308 redirects, the user agent should
+  // set the request's origin to an "opaque identifier," which serializes to
+  // "null." This matches Firefox and IE behavior, although it supercedes the
+  // suggested behavior in RFC 6454, "The Web Origin Concept."
+  //
+  // See also https://crbug.com/465517.
+  //
+  // TODO(jww): This is probably layering violation and should be refactored
+  // into //content. See https://crbug.com/471397.
+  if (redirect_info.new_url.GetOrigin() != url().GetOrigin() &&
+      extra_request_headers_.HasHeader(HttpRequestHeaders::kOrigin)) {
+    extra_request_headers_.SetHeader(HttpRequestHeaders::kOrigin,
+                                     url::Origin().string());
+  }
+
   referrer_ = redirect_info.new_referrer;
   first_party_for_cookies_ = redirect_info.new_first_party_for_cookies;
 
@@ -1033,13 +1013,14 @@ void URLRequest::SetPriority(RequestPriority priority) {
 
 bool URLRequest::GetHSTSRedirect(GURL* redirect_url) const {
   const GURL& url = this->url();
-  if (!url.SchemeIs("http"))
+  bool scheme_is_http = url.SchemeIs("http");
+  if (!scheme_is_http && !url.SchemeIs("ws"))
     return false;
   TransportSecurityState* state = context()->transport_security_state();
   if (state && state->ShouldUpgradeToSSL(url.host())) {
-    url::Replacements<char> replacements;
-    const char kNewScheme[] = "https";
-    replacements.SetScheme(kNewScheme, url::Component(0, strlen(kNewScheme)));
+    GURL::Replacements replacements;
+    const char* new_scheme = scheme_is_http ? "https" : "wss";
+    replacements.SetSchemeStr(new_scheme);
     *redirect_url = url.ReplaceComponents(replacements);
     return true;
   }

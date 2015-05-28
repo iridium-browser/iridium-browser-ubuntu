@@ -146,7 +146,7 @@ PluginProcessHost::~PluginProcessHost() {
     PostMessage(*window_index, WM_CLOSE, 0, 0);
   }
 #elif defined(OS_MACOSX)
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
   // If the plugin process crashed but had fullscreen windows open at the time,
   // make sure that the menu bar is visible.
   for (size_t i = 0; i < plugin_fullscreen_windows_set_.size(); ++i) {
@@ -189,8 +189,8 @@ bool PluginProcessHost::Init(const WebPluginInfo& info) {
       browser_command_line.GetSwitchValueNative(switches::kPluginLauncher);
 
 #if defined(OS_MACOSX)
-  // Run the plug-in process in a mode tolerant of heap execution without
-  // explicit mprotect calls. Some plug-ins still rely on this quaint and
+  // Run the plugin process in a mode tolerant of heap execution without
+  // explicit mprotect calls. Some plugins still rely on this quaint and
   // archaic "feature." See http://crbug.com/93551.
   int flags = ChildProcessHost::CHILD_ALLOW_HEAP_EXECUTION;
 #elif defined(OS_LINUX)
@@ -248,15 +248,15 @@ bool PluginProcessHost::Init(const WebPluginInfo& info) {
 
   cmd_line->AppendSwitchASCII(switches::kProcessChannelID, channel_id);
 
-  process_->Launch(
-      new PluginSandboxedProcessLauncherDelegate(process_->GetHost()),
-      cmd_line);
-
   // The plugin needs to be shutdown gracefully, i.e. NP_Shutdown needs to be
   // called on the plugin. The plugin process exits when it receives the
   // OnChannelError notification indicating that the browser plugin channel has
   // been destroyed.
-  process_->SetTerminateChildOnShutdown(false);
+  bool terminate_on_shutdown = false;
+  process_->Launch(
+      new PluginSandboxedProcessLauncherDelegate(process_->GetHost()),
+      cmd_line,
+      terminate_on_shutdown);
 
   ResourceMessageFilter::GetContextsCallback get_contexts_callback(
       base::Bind(&PluginProcessHost::GetContexts,
@@ -273,7 +273,7 @@ bool PluginProcessHost::Init(const WebPluginInfo& info) {
 }
 
 void PluginProcessHost::ForceShutdown() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
+  DCHECK_CURRENTLY_ON(BrowserThread::IO);
   Send(new PluginProcessMsg_NotifyRenderersOfPendingShutdown());
   process_->ForceShutdown();
 }

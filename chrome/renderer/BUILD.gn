@@ -37,11 +37,12 @@ static_library("renderer") {
     "//chrome:strings",
     "//components/autofill/content/renderer",
     "//components/cdm/renderer",
-    "//components/data_reduction_proxy/core/common",
-    "//components/dns_prefetch/renderer",
+    "//components/data_reduction_proxy/content/common",
+    "//components/network_hints/renderer",
     "//components/error_page/renderer",
     "//components/password_manager/content/renderer",
     "//components/plugins/renderer",
+    "//components/printing/renderer:printing_renderer",
     "//components/startup_metric_utils",
     "//components/translate/content/renderer",
     "//components/translate/core/common",
@@ -51,13 +52,11 @@ static_library("renderer") {
     "//content/app/resources",
     "//content/app/strings",
     "//content/public/renderer",
-    "//media/cast:net",
-    "//media/cast:sender",
-    "//media/cast/logging/proto",
     "//net",
     "//skia",
     "//storage/common",
     "//third_party/WebKit/public:blink",
+    "//third_party/WebKit/public:image_resources",
     "//third_party/WebKit/public:resources",
     "//third_party/icu",
     "//third_party/npapi",
@@ -69,8 +68,8 @@ static_library("renderer") {
 
   if (enable_nacl) {
     deps += [
-      #'../components/nacl.gyp:nacl',  TODO(GYP)
-      #'../components/nacl.gyp:nacl_renderer',  TODO(GYP)
+      "//components/nacl",
+      "//components/nacl:nacl_renderer",
     ]
   }
 
@@ -79,10 +78,10 @@ static_library("renderer") {
         rebase_path(gypi_values.chrome_renderer_plugin_sources, ".", "..")
     deps += [
       "//components/pdf/renderer",
-      "//ppapi:ppapi_host",
-      "//ppapi:ppapi_ipc",
-      "//ppapi:ppapi_proxy",
-      "//ppapi:ppapi_shared",
+      "//ppapi/host",
+      "//ppapi/proxy",
+      "//ppapi/proxy:ipc",
+      "//ppapi/shared_impl",
     ]
   }
 
@@ -117,7 +116,19 @@ static_library("renderer") {
       "//chrome/common/extensions/api",
       "//extensions:extensions_resources",
       "//extensions/renderer",
+      "//media/cast:net",
+      "//media/cast:receiver",
+      "//media/cast:sender",
+      "//media/cast/logging/proto",
     ]
+    if (!enable_webrtc) {
+      sources -= [
+        "media/cast_receiver_session.cc",
+        "media/cast_receiver_session.h",
+        "media/cast_rtp_stream.cc",
+        "media/cast_rtp_stream.h",
+      ]
+    }
   }
   if (enable_webrtc) {
     sources +=
@@ -151,7 +162,7 @@ static_library("renderer") {
   }
   if (is_win) {
     deps += [
-      #'../chrome_elf/chrome_elf.gyp:chrome_elf',  TODO(GYP)
+      "//chrome_elf",
       "//third_party/wtl",
     ]
   }
@@ -159,11 +170,6 @@ static_library("renderer") {
     sources +=
         rebase_path(gypi_values.chrome_renderer_non_android_sources, ".", "..")
   }
-
-  # TODO(GYP)
-  #       'sources': [
-  #         'renderer/printing/print_web_view_helper_pdf_win.cc',
-  #       ],
 }
 
 # In GYP this is part of test_support_common.
@@ -189,12 +195,6 @@ source_set("test_support") {
 
   if (enable_print_preview) {
     deps += [ "//chrome/service" ]
-  }
-  if (enable_basic_printing || enable_print_preview) {
-    sources += [
-      "printing/mock_printer.cc",
-      "printing/mock_printer.h",
-    ]
   }
 
   if (enable_webrtc) {

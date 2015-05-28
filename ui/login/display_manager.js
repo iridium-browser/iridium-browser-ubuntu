@@ -35,6 +35,7 @@
 /* Accelerator identifiers. Must be kept in sync with webui_login_view.cc. */
 /** @const */ var ACCELERATOR_CANCEL = 'cancel';
 /** @const */ var ACCELERATOR_ENABLE_DEBBUGING = 'debugging';
+/** @const */ var ACCELERATOR_TOGGLE_EASY_BOOTSTRAP = 'toggle_easy_bootstrap';
 /** @const */ var ACCELERATOR_ENROLLMENT = 'enrollment';
 /** @const */ var ACCELERATOR_KIOSK_ENABLE = 'kiosk_enable';
 /** @const */ var ACCELERATOR_VERSION = 'version';
@@ -49,8 +50,8 @@
 /** @const */ var ACCELERATOR_APP_LAUNCH_BAILOUT = 'app_launch_bailout';
 /** @const */ var ACCELERATOR_APP_LAUNCH_NETWORK_CONFIG =
     'app_launch_network_config';
-/** @const */ var ACCELERATOR_EMBEDDED_SIGNIN = 'embedded_signin';
 /** @const */ var ACCELERATOR_NEW_OOBE = 'new_oobe';
+/** @const */ var ACCELERATOR_TOGGLE_WEBVIEW_SIGNIN = 'toggle_webview_signin';
 
 /* Signin UI state constants. Used to control header bar UI. */
 /** @const */ var SIGNIN_UI_STATE = {
@@ -85,6 +86,8 @@
   APP_LAUNCH_SPLASH: 'app-launch-splash',
   DESKTOP_USER_MANAGER: 'login-add-user'
 };
+
+/** @const */ var USER_ACTION_ROLLBACK_TOGGLED = 'rollback-toggled';
 
 cr.define('cr.ui.login', function() {
   var Bubble = cr.ui.Bubble;
@@ -378,7 +381,8 @@ cr.define('cr.ui.login', function() {
           $('version-labels').hidden = !$('version-labels').hidden;
       } else if (name == ACCELERATOR_RESET) {
         if (currentStepId == SCREEN_OOBE_RESET)
-          chrome.send('toggleRollbackOnResetScreen');
+          $('reset').send(login.Screen.CALLBACK_USER_ACTED,
+                          USER_ACTION_ROLLBACK_TOGGLED);
         else if (RESET_AVAILABLE_SCREEN_GROUP.indexOf(currentStepId) != -1)
           chrome.send('toggleResetScreen');
       } else if (name == ACCELERATOR_DEVICE_REQUISITION) {
@@ -398,11 +402,15 @@ cr.define('cr.ui.login', function() {
       } else if (name == ACCELERATOR_APP_LAUNCH_NETWORK_CONFIG) {
         if (currentStepId == SCREEN_APP_LAUNCH_SPLASH)
           chrome.send('networkConfigRequest');
-      } else if (name == ACCELERATOR_EMBEDDED_SIGNIN) {
-        if (currentStepId == SCREEN_GAIA_SIGNIN)
-          chrome.send('switchToEmbeddedSignin');
       } else if (name == ACCELERATOR_NEW_OOBE) {
         chrome.send('switchToNewOobe');
+      } else if (name == ACCELERATOR_TOGGLE_WEBVIEW_SIGNIN) {
+        if (currentStepId == SCREEN_GAIA_SIGNIN ||
+            currentStepId == SCREEN_OOBE_ENROLLMENT)
+          chrome.send('toggleWebviewSignin');
+      } else if (name == ACCELERATOR_TOGGLE_EASY_BOOTSTRAP) {
+        if (currentStepId == SCREEN_GAIA_SIGNIN)
+          chrome.send('toggleEasyBootstrap');
       }
 
       if (!this.forceKeyboardFlow_)
@@ -609,9 +617,9 @@ cr.define('cr.ui.login', function() {
      */
     preloadScreen: function(screen) {
       var screenEl = $(screen.id);
-      if (screenEl.deferredDecorate !== undefined) {
-        screenEl.deferredDecorate();
-        delete screenEl.deferredDecorate;
+      if (screenEl.deferredInitialization !== undefined) {
+        screenEl.deferredInitialization();
+        delete screenEl.deferredInitialization;
       }
     },
 
@@ -699,7 +707,7 @@ cr.define('cr.ui.login', function() {
       screen.style.width = '';
       screen.style.height = '';
 
-     $('outer-container').classList.toggle(
+      $('outer-container').classList.toggle(
         'fullscreen', screen.classList.contains('fullscreen'));
 
       var width = screen.getPreferredSize().width;

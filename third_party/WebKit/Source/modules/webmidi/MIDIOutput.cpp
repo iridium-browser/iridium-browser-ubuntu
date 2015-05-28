@@ -35,17 +35,20 @@
 #include "core/dom/ExceptionCode.h"
 #include "core/dom/ExecutionContext.h"
 #include "core/frame/LocalDOMWindow.h"
+#include "core/timing/DOMWindowPerformance.h"
 #include "core/timing/Performance.h"
 #include "modules/webmidi/MIDIAccess.h"
 
 namespace blink {
 
+using PortState = MIDIAccessor::MIDIPortState;
+
 namespace {
 
 double now(ExecutionContext* context)
 {
-    LocalDOMWindow* window = context ? context->executingWindow() : 0;
-    Performance* performance = window ? window->performance() : 0;
+    LocalDOMWindow* window = context ? context->executingWindow() : nullptr;
+    Performance* performance = window ? DOMWindowPerformance::performance(*window) : nullptr;
     return performance ? performance->now() : 0.0;
 }
 
@@ -173,14 +176,16 @@ private:
 
 } // namespace
 
-MIDIOutput* MIDIOutput::create(MIDIAccess* access, unsigned portIndex, const String& id, const String& manufacturer, const String& name, const String& version, bool isActive)
+MIDIOutput* MIDIOutput::create(MIDIAccess* access, unsigned portIndex, const String& id, const String& manufacturer, const String& name, const String& version, PortState state)
 {
     ASSERT(access);
-    return new MIDIOutput(access, portIndex, id, manufacturer, name, version, isActive);
+    MIDIOutput* output = new MIDIOutput(access, portIndex, id, manufacturer, name, version, state);
+    output->suspendIfNeeded();
+    return output;
 }
 
-MIDIOutput::MIDIOutput(MIDIAccess* access, unsigned portIndex, const String& id, const String& manufacturer, const String& name, const String& version, bool isActive)
-    : MIDIPort(access, id, manufacturer, name, MIDIPortTypeOutput, version, isActive)
+MIDIOutput::MIDIOutput(MIDIAccess* access, unsigned portIndex, const String& id, const String& manufacturer, const String& name, const String& version, PortState state)
+    : MIDIPort(access, id, manufacturer, name, TypeOutput, version, state)
     , m_portIndex(portIndex)
 {
 }
@@ -193,6 +198,10 @@ void MIDIOutput::send(DOMUint8Array* array, double timestamp, ExceptionState& ex
 {
     if (timestamp == 0.0)
         timestamp = now(executionContext());
+
+    // Implicit open. It does nothing if the port is already opened.
+    // This should be performed even if |array| is invalid.
+    open();
 
     if (!array)
         return;
@@ -232,7 +241,7 @@ void MIDIOutput::send(Vector<unsigned> unsignedData, ExceptionState& exceptionSt
     send(unsignedData, 0.0, exceptionState);
 }
 
-void MIDIOutput::trace(Visitor* visitor)
+DEFINE_TRACE(MIDIOutput)
 {
     MIDIPort::trace(visitor);
 }

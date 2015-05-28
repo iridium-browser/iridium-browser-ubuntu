@@ -13,8 +13,8 @@
 
 #include <string.h>
 
+#include "webrtc/base/scoped_ptr.h"
 #include "webrtc/common_audio/resampler/push_sinc_resampler.h"
-#include "webrtc/system_wrappers/interface/scoped_ptr.h"
 #include "webrtc/system_wrappers/interface/scoped_vector.h"
 #include "webrtc/typedefs.h"
 
@@ -56,37 +56,25 @@ class SplittingFilter {
  public:
   SplittingFilter(int channels);
 
-  void Analysis(const IFChannelBuffer* in_data,
-                const std::vector<IFChannelBuffer*>& bands);
-  void Synthesis(const std::vector<IFChannelBuffer*>& bands,
-                 IFChannelBuffer* out_data);
+  void Analysis(const IFChannelBuffer* data, IFChannelBuffer* bands);
+  void Synthesis(const IFChannelBuffer* bands, IFChannelBuffer* data);
 
  private:
   // These work for 640 samples or less.
-  void TwoBandsAnalysis(const IFChannelBuffer* in_data,
-                        IFChannelBuffer* band1,
-                        IFChannelBuffer* band2);
-  void TwoBandsSynthesis(const IFChannelBuffer* band1,
-                         const IFChannelBuffer* band2,
-                         IFChannelBuffer* out_data);
+  void TwoBandsAnalysis(const IFChannelBuffer* data, IFChannelBuffer* bands);
+  void TwoBandsSynthesis(const IFChannelBuffer* bands, IFChannelBuffer* data);
   // These only work for 480 samples at the moment.
-  void ThreeBandsAnalysis(const IFChannelBuffer* in_data,
-                          IFChannelBuffer* band1,
-                          IFChannelBuffer* band2,
-                          IFChannelBuffer* band3);
-  void ThreeBandsSynthesis(const IFChannelBuffer* band1,
-                           const IFChannelBuffer* band2,
-                           const IFChannelBuffer* band3,
-                           IFChannelBuffer* out_data);
+  void ThreeBandsAnalysis(const IFChannelBuffer* data, IFChannelBuffer* bands);
+  void ThreeBandsSynthesis(const IFChannelBuffer* bands, IFChannelBuffer* data);
   void InitBuffers();
 
   int channels_;
-  scoped_ptr<TwoBandsStates[]> two_bands_states_;
-  scoped_ptr<TwoBandsStates[]> band1_states_;
-  scoped_ptr<TwoBandsStates[]> band2_states_;
+  rtc::scoped_ptr<TwoBandsStates[]> two_bands_states_;
+  rtc::scoped_ptr<TwoBandsStates[]> band1_states_;
+  rtc::scoped_ptr<TwoBandsStates[]> band2_states_;
   ScopedVector<PushSincResampler> analysis_resamplers_;
   ScopedVector<PushSincResampler> synthesis_resamplers_;
-  scoped_ptr<int16_t[]> int_buffer_;
+  rtc::scoped_ptr<int16_t[]> int_buffer_;
 };
 
 }  // namespace webrtc

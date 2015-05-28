@@ -17,9 +17,11 @@
 #include "base/sequenced_task_runner.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/threading/sequenced_worker_pool.h"
+#include "chrome/browser/chromeos/policy/affiliated_cloud_policy_invalidator.h"
+#include "chrome/browser/chromeos/policy/affiliated_invalidation_service_provider.h"
+#include "chrome/browser/chromeos/policy/affiliated_invalidation_service_provider_impl.h"
 #include "chrome/browser/chromeos/policy/consumer_management_service.h"
 #include "chrome/browser/chromeos/policy/device_cloud_policy_initializer.h"
-#include "chrome/browser/chromeos/policy/device_cloud_policy_invalidator.h"
 #include "chrome/browser/chromeos/policy/device_cloud_policy_store_chromeos.h"
 #include "chrome/browser/chromeos/policy/device_local_account.h"
 #include "chrome/browser/chromeos/policy/device_local_account_policy_service.h"
@@ -47,6 +49,7 @@
 #include "content/public/browser/browser_thread.h"
 #include "google_apis/gaia/gaia_auth_util.h"
 #include "net/url_request/url_request_context_getter.h"
+#include "policy/proto/device_management_backend.pb.h"
 
 using content::BrowserThread;
 
@@ -149,7 +152,11 @@ BrowserPolicyConnectorChromeOS::~BrowserPolicyConnectorChromeOS() {}
 void BrowserPolicyConnectorChromeOS::Init(
     PrefService* local_state,
     scoped_refptr<net::URLRequestContextGetter> request_context) {
+  local_state_ = local_state;
   ChromeBrowserPolicyConnector::Init(local_state, request_context);
+
+  affiliated_invalidation_service_provider_.reset(
+      new AffiliatedInvalidationServiceProviderImpl);
 
   const base::CommandLine* command_line =
       base::CommandLine::ForCurrentProcess();
@@ -171,19 +178,7 @@ void BrowserPolicyConnectorChromeOS::Init(
 
     device_cloud_policy_manager_->Initialize(local_state);
     device_cloud_policy_manager_->AddDeviceCloudPolicyManagerObserver(this);
-
-    device_cloud_policy_initializer_.reset(
-        new DeviceCloudPolicyInitializer(
-            local_state,
-            device_management_service(),
-            consumer_device_management_service_.get(),
-            GetBackgroundTaskRunner(),
-            install_attributes_.get(),
-            state_keys_broker_.get(),
-            device_cloud_policy_manager_->device_store(),
-            device_cloud_policy_manager_,
-            chromeos::DeviceSettingsService::Get()));
-    device_cloud_policy_initializer_->Init();
+    RestartDeviceCloudPolicyInitializer();
   }
 
   device_local_account_policy_service_.reset(
@@ -191,6 +186,7 @@ void BrowserPolicyConnectorChromeOS::Init(
           chromeos::DBusThreadManager::Get()->GetSessionManagerClient(),
           chromeos::DeviceSettingsService::Get(),
           chromeos::CrosSettings::Get(),
+          affiliated_invalidation_service_provider_.get(),
           GetBackgroundTaskRunner(),
           GetBackgroundTaskRunner(),
           GetBackgroundTaskRunner(),
@@ -198,7 +194,12 @@ void BrowserPolicyConnectorChromeOS::Init(
               content::BrowserThread::IO),
           request_context));
   device_local_account_policy_service_->Connect(device_management_service());
-  device_cloud_policy_invalidator_.reset(new DeviceCloudPolicyInvalidator);
+  if (device_cloud_policy_manager_) {
+    device_cloud_policy_invalidator_.reset(new AffiliatedCloudPolicyInvalidator(
+        enterprise_management::DeviceRegisterRequest::DEVICE,
+        device_cloud_policy_manager_->core(),
+        affiliated_invalidation_service_provider_.get()));
+  }
 
   SetTimezoneIfPolicyAvailable();
 
@@ -212,17 +213,15 @@ void BrowserPolicyConnectorChromeOS::Init(
 }
 
 void BrowserPolicyConnectorChromeOS::PreShutdown() {
-  // Let the |device_cloud_policy_invalidator_| unregister itself as an
+  // Let the |affiliated_invalidation_service_provider_| unregister itself as an
   // observer of per-Profile InvalidationServices and the device-global
   // invalidation::TiclInvalidationService it may have created as an observer of
   // the DeviceOAuth2TokenService that is destroyed before Shutdown() is called.
-  device_cloud_policy_invalidator_.reset();
+  if (affiliated_invalidation_service_provider_)
+    affiliated_invalidation_service_provider_->Shutdown();
 }
 
 void BrowserPolicyConnectorChromeOS::Shutdown() {
-  // Verify that PreShutdown() has been called first.
-  DCHECK(!device_cloud_policy_invalidator_);
-
   network_configuration_updater_.reset();
 
   if (device_local_account_policy_service_)
@@ -316,13 +315,19 @@ void BrowserPolicyConnectorChromeOS::RegisterPrefs(
 }
 
 void BrowserPolicyConnectorChromeOS::OnDeviceCloudPolicyManagerConnected() {
+  CHECK(device_cloud_policy_initializer_);
+
   // DeviceCloudPolicyInitializer might still be on the call stack, so we
   // should release the initializer after this function returns.
-  if (device_cloud_policy_initializer_) {
-    device_cloud_policy_initializer_->Shutdown();
-    base::MessageLoop::current()->DeleteSoon(
-        FROM_HERE, device_cloud_policy_initializer_.release());
-  }
+  device_cloud_policy_initializer_->Shutdown();
+  base::MessageLoop::current()->DeleteSoon(
+      FROM_HERE, device_cloud_policy_initializer_.release());
+}
+
+void BrowserPolicyConnectorChromeOS::OnDeviceCloudPolicyManagerDisconnected() {
+  DCHECK(!device_cloud_policy_initializer_);
+
+  RestartDeviceCloudPolicyInitializer();
 }
 
 void BrowserPolicyConnectorChromeOS::SetTimezoneIfPolicyAvailable() {
@@ -342,6 +347,20 @@ void BrowserPolicyConnectorChromeOS::SetTimezoneIfPolicyAvailable() {
     chromeos::system::TimezoneSettings::GetInstance()->SetTimezoneFromID(
         base::UTF8ToUTF16(timezone));
   }
+}
+
+void BrowserPolicyConnectorChromeOS::RestartDeviceCloudPolicyInitializer() {
+  device_cloud_policy_initializer_.reset(
+      new DeviceCloudPolicyInitializer(
+          local_state_,
+          device_management_service(),
+          consumer_device_management_service_.get(),
+          GetBackgroundTaskRunner(),
+          install_attributes_.get(),
+          state_keys_broker_.get(),
+          device_cloud_policy_manager_->device_store(),
+          device_cloud_policy_manager_));
+  device_cloud_policy_initializer_->Init();
 }
 
 }  // namespace policy

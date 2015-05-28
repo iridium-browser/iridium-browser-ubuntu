@@ -6,6 +6,7 @@ package org.chromium.android_webview.test;
 
 import android.app.Instrumentation;
 import android.content.Context;
+import android.graphics.Bitmap;
 import android.test.ActivityInstrumentationTestCase2;
 import android.util.Log;
 
@@ -16,13 +17,15 @@ import org.chromium.android_webview.AwBrowserProcess;
 import org.chromium.android_webview.AwContents;
 import org.chromium.android_webview.AwContentsClient;
 import org.chromium.android_webview.AwSettings;
+import org.chromium.android_webview.test.util.GraphicsTestUtils;
 import org.chromium.android_webview.test.util.JSUtils;
 import org.chromium.base.test.util.InMemorySharedPreferences;
-import org.chromium.content.browser.ContentSettings;
 import org.chromium.content.browser.test.util.CallbackHelper;
 import org.chromium.content.browser.test.util.Criteria;
 import org.chromium.content.browser.test.util.CriteriaHelper;
+import org.chromium.content.browser.test.util.TestCallbackHelperContainer.OnPageFinishedHelper;
 import org.chromium.content_public.browser.LoadUrlParams;
+import org.chromium.net.test.util.TestWebServer;
 
 import java.lang.annotation.Annotation;
 import java.lang.reflect.Method;
@@ -273,6 +276,54 @@ public class AwTestBase
     }
 
     /**
+     * Stops loading on the UI thread.
+     */
+    public void stopLoading(final AwContents awContents) {
+        getInstrumentation().runOnMainSync(new Runnable() {
+            @Override
+            public void run() {
+                awContents.stopLoading();
+            }
+        });
+    }
+
+    public void waitForVisualStateCallback(final AwContents awContents) throws Exception {
+        final CallbackHelper ch = new CallbackHelper();
+        final int chCount = ch.getCallCount();
+        getInstrumentation().runOnMainSync(new Runnable() {
+            @Override
+            public void run() {
+                final long requestId = 666;
+                awContents.insertVisualStateCallback(requestId,
+                        new AwContents.VisualStateCallback() {
+                            @Override
+                            public void onComplete(long id) {
+                                assertEquals(requestId, id);
+                                ch.notifyCalled();
+                            }
+                        });
+            }
+        });
+        ch.waitForCallback(chCount);
+    }
+
+    // Waits for the pixel at the center of AwContents to color up into expectedColor.
+    // Note that this is a stricter condition that waiting for a visual state callback,
+    // as visual state callback only indicates that *something* has appeared in WebView.
+    public void waitForPixelColorAtCenterOfView(final AwContents awContents,
+            final AwTestContainerView testContainerView, final int expectedColor) throws Exception {
+        pollOnUiThread(new Callable<Boolean>() {
+            @Override
+            public Boolean call() throws Exception {
+                Bitmap bitmap = GraphicsTestUtils.drawAwContents(awContents, 2, 2,
+                        -(float) testContainerView.getWidth() / 2,
+                        -(float) testContainerView.getHeight() / 2);
+                return bitmap.getPixel(0, 0) == expectedColor;
+            }
+        });
+    }
+
+    /**
      * Checks the current test has |clazz| annotation. Note this swallows NoSuchMethodException
      * and returns false in that case.
      */
@@ -326,6 +377,10 @@ public class AwTestBase
     // The browser context needs to be a process-wide singleton.
     private AwBrowserContext mBrowserContext =
             new AwBrowserContext(new InMemorySharedPreferences());
+
+    public AwBrowserContext getAwBrowserContext() {
+        return mBrowserContext;
+    }
 
     public AwTestContainerView createDetachedAwTestContainerView(
             final AwContentsClient awContentsClient) {
@@ -388,16 +443,6 @@ public class AwTestBase
             @Override
             public String call() throws Exception {
                 return awContents.getTitle();
-            }
-        });
-    }
-
-    public ContentSettings getContentSettingsOnUiThread(
-            final AwContents awContents) throws Exception {
-        return runTestOnUiThreadAndGetResult(new Callable<ContentSettings>() {
-            @Override
-            public ContentSettings call() throws Exception {
-                return awContents.getContentViewCore().getContentSettings();
             }
         });
     }
@@ -516,4 +561,78 @@ public class AwTestBase
         });
     }
 
+    /**
+     * Loads the main html then triggers the popup window.
+     */
+    public void triggerPopup(final AwContents parentAwContents,
+            TestAwContentsClient parentAwContentsClient, TestWebServer testWebServer,
+            String mainHtml, String popupHtml, String popupPath, String triggerScript)
+            throws Exception {
+        enableJavaScriptOnUiThread(parentAwContents);
+        getInstrumentation().runOnMainSync(new Runnable() {
+            @Override
+            public void run() {
+                parentAwContents.getSettings().setSupportMultipleWindows(true);
+                parentAwContents.getSettings().setJavaScriptCanOpenWindowsAutomatically(true);
+            }
+        });
+
+        final String parentUrl = testWebServer.setResponse("/popupParent.html", mainHtml, null);
+        if (popupHtml != null) {
+            testWebServer.setResponse(popupPath, popupHtml, null);
+        } else {
+            testWebServer.setResponseWithNoContentStatus(popupPath);
+        }
+
+        parentAwContentsClient.getOnCreateWindowHelper().setReturnValue(true);
+        loadUrlSync(parentAwContents, parentAwContentsClient.getOnPageFinishedHelper(), parentUrl);
+
+        TestAwContentsClient.OnCreateWindowHelper onCreateWindowHelper =
+                parentAwContentsClient.getOnCreateWindowHelper();
+        int currentCallCount = onCreateWindowHelper.getCallCount();
+        parentAwContents.evaluateJavaScript(triggerScript, null);
+        onCreateWindowHelper.waitForCallback(
+                currentCallCount, 1, WAIT_TIMEOUT_MS, TimeUnit.MILLISECONDS);
+    }
+
+    /**
+     * POD object for holding references to helper objects of a popup window.
+     */
+    public static class PopupInfo {
+        public final TestAwContentsClient popupContentsClient;
+        public final AwTestContainerView popupContainerView;
+        public final AwContents popupContents;
+        public PopupInfo(TestAwContentsClient popupContentsClient,
+                AwTestContainerView popupContainerView, AwContents popupContents) {
+            this.popupContentsClient = popupContentsClient;
+            this.popupContainerView = popupContainerView;
+            this.popupContents = popupContents;
+        }
+    }
+
+    /**
+     * Supplies the popup window with AwContents then waits for the popup window to finish loading.
+     */
+    public PopupInfo connectPendingPopup(final AwContents parentAwContents) throws Exception {
+        TestAwContentsClient popupContentsClient;
+        AwTestContainerView popupContainerView;
+        final AwContents popupContents;
+        popupContentsClient = new TestAwContentsClient();
+        popupContainerView = createAwTestContainerViewOnMainSync(popupContentsClient);
+        popupContents = popupContainerView.getAwContents();
+        enableJavaScriptOnUiThread(popupContents);
+
+        getInstrumentation().runOnMainSync(new Runnable() {
+            @Override
+            public void run() {
+                parentAwContents.supplyContentsForPopup(popupContents);
+            }
+        });
+
+        OnPageFinishedHelper onPageFinishedHelper = popupContentsClient.getOnPageFinishedHelper();
+        int callCount = onPageFinishedHelper.getCallCount();
+        onPageFinishedHelper.waitForCallback(callCount, 1, WAIT_TIMEOUT_MS, TimeUnit.MILLISECONDS);
+
+        return new PopupInfo(popupContentsClient, popupContainerView, popupContents);
+    }
 }

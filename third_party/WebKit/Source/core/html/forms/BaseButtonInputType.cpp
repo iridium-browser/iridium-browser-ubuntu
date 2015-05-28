@@ -36,7 +36,7 @@
 #include "core/dom/Text.h"
 #include "core/dom/shadow/ShadowRoot.h"
 #include "core/html/HTMLInputElement.h"
-#include "core/rendering/RenderButton.h"
+#include "core/layout/LayoutButton.h"
 
 namespace blink {
 
@@ -44,13 +44,13 @@ using namespace HTMLNames;
 
 void BaseButtonInputType::createShadowSubtree()
 {
-    ASSERT(element().userAgentShadowRoot());
-    element().userAgentShadowRoot()->appendChild(Text::create(element().document(), element().valueWithDefault()));
+    ASSERT(element().closedShadowRoot());
+    element().closedShadowRoot()->appendChild(Text::create(element().document(), element().valueWithDefault()));
 }
 
 void BaseButtonInputType::valueAttributeChanged()
 {
-    toText(element().userAgentShadowRoot()->firstChild())->setData(element().valueWithDefault());
+    toText(element().closedShadowRoot()->firstChild())->setData(element().valueWithDefault());
 }
 
 bool BaseButtonInputType::shouldSaveAndRestoreFormControlState() const
@@ -64,9 +64,9 @@ bool BaseButtonInputType::appendFormData(FormDataList&, bool) const
     return false;
 }
 
-RenderObject* BaseButtonInputType::createRenderer(RenderStyle*) const
+LayoutObject* BaseButtonInputType::createLayoutObject(const ComputedStyle&) const
 {
-    return new RenderButton(&element());
+    return new LayoutButton(&element());
 }
 
 bool BaseButtonInputType::storesValueSeparateFromAttribute()

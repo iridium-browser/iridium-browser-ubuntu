@@ -191,6 +191,13 @@ def OutputAnnotationStepWarning():
   print
 
 
+def OutputAnnotationStepFailure():
+  """Outputs appropriate annotation to signal a warning."""
+  print
+  print '@@@STEP_FAILURE@@@'
+  print
+
+
 def OutputAnnotationStepLink(label, url):
   """Outputs appropriate annotation to print a link.
 
@@ -318,7 +325,6 @@ def RunGClientAndCreateConfig(opts, custom_deps=None, cwd=None):
   return return_code
 
 
-
 def OnAccessError(func, path, _):
   """Error handler for shutil.rmtree.
 
@@ -424,7 +430,7 @@ def CheckRunGit(command, cwd=None):
   Returns:
     A tuple of the output and return code.
   """
-  (output, return_code) = RunGit(command, cwd=cwd)
+  output, return_code = RunGit(command, cwd=cwd)
 
   assert not return_code, 'An error occurred while running'\
                           ' "git %s"' % ' '.join(command)
@@ -456,8 +462,7 @@ def CreateBisectDirectoryAndSetupDepot(opts, custom_deps):
   if CheckIfBisectDepotExists(opts):
     path_to_dir = os.path.join(os.path.abspath(opts.working_directory),
                                BISECT_DIR, 'src')
-    (output, _) = RunGit(['rev-parse', '--is-inside-work-tree'],
-                         cwd=path_to_dir)
+    output, _ = RunGit(['rev-parse', '--is-inside-work-tree'], cwd=path_to_dir)
     if output.strip() == 'true':
       # Before checking out master, cleanup up any leftover index.lock files.
       _CleanupPreviousGitRuns(path_to_dir)
@@ -508,9 +513,10 @@ def RunProcessAndRetrieveOutput(command, cwd=None):
 
   # On Windows, use shell=True to get PATH interpretation.
   shell = IsWindowsHost()
-  proc = subprocess.Popen(command, shell=shell, stdout=subprocess.PIPE,
+  proc = subprocess.Popen(
+      command, shell=shell, stdout=subprocess.PIPE,
       stderr=subprocess.STDOUT)
-  (output, _) = proc.communicate()
+  output, _ = proc.communicate()
 
   if cwd:
     os.chdir(original_cwd)

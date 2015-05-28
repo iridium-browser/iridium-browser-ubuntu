@@ -2,7 +2,8 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-import("//mojo/public/tools/bindings/mojom.gni")
+import("//build/module_args/mojo.gni")
+import("$mojo_sdk_root/mojo/public/tools/bindings/mojom.gni")
 
 mojom("interfaces") {
   sources = [
@@ -17,4 +18,6 @@ mojom("interfaces") {
     "url_loader.mojom",
     "web_socket.mojom",
   ]
+
+  import_dirs = [ get_path_info("../../../", "abspath") ]
 }

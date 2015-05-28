@@ -33,12 +33,12 @@
 #include "core/fetch/RawResource.h"
 #include "core/fetch/ResourceLoaderOptions.h"
 #include "core/fetch/ResourcePtr.h"
+#include "core/fetch/SubstituteData.h"
 #include "core/frame/csp/ContentSecurityPolicy.h"
 #include "core/loader/DocumentLoadTiming.h"
 #include "core/loader/DocumentWriter.h"
 #include "core/loader/FrameLoaderTypes.h"
 #include "core/loader/NavigationPolicy.h"
-#include "core/loader/SubstituteData.h"
 #include "platform/network/ResourceError.h"
 #include "platform/network/ResourceRequest.h"
 #include "platform/network/ResourceResponse.h"
@@ -46,21 +46,17 @@
 #include "wtf/RefPtr.h"
 
 namespace blink {
-class WebThreadedDataReceiver;
-}
-
-namespace blink {
     class ApplicationCacheHost;
-    class ArchiveResourceCollection;
     class ResourceFetcher;
     class DocumentInit;
     class LocalFrame;
     class FrameLoader;
     class MHTMLArchive;
     class ResourceLoader;
+    class ThreadedDataReceiver;
 
     class DocumentLoader : public RefCounted<DocumentLoader>, private RawResourceClient {
-        WTF_MAKE_FAST_ALLOCATED;
+        WTF_MAKE_FAST_ALLOCATED(DocumentLoader);
     public:
         static PassRefPtr<DocumentLoader> create(LocalFrame* frame, const ResourceRequest& request, const SubstituteData& data)
         {
@@ -106,8 +102,6 @@ namespace blink {
         bool replacesCurrentHistoryItem() const { return m_replacesCurrentHistoryItem; }
         void setReplacesCurrentHistoryItem(bool replacesCurrentHistoryItem) { m_replacesCurrentHistoryItem = replacesCurrentHistoryItem; }
 
-        bool scheduleArchiveLoad(Resource*, const ResourceRequest&);
-
         bool shouldContinueForNavigationPolicy(const ResourceRequest&, ContentSecurityPolicyDisposition shouldCheckMainWorldContentSecurityPolicy, NavigationPolicy = NavigationPolicyCurrentTab, bool isTransitionNavigation = false);
         NavigationType navigationType() const { return m_navigationType; }
         void setNavigationType(NavigationType navigationType) { m_navigationType = navigationType; }
@@ -117,8 +111,10 @@ namespace blink {
         void startLoadingMainResource();
         void cancelMainResourceLoad(const ResourceError&);
 
-        void attachThreadedDataReceiver(PassOwnPtr<blink::WebThreadedDataReceiver>);
-        DocumentLoadTiming* timing() { return &m_documentLoadTiming; }
+        void attachThreadedDataReceiver(PassRefPtrWillBeRawPtr<ThreadedDataReceiver>);
+        void acceptDataFromThreadedReceiver(const char* data, int dataLength, int encodedDataLength);
+        DocumentLoadTiming& timing() { return m_documentLoadTiming; }
+        const DocumentLoadTiming& timing() const { return m_documentLoadTiming; }
 
         ApplicationCacheHost* applicationCacheHost() const { return m_applicationCacheHost.get(); }
 
@@ -127,6 +123,18 @@ namespace blink {
         void appendRedirect(const KURL&);
 
         PassRefPtr<ContentSecurityPolicy> releaseContentSecurityPolicy() { return m_contentSecurityPolicy.release(); }
+
+
+        struct InitialScrollState {
+            InitialScrollState()
+                : didRestoreFromHistory(false)
+            {
+            }
+
+            // TODO(skobes): Move FrameView::m_wasScrolledByUser into here.
+            bool didRestoreFromHistory;
+        };
+        InitialScrollState& initialScrollState() { return m_initialScrollState; }
 
     protected:
         DocumentLoader(LocalFrame*, const ResourceRequest&, const SubstituteData&);
@@ -144,7 +152,6 @@ namespace blink {
 
         void commitIfReady();
         void commitData(const char* bytes, size_t length);
-        void setMainDocumentError(const ResourceError&);
         void clearMainResourceLoader();
         ResourceLoader* mainResourceLoader() const;
         void clearMainResourceHandle();
@@ -152,7 +159,6 @@ namespace blink {
         bool maybeCreateArchive();
 
         void prepareSubframeArchiveLoadIfNeeded();
-        void addAllArchiveResources(MHTMLArchive*);
 
         void willSendRequest(ResourceRequest&, const ResourceResponse&);
         void finishedLoading(double finishTime);
@@ -199,7 +205,6 @@ namespace blink {
 
         NavigationType m_navigationType;
 
-        OwnPtrWillBePersistent<ArchiveResourceCollection> m_archiveResourceCollection;
         RefPtrWillBePersistent<MHTMLArchive> m_archive;
 
         bool m_loadingMainResource;
@@ -211,6 +216,7 @@ namespace blink {
         OwnPtrWillBePersistent<ApplicationCacheHost> m_applicationCacheHost;
 
         RefPtr<ContentSecurityPolicy> m_contentSecurityPolicy;
+        InitialScrollState m_initialScrollState;
     };
 }
 

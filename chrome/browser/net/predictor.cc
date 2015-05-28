@@ -39,10 +39,12 @@
 #include "net/base/host_port_pair.h"
 #include "net/base/load_flags.h"
 #include "net/base/net_errors.h"
-#include "net/base/net_log.h"
 #include "net/dns/host_resolver.h"
 #include "net/dns/single_request_host_resolver.h"
 #include "net/http/transport_security_state.h"
+#include "net/log/net_log.h"
+#include "net/proxy/proxy_info.h"
+#include "net/proxy/proxy_service.h"
 #include "net/ssl/ssl_config_service.h"
 #include "net/url_request/url_request_context.h"
 #include "net/url_request/url_request_context_getter.h"
@@ -465,7 +467,7 @@ void Predictor::Resolve(const GURL& url,
 void Predictor::LearnFromNavigation(const GURL& referring_url,
                                     const GURL& target_url) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
-  if (!predictor_enabled_ || !CanPrefetchAndPrerender())
+  if (!predictor_enabled_ || !CanPreresolveAndPreconnect())
     return;
   DCHECK_EQ(referring_url, Predictor::CanonicalizeUrl(referring_url));
   DCHECK_NE(referring_url, GURL::EmptyGURL());
@@ -489,7 +491,7 @@ void Predictor::PredictorGetHtmlInfo(Predictor* predictor,
                  // "<META HTTP-EQUIV=\"Pragma\" CONTENT=\"no-cache\">"
                  "</head><body>");
   if (predictor && predictor->predictor_enabled() &&
-      predictor->CanPrefetchAndPrerender()) {
+      predictor->CanPreresolveAndPreconnect()) {
     predictor->GetHtmlInfo(output);
   } else {
     output->append("DNS pre-resolution and TCP pre-connection is disabled.");
@@ -747,7 +749,7 @@ void Predictor::FinalizeInitializationOnIOThread(
 void Predictor::LearnAboutInitialNavigation(const GURL& url) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::IO));
   if (!predictor_enabled_ || NULL == initial_observer_.get() ||
-      !CanPrefetchAndPrerender()) {
+      !CanPreresolveAndPreconnect()) {
     return;
   }
   initial_observer_->Append(url, this);
@@ -783,7 +785,7 @@ void Predictor::DnsPrefetchMotivatedList(
          BrowserThread::CurrentlyOn(BrowserThread::IO));
   if (!predictor_enabled_)
     return;
-  if (!CanPrefetchAndPrerender())
+  if (!CanPreresolveAndPreconnect())
     return;
 
   if (BrowserThread::CurrentlyOn(BrowserThread::IO)) {
@@ -819,7 +821,7 @@ static void SaveDnsPrefetchStateForNextStartupAndTrimOnIOThread(
 void Predictor::SaveStateForNextStartupAndTrim() {
   if (!predictor_enabled_)
     return;
-  if (!CanPrefetchAndPrerender())
+  if (!CanPreresolveAndPreconnect())
     return;
 
   base::WaitableEvent completion(true, false);
@@ -866,6 +868,8 @@ void Predictor::SaveDnsPrefetchStateForNextStartupAndTrim(
 
   // Do at least one trim at shutdown, in case the user wasn't running long
   // enough to do any regular trimming of referrers.
+  // TODO(lizeb): Should trimming really be done at each shutdown? This could be
+  // a frequent occurrence on Android.
   TrimReferrersNow();
   SerializeReferrers(referral_list);
 
@@ -917,7 +921,7 @@ void Predictor::PredictFrameSubresources(const GURL& url,
          BrowserThread::CurrentlyOn(BrowserThread::IO));
   if (!predictor_enabled_)
     return;
-  if (!CanPrefetchAndPrerender())
+  if (!CanPreresolveAndPreconnect())
     return;
   DCHECK_EQ(url.GetWithEmptyPath(), url);
   // Add one pass through the message loop to allow current navigation to

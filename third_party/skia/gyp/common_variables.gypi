@@ -86,11 +86,6 @@
         }, {
           'os_posix%': 1,
         }],
-        [ 'skia_os in ["linux"]', {
-          'skia_poppler_enabled%': 1,
-        }, {
-          'skia_poppler_enabled%': 0,
-        }],
         ['"64" in skia_arch_type', {
           'skia_arch_width%': 64,
         }, {
@@ -107,10 +102,7 @@
           'arm_version%': 7,
           'arm_neon%': 0, # neon asm files known not to work with the ios build
         }],
-        [ 'skia_os == "nacl"', {
-          'skia_egl%': 1,
-        }],
-        [ 'skia_os in ["android", "nacl"] and not skia_android_framework',
+        [ 'skia_os == "android" and not skia_android_framework',
           # skia_freetype_static - on OS variants that normally would
           #     dynamically link the system FreeType library, don't do
           #     that; instead statically link to the version in
@@ -123,32 +115,16 @@
         ],
       ],
 
-      # skia_giflib_static - on OS variants that normally would link giflib
-      #     with '-lgif' and include the headers from '/usr/include/gif_lib.h',
-      #     don't do that; instead compile and staticlly link the version of
-      #     giflib in third_party/externals/giflib.
-      'skia_giflib_static%': '0',
-
-      # skia_libpng_static - on OS variants that normally would link libpng
-      #     with '-lpng' and include the headers from '/usr/include/png.h',
-      #     don't do that; instead compile and staticlly link the version of
-      #     libpng in third_party/externals/libpng.
-      'skia_libpng_static%': '0',
-
-      # skia_zlib_static - on OS variants that normally would link zlib with
-      #     '-lz' or libz.dylib and include the headers from '<zlib.h>',
-      #     don't do that; instead compile and staticlly link the version of
-      #     zlib in third_party/externals/zlib.
-      'skia_zlib_static%': '0',
-
       # skia_no_fontconfig - On POSIX systems that would normally use the
       #     SkFontHost_fontconfig interface; use the SkFontHost_linux
       #     version instead.
       'skia_no_fontconfig%': '0',
+      'skia_embedded_fonts%': '0',
 
       'skia_sanitizer%': '',
       'skia_scalar%': 'float',
       'skia_mesa%': 0,
+      'skia_gpu_extra_dependency_path%': '',
       'skia_stroke_path_rendering%': 0,
       'skia_android_path_rendering%': 0,
       'skia_resource_cache_mb_limit%': 0,
@@ -186,6 +162,15 @@
       }, {
         'skia_release_optimization_level%': '<(skia_default_gcc_optimization_level)',
       }],
+      [ 'skia_os == "android"', {
+          # skia_libpng_static - instead of linking libpng with '-lpng' and
+          #     including the headers from '/usr/include/png.h', compile and
+          #     statically link the version of libpng in
+          #     third_party/externals/libpng.
+          'skia_libpng_static%': '0',
+      }, {
+          'skia_libpng_static%': '1',
+      }],
       [ 'skia_sanitizer', {
         'skia_clang_build': 1,
         'skia_keep_frame_pointer': 1,
@@ -212,13 +197,12 @@
     'os_posix%': '<(os_posix)',
 
     'skia_freetype_static%': '<(skia_freetype_static)',
-    'skia_giflib_static%': '<(skia_giflib_static)',
-    'skia_libpng_static%': '<(skia_libpng_static)',
-    'skia_zlib_static%': '<(skia_zlib_static)',
     'skia_no_fontconfig%': '<(skia_no_fontconfig)',
+    'skia_embedded_fonts%': '<(skia_embedded_fonts)',
     'skia_sanitizer%': '<(skia_sanitizer)',
     'skia_scalar%': '<(skia_scalar)',
     'skia_mesa%': '<(skia_mesa)',
+    'skia_gpu_extra_dependency_path%': '<(skia_gpu_extra_dependency_path)',
     'skia_stroke_path_rendering%': '<(skia_stroke_path_rendering)',
     'skia_android_framework%': '<(skia_android_framework)',
     'skia_use_system_json%': '<(skia_use_system_json)',
@@ -226,7 +210,6 @@
     'skia_resource_cache_mb_limit%': '<(skia_resource_cache_mb_limit)',
     'skia_resource_cache_count_limit%': '<(skia_resource_cache_count_limit)',
     'skia_angle%': '<(skia_angle)',
-    'skia_poppler_enabled%': '<(skia_poppler_enabled)',
     'skia_arch_width%': '<(skia_arch_width)',
     'skia_arch_type%': '<(skia_arch_type)',
     'skia_chrome_utils%': '<(skia_chrome_utils)',
@@ -247,6 +230,14 @@
     'skia_moz2d%': 0,
     'skia_is_bot%': '<!(python -c "import os; print os.environ.get(\'CHROME_HEADLESS\', 0)")',
     'skia_egl%': '<(skia_egl)',
+    'skia_fast%': 0,
+    'skia_fast_flags': [
+        '-O3',                   # Even for Debug builds.
+        '-march=native',         # Use all features of and optimize for THIS machine.
+        '-fomit-frame-pointer',  # Sometimes an extra register is nice, and cuts a push/pop.
+        '-ffast-math',           # Optimize float math even when it breaks IEEE compliance.
+        #'-flto'                  # Enable link-time optimization.
+    ],
 
     # These are referenced by our .gypi files that list files (e.g. core.gypi)
     #

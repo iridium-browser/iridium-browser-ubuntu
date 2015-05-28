@@ -6,6 +6,7 @@ import("//build/config/android/config.gni")
 import("//build/config/android/rules.gni")
 import("//build/module_args/v8.gni")
 import("//chrome/version.gni")
+import("//testing/test.gni")
 import("//third_party/icu/config.gni")
 import("channel.gni")
 
@@ -16,6 +17,8 @@ android_resources("chrome_java_resources") {
     ":chrome_strings_grd",
     "//content/public/android:content_java_resources",
     "//chrome/app:java_strings_grd",
+    "//third_party/android_data_chart:android_data_chart_java_resources",
+    "//third_party/android_media:android_media_resources",
     "//third_party/android_tools:android_support_v7_appcompat_resources",
   ]
   custom_package = "org.chromium.chrome"
@@ -84,25 +87,28 @@ android_library("chrome_java") {
     "//components/gcm_driver/android:gcm_driver_java",
     "//components/invalidation:java",
     "//components/navigation_interception/android:navigation_interception_java",
+    "//components/precache/android:precache_java",
     "//components/variations/android:variations_java",
     "//components/web_contents_delegate_android:web_contents_delegate_android_java",
     "//content/public/android:content_java",
     "//printing:printing_java",
     "//sync/android:sync_java",
+    "//third_party/android_data_chart:android_data_chart_java",
+    "//third_party/android_media:android_media_java",
     "//third_party/android_protobuf:protobuf_nano_javalib",
     "//third_party/android_tools:android_support_v13_java",
     "//third_party/android_tools:android_support_v7_appcompat_java",
+    "//third_party/android_tools:android_support_v7_mediarouter_java",
     "//third_party/cacheinvalidation:cacheinvalidation_javalib",
     "//third_party/cacheinvalidation:cacheinvalidation_proto_java",
     "//third_party/jsr-305:jsr_305_javalib",
-    "//third_party/libaddressinput:android_addressinput_widget_java",
-    "//third_party/libaddressinput:android_addressinput_widget_resources",
+    "//media/base/android:media_java",
     "//ui/android:ui_java",
     "//ui/android:ui_java_resources",
+    google_play_services_library,
   ]
 
   srcjar_deps = [
-    ":app_banner_metrics_ids_javagen",
     ":chrome_android_java_enums_srcjar",
     ":chrome_version_srcjar",
     ":resource_id_javagen",
@@ -137,17 +143,6 @@ java_cpp_enum("chrome_android_java_enums_srcjar") {
   ]
 }
 
-# GYP: //chrome/chrome_browser.gypi:app_banner_metrics_ids_java
-java_cpp_template("app_banner_metrics_ids_javagen") {
-  sources = [
-    "java/AppBannerMetricsIds.template",
-  ]
-  package_name = "org/chromium/chrome/browser/banners"
-  inputs = [
-    "../browser/android/banners/app_banner_metrics_id_list.h",
-  ]
-}
-
 # GYP: //chrome/chrome_browser.gypi:document_tab_model_info_proto_java
 proto_java_library("document_tab_model_info_proto_java") {
   proto_path = "java/src/org/chromium/chrome/browser/tabmodel/document"
@@ -168,32 +163,18 @@ java_cpp_template("resource_id_javagen") {
 }
 
 # GYP: //chrome/chrome_shell.gypi:libchromeshell_base
-static_library("chrome_shell_base") {
-  sources = [
-    "shell/chrome_shell_google_location_settings_helper.cc",
-    "shell/chrome_shell_google_location_settings_helper.h",
-  ]
-
+group("chrome_shell_base") {
   deps = [
     "//chrome/browser/ui",
     "//chrome:chrome_android_core",
     "//base",
     "//base/allocator",
-    "//content/public/app:browser",
+    "//content/public/app:both",
     "//skia",
   ]
-
-  # Some android targets still depend on --gc-sections to link.
-  # TODO: remove --gc-sections for Debug builds (crbug.com/159847).
-  ldflags = [ "-Wl,--gc-sections" ]
-
   # TODO(GYP):
   #[ 'order_profiling!=0', {
-  #'conditions': [
-  #[ 'OS=="android"', {
   #'dependencies': [ '../tools/cygprofile/cygprofile.gyp:cygprofile', ],
-  #}],
-  #],
   #}],
 }
 
@@ -201,11 +182,9 @@ static_library("chrome_shell_base") {
 shared_library("chrome_shell") {
   testonly = true
   sources = [
-    # This file must always be included in the shared_library step to ensure
-    # JNI_OnLoad is exported.
-    "//chrome/app/android/chrome_jni_onload.cc",
     "shell/chrome_main_delegate_chrome_shell_android.cc",
     "shell/chrome_main_delegate_chrome_shell_android.h",
+    "shell/chrome_shell_entry_point.cc",
   ]
   deps = [
     ":chrome_shell_base",
@@ -224,9 +203,7 @@ shared_library("chrome_shell") {
 shared_library("chrome_sync_shell") {
   testonly = true
   sources = [
-    # This file must always be included in the shared_library step to ensure
-    # JNI_OnLoad is exported.
-    #"//chrome/app/android/chrome_jni_onload.cc",
+    #"shell/chrome_shell_entry_point.cc",
     #"sync_shell/chrome_main_delegate_chrome_sync_shell_android.cc",
     #"sync_shell/chrome_main_delegate_chrome_sync_shell_android.h",
   ]
@@ -275,7 +252,6 @@ copy_ex("chrome_shell_assets") {
   clear_dir = true
   dest = chrome_shell_assets_dir
   sources = [
-    "$root_build_dir/resources.pak",
     "$root_build_dir/chrome_100_percent.pak",
     "$root_build_dir/locales/am.pak",
     "$root_build_dir/locales/ar.pak",
@@ -287,8 +263,8 @@ copy_ex("chrome_shell_assets") {
     "$root_build_dir/locales/el.pak",
     "$root_build_dir/locales/en-GB.pak",
     "$root_build_dir/locales/en-US.pak",
-    "$root_build_dir/locales/es.pak",
     "$root_build_dir/locales/es-419.pak",
+    "$root_build_dir/locales/es.pak",
     "$root_build_dir/locales/fa.pak",
     "$root_build_dir/locales/fi.pak",
     "$root_build_dir/locales/fil.pak",
@@ -321,6 +297,7 @@ copy_ex("chrome_shell_assets") {
     "$root_build_dir/locales/vi.pak",
     "$root_build_dir/locales/zh-CN.pak",
     "$root_build_dir/locales/zh-TW.pak",
+    "$root_build_dir/resources.pak",
   ]
   deps = [
     "//chrome:packed_resources",
@@ -348,10 +325,24 @@ jinja_template("chrome_shell_manifest") {
   output = chrome_shell_manifest
 }
 
+# TODO(cjhopman): This should actually be done as a build step instead of at gn
+# time.
+_version_py_path = "//build/util/version.py"
+_chrome_version_path = "//chrome/VERSION"
+_version_full = exec_script(_version_py_path,
+                            [
+                              "-f",
+                              rebase_path(_chrome_version_path, root_build_dir),
+                              "-t \"@MAJOR@.@MINOR@.@BUILD@.@PATCH@\"",
+                            ],
+                            "value",
+                            [ _chrome_version_path ])
+
 # GYP: //chrome/chrome_shell.gypi:chrome_shell_apk
 android_apk("chrome_shell_apk") {
   testonly = true
   deps = [
+    "//base:base_java",
     ":chrome_shell_resources",
     ":chrome_shell_java",
     ":chrome_shell_assets",
@@ -360,6 +351,7 @@ android_apk("chrome_shell_apk") {
   apk_name = "ChromeShell"
   android_manifest = chrome_shell_manifest
   native_libs = [ "libchrome_shell.so" ]
+  native_lib_version_name = _version_full
   asset_location = chrome_shell_assets_dir
 
   #TODO(GYP):
@@ -388,6 +380,7 @@ jinja_template("chrome_sync_shell_manifest") {
 android_apk("chrome_sync_shell_apk") {
   testonly = true
   deps = [
+    "//base:base_java",
     ":chrome_shell_resources",
     ":chrome_shell_java",
     ":chrome_shell_assets",
@@ -459,6 +452,19 @@ android_apk("chrome_shell_test_apk") {
   android_manifest = "shell/javatests/AndroidManifest.xml"
 }
 
+# GYP: //chrome/chrome_tests.gypi:chrome_junit_tests
+java_binary("chrome_junit_tests") {
+  testonly = true
+  java_files = [ "android/junit/src/org/chromium/chrome/browser/omaha/ResponseParserTest.java" ]
+  main_class = "org.chromium.testing.local.JunitTestMain"
+  deps = [
+    ":chrome_java",
+    "//base:base_java",
+    "//base:base_java_test_support",
+    "//testing/android/junit:junit_test_support",
+  ]
+}
+
 # GYP: //chrome/chrome_tests.gypi:chrome_sync_shell_test_apk
 android_apk("chrome_sync_shell_test_apk") {
   testonly = true
@@ -476,6 +482,7 @@ android_apk("chrome_sync_shell_test_apk") {
     "//sync:sync_java_test_support",
     "//third_party/android_tools:android_support_v13_java",
     "//third_party/android_tools:android_support_v7_appcompat_java",
+    "//ui/android:ui_java",
   ]
   apk_name = "ChromeSyncShellTest"
   DEPRECATED_java_in_dir = "sync_shell/javatests/src"
@@ -504,7 +511,7 @@ uiautomator_test("uiautomator_tests") {
 chrome_version_java_dir = "$root_gen_dir/templates/chrome_version_java"
 chrome_version_java_file = "$chrome_version_java_dir/org/chromium/chrome/browser/ChromeVersionConstants.java"
 process_version("chrome_version_java") {
-  source = "java/ChromeVersionConstants.java.version"
+  template_file = "java/ChromeVersionConstants.java.version"
   output = chrome_version_java_file
   extra_args = [
     "-e",

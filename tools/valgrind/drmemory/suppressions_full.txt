@@ -32,7 +32,11 @@ GoogleDesktopNetwork3.DLL!DllUnregisterServer
 # so we just look for randomByte.
 UNINITIALIZED READ
 name=sqlite3_randomness UNINIT
-*!randomByte
+sql.dll!sqlite3_randomness
+
+UNINITIALIZED READ
+name=blink_web_dll_sqlite3_randomness UNINIT
+blink_web.dll!sqlite3_randomness
 
 # Intentional leak in WebKit Template Framework for ThreadData.
 LEAK
@@ -1099,13 +1103,6 @@ name=http://crbug.com/64887 (GMock printing uninit data)
 # at the peak set of tests we plan to run and remove the unused ones.
 
 UNINITIALIZED READ
-name=bug_99307
-*!modp_b64_encode
-*!base::Base64Encode*
-*!web_ui_util::GetImageDataUrl
-*!::NetworkInfoDictionary::set_icon
-
-UNINITIALIZED READ
 name=bug_101781
 *!encode_one_block
 *!encode_mcu_huff
@@ -1824,6 +1821,10 @@ KERNELBASE.dll!WriteFile
 KERNEL32.dll!WriteFile
 mojo_system_impl.dll!mojo::system::`anonymous namespace'::RawChannelWin::WriteNoLock
 
+UNINITIALIZED READ
+name=bug_399842
+skia.dll!S32A_Opaque_BlitRow32_SSE4
+
 HANDLE LEAK
 name=bug_403544
 system call NtCreateSemaphore
@@ -1889,7 +1890,40 @@ name=bug_436131_c
 *!ash::test::ShelfViewTest_OverflowBubbleSize_Test::TestBody
 *!testing::internal::HandleExceptionsInMethodIfSupported<>
 
+UNADDRESSABLE ACCESS
+name=bug_442969
+*!testing::internal::CmpHelperNE<>
+*!extensions::WebrtcAudioPrivateTest_GetAndSetWithMediaStream_Test::RunTestOnMainThread
+
 UNINITIALIZED READ
-name=bug_447788
+name=bug_455417
+*!std::char_traits<>::compare
 ...
-*!gpu::gles2::GLES2ImplementationTest_TexImage3DSingleCommand_Test::TestBody
+*!*::*URLRequest*::TestBody
+
+UNINITIALIZED READ
+name=bug_468169
+...
+*!vp9_foreach_transformed_block_in_plane
+...
+*!encode_superblock
+*!encode_b_rt
+*!encode_sb_rt
+*!encode_sb_rt
+*!encode_sb_rt
+*!encode_sb_rt
+*!nonrd_select_partition
+*!encode_nonrd_sb_row
+*!vp9_encode_tile
+
+UNADDRESSABLE ACCESS
+name=bug_470055
+blink_web.dll!blink::*::focused*Frame
+blink_web.dll!blink::WebFrameWidgetImpl::selectionBounds
+content.dll!content::RenderWidget::UpdateSelectionBounds
+content.dll!content::RenderWidget::willBeginCompositorFrame
+
+UNINITIALIZED READ
+name=bug_470848
+blink_platform.dll!blink::Heap::RegionTree::lookup
+*!testing::internal::HandleExceptionsInMethodIfSupported<>

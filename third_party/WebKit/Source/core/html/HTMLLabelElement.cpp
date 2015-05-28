@@ -51,7 +51,7 @@ PassRefPtrWillBeRawPtr<HTMLLabelElement> HTMLLabelElement::create(Document& docu
     return labelElement.release();
 }
 
-bool HTMLLabelElement::rendererIsFocusable() const
+bool HTMLLabelElement::layoutObjectIsFocusable() const
 {
     HTMLLabelElement* that = const_cast<HTMLLabelElement*>(this);
     return that->isContentEditable();
@@ -182,7 +182,7 @@ void HTMLLabelElement::defaultEventHandler(Event* evt)
             // In case of double click or triple click, selection will be there,
             // so do not focus the control element.
             if (!isLabelTextSelected)
-                element->focus(true, FocusTypeMouse);
+                element->focus(true, WebFocusTypeMouse);
         }
 
         // Click the corresponding control.
@@ -204,7 +204,7 @@ bool HTMLLabelElement::willRespondToMouseClickEvents()
     return HTMLElement::willRespondToMouseClickEvents();
 }
 
-void HTMLLabelElement::focus(bool, FocusType type)
+void HTMLLabelElement::focus(bool, WebFocusType type)
 {
     // to match other browsers, always restore previous selection
     if (HTMLElement* element = control())
@@ -274,7 +274,7 @@ void HTMLLabelElement::removedFrom(ContainerNode* insertionPoint)
     document().removeFormAssociation(this);
 }
 
-void HTMLLabelElement::trace(Visitor* visitor)
+DEFINE_TRACE(HTMLLabelElement)
 {
     HTMLElement::trace(visitor);
     FormAssociatedElement::trace(visitor);

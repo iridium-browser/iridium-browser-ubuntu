@@ -30,6 +30,7 @@
 #include "core/dom/ExecutionContext.h"
 #include "core/dom/ExecutionContextTask.h"
 #include "core/html/VoidCallback.h"
+#include "core/inspector/ConsoleMessage.h"
 #include "modules/webdatabase/ChangeVersionData.h"
 #include "modules/webdatabase/ChangeVersionWrapper.h"
 #include "modules/webdatabase/DatabaseAuthorizer.h"
@@ -48,6 +49,7 @@
 #include "modules/webdatabase/sqlite/SQLiteStatement.h"
 #include "modules/webdatabase/sqlite/SQLiteTransaction.h"
 #include "platform/Logging.h"
+#include "platform/heap/SafePoint.h"
 #include "platform/weborigin/DatabaseIdentifier.h"
 #include "public/platform/Platform.h"
 #include "public/platform/WebDatabaseObserver.h"
@@ -139,7 +141,7 @@ static bool setTextValueInDatabase(SQLiteDatabase& db, const String& query, cons
 // FIXME: move all guid-related functions to a DatabaseVersionTracker class.
 static RecursiveMutex& guidMutex()
 {
-    AtomicallyInitializedStatic(RecursiveMutex&, mutex = *new RecursiveMutex);
+    AtomicallyInitializedStaticReference(RecursiveMutex, mutex, new RecursiveMutex);
     return mutex;
 }
 
@@ -148,7 +150,7 @@ static GuidVersionMap& guidToVersionMap()
 {
     // Ensure the the mutex is locked.
     ASSERT(guidMutex().locked());
-    DEFINE_STATIC_LOCAL(GuidVersionMap, map, ());
+    DEFINE_STATIC_LOCAL_NOASSERT(GuidVersionMap, map, ());
     return map;
 }
 
@@ -174,7 +176,7 @@ static GuidDatabaseMap& guidToDatabaseMap()
 {
     // Ensure the the mutex is locked.
     ASSERT(guidMutex().locked());
-    DEFINE_STATIC_LOCAL(GuidDatabaseMap, map, ());
+    DEFINE_STATIC_LOCAL_NOASSERT(GuidDatabaseMap, map, ());
     return map;
 }
 
@@ -186,7 +188,7 @@ static DatabaseGuid guidForOriginAndName(const String& origin, const String& nam
     String stringID = origin + "/" + name;
 
     typedef HashMap<String, int> IDGuidMap;
-    DEFINE_STATIC_LOCAL(IDGuidMap, stringIdentifierToGUIDMap, ());
+    DEFINE_STATIC_LOCAL_NOASSERT(IDGuidMap, stringIdentifierToGUIDMap, ());
     DatabaseGuid guid = stringIdentifierToGUIDMap.get(stringID);
     if (!guid) {
         static int currentNewGUID = 1;
@@ -249,7 +251,7 @@ Database::~Database()
     ASSERT(!m_opened);
 }
 
-void Database::trace(Visitor* visitor)
+DEFINE_TRACE(Database)
 {
     visitor->trace(m_databaseContext);
     visitor->trace(m_sqliteDatabase);
@@ -839,7 +841,7 @@ void Database::runTransaction(
         ASSERT(callback == originalErrorCallback);
         if (callback) {
             OwnPtr<SQLErrorData> error = SQLErrorData::create(SQLError::UNKNOWN_ERR, "database has been closed");
-            executionContext()->postTask(createSameThreadTask(&callTransactionErrorCallback, callback, error.release()));
+            executionContext()->postTask(FROM_HERE, createSameThreadTask(&callTransactionErrorCallback, callback, error.release()));
         }
     }
 }
@@ -869,7 +871,7 @@ private:
 
 void Database::scheduleTransactionCallback(SQLTransaction* transaction)
 {
-    executionContext()->postTask(DeliverPendingCallbackTask::create(transaction));
+    executionContext()->postTask(FROM_HERE, DeliverPendingCallbackTask::create(transaction));
 }
 
 Vector<String> Database::performGetTableNames()

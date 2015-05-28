@@ -42,11 +42,13 @@
 
 namespace blink {
 
+static const double TwentyMinutesInSeconds = 20 * 60;
+
 class HeapSizeCache {
-    WTF_MAKE_NONCOPYABLE(HeapSizeCache); WTF_MAKE_FAST_ALLOCATED;
+    WTF_MAKE_NONCOPYABLE(HeapSizeCache); WTF_MAKE_FAST_ALLOCATED(HeapSizeCache);
 public:
     HeapSizeCache()
-        : m_lastUpdateTime(0)
+        : m_lastUpdateTime(monotonicallyIncreasingTime() - TwentyMinutesInSeconds)
     {
     }
 
@@ -58,8 +60,8 @@ public:
 
     static HeapSizeCache& forCurrentThread()
     {
-        AtomicallyInitializedStatic(ThreadSpecific<HeapSizeCache>*, heapSizeCache = new ThreadSpecific<HeapSizeCache>);
-        return **heapSizeCache;
+        AtomicallyInitializedStaticReference(ThreadSpecific<HeapSizeCache>, heapSizeCache, new ThreadSpecific<HeapSizeCache>);
+        return *heapSizeCache;
     }
 
 private:
@@ -67,8 +69,6 @@ private:
     {
         // We rate-limit queries to once every twenty minutes to make it more difficult
         // for attackers to compare memory usage before and after some event.
-        const double TwentyMinutesInSeconds = 20 * 60;
-
         double now = monotonicallyIncreasingTime();
         if (now - m_lastUpdateTime >= TwentyMinutesInSeconds) {
             update();

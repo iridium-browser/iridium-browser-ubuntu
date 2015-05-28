@@ -107,12 +107,12 @@ chrome.runtime.onMessageExternal.addListener(
           return true;
         } else if (method == 'getActiveSink') {
           chrome.webrtcAudioPrivate.getActiveSink(
-              sender.tab.id, doSendResponse);
+              requestInfo, doSendResponse);
           return true;
         } else if (method == 'setActiveSink') {
           var sinkId = message['sinkId'];
           chrome.webrtcAudioPrivate.setActiveSink(
-              sender.tab.id, sinkId, doSendResponse);
+              requestInfo, sinkId, doSendResponse);
           return true;
         } else if (method == 'getAssociatedSink') {
           var sourceId = message['sourceId'];
@@ -196,7 +196,7 @@ function onChooseDesktopMediaPort(port) {
 
 // A port for continuously reporting relevant CPU usage information to the page.
 function onProcessCpu(port) {
-  var tabPid;
+  var tabPid = port.sender.guestProcessId || undefined;
   function processListener(processes) {
     if (tabPid == undefined) {
       // getProcessIdForTab sometimes fails, and does not call the callback.

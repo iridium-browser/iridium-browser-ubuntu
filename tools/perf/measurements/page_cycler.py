@@ -18,20 +18,20 @@ cycling all pages.
 import collections
 import os
 
-from metrics import cpu
-from metrics import memory
-from metrics import power
-from metrics import speedindex
-from metrics import v8_object_stats
 from telemetry.core import util
 from telemetry.page import page_test
 from telemetry.value import scalar
 
+from metrics import cpu
+from metrics import keychain_metric
+from metrics import memory
+from metrics import power
+from metrics import speedindex
+
 
 class PageCycler(page_test.PageTest):
   def __init__(self, page_repeat, pageset_repeat, cold_load_percent=50,
-               record_v8_object_stats=False, report_speed_index=False,
-               clear_cache_before_each_run=False):
+               report_speed_index=False, clear_cache_before_each_run=False):
     super(PageCycler, self).__init__(
         clear_cache_before_each_run=clear_cache_before_each_run)
 
@@ -39,13 +39,11 @@ class PageCycler(page_test.PageTest):
                            'page_cycler.js'), 'r') as f:
       self._page_cycler_js = f.read()
 
-    self._record_v8_object_stats = record_v8_object_stats
     self._report_speed_index = report_speed_index
     self._speedindex_metric = speedindex.SpeedIndexMetric()
     self._memory_metric = None
     self._power_metric = None
     self._cpu_metric = None
-    self._v8_object_stats_metric = None
     self._has_loaded_page = collections.defaultdict(int)
     self._initial_renderer_url = None  # to avoid cross-renderer navigation
 
@@ -63,8 +61,6 @@ class PageCycler(page_test.PageTest):
           (int(pageset_repeat) - 1) * (100 - cold_load_percent) / 100)
       number_warm_runs = number_warm_pageset_runs * page_repeat
       self._cold_run_start_index = number_warm_runs + page_repeat
-      self._discard_first_result = (not cold_load_percent or
-                                    self._discard_first_result)
     else:
       self._cold_run_start_index = pageset_repeat * page_repeat
 
@@ -76,8 +72,6 @@ class PageCycler(page_test.PageTest):
     """Initialize metrics once right after the browser has been launched."""
     self._memory_metric = memory.MemoryMetric(browser)
     self._cpu_metric = cpu.CpuMetric(browser)
-    if self._record_v8_object_stats:
-      self._v8_object_stats_metric = v8_object_stats.V8ObjectStatsMetric()
 
   def WillNavigateToPage(self, page, tab):
     if page.is_file:
@@ -98,18 +92,16 @@ class PageCycler(page_test.PageTest):
 
   def DidNavigateToPage(self, page, tab):
     self._memory_metric.Start(page, tab)
-    if self._record_v8_object_stats:
-      self._v8_object_stats_metric.Start(page, tab)
 
   def CustomizeBrowserOptions(self, options):
     memory.MemoryMetric.CustomizeBrowserOptions(options)
     power.PowerMetric.CustomizeBrowserOptions(options)
     options.AppendExtraBrowserArgs('--js-flags=--expose_gc')
 
-    if self._record_v8_object_stats:
-      v8_object_stats.V8ObjectStatsMetric.CustomizeBrowserOptions(options)
     if self._report_speed_index:
       self._speedindex_metric.CustomizeBrowserOptions(options)
+
+    keychain_metric.KeychainMetric.CustomizeBrowserOptions(options)
 
   def ValidateAndMeasurePage(self, page, tab, results):
     tab.WaitForJavaScriptExpression('__pc_load_time', 60)
@@ -136,9 +128,6 @@ class PageCycler(page_test.PageTest):
 
     self._cpu_metric.Stop(page, tab)
     self._cpu_metric.AddResults(tab, results)
-    if self._record_v8_object_stats:
-      self._v8_object_stats_metric.Stop(page, tab)
-      self._v8_object_stats_metric.AddResults(tab, results)
 
     if self._report_speed_index:
       def SpeedIndexIsFinished():
@@ -147,6 +136,7 @@ class PageCycler(page_test.PageTest):
       self._speedindex_metric.Stop(page, tab)
       self._speedindex_metric.AddResults(
           tab, results, chart_name=chart_name_prefix+'speed_index')
+    keychain_metric.KeychainMetric().AddResults(tab, results)
 
   def IsRunCold(self, url):
     return (self.ShouldRunCold(url) or

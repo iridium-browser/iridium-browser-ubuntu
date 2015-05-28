@@ -4,9 +4,9 @@
 
 #include "base/memory/memory_pressure_listener.h"
 
-#include "base/debug/trace_event.h"
 #include "base/lazy_instance.h"
 #include "base/observer_list_threadsafe.h"
+#include "base/trace_event/trace_event.h"
 
 namespace {
 
@@ -54,7 +54,7 @@ void MemoryPressureListener::NotifyMemoryPressure(
   DCHECK_NE(memory_pressure_level, MEMORY_PRESSURE_LEVEL_NONE);
   TRACE_EVENT1("memory", "MemoryPressureListener::NotifyMemoryPressure",
       "level", memory_pressure_level);
-  g_observers.Get().Notify(&MemoryPressureListener::Notify,
+  g_observers.Get().Notify(FROM_HERE, &MemoryPressureListener::Notify,
                            memory_pressure_level);
 }
 

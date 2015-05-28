@@ -6,12 +6,10 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
-#include "base/command_line.h"
 #include "base/message_loop/message_loop_proxy.h"
 #include "base/metrics/histogram.h"
 #include "base/numerics/safe_conversions.h"
 #include "content/common/gpu/media/h264_dpb.h"
-#include "content/public/common/content_switches.h"
 #include "media/base/bind_to_current_loop.h"
 #include "third_party/libva/va/va_enc_h264.h"
 
@@ -107,24 +105,8 @@ struct VaapiVideoEncodeAccelerator::BitstreamBufferRef {
 
 std::vector<media::VideoEncodeAccelerator::SupportedProfile>
 VaapiVideoEncodeAccelerator::GetSupportedProfiles() {
-  std::vector<SupportedProfile> profiles;
 
-  const base::CommandLine* cmd_line = base::CommandLine::ForCurrentProcess();
-  if (cmd_line->HasSwitch(switches::kDisableVaapiAcceleratedVideoEncode))
-    return profiles;
-
-  std::vector<media::VideoCodecProfile> hw_profiles =
-      VaapiWrapper::GetSupportedEncodeProfiles(base::Bind(&base::DoNothing));
-
-  media::VideoEncodeAccelerator::SupportedProfile profile;
-  profile.max_resolution.SetSize(1920, 1088);
-  profile.max_framerate_numerator = kDefaultFramerate;
-  profile.max_framerate_denominator = 1;
-  for (size_t i = 0; i < hw_profiles.size(); i++) {
-    profile.profile = hw_profiles[i];
-    profiles.push_back(profile);
-  }
-  return profiles;
+  return VaapiWrapper::GetSupportedEncodeProfiles();
 }
 
 static unsigned int Log2OfPowerOf2(unsigned int x) {
@@ -214,11 +196,11 @@ bool VaapiVideoEncodeAccelerator::Initialize(
 
   UpdateRates(initial_bitrate, kDefaultFramerate);
 
-  vaapi_wrapper_ = VaapiWrapper::Create(VaapiWrapper::kEncode,
-                                        output_profile,
+  vaapi_wrapper_ =
+      VaapiWrapper::CreateForVideoCodec(VaapiWrapper::kEncode, output_profile,
                                         base::Bind(&ReportToUMA, VAAPI_ERROR));
   if (!vaapi_wrapper_.get()) {
-    LOG(ERROR) << "Failed initializing VAAPI";
+    DVLOGF(1) << "Failed initializing VAAPI for profile " << output_profile;
     return false;
   }
 
@@ -972,7 +954,23 @@ void VaapiVideoEncodeAccelerator::GeneratePackedSPS() {
       packed_sps_.AppendBool(current_sps_.low_delay_hrd_flag);
 
     packed_sps_.AppendBool(false);  // pic_struct_present_flag
-    packed_sps_.AppendBool(false);  // bitstream_restriction_flag
+    packed_sps_.AppendBool(true);  // bitstream_restriction_flag
+
+    packed_sps_.AppendBool(false);  // motion_vectors_over_pic_boundaries_flag
+    packed_sps_.AppendUE(2);  // max_bytes_per_pic_denom
+    packed_sps_.AppendUE(1);  // max_bits_per_mb_denom
+    packed_sps_.AppendUE(16);  // log2_max_mv_length_horizontal
+    packed_sps_.AppendUE(16);  // log2_max_mv_length_vertical
+
+    // Explicitly set max_num_reorder_frames to 0 to allow the decoder to
+    // output pictures early.
+    packed_sps_.AppendUE(0);  // max_num_reorder_frames
+
+    // The value of max_dec_frame_buffering shall be greater than or equal to
+    // max_num_ref_frames.
+    const unsigned int max_dec_frame_buffering =
+        current_sps_.max_num_ref_frames;
+    packed_sps_.AppendUE(max_dec_frame_buffering);
   }
 
   packed_sps_.FinishNALU();

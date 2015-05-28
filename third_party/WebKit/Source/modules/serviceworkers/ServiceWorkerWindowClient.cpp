@@ -7,6 +7,7 @@
 
 #include "bindings/core/v8/CallbackPromiseAdapter.h"
 #include "bindings/core/v8/ScriptPromiseResolver.h"
+#include "core/dom/ExceptionCode.h"
 #include "core/page/PageVisibilityState.h"
 #include "core/page/WindowFocusAllowedIndicator.h"
 #include "modules/serviceworkers/ServiceWorkerError.h"
@@ -16,6 +17,16 @@
 
 namespace blink {
 
+ServiceWorkerWindowClient* ServiceWorkerWindowClient::take(ScriptPromiseResolver*, ServiceWorkerWindowClient::WebType* webClientRaw)
+{
+    return ServiceWorkerWindowClient::create(*webClientRaw);
+}
+
+void ServiceWorkerWindowClient::dispose(ServiceWorkerWindowClient::WebType* webClientRaw)
+{
+    delete webClientRaw;
+}
+
 ServiceWorkerWindowClient* ServiceWorkerWindowClient::create(const WebServiceWorkerClientInfo& info)
 {
     return new ServiceWorkerWindowClient(info);
@@ -23,10 +34,8 @@ ServiceWorkerWindowClient* ServiceWorkerWindowClient::create(const WebServiceWor
 
 ServiceWorkerWindowClient::ServiceWorkerWindowClient(const WebServiceWorkerClientInfo& info)
     : ServiceWorkerClient(info)
-    , m_visibilityState(info.visibilityState)
     , m_pageVisibilityState(info.pageVisibilityState)
     , m_isFocused(info.isFocused)
-    , m_frameType(info.frameType)
 {
 }
 
@@ -36,32 +45,7 @@ ServiceWorkerWindowClient::~ServiceWorkerWindowClient()
 
 String ServiceWorkerWindowClient::visibilityState() const
 {
-    // FIXME: temporary until m_pageVisibilityState is used in Chromium.
-    if (m_pageVisibilityState == WebPageVisibilityStateLast)
-        return m_visibilityState;
     return pageVisibilityStateString(static_cast<PageVisibilityState>(m_pageVisibilityState));
-}
-
-String ServiceWorkerWindowClient::frameType() const
-{
-    DEFINE_STATIC_LOCAL(const String, auxiliary, ("auxiliary"));
-    DEFINE_STATIC_LOCAL(const String, nested, ("nested"));
-    DEFINE_STATIC_LOCAL(const String, none, ("none"));
-    DEFINE_STATIC_LOCAL(const String, topLevel, ("top-level"));
-
-    switch (m_frameType) {
-    case WebURLRequest::FrameTypeAuxiliary:
-        return auxiliary;
-    case WebURLRequest::FrameTypeNested:
-        return nested;
-    case WebURLRequest::FrameTypeNone:
-        return none;
-    case WebURLRequest::FrameTypeTopLevel:
-        return topLevel;
-    }
-
-    ASSERT_NOT_REACHED();
-    return String();
 }
 
 ScriptPromise ServiceWorkerWindowClient::focus(ScriptState* scriptState)
@@ -69,17 +53,17 @@ ScriptPromise ServiceWorkerWindowClient::focus(ScriptState* scriptState)
     RefPtrWillBeRawPtr<ScriptPromiseResolver> resolver = ScriptPromiseResolver::create(scriptState);
     ScriptPromise promise = resolver->promise();
 
-    if (!scriptState->executionContext()->isWindowFocusAllowed()) {
-        resolver->resolve(false);
+    if (!scriptState->executionContext()->isWindowInteractionAllowed()) {
+        resolver->reject(DOMException::create(InvalidAccessError, "Not allowed to focus a window."));
         return promise;
     }
-    scriptState->executionContext()->consumeWindowFocus();
+    scriptState->executionContext()->consumeWindowInteraction();
 
-    ServiceWorkerGlobalScopeClient::from(scriptState->executionContext())->focus(id(), new CallbackPromiseAdapter<bool, ServiceWorkerError>(resolver));
+    ServiceWorkerGlobalScopeClient::from(scriptState->executionContext())->focus(uuid(), new CallbackPromiseAdapter<ServiceWorkerWindowClient, ServiceWorkerError>(resolver));
     return promise;
 }
 
-void ServiceWorkerWindowClient::trace(Visitor* visitor)
+DEFINE_TRACE(ServiceWorkerWindowClient)
 {
     ServiceWorkerClient::trace(visitor);
 }

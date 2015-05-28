@@ -59,7 +59,6 @@ enum CdmMessageType {
 
 // An interface that represents a CDM in the Encrypted Media Extensions (EME)
 // spec (https://w3c.github.io/encrypted-media/). See media/base/media_keys.h.
-[Client=ContentDecryptionModuleClient]
 interface ContentDecryptionModule {
   // See media::MediaKeys::SessionType.
   enum SessionType {
@@ -67,6 +66,17 @@ interface ContentDecryptionModule {
     PERSISTENT_LICENSE_SESSION,
     PERSISTENT_RELEASE_MESSAGE_SESSION
   };
+
+  // See media::EmeInitDataType.
+  enum InitDataType {
+    UNKNOWN,
+    WEBM,
+    CENC,
+    KEYIDS
+  };
+
+  // Sets ContentDecryptionModuleClient. Must be called before any other calls.
+  SetClient(ContentDecryptionModuleClient client);
 
   // Provides a server certificate to be used to encrypt messages to the
   // license server.
@@ -77,7 +87,7 @@ interface ContentDecryptionModule {
   // provided. If |result.success| is false, the output |session_id| will be
   // null.
   CreateSessionAndGenerateRequest(SessionType session_type,
-                                  string init_data_type,
+                                  InitDataType init_data_type,
                                   array<uint8> init_data)
       => (CdmPromiseResult result, string? session_id);
 
@@ -122,11 +132,13 @@ interface ContentDecryptionModuleClient {
 
   OnSessionClosed(string session_id);
 
-  OnSessionError(string session_id, CdmException exception,
-                 uint32 system_code, string error_message);
+  OnLegacySessionError(string session_id, CdmException exception,
+                       uint32 system_code, string error_message);
 
   OnSessionKeysChange(string session_id, bool has_additional_usable_key,
                       array<CdmKeyInformation> key_information);
 
-  OnSessionExpirationUpdate(string session_id, int64 new_expiry_time_usec);
+  // Provide session expiration update for |session_id|.
+  // |new_expiry_time_sec| is the number of seconds since epoch (Jan 1, 1970).
+  OnSessionExpirationUpdate(string session_id, double new_expiry_time_sec);
 };

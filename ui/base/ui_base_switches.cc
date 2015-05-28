@@ -15,6 +15,9 @@ const char kDisableRemoteCoreAnimation[] = "disable-remote-core-animation";
 // Disables use of DWM composition for top level windows.
 const char kDisableDwmComposition[] = "disable-dwm-composition";
 
+// Disables large icons on the New Tab page.
+const char kDisableIconNtp[] = "disable-icon-ntp";
+
 // Disables an experimental focus manager to track text input clients.
 const char kDisableTextInputFocusManager[] = "disable-text-input-focus-manager";
 
@@ -29,6 +32,9 @@ const char kDisableTouchEditing[] = "disable-touch-editing";
 
 // Disables additional visual feedback to touch input.
 const char kDisableTouchFeedback[] = "disable-touch-feedback";
+
+// Enables large icons on the New Tab page.
+const char kEnableIconNtp[] = "enable-icon-ntp";
 
 // Enables a zoomed popup bubble that allows the user to select a link.
 const char kEnableLinkDisambiguationPopup[] =
@@ -52,9 +58,9 @@ const char kLang[] = "lang";
 const char kViewerConnect[] = "connect-to-metro-viewer";
 
 #if defined(OS_CHROMEOS)
-// Enables Roboto as UI font (instead of Noto Sans) experiment in both
+// Disables Roboto as UI font (instead of Noto Sans) experiment in both
 // native and web UI.
-const char kEnableRobotoFontUI[] = "enable-roboto-font-ui";
+const char kDisableRobotoFontUI[] = "disable-roboto-font-ui";
 #endif
 
 }  // namespace switches

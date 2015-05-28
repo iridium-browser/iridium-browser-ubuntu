@@ -41,6 +41,8 @@
 #include "ui/gfx/image/image_skia.h"
 
 using base::ASCIIToUTF16;
+using bookmarks::BookmarkModel;
+using bookmarks::BookmarkNode;
 
 // Unit tests don't need time-consuming asynchronous animations.
 @interface BookmarkBarControllerTestable : BookmarkBarController {

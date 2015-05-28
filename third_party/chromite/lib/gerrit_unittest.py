@@ -1,4 +1,3 @@
-#!/usr/bin/python
 # Copyright (c) 2012 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -9,10 +8,7 @@ from __future__ import print_function
 
 import getpass
 import httplib
-import os
-import sys
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(
-    os.path.abspath(__file__)))))
+import mock
 
 from chromite.cbuildbot import constants
 from chromite.lib import cros_build_lib
@@ -21,7 +17,11 @@ from chromite.lib import gerrit
 from chromite.lib import git
 from chromite.lib import gob_util
 
-import mock
+
+# NOTE: The following test cases are designed to run as part of the release
+# qualification process for the googlesource.com servers:
+#   GerritHelperTest
+# Any new test cases must be manually added to the qualification test suite.
 
 
 # pylint: disable=W0212,R0904
@@ -333,6 +333,53 @@ class GerritHelperTest(cros_test_lib.GerritTestCase):
     gob_util.ResetReviewLabels(helper.host, gpatch.gerrit_number,
                                label='Code-Review', notify='OWNER')
 
+  @cros_test_lib.NetworkTest()
+  def test013ApprovalTime(self):
+    """Approval timestamp should be reset when a new patchset is created."""
+    # Create a change.
+    project = self.createProject('test012')
+    helper = self._GetHelper()
+    clone_path = self.cloneProject(project, 'p1')
+    gpatch = self.createPatch(clone_path, project, msg='Init')
+    helper.SetReview(gpatch.gerrit_number, labels={'Code-Review':'+2'})
 
-if __name__ == '__main__':
-  cros_test_lib.main()
+    # Update the change.
+    new_msg = 'New %s' % gpatch.commit_message
+    cros_build_lib.RunCommand(
+        ['git', 'commit', '--amend', '-m', new_msg], cwd=clone_path, quiet=True)
+    self.uploadChange(clone_path)
+    gpatch2 = self._GetHelper().QuerySingleRecord(
+        change=gpatch.change_id, project=gpatch.project, branch='master')
+    self.assertNotEqual(gpatch2.approval_timestamp, 0)
+    self.assertNotEqual(gpatch2.commit_timestamp, 0)
+    self.assertEqual(gpatch2.approval_timestamp, gpatch2.commit_timestamp)
+
+
+@cros_test_lib.NetworkTest()
+class DirectGerritHelperTest(cros_test_lib.TestCase):
+  """Unittests for GerritHelper that use the real Chromium instance."""
+
+  # A big list of real changes.
+  CHANGES = ['235893', '*189165', '231790', '*190026', '231647', '234645']
+
+  def testMultipleChangeDetail(self):
+    """Test ordering of results in GetMultipleChangeDetail"""
+    changes = [x for x in self.CHANGES if not x.startswith('*')]
+    helper = gerrit.GetCrosExternal()
+    results = list(helper.GetMultipleChangeDetail([str(x) for x in changes]))
+    gerrit_numbers = [str(x['_number']) for x in results]
+    self.assertEqual(changes, gerrit_numbers)
+
+  def testQueryMultipleCurrentPatchset(self):
+    """Test ordering of results in QueryMultipleCurrentPatchset"""
+    changes = [x for x in self.CHANGES if not x.startswith('*')]
+    helper = gerrit.GetCrosExternal()
+    results = list(helper.QueryMultipleCurrentPatchset(changes))
+    self.assertEqual(changes, [x.gerrit_number for _, x in results])
+    self.assertEqual(changes, [x for x, _ in results])
+
+  def testGetGerritPatchInfo(self):
+    """Test ordering of results in GetGerritPatchInfo"""
+    changes = self.CHANGES
+    results = list(gerrit.GetGerritPatchInfo(changes))
+    self.assertEqual(changes, [x.gerrit_number_str for x in results])

@@ -25,15 +25,53 @@
  * ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
  */
 
+#include <string.h>
+
 #include "talk/media/base/videoframe_unittest.h"
 #include "talk/media/webrtc/webrtcvideoframe.h"
+
+class NativeHandleImpl : public webrtc::NativeHandle {
+ public:
+  NativeHandleImpl() : ref_count_(0) {}
+  virtual ~NativeHandleImpl() {}
+  virtual int32_t AddRef() { return ++ref_count_; }
+  virtual int32_t Release() { return --ref_count_; }
+  virtual void* GetHandle() { return NULL; }
+
+  int32_t ref_count() { return ref_count_; }
+ private:
+  int32_t ref_count_;
+};
+
+namespace {
+
+class WebRtcVideoTestFrame : public cricket::WebRtcVideoFrame {
+ public:
+  using cricket::WebRtcVideoFrame::SetRotation;
+
+  virtual VideoFrame* CreateEmptyFrame(int w,
+                                       int h,
+                                       size_t pixel_width,
+                                       size_t pixel_height,
+                                       int64_t elapsed_time,
+                                       int64_t time_stamp) const override {
+    WebRtcVideoTestFrame* frame = new WebRtcVideoTestFrame();
+    frame->InitToBlack(w, h, pixel_width, pixel_height, elapsed_time,
+                       time_stamp);
+    return frame;
+  }
+};
+
+}  // namespace
 
 class WebRtcVideoFrameTest : public VideoFrameTest<cricket::WebRtcVideoFrame> {
  public:
   WebRtcVideoFrameTest() {
   }
 
-  void TestInit(int cropped_width, int cropped_height) {
+  void TestInit(int cropped_width, int cropped_height,
+                webrtc::VideoRotation frame_rotation,
+                bool apply_rotation) {
     const int frame_width = 1920;
     const int frame_height = 1080;
 
@@ -44,28 +82,42 @@ class WebRtcVideoFrameTest : public VideoFrameTest<cricket::WebRtcVideoFrame> {
     captured_frame.pixel_height = 1;
     captured_frame.elapsed_time = 1234;
     captured_frame.time_stamp = 5678;
-    captured_frame.rotation = 0;
+    captured_frame.rotation = frame_rotation;
     captured_frame.width = frame_width;
     captured_frame.height = frame_height;
     captured_frame.data_size = (frame_width * frame_height) +
         ((frame_width + 1) / 2) * ((frame_height + 1) / 2) * 2;
     rtc::scoped_ptr<uint8[]> captured_frame_buffer(
         new uint8[captured_frame.data_size]);
+    // Initialize memory to satisfy DrMemory tests.
+    memset(captured_frame_buffer.get(), 0, captured_frame.data_size);
     captured_frame.data = captured_frame_buffer.get();
 
     // Create the new frame from the CapturedFrame.
     cricket::WebRtcVideoFrame frame;
-    EXPECT_TRUE(frame.Init(&captured_frame, cropped_width, cropped_height));
+    EXPECT_TRUE(
+        frame.Init(&captured_frame, cropped_width, cropped_height,
+                   apply_rotation));
 
     // Verify the new frame.
     EXPECT_EQ(1u, frame.GetPixelWidth());
     EXPECT_EQ(1u, frame.GetPixelHeight());
     EXPECT_EQ(1234, frame.GetElapsedTime());
     EXPECT_EQ(5678, frame.GetTimeStamp());
-    EXPECT_EQ(0, frame.GetRotation());
-    // The size of the new frame should have been cropped to multiple of 4.
-    EXPECT_EQ(static_cast<size_t>(cropped_width & ~3), frame.GetWidth());
-    EXPECT_EQ(static_cast<size_t>(cropped_height & ~3), frame.GetHeight());
+    if (apply_rotation)
+      EXPECT_EQ(webrtc::kVideoRotation_0, frame.GetRotation());
+    else
+      EXPECT_EQ(frame_rotation, frame.GetRotation());
+    // If |apply_rotation| and the frame rotation is 90 or 270, width and
+    // height are flipped.
+    if (apply_rotation && (frame_rotation == webrtc::kVideoRotation_90
+        || frame_rotation == webrtc::kVideoRotation_270)) {
+      EXPECT_EQ(static_cast<size_t>(cropped_width), frame.GetHeight());
+      EXPECT_EQ(static_cast<size_t>(cropped_height), frame.GetWidth());
+    } else {
+      EXPECT_EQ(static_cast<size_t>(cropped_width), frame.GetWidth());
+      EXPECT_EQ(static_cast<size_t>(cropped_height), frame.GetHeight());
+    }
   }
 };
 
@@ -152,7 +204,8 @@ TEST_WEBRTCVIDEOFRAME(ValidateI420HugeSize)
 // Re-evaluate once WebRTC switches to libyuv
 // TEST_WEBRTCVIDEOFRAME(ConstructYuy2AllSizes)
 // TEST_WEBRTCVIDEOFRAME(ConstructARGBAllSizes)
-TEST_WEBRTCVIDEOFRAME(Reset)
+TEST_WEBRTCVIDEOFRAME(ResetAndApplyRotation)
+TEST_WEBRTCVIDEOFRAME(ResetAndDontApplyRotation)
 TEST_WEBRTCVIDEOFRAME(ConvertToABGRBuffer)
 TEST_WEBRTCVIDEOFRAME(ConvertToABGRBufferStride)
 TEST_WEBRTCVIDEOFRAME(ConvertToABGRBufferInverted)
@@ -260,31 +313,83 @@ TEST_WEBRTCVIDEOFRAME(CopyIsRef)
 TEST_WEBRTCVIDEOFRAME(MakeExclusive)
 
 // These functions test implementation-specific details.
-TEST_F(WebRtcVideoFrameTest, Alias) {
-  cricket::WebRtcVideoFrame frame1, frame2;
-  ASSERT_TRUE(LoadFrameNoRepeat(&frame1));
-  const int64 time_stamp = INT64_C(0x7FFFFFFFFFFFFFF0);
-  frame1.SetTimeStamp(time_stamp);
-  EXPECT_EQ(time_stamp, frame1.GetTimeStamp());
-  frame2.Alias(frame1.frame()->Buffer(), frame1.frame()->Size(),
-               kWidth, kHeight, 1, 1,
-               frame1.GetElapsedTime(), frame1.GetTimeStamp(), 0);
-  EXPECT_TRUE(IsEqual(frame1, frame2, 0));
-}
-
 // Tests the Init function with different cropped size.
 TEST_F(WebRtcVideoFrameTest, InitEvenSize) {
-  TestInit(640, 360);
+  TestInit(640, 360, webrtc::kVideoRotation_0, true);
 }
 
 TEST_F(WebRtcVideoFrameTest, InitOddWidth) {
-  TestInit(601, 480);
+  TestInit(601, 480, webrtc::kVideoRotation_0, true);
 }
 
 TEST_F(WebRtcVideoFrameTest, InitOddHeight) {
-  TestInit(360, 765);
+  TestInit(360, 765, webrtc::kVideoRotation_0, true);
 }
 
 TEST_F(WebRtcVideoFrameTest, InitOddWidthHeight) {
-  TestInit(355, 1021);
+  TestInit(355, 1021, webrtc::kVideoRotation_0, true);
+}
+
+TEST_F(WebRtcVideoFrameTest, InitRotated90ApplyRotation) {
+  TestInit(640, 360, webrtc::kVideoRotation_90, true);
+}
+
+TEST_F(WebRtcVideoFrameTest, InitRotated90DontApplyRotation) {
+  TestInit(640, 360, webrtc::kVideoRotation_90, false);
+}
+
+TEST_F(WebRtcVideoFrameTest, TextureInitialValues) {
+  NativeHandleImpl handle;
+  cricket::WebRtcVideoFrame frame(&handle, 640, 480, 100, 200,
+                                  webrtc::kVideoRotation_0);
+  EXPECT_EQ(&handle, frame.GetNativeHandle());
+  EXPECT_EQ(640u, frame.GetWidth());
+  EXPECT_EQ(480u, frame.GetHeight());
+  EXPECT_EQ(100, frame.GetElapsedTime());
+  EXPECT_EQ(200, frame.GetTimeStamp());
+  frame.SetElapsedTime(300);
+  EXPECT_EQ(300, frame.GetElapsedTime());
+  frame.SetTimeStamp(400);
+  EXPECT_EQ(400, frame.GetTimeStamp());
+}
+
+TEST_F(WebRtcVideoFrameTest, CopyTextureFrame) {
+  NativeHandleImpl handle;
+  cricket::WebRtcVideoFrame frame1(&handle, 640, 480, 100, 200,
+                                   webrtc::kVideoRotation_0);
+  cricket::VideoFrame* frame2 = frame1.Copy();
+  EXPECT_EQ(frame1.GetNativeHandle(), frame2->GetNativeHandle());
+  EXPECT_EQ(frame1.GetWidth(), frame2->GetWidth());
+  EXPECT_EQ(frame1.GetHeight(), frame2->GetHeight());
+  EXPECT_EQ(frame1.GetElapsedTime(), frame2->GetElapsedTime());
+  EXPECT_EQ(frame1.GetTimeStamp(), frame2->GetTimeStamp());
+  delete frame2;
+}
+
+TEST_F(WebRtcVideoFrameTest, ApplyRotationToFrame) {
+  WebRtcVideoTestFrame applied0;
+  EXPECT_TRUE(IsNull(applied0));
+  rtc::scoped_ptr<rtc::MemoryStream> ms(CreateYuvSample(kWidth, kHeight, 12));
+  EXPECT_TRUE(
+      LoadFrame(ms.get(), cricket::FOURCC_I420, kWidth, kHeight, &applied0));
+
+  // Claim that this frame needs to be rotated for 90 degree.
+  applied0.SetRotation(webrtc::kVideoRotation_90);
+
+  // Apply rotation on frame 1. Output should be different from frame 1.
+  WebRtcVideoTestFrame* applied90 = const_cast<WebRtcVideoTestFrame*>(
+      static_cast<const WebRtcVideoTestFrame*>(
+          applied0.GetCopyWithRotationApplied()));
+  EXPECT_TRUE(applied90);
+  EXPECT_EQ(applied90->GetVideoRotation(), webrtc::kVideoRotation_0);
+  EXPECT_FALSE(IsEqual(applied0, *applied90, 0));
+
+  // Claim the frame 2 needs to be rotated for another 270 degree. The output
+  // from frame 2 rotation should be the same as frame 1.
+  applied90->SetRotation(webrtc::kVideoRotation_270);
+  const cricket::VideoFrame* applied360 =
+      applied90->GetCopyWithRotationApplied();
+  EXPECT_TRUE(applied360);
+  EXPECT_EQ(applied360->GetVideoRotation(), webrtc::kVideoRotation_0);
+  EXPECT_TRUE(IsEqual(applied0, *applied360, 0));
 }

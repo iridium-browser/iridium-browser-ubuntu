@@ -25,7 +25,20 @@ const char* const kContentSettingsTypeNames[] = {
   "popups",
   "location",
   "notifications",
+  "auto-select-certificate",
+  "fullscreen",
+  "mouselock",
+  "mixed-script",
+  "media-stream",
+  "media-stream-mic",
+  "media-stream-camera",
+  "register-protocol-handler",
+  "ppapi-broker",
+  "multiple-automatic-downloads"
 };
+
+// TODO(msramek): Assert that |kContentSettingsTypeNames| is synced with
+// enum |ContentSettingsType|.
 static_assert(arraysize(kContentSettingsTypeNames) <=
               CONTENT_SETTINGS_NUM_TYPES,
               "kContentSettingsTypeNames has an unexpected number of elements");

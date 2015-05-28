@@ -15,6 +15,7 @@
 #include "libANGLE/renderer/d3d/d3d9/renderer9_utils.h"
 #include "libANGLE/renderer/d3d/d3d9/formatutils9.h"
 #include "libANGLE/renderer/d3d/TextureD3D.h"
+#include "libANGLE/formatutils.h"
 #include "libANGLE/Texture.h"
 
 namespace rx
@@ -91,7 +92,7 @@ int TextureStorage9::getLevelCount() const
     return mMipLevels - mTopLevel;
 }
 
-gl::Error TextureStorage9::setData(const gl::ImageIndex &index, Image *image, const gl::Box *destBox, GLenum type,
+gl::Error TextureStorage9::setData(const gl::ImageIndex &index, ImageD3D *image, const gl::Box *destBox, GLenum type,
                                    const gl::PixelUnpackState &unpack, const uint8_t *pixelData)
 {
     UNREACHABLE();
@@ -179,7 +180,7 @@ gl::Error TextureStorage9_2D::getSurfaceLevel(int level, bool dirty, IDirect3DSu
     return gl::Error(GL_NO_ERROR);
 }
 
-gl::Error TextureStorage9_2D::getRenderTarget(const gl::ImageIndex &/*index*/, RenderTarget **outRT)
+gl::Error TextureStorage9_2D::getRenderTarget(const gl::ImageIndex &/*index*/, RenderTargetD3D **outRT)
 {
     if (!mRenderTarget && isRenderTarget())
     {
@@ -285,7 +286,7 @@ gl::Error TextureStorage9_2D::copyToStorage(TextureStorage *destStorage)
     return gl::Error(GL_NO_ERROR);
 }
 
-TextureStorage9_Cube::TextureStorage9_Cube(Renderer9 *renderer, GLenum internalformat, bool renderTarget, int size, int levels)
+TextureStorage9_Cube::TextureStorage9_Cube(Renderer9 *renderer, GLenum internalformat, bool renderTarget, int size, int levels, bool hintLevelZeroOnly)
     : TextureStorage9(renderer, GetTextureUsage(internalformat, renderTarget))
 {
     mTexture = NULL;
@@ -355,7 +356,7 @@ gl::Error TextureStorage9_Cube::getCubeMapSurface(GLenum faceTarget, int level, 
     return gl::Error(GL_NO_ERROR);
 }
 
-gl::Error TextureStorage9_Cube::getRenderTarget(const gl::ImageIndex &index, RenderTarget **outRT)
+gl::Error TextureStorage9_Cube::getRenderTarget(const gl::ImageIndex &index, RenderTargetD3D **outRT)
 {
     ASSERT(outRT);
     ASSERT(index.mipIndex == 0);

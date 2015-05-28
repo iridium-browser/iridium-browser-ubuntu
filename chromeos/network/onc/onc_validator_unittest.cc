@@ -208,6 +208,9 @@ INSTANTIATE_TEST_CASE_P(
                   false),
         OncParams("openvpn_with_password.onc",
                   &kNetworkConfigurationSignature,
+                  false),
+        OncParams("third_party_vpn.onc",
+                  &kNetworkConfigurationSignature,
                   false)));
 
 namespace {
@@ -348,6 +351,10 @@ INSTANTIATE_TEST_CASE_P(
         std::make_pair(OncParams("openvpn-missing-verify-x509-name",
                                  &kNetworkConfigurationSignature,
                                  false),
+                       ExpectStrictNotValid("")),
+        std::make_pair(OncParams("third-party-vpn-missing-extension-id",
+                                 &kNetworkConfigurationSignature,
+                                 false),
                        ExpectStrictNotValid(""))));
 
 // Strict validator returns INVALID. Liberal validator repairs.
@@ -434,6 +441,16 @@ INSTANTIATE_TEST_CASE_P(
                                  false,
                                  ::onc::ONC_SOURCE_DEVICE_POLICY),
                        ExpectBothNotValid("toplevel-empty", "toplevel-empty")),
+        std::make_pair(OncParams("wifi-ssid-and-hexssid-inconsistent",
+                                 &kNetworkConfigurationSignature,
+                                 false),
+                       ExpectBothNotValid("wifi-ssid-and-hexssid-repaired",
+                                          "wifi-ssid-and-hexssid-repaired")),
+        std::make_pair(OncParams("wifi-ssid-and-hexssid-partially-invalid",
+                                 &kNetworkConfigurationSignature,
+                                 false),
+                       ExpectBothNotValid("wifi-ssid-and-hexssid-repaired",
+                                          "wifi-ssid-and-hexssid-repaired")),
         std::make_pair(
             OncParams("toplevel-with-server-and-ca-cert",
                       &kToplevelConfigurationSignature,
@@ -461,15 +478,15 @@ INSTANTIATE_TEST_CASE_P(
                                  &kNetworkConfigurationSignature,
                                  false),
                        ExpectBothNotValid("", "")),
-        std::make_pair(OncParams("network-wifi-hexssid-invalid-length",
+        std::make_pair(OncParams("wifi-hexssid-invalid-length",
                                  &kNetworkConfigurationSignature,
                                  false),
                        ExpectBothNotValid("", "")),
-        std::make_pair(OncParams("network-wifi-invalid-hexssid",
+        std::make_pair(OncParams("wifi-ssid-invalid-length",
                                  &kNetworkConfigurationSignature,
                                  false),
                        ExpectBothNotValid("", "")),
-        std::make_pair(OncParams("network-wifi-ssid-and-hexssid-inconsistent",
+        std::make_pair(OncParams("wifi-invalid-hexssid",
                                  &kNetworkConfigurationSignature,
                                  false),
                        ExpectBothNotValid("", "")),

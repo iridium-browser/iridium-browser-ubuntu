@@ -13,7 +13,7 @@
 #include "base/synchronization/waitable_event.h"
 #include "content/child/thread_safe_sender.h"
 #include "content/common/content_export.h"
-#include "media/filters/gpu_video_accelerator_factories.h"
+#include "media/renderers/gpu_video_accelerator_factories.h"
 #include "ui/gfx/geometry/size.h"
 
 namespace base {
@@ -58,9 +58,6 @@ class CONTENT_EXPORT RendererGpuVideoAcceleratorFactories
                       uint32 texture_target) override;
   void DeleteTexture(uint32 texture_id) override;
   void WaitSyncPoint(uint32 sync_point) override;
-  void ReadPixels(uint32 texture_id,
-                  const gfx::Rect& visible_rect,
-                  const SkBitmap& pixels) override;
   scoped_ptr<base::SharedMemory> CreateSharedMemory(size_t size) override;
   scoped_refptr<base::SingleThreadTaskRunner> GetTaskRunner() override;
   std::vector<media::VideoEncodeAccelerator::SupportedProfile>

@@ -15,10 +15,12 @@ goog.provide('i18n.input.chrome.inputview.elements.content.MenuView');
 
 goog.require('goog.a11y.aria');
 goog.require('goog.a11y.aria.State');
+goog.require('goog.array');
 goog.require('goog.dom.TagName');
 goog.require('goog.dom.classlist');
 goog.require('goog.style');
 goog.require('i18n.input.chrome.inputview.Css');
+goog.require('i18n.input.chrome.inputview.GlobalFlags');
 goog.require('i18n.input.chrome.inputview.elements.Element');
 goog.require('i18n.input.chrome.inputview.elements.ElementType');
 goog.require('i18n.input.chrome.inputview.elements.content.MenuItem');
@@ -75,16 +77,25 @@ MenuView.Command = {
  * @type {number}
  * @private
  */
-MenuView.MAXIMAL_VISIBLE_IMES_ = 3;
+MenuView.MAXIMAL_VISIBLE_IMES_ = 4;
 
 
 /**
  * The width of the popup menu.
+ * The total width include padding is 300px, the padding left is 41px.
  *
  * @type {number}
  * @private
  */
-MenuView.WIDTH_ = 300;
+MenuView.width_ = 300;
+
+
+/**
+ * The padding-left of the menu item.
+ *
+ * @private {number}
+ */
+MenuView.paddingLeft_ = 0;
 
 
 /**
@@ -93,7 +104,7 @@ MenuView.WIDTH_ = 300;
  * @type {number}
  * @private
  */
-MenuView.LIST_ITEM_HEIGHT_ = 50;
+MenuView.LIST_ITEM_HEIGHT_ = 45;
 
 
 /**
@@ -150,6 +161,11 @@ MenuView.prototype.enterDocument = function() {
 MenuView.prototype.show = function(key, currentKeysetId, isCompact,
     enableCompactLayout, currentInputMethod, inputMethods, hasHwt,
     enableSettings, hasEmoji) {
+  if (i18n.input.chrome.inputview.GlobalFlags.isQPInputView) {
+    // Temporary overwrites the value for material design.
+    MenuView.width_ = 259;
+    MenuView.paddingLeft_ = 41;
+  }
   var ElementType = i18n.input.chrome.inputview.elements.ElementType;
   var dom = this.getDomHelper();
   if (key.type != ElementType.MENU_KEY) {
@@ -220,20 +236,26 @@ MenuView.prototype.addInputMethodItems_ = function(currentInputMethod,
         [MenuView.Command.SWITCH_IME, inputMethod['id']];
     var ariaLabel = chrome.i18n.getMessage('SWITCH_TO_KEYBOARD_PREFIX') +
         inputMethod['name'];
+    if (currentInputMethod == inputMethod['id']) {
+      ariaLabel = chrome.i18n.getMessage('CURRENT_KEYBOARD_PREFIX') +
+          inputMethod['name'];
+    }
     var imeItem = new MenuItem(String(i), listItem, MenuItem.Type.LIST_ITEM,
         ariaLabel);
     imeItem.render(container);
     if (currentInputMethod == inputMethod['id']) {
       imeItem.check();
     }
-    goog.style.setSize(imeItem.getElement(), MenuView.WIDTH_,
+    goog.style.setSize(imeItem.getElement(),
+        (MenuView.width_ + MenuView.paddingLeft_),
         MenuView.LIST_ITEM_HEIGHT_);
   }
 
   var containerHeight = inputMethods.length > MenuView.MAXIMAL_VISIBLE_IMES_ ?
       MenuView.LIST_ITEM_HEIGHT_ * MenuView.MAXIMAL_VISIBLE_IMES_ :
       MenuView.LIST_ITEM_HEIGHT_ * inputMethods.length;
-  goog.style.setSize(container, MenuView.WIDTH_, containerHeight);
+  goog.style.setSize(container, MenuView.width_ + MenuView.paddingLeft_,
+      containerHeight);
 
   dom.appendChild(this.getElement(), container);
   return containerHeight;
@@ -261,7 +283,6 @@ MenuView.prototype.addLayoutSwitcherItem_ = function(key, currentKeysetId,
   if (!isCompact && !enableCompactLayout) {
     return 0;
   }
-  var dom = this.getDomHelper();
   // Adds layout switcher.
   var layoutSwitcherItem;
   if (isCompact) {
@@ -289,7 +310,7 @@ MenuView.prototype.addLayoutSwitcherItem_ = function(key, currentKeysetId,
         chrome.i18n.getMessage('SWITCH_TO_COMPACT_LAYOUT'));
   }
   layoutSwitcherItem.render(this.getElement());
-  goog.style.setSize(layoutSwitcherItem.getElement(), MenuView.WIDTH_,
+  goog.style.setSize(layoutSwitcherItem.getElement(), MenuView.width_,
       MenuView.LIST_ITEM_HEIGHT_);
 
   return MenuView.LIST_ITEM_HEIGHT_;
@@ -343,15 +364,17 @@ MenuView.prototype.addFooterItems_ = function(hasHwt, enableSettings,
   // Sets footer itmes' width.
   var elems = dom.getChildren(footer);
   var len = elems.length;
-  var subWidth = Math.ceil(MenuView.WIDTH_ / len);
+  var subWidth = Math.ceil((MenuView.width_ + MenuView.paddingLeft_) / len);
   var i = 0;
   for (; i < len - 1; i++) {
     elems[i].style.width = subWidth + 'px';
   }
-  elems[i].style.width = (MenuView.WIDTH_ - subWidth * (len - 1)) + 'px';
+  elems[i].style.width = (MenuView.width_ + MenuView.paddingLeft_ -
+      subWidth * (len - 1)) + 'px';
 
   dom.appendChild(this.getElement(), footer);
-  goog.style.setSize(footer, MenuView.WIDTH_, MenuView.LIST_ITEM_HEIGHT_);
+  goog.style.setSize(footer, (MenuView.width_ + MenuView.paddingLeft_),
+      MenuView.LIST_ITEM_HEIGHT_);
 
   return MenuView.LIST_ITEM_HEIGHT_;
 };

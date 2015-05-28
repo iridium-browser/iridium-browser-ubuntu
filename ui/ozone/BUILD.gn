@@ -3,6 +3,7 @@
 # found in the LICENSE file.
 
 import("//ui/ozone/ozone.gni")
+import("//testing/test.gni")
 
 # The list of platforms that will be built.
 ozone_platforms = []
@@ -28,15 +29,18 @@ if (ozone_platform_caca) {
   ozone_platform_deps += [ "platform/caca" ]
 }
 
-if (ozone_platform_dri) {
-  ozone_platforms += [ "dri" ]
-  ozone_platform_deps += [ "platform/dri" ]
-  ozone_platform_test_deps += [ "platform/dri:dri_unittests" ]
+if (ozone_platform_dri || ozone_platform_drm) {
+  ozone_platforms += [
+    "dri",
+    "drm",
+  ]
+  ozone_platform_deps += [ "platform/drm" ]
+  ozone_platform_test_deps += [ "platform/drm:drm_unittests" ]
 }
 
 if (ozone_platform_gbm) {
   ozone_platforms += [ "gbm" ]
-  ozone_platform_deps += [ "platform/dri:gbm" ]
+  ozone_platform_deps += [ "platform/drm:gbm" ]
 }
 
 platform_list_cc_file = "$target_gen_dir/platform_list.cc"
@@ -58,6 +62,7 @@ component("ozone_base") {
     "public/surface_factory_ozone.cc",
     "public/surface_factory_ozone.h",
     "public/surface_ozone_canvas.h",
+    "public/surface_ozone_egl.cc",
     "public/surface_ozone_egl.h",
     "public/system_input_injector.h",
   ]
@@ -73,9 +78,6 @@ component("ozone_base") {
 
 component("ozone") {
   sources = [
-    platform_list_cc_file,
-    platform_list_h_file,
-    constructor_list_cc_file,
     "common/display_mode_proxy.cc",
     "common/display_mode_proxy.h",
     "common/display_snapshot_proxy.cc",
@@ -91,16 +93,19 @@ component("ozone") {
     "common/gpu/ozone_gpu_messages.h",
     "common/native_display_delegate_ozone.cc",
     "common/native_display_delegate_ozone.h",
+    "platform_selection.cc",
+    "platform_selection.h",
     "public/input_controller.cc",
     "public/input_controller.h",
+    "public/ozone_gpu_test_helper.cc",
+    "public/ozone_gpu_test_helper.h",
     "public/ozone_platform.cc",
     "public/ozone_platform.h",
     "public/ozone_switches.cc",
     "public/ozone_switches.h",
-    "public/ui_thread_gpu.cc",
-    "public/ui_thread_gpu.h",
-    "platform_selection.cc",
-    "platform_selection.h",
+    constructor_list_cc_file,
+    platform_list_cc_file,
+    platform_list_h_file,
   ]
 
   defines = [ "OZONE_IMPLEMENTATION" ]
@@ -170,11 +175,13 @@ action("generate_constructor_list") {
 
 test("ozone_unittests") {
   sources = [
+    "common/display_util_unittest.cc",
     "run_all_unittests.cc",
   ]
 
   deps = [
            "//base/test:test_support",
            "//testing/gtest",
+           "//ui/gfx/geometry",
          ] + ozone_platform_test_deps
 }

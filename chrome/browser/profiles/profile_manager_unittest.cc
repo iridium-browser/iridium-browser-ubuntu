@@ -15,7 +15,6 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
-#include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/io_thread.h"
 #include "chrome/browser/prefs/browser_prefs.h"
@@ -35,6 +34,7 @@
 #include "chrome/test/base/test_browser_window.h"
 #include "chrome/test/base/testing_browser_process.h"
 #include "chrome/test/base/testing_profile.h"
+#include "components/history/core/browser/history_service.h"
 #include "components/signin/core/common/profile_management_switches.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/common/content_switches.h"
@@ -44,9 +44,10 @@
 #include "ui/base/l10n/l10n_util.h"
 
 #if defined(OS_CHROMEOS)
-#include "chrome/browser/chromeos/login/users/fake_user_manager.h"
+#include "chrome/browser/chromeos/login/users/fake_chrome_user_manager.h"
 #include "chrome/browser/chromeos/login/users/scoped_test_user_manager.h"
 #include "chrome/browser/chromeos/login/users/scoped_user_manager_enabler.h"
+#include "chrome/browser/chromeos/login/users/wallpaper/wallpaper_manager.h"
 #include "chrome/browser/chromeos/profiles/profile_helper.h"
 #include "chrome/browser/chromeos/settings/cros_settings.h"
 #include "chrome/browser/chromeos/settings/device_settings_service.h"
@@ -112,12 +113,16 @@ class ProfileManagerTest : public testing::Test {
 #if defined(OS_CHROMEOS)
     base::CommandLine* cl = base::CommandLine::ForCurrentProcess();
     cl->AppendSwitch(switches::kTestType);
+    chromeos::WallpaperManager::Initialize();
 #endif
   }
 
   void TearDown() override {
     TestingBrowserProcess::GetGlobal()->SetProfileManager(NULL);
     base::RunLoop().RunUntilIdle();
+#if defined(OS_CHROMEOS)
+    chromeos::WallpaperManager::Shutdown();
+#endif
   }
 
   // Helper function to create a profile with |name| for a profile |manager|.
@@ -222,7 +227,8 @@ TEST_F(ProfileManagerTest, LoggedInProfileDir) {
             profile_manager->GetInitialProfileDir().value());
 
   const char kTestUserName[] = "test-user@example.com";
-  chromeos::FakeUserManager* user_manager = new chromeos::FakeUserManager();
+  chromeos::FakeChromeUserManager* user_manager =
+      new chromeos::FakeChromeUserManager();
   chromeos::ScopedUserManagerEnabler enabler(user_manager);
 
   const user_manager::User* active_user = user_manager->AddUser(kTestUserName);
@@ -263,15 +269,15 @@ TEST_F(ProfileManagerTest, CreateAndUseTwoProfiles) {
 
   // Force lazy-init of some profile services to simulate use.
   ASSERT_TRUE(profile1->CreateHistoryService(true, false));
-  EXPECT_TRUE(HistoryServiceFactory::GetForProfile(profile1,
-                                                   Profile::EXPLICIT_ACCESS));
+  EXPECT_TRUE(HistoryServiceFactory::GetForProfile(
+      profile1, ServiceAccessType::EXPLICIT_ACCESS));
   profile1->CreateBookmarkModel(true);
   EXPECT_TRUE(BookmarkModelFactory::GetForProfile(profile1));
   profile2->CreateBookmarkModel(true);
   EXPECT_TRUE(BookmarkModelFactory::GetForProfile(profile2));
   ASSERT_TRUE(profile2->CreateHistoryService(true, false));
-  EXPECT_TRUE(HistoryServiceFactory::GetForProfile(profile2,
-                                                   Profile::EXPLICIT_ACCESS));
+  EXPECT_TRUE(HistoryServiceFactory::GetForProfile(
+      profile2, ServiceAccessType::EXPLICIT_ACCESS));
 
   // Make sure any pending tasks run before we destroy the profiles.
     base::RunLoop().RunUntilIdle();
@@ -384,6 +390,13 @@ TEST_F(ProfileManagerTest, GetGuestProfilePath) {
   EXPECT_EQ(expected_path, guest_path);
 }
 
+TEST_F(ProfileManagerTest, GetSystemProfilePath) {
+  base::FilePath system_profile_path = ProfileManager::GetSystemProfilePath();
+  base::FilePath expected_path = temp_dir_.path();
+  expected_path = expected_path.Append(chrome::kSystemProfileDir);
+  EXPECT_EQ(expected_path, system_profile_path);
+}
+
 class UnittestGuestProfileManager : public UnittestProfileManager {
  public:
   explicit UnittestGuestProfileManager(const base::FilePath& user_data_dir)
@@ -416,6 +429,7 @@ class ProfileManagerGuestTest : public ProfileManagerTest  {
     cl->AppendSwitch(chromeos::switches::kGuestSession);
     cl->AppendSwitch(::switches::kIncognito);
 
+    chromeos::WallpaperManager::Initialize();
     RegisterUser(chromeos::login::kGuestUserName);
 #endif
   }

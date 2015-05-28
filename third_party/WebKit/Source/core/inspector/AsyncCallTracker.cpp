@@ -36,14 +36,12 @@
 #include "core/dom/ExecutionContextTask.h"
 #include "core/events/Event.h"
 #include "core/events/EventTarget.h"
-#include "core/inspector/AsyncCallChain.h"
-#include "core/inspector/AsyncCallChainMap.h"
+#include "core/inspector/AsyncOperationMap.h"
 #include "core/inspector/InspectorDebuggerAgent.h"
 #include "core/xmlhttprequest/XMLHttpRequest.h"
 #include "core/xmlhttprequest/XMLHttpRequestUpload.h"
 #include "wtf/text/StringBuilder.h"
 #include "wtf/text/StringHash.h"
-#include <v8.h>
 
 namespace {
 
@@ -59,7 +57,7 @@ namespace blink {
 
 class AsyncCallTracker::ExecutionContextData final : public NoBaseWillBeGarbageCollectedFinalized<ExecutionContextData>, public ContextLifecycleObserver {
     WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(AsyncCallTracker::ExecutionContextData);
-    WTF_MAKE_FAST_ALLOCATED_WILL_BE_REMOVED;
+    WTF_MAKE_FAST_ALLOCATED_WILL_BE_REMOVED(AsyncCallTracker::ExecutionContextData);
 public:
     ExecutionContextData(AsyncCallTracker* tracker, ExecutionContext* executionContext)
         : ContextLifecycleObserver(executionContext)
@@ -70,8 +68,7 @@ public:
         , m_xhrCallChains(tracker->m_debuggerAgent)
         , m_mutationObserverCallChains(tracker->m_debuggerAgent)
         , m_executionContextTaskCallChains(tracker->m_debuggerAgent)
-        , m_asyncOperationCallChains(tracker->m_debuggerAgent)
-        , m_circularSequentialId(0)
+        , m_asyncOperations(tracker->m_debuggerAgent)
     {
     }
 
@@ -81,7 +78,6 @@ public:
         OwnPtrWillBeRawPtr<ExecutionContextData> self = m_tracker->m_executionContextDataMap.take(executionContext());
         ASSERT_UNUSED(self, self == this);
         ContextLifecycleObserver::contextDestroyed();
-        clearLifecycleContext();
         disposeCallChains();
     }
 
@@ -91,17 +87,7 @@ public:
         dispose();
     }
 
-    int nextAsyncOperationUniqueId()
-    {
-        do {
-            ++m_circularSequentialId;
-            if (m_circularSequentialId <= 0)
-                m_circularSequentialId = 1;
-        } while (m_asyncOperationCallChains.contains(m_circularSequentialId));
-        return m_circularSequentialId;
-    }
-
-    virtual void trace(Visitor* visitor) override
+    DEFINE_INLINE_VIRTUAL_TRACE()
     {
         visitor->trace(m_tracker);
 #if ENABLE(OILPAN)
@@ -111,20 +97,20 @@ public:
         visitor->trace(m_xhrCallChains);
         visitor->trace(m_mutationObserverCallChains);
         visitor->trace(m_executionContextTaskCallChains);
-        visitor->trace(m_asyncOperationCallChains);
+        visitor->trace(m_asyncOperations);
 #endif
         ContextLifecycleObserver::trace(visitor);
     }
 
     RawPtrWillBeMember<AsyncCallTracker> m_tracker;
     HashSet<int> m_intervalTimerIds;
-    AsyncCallChainMap<int> m_timerCallChains;
-    AsyncCallChainMap<int> m_animationFrameCallChains;
-    AsyncCallChainMap<RawPtrWillBeMember<Event> > m_eventCallChains;
-    AsyncCallChainMap<RawPtrWillBeMember<EventTarget> > m_xhrCallChains;
-    AsyncCallChainMap<RawPtrWillBeMember<MutationObserver> > m_mutationObserverCallChains;
-    AsyncCallChainMap<ExecutionContextTask*> m_executionContextTaskCallChains;
-    AsyncCallChainMap<int> m_asyncOperationCallChains;
+    AsyncOperationMap<int> m_timerCallChains;
+    AsyncOperationMap<int> m_animationFrameCallChains;
+    AsyncOperationMap<RawPtrWillBeMember<Event> > m_eventCallChains;
+    AsyncOperationMap<RawPtrWillBeMember<EventTarget> > m_xhrCallChains;
+    AsyncOperationMap<RawPtrWillBeMember<MutationObserver> > m_mutationObserverCallChains;
+    AsyncOperationMap<ExecutionContextTask*> m_executionContextTaskCallChains;
+    AsyncOperationMap<int> m_asyncOperations;
 
 private:
     void disposeCallChains()
@@ -135,10 +121,8 @@ private:
         m_xhrCallChains.dispose();
         m_mutationObserverCallChains.dispose();
         m_executionContextTaskCallChains.dispose();
-        m_asyncOperationCallChains.dispose();
+        m_asyncOperations.dispose();
     }
-
-    int m_circularSequentialId;
 };
 
 static XMLHttpRequest* toXmlHttpRequest(EventTarget* eventTarget)
@@ -167,7 +151,7 @@ void AsyncCallTracker::asyncCallTrackingStateChanged(bool tracking)
     m_instrumentingAgents->setAsyncCallTracker(tracking ? this : nullptr);
 }
 
-void AsyncCallTracker::resetAsyncCallChains()
+void AsyncCallTracker::resetAsyncOperations()
 {
     for (auto& it : m_executionContextDataMap)
         it.value->unobserve();
@@ -178,12 +162,10 @@ void AsyncCallTracker::didInstallTimer(ExecutionContext* context, int timerId, i
 {
     ASSERT(context);
     ASSERT(m_debuggerAgent->trackingAsyncCalls());
-    RefPtrWillBeRawPtr<AsyncCallChain> callChain = m_debuggerAgent->createAsyncCallChain(singleShot ? setTimeoutName : setIntervalName);
-    if (!callChain)
-        return;
+    int operationId = m_debuggerAgent->traceAsyncOperationStarting(singleShot ? setTimeoutName : setIntervalName);
     ASSERT(timerId > 0);
     ExecutionContextData* data = createContextDataIfNeeded(context);
-    data->m_timerCallChains.set(timerId, callChain.release());
+    data->m_timerCallChains.set(timerId, operationId);
     if (!singleShot)
         data->m_intervalTimerIds.add(timerId);
 }
@@ -206,13 +188,12 @@ bool AsyncCallTracker::willFireTimer(ExecutionContext* context, int timerId)
     ASSERT(context);
     ASSERT(m_debuggerAgent->trackingAsyncCalls());
     ASSERT(timerId > 0);
-    ASSERT(!m_debuggerAgent->currentAsyncCallChain());
     if (ExecutionContextData* data = m_executionContextDataMap.get(context)) {
-        setCurrentAsyncCallChain(context, data->m_timerCallChains.get(timerId));
+        willFireAsyncCall(data->m_timerCallChains.get(timerId));
         if (!data->m_intervalTimerIds.contains(timerId))
             data->m_timerCallChains.remove(timerId);
     } else {
-        setCurrentAsyncCallChain(context, nullptr);
+        willFireAsyncCall(InspectorDebuggerAgent::unknownAsyncOperationId);
     }
     return true;
 }
@@ -221,12 +202,10 @@ void AsyncCallTracker::didRequestAnimationFrame(ExecutionContext* context, int c
 {
     ASSERT(context);
     ASSERT(m_debuggerAgent->trackingAsyncCalls());
-    RefPtrWillBeRawPtr<AsyncCallChain> callChain = m_debuggerAgent->createAsyncCallChain(requestAnimationFrameName);
-    if (!callChain)
-        return;
+    int operationId = m_debuggerAgent->traceAsyncOperationStarting(requestAnimationFrameName);
     ASSERT(callbackId > 0);
     ExecutionContextData* data = createContextDataIfNeeded(context);
-    data->m_animationFrameCallChains.set(callbackId, callChain.release());
+    data->m_animationFrameCallChains.set(callbackId, operationId);
 }
 
 void AsyncCallTracker::didCancelAnimationFrame(ExecutionContext* context, int callbackId)
@@ -244,12 +223,11 @@ bool AsyncCallTracker::willFireAnimationFrame(ExecutionContext* context, int cal
     ASSERT(context);
     ASSERT(m_debuggerAgent->trackingAsyncCalls());
     ASSERT(callbackId > 0);
-    ASSERT(!m_debuggerAgent->currentAsyncCallChain());
     if (ExecutionContextData* data = m_executionContextDataMap.get(context)) {
-        setCurrentAsyncCallChain(context, data->m_animationFrameCallChains.get(callbackId));
+        willFireAsyncCall(data->m_animationFrameCallChains.get(callbackId));
         data->m_animationFrameCallChains.remove(callbackId);
     } else {
-        setCurrentAsyncCallChain(context, nullptr);
+        willFireAsyncCall(InspectorDebuggerAgent::unknownAsyncOperationId);
     }
     return true;
 }
@@ -258,11 +236,9 @@ void AsyncCallTracker::didEnqueueEvent(EventTarget* eventTarget, Event* event)
 {
     ASSERT(eventTarget->executionContext());
     ASSERT(m_debuggerAgent->trackingAsyncCalls());
-    RefPtrWillBeRawPtr<AsyncCallChain> callChain = m_debuggerAgent->createAsyncCallChain(event->type());
-    if (!callChain)
-        return;
+    int operationId = m_debuggerAgent->traceAsyncOperationStarting(event->type());
     ExecutionContextData* data = createContextDataIfNeeded(eventTarget->executionContext());
-    data->m_eventCallChains.set(event, callChain.release());
+    data->m_eventCallChains.set(event, operationId);
 }
 
 void AsyncCallTracker::didRemoveEvent(EventTarget* eventTarget, Event* event)
@@ -282,9 +258,9 @@ void AsyncCallTracker::willHandleEvent(EventTarget* eventTarget, Event* event, E
     } else {
         ExecutionContext* context = eventTarget->executionContext();
         if (ExecutionContextData* data = m_executionContextDataMap.get(context))
-            setCurrentAsyncCallChain(context, data->m_eventCallChains.get(event));
+            willFireAsyncCall(data->m_eventCallChains.get(event));
         else
-            setCurrentAsyncCallChain(context, nullptr);
+            willFireAsyncCall(InspectorDebuggerAgent::unknownAsyncOperationId);
     }
 }
 
@@ -294,11 +270,9 @@ void AsyncCallTracker::willLoadXHR(XMLHttpRequest* xhr, ThreadableLoaderClient*,
     ASSERT(m_debuggerAgent->trackingAsyncCalls());
     if (!async)
         return;
-    RefPtrWillBeRawPtr<AsyncCallChain> callChain = m_debuggerAgent->createAsyncCallChain(xhrSendName);
-    if (!callChain)
-        return;
+    int operationId = m_debuggerAgent->traceAsyncOperationStarting(xhrSendName);
     ExecutionContextData* data = createContextDataIfNeeded(xhr->executionContext());
-    data->m_xhrCallChains.set(xhr, callChain.release());
+    data->m_xhrCallChains.set(xhr, operationId);
 }
 
 void AsyncCallTracker::didDispatchXHRLoadendEvent(XMLHttpRequest* xhr)
@@ -315,9 +289,9 @@ void AsyncCallTracker::willHandleXHREvent(XMLHttpRequest* xhr, Event* event)
     ASSERT(context);
     ASSERT(m_debuggerAgent->trackingAsyncCalls());
     if (ExecutionContextData* data = m_executionContextDataMap.get(context))
-        setCurrentAsyncCallChain(context, data->m_xhrCallChains.get(xhr));
+        willFireAsyncCall(data->m_xhrCallChains.get(xhr));
     else
-        setCurrentAsyncCallChain(context, nullptr);
+        willFireAsyncCall(InspectorDebuggerAgent::unknownAsyncOperationId);
 }
 
 void AsyncCallTracker::didEnqueueMutationRecord(ExecutionContext* context, MutationObserver* observer)
@@ -327,10 +301,8 @@ void AsyncCallTracker::didEnqueueMutationRecord(ExecutionContext* context, Mutat
     ExecutionContextData* data = createContextDataIfNeeded(context);
     if (data->m_mutationObserverCallChains.contains(observer))
         return;
-    RefPtrWillBeRawPtr<AsyncCallChain> callChain = m_debuggerAgent->createAsyncCallChain(enqueueMutationRecordName);
-    if (!callChain)
-        return;
-    data->m_mutationObserverCallChains.set(observer, callChain.release());
+    int operationId = m_debuggerAgent->traceAsyncOperationStarting(enqueueMutationRecordName);
+    data->m_mutationObserverCallChains.set(observer, operationId);
 }
 
 void AsyncCallTracker::didClearAllMutationRecords(ExecutionContext* context, MutationObserver* observer)
@@ -346,10 +318,10 @@ void AsyncCallTracker::willDeliverMutationRecords(ExecutionContext* context, Mut
     ASSERT(context);
     ASSERT(m_debuggerAgent->trackingAsyncCalls());
     if (ExecutionContextData* data = m_executionContextDataMap.get(context)) {
-        setCurrentAsyncCallChain(context, data->m_mutationObserverCallChains.get(observer));
+        willFireAsyncCall(data->m_mutationObserverCallChains.get(observer));
         data->m_mutationObserverCallChains.remove(observer);
     } else {
-        setCurrentAsyncCallChain(context, nullptr);
+        willFireAsyncCall(InspectorDebuggerAgent::unknownAsyncOperationId);
     }
 }
 
@@ -359,11 +331,9 @@ void AsyncCallTracker::didPostExecutionContextTask(ExecutionContext* context, Ex
     ASSERT(m_debuggerAgent->trackingAsyncCalls());
     if (task->taskNameForInstrumentation().isEmpty())
         return;
-    RefPtrWillBeRawPtr<AsyncCallChain> callChain = m_debuggerAgent->createAsyncCallChain(task->taskNameForInstrumentation());
-    if (!callChain)
-        return;
+    int operationId = m_debuggerAgent->traceAsyncOperationStarting(task->taskNameForInstrumentation());
     ExecutionContextData* data = createContextDataIfNeeded(context);
-    data->m_executionContextTaskCallChains.set(task, callChain.release());
+    data->m_executionContextTaskCallChains.set(task, operationId);
 }
 
 void AsyncCallTracker::didKillAllExecutionContextTasks(ExecutionContext* context)
@@ -379,10 +349,10 @@ void AsyncCallTracker::willPerformExecutionContextTask(ExecutionContext* context
     ASSERT(context);
     ASSERT(m_debuggerAgent->trackingAsyncCalls());
     if (ExecutionContextData* data = m_executionContextDataMap.get(context)) {
-        setCurrentAsyncCallChain(context, data->m_executionContextTaskCallChains.get(task));
+        willFireAsyncCall(data->m_executionContextTaskCallChains.get(task));
         data->m_executionContextTaskCallChains.remove(task);
     } else {
-        setCurrentAsyncCallChain(context, nullptr);
+        willFireAsyncCall(InspectorDebuggerAgent::unknownAsyncOperationId);
     }
 }
 
@@ -392,13 +362,10 @@ int AsyncCallTracker::traceAsyncOperationStarting(ExecutionContext* context, con
     ASSERT(m_debuggerAgent->trackingAsyncCalls());
     if (prevOperationId)
         traceAsyncOperationCompleted(context, prevOperationId);
-    RefPtrWillBeRawPtr<AsyncCallChain> callChain = m_debuggerAgent->createAsyncCallChain(operationName);
-    if (!callChain)
-        return 0;
+    int operationId = m_debuggerAgent->traceAsyncOperationStarting(operationName);
     ExecutionContextData* data = createContextDataIfNeeded(context);
-    int id = data->nextAsyncOperationUniqueId();
-    data->m_asyncOperationCallChains.set(id, callChain.release());
-    return id;
+    data->m_asyncOperations.set(operationId, operationId);
+    return operationId;
 }
 
 void AsyncCallTracker::traceAsyncOperationCompleted(ExecutionContext* context, int operationId)
@@ -408,7 +375,7 @@ void AsyncCallTracker::traceAsyncOperationCompleted(ExecutionContext* context, i
     if (operationId <= 0)
         return;
     if (ExecutionContextData* data = m_executionContextDataMap.get(context))
-        data->m_asyncOperationCallChains.remove(operationId);
+        data->m_asyncOperations.remove(operationId);
 }
 
 void AsyncCallTracker::traceAsyncOperationCompletedCallbackStarting(ExecutionContext* context, int operationId)
@@ -417,24 +384,31 @@ void AsyncCallTracker::traceAsyncOperationCompletedCallbackStarting(ExecutionCon
     traceAsyncOperationCompleted(context, operationId);
 }
 
+bool AsyncCallTracker::isKnownAsyncOperationId(ExecutionContext* context, int operationId) const
+{
+    if (operationId <= 0)
+        return false;
+    if (ExecutionContextData* data = m_executionContextDataMap.get(context))
+        return data->m_asyncOperations.contains(operationId);
+    return false;
+}
+
 void AsyncCallTracker::traceAsyncCallbackStarting(ExecutionContext* context, int operationId)
 {
     ASSERT(context);
     ASSERT(m_debuggerAgent->trackingAsyncCalls());
-    if (ExecutionContextData* data = m_executionContextDataMap.get(context))
-        setCurrentAsyncCallChain(context, operationId > 0 ? data->m_asyncOperationCallChains.get(operationId) : nullptr);
-    else
-        setCurrentAsyncCallChain(context, nullptr);
+    ASSERT(operationId <= 0 || isKnownAsyncOperationId(context, operationId));
+    willFireAsyncCall(operationId > 0 ? operationId : InspectorDebuggerAgent::unknownAsyncOperationId);
 }
 
 void AsyncCallTracker::didFireAsyncCall()
 {
-    m_debuggerAgent->clearCurrentAsyncCallChain();
+    m_debuggerAgent->traceAsyncCallbackCompleted();
 }
 
-void AsyncCallTracker::setCurrentAsyncCallChain(ExecutionContext* context, PassRefPtrWillBeRawPtr<AsyncCallChain> chain)
+void AsyncCallTracker::willFireAsyncCall(int operationId)
 {
-    m_debuggerAgent->setCurrentAsyncCallChain(toIsolate(context), chain);
+    m_debuggerAgent->traceAsyncCallbackStarting(operationId);
 }
 
 AsyncCallTracker::ExecutionContextData* AsyncCallTracker::createContextDataIfNeeded(ExecutionContext* context)
@@ -447,7 +421,7 @@ AsyncCallTracker::ExecutionContextData* AsyncCallTracker::createContextDataIfNee
     return data;
 }
 
-void AsyncCallTracker::trace(Visitor* visitor)
+DEFINE_TRACE(AsyncCallTracker)
 {
 #if ENABLE(OILPAN)
     visitor->trace(m_executionContextDataMap);

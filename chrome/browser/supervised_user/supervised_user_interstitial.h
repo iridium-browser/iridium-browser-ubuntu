@@ -27,6 +27,9 @@ class Profile;
 class SupervisedUserInterstitial : public content::InterstitialPageDelegate,
                                    public SupervisedUserServiceObserver {
  public:
+  // Interstitial type, used for testing.
+  static content::InterstitialPageDelegate::TypeID kTypeForTesting;
+
   static void Show(content::WebContents* web_contents,
                    const GURL& url,
                    SupervisedUserURLFilter::FilteringBehaviorReason reason,
@@ -47,6 +50,7 @@ class SupervisedUserInterstitial : public content::InterstitialPageDelegate,
   void CommandReceived(const std::string& command) override;
   void OnProceed() override;
   void OnDontProceed() override;
+  content::InterstitialPageDelegate::TypeID GetTypeForTesting() const override;
 
   // SupervisedUserServiceObserver implementation.
   void OnURLFilterChanged() override;
@@ -54,11 +58,11 @@ class SupervisedUserInterstitial : public content::InterstitialPageDelegate,
 
   void OnAccessRequestAdded(bool success);
 
-  // Returns whether there is a manual exception for the blocked URL.
+  // Returns whether we should now proceed on a previously-blocked URL.
   // Called initially before the interstitial is shown (to catch race
   // conditions), or when the URL filtering prefs change. Note that this does
-  // not include the asynchronous online checks, so the return value indicates
-  // either "allow" or "don't know".
+  // not include the asynchronous online checks, so if those are enabled, then
+  // the return value indicates only "allow" or "don't know".
   bool ShouldProceed();
 
   void DispatchContinueRequest(bool continue_request);

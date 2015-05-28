@@ -168,7 +168,9 @@ class ObserverListThreadSafe
   // that at the completion of the Notify call that all Observers have
   // been Notified.  The notification may still be pending delivery.
   template <class Method, class... Params>
-  void Notify(Method m, const Params&... params) {
+  void Notify(const tracked_objects::Location& from_here,
+              Method m,
+              const Params&... params) {
     UnboundMethod<ObserverType, Method, Tuple<Params...>> method(
         m, MakeTuple(params...));
 
@@ -176,7 +178,7 @@ class ObserverListThreadSafe
     for (const auto& entry : observer_lists_) {
       ObserverListContext* context = entry.second;
       context->loop->PostTask(
-          FROM_HERE,
+          from_here,
           base::Bind(
               &ObserverListThreadSafe<ObserverType>::template NotifyWrapper<
                   Method, Tuple<Params...>>,
@@ -197,6 +199,7 @@ class ObserverListThreadSafe
     scoped_refptr<base::MessageLoopProxy> loop;
     ObserverList<ObserverType> list;
 
+   private:
     DISALLOW_COPY_AND_ASSIGN(ObserverListContext);
   };
 
@@ -210,7 +213,6 @@ class ObserverListThreadSafe
   template <class Method, class Params>
   void NotifyWrapper(ObserverListContext* context,
       const UnboundMethod<ObserverType, Method, Params>& method) {
-
     // Check that this list still needs notifications.
     {
       base::AutoLock lock(list_lock_);
@@ -226,7 +228,7 @@ class ObserverListThreadSafe
     }
 
     {
-      typename ObserverList<ObserverType>::Iterator it(context->list);
+      typename ObserverList<ObserverType>::Iterator it(&context->list);
       ObserverType* obs;
       while ((obs = it.GetNext()) != NULL)
         method.Run(obs);

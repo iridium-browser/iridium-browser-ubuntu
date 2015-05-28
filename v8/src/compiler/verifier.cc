@@ -4,20 +4,21 @@
 
 #include "src/compiler/verifier.h"
 
+#include <algorithm>
 #include <deque>
 #include <queue>
 #include <sstream>
 #include <string>
 
 #include "src/bit-vector.h"
-#include "src/compiler/generic-algorithm.h"
-#include "src/compiler/graph-inl.h"
+#include "src/compiler/all-nodes.h"
+#include "src/compiler/common-operator.h"
 #include "src/compiler/graph.h"
 #include "src/compiler/node.h"
-#include "src/compiler/node-properties-inl.h"
 #include "src/compiler/node-properties.h"
 #include "src/compiler/opcodes.h"
 #include "src/compiler/operator.h"
+#include "src/compiler/operator-properties.h"
 #include "src/compiler/schedule.h"
 #include "src/compiler/simplified-operator.h"
 #include "src/ostreams.h"
@@ -28,29 +29,22 @@ namespace compiler {
 
 
 static bool IsDefUseChainLinkPresent(Node* def, Node* use) {
-  Node::Uses uses = def->uses();
-  for (Node::Uses::iterator it = uses.begin(); it != uses.end(); ++it) {
-    if (*it == use) return true;
-  }
-  return false;
+  auto const uses = def->uses();
+  return std::find(uses.begin(), uses.end(), use) != uses.end();
 }
 
 
 static bool IsUseDefChainLinkPresent(Node* def, Node* use) {
-  Node::Inputs inputs = use->inputs();
-  for (Node::Inputs::iterator it = inputs.begin(); it != inputs.end(); ++it) {
-    if (*it == def) return true;
-  }
-  return false;
+  auto const inputs = use->inputs();
+  return std::find(inputs.begin(), inputs.end(), def) != inputs.end();
 }
 
 
-class Verifier::Visitor : public NullNodeVisitor {
+class Verifier::Visitor {
  public:
   Visitor(Zone* z, Typing typed) : zone(z), typing(typed) {}
 
-  // Fulfills the PreNodeCallback interface.
-  void Pre(Node* node);
+  void Check(Node* node);
 
   Zone* zone;
   Typing typing;
@@ -74,51 +68,50 @@ class Verifier::Visitor : public NullNodeVisitor {
   void CheckNotTyped(Node* node) {
     if (NodeProperties::IsTyped(node)) {
       std::ostringstream str;
-      str << "TypeError: node #" << node->opcode() << ":"
-          << node->op()->mnemonic() << " should never have a type";
-      V8_Fatal(__FILE__, __LINE__, str.str().c_str());
+      str << "TypeError: node #" << node->id() << ":" << *node->op()
+          << " should never have a type";
+      FATAL(str.str().c_str());
     }
   }
   void CheckUpperIs(Node* node, Type* type) {
     if (typing == TYPED && !bounds(node).upper->Is(type)) {
       std::ostringstream str;
-      str << "TypeError: node #" << node->opcode() << ":"
-          << node->op()->mnemonic() << " upper bound ";
+      str << "TypeError: node #" << node->id() << ":" << *node->op()
+          << " upper bound ";
       bounds(node).upper->PrintTo(str);
       str << " is not ";
       type->PrintTo(str);
-      V8_Fatal(__FILE__, __LINE__, str.str().c_str());
+      FATAL(str.str().c_str());
     }
   }
   void CheckUpperMaybe(Node* node, Type* type) {
     if (typing == TYPED && !bounds(node).upper->Maybe(type)) {
       std::ostringstream str;
-      str << "TypeError: node #" << node->opcode() << ":"
-          << node->op()->mnemonic() << " upper bound ";
+      str << "TypeError: node #" << node->id() << ":" << *node->op()
+          << " upper bound ";
       bounds(node).upper->PrintTo(str);
       str << " must intersect ";
       type->PrintTo(str);
-      V8_Fatal(__FILE__, __LINE__, str.str().c_str());
+      FATAL(str.str().c_str());
     }
   }
   void CheckValueInputIs(Node* node, int i, Type* type) {
     Node* input = ValueInput(node, i);
     if (typing == TYPED && !bounds(input).upper->Is(type)) {
       std::ostringstream str;
-      str << "TypeError: node #" << node->opcode() << ":"
-          << node->op()->mnemonic() << "(input @" << i << " = "
-          << input->opcode() << ":" << input->op()->mnemonic()
-          << ") upper bound ";
+      str << "TypeError: node #" << node->id() << ":" << *node->op()
+          << "(input @" << i << " = " << input->opcode() << ":"
+          << input->op()->mnemonic() << ") upper bound ";
       bounds(input).upper->PrintTo(str);
       str << " is not ";
       type->PrintTo(str);
-      V8_Fatal(__FILE__, __LINE__, str.str().c_str());
+      FATAL(str.str().c_str());
     }
   }
 };
 
 
-void Verifier::Visitor::Pre(Node* node) {
+void Verifier::Visitor::Check(Node* node) {
   int value_count = node->op()->ValueInputCount();
   int context_count = OperatorProperties::GetContextInputCount(node->op());
   int frame_state_count =
@@ -132,8 +125,8 @@ void Verifier::Visitor::Pre(Node* node) {
   CHECK_EQ(input_count, node->InputCount());
 
   // Verify that frame state has been inserted for the nodes that need it.
-  if (OperatorProperties::HasFrameStateInput(node->op())) {
-    Node* frame_state = NodeProperties::GetFrameStateInput(node);
+  for (int i = 0; i < frame_state_count; i++) {
+    Node* frame_state = NodeProperties::GetFrameStateInput(node, i);
     CHECK(frame_state->opcode() == IrOpcode::kFrameState ||
           // kFrameState uses undefined as a sentinel.
           (node->opcode() == IrOpcode::kFrameState &&
@@ -185,6 +178,16 @@ void Verifier::Visitor::Pre(Node* node) {
   }
 
   switch (node->opcode()) {
+    case IrOpcode::kAlways:
+      // Always has no inputs.
+      CHECK_EQ(0, input_count);
+      // Always uses are Branch.
+      for (auto use : node->uses()) {
+        CHECK(use->opcode() == IrOpcode::kBranch);
+      }
+      // Type is boolean.
+      CheckUpperIs(node, Type::Boolean());
+      break;
     case IrOpcode::kStart:
       // Start has no inputs.
       CHECK_EQ(0, input_count);
@@ -205,15 +208,15 @@ void Verifier::Visitor::Pre(Node* node) {
       UNREACHABLE();
     case IrOpcode::kBranch: {
       // Branch uses are IfTrue and IfFalse.
-      Node::Uses uses = node->uses();
       int count_true = 0, count_false = 0;
-      for (Node::Uses::iterator it = uses.begin(); it != uses.end(); ++it) {
-        CHECK((*it)->opcode() == IrOpcode::kIfTrue ||
-              (*it)->opcode() == IrOpcode::kIfFalse);
-        if ((*it)->opcode() == IrOpcode::kIfTrue) ++count_true;
-        if ((*it)->opcode() == IrOpcode::kIfFalse) ++count_false;
+      for (auto use : node->uses()) {
+        CHECK(use->opcode() == IrOpcode::kIfTrue ||
+              use->opcode() == IrOpcode::kIfFalse);
+        if (use->opcode() == IrOpcode::kIfTrue) ++count_true;
+        if (use->opcode() == IrOpcode::kIfFalse) ++count_false;
       }
-      CHECK(count_true == 1 && count_false == 1);
+      CHECK_EQ(1, count_true);
+      CHECK_EQ(1, count_false);
       // Type is empty.
       CheckNotTyped(node);
       break;
@@ -225,12 +228,64 @@ void Verifier::Visitor::Pre(Node* node) {
       // Type is empty.
       CheckNotTyped(node);
       break;
+    case IrOpcode::kIfSuccess:
+    case IrOpcode::kIfException: {
+      // IfSuccess and IfException continuation only on throwing nodes.
+      Node* input = NodeProperties::GetControlInput(node, 0);
+      CHECK(!input->op()->HasProperty(Operator::kNoThrow));
+      // Type is empty.
+      CheckNotTyped(node);
+      break;
+    }
+    case IrOpcode::kSwitch: {
+      // Switch uses are Case and Default.
+      int count_case = 0, count_default = 0;
+      for (auto use : node->uses()) {
+        switch (use->opcode()) {
+          case IrOpcode::kIfValue: {
+            for (auto user : node->uses()) {
+              if (user != use && user->opcode() == IrOpcode::kIfValue) {
+                CHECK_NE(OpParameter<int32_t>(use->op()),
+                         OpParameter<int32_t>(user->op()));
+              }
+            }
+            ++count_case;
+            break;
+          }
+          case IrOpcode::kIfDefault: {
+            ++count_default;
+            break;
+          }
+          default: {
+            UNREACHABLE();
+            break;
+          }
+        }
+      }
+      CHECK_LE(1, count_case);
+      CHECK_EQ(1, count_default);
+      CHECK_EQ(node->op()->ControlOutputCount(), count_case + count_default);
+      // Type is empty.
+      CheckNotTyped(node);
+      break;
+    }
+    case IrOpcode::kIfValue:
+    case IrOpcode::kIfDefault:
+      CHECK_EQ(IrOpcode::kSwitch,
+               NodeProperties::GetControlInput(node)->opcode());
+      // Type is empty.
+      CheckNotTyped(node);
+      break;
     case IrOpcode::kLoop:
     case IrOpcode::kMerge:
       CHECK_EQ(control_count, input_count);
       // Type is empty.
       CheckNotTyped(node);
       break;
+    case IrOpcode::kDeoptimize:
+      // TODO(rossberg): check successor is End
+      // Type is empty.
+      CheckNotTyped(node);
     case IrOpcode::kReturn:
       // TODO(rossberg): check successor is End
       // Type is empty.
@@ -241,11 +296,13 @@ void Verifier::Visitor::Pre(Node* node) {
       // Type is empty.
       CheckNotTyped(node);
       break;
-    case IrOpcode::kTerminate:
+    case IrOpcode::kOsrNormalEntry:
+    case IrOpcode::kOsrLoopEntry:
+      // Osr entries have
+      CHECK_EQ(1, effect_count);
+      CHECK_EQ(1, control_count);
       // Type is empty.
       CheckNotTyped(node);
-      CHECK_EQ(1, control_count);
-      CHECK_EQ(input_count, 1 + effect_count);
       break;
 
     // Common operators
@@ -297,9 +354,16 @@ void Verifier::Visitor::Pre(Node* node) {
       // Type is considered internal.
       CheckUpperIs(node, Type::Internal());
       break;
+    case IrOpcode::kOsrValue:
+      // OSR values have a value and a control input.
+      CHECK_EQ(1, control_count);
+      CHECK_EQ(1, input_count);
+      // Type is merged from other values in the graph and could be any.
+      CheckUpperIs(node, Type::Any());
+      break;
     case IrOpcode::kProjection: {
       // Projection has an input that produces enough values.
-      int index = static_cast<int>(OpParameter<size_t>(node->op()));
+      int index = static_cast<int>(ProjectionIndexOf(node->op()));
       Node* input = NodeProperties::GetValueInput(node, 0);
       CHECK_GT(input->op()->ValueOutputCount(), index);
       // Type can be anything.
@@ -341,6 +405,12 @@ void Verifier::Visitor::Pre(Node* node) {
       CHECK_EQ(input_count, 1 + effect_count);
       break;
     }
+    case IrOpcode::kEffectSet: {
+      CHECK_EQ(0, value_count);
+      CHECK_EQ(0, control_count);
+      CHECK_LT(1, effect_count);
+      break;
+    }
     case IrOpcode::kValueEffect:
       // TODO(rossberg): what are the constraints on these?
       break;
@@ -357,6 +427,7 @@ void Verifier::Visitor::Pre(Node* node) {
       // TODO(jarin): what are the constraints on these?
       break;
     case IrOpcode::kStateValues:
+    case IrOpcode::kTypedStateValues:
       // TODO(jarin): what are the constraints on these?
       break;
     case IrOpcode::kCall:
@@ -475,17 +546,17 @@ void Verifier::Visitor::Pre(Node* node) {
     case IrOpcode::kJSCallFunction:
     case IrOpcode::kJSCallRuntime:
     case IrOpcode::kJSYield:
-    case IrOpcode::kJSDebugger:
       // Type can be anything.
       CheckUpperIs(node, Type::Any());
       break;
 
+    case IrOpcode::kJSStackCheck:
+      // Type is empty.
+      CheckNotTyped(node);
+      break;
+
     // Simplified operators
     // -------------------------------
-    case IrOpcode::kAnyToBoolean:
-      // Type is Boolean.
-      CheckUpperIs(node, Type::Boolean());
-      break;
     case IrOpcode::kBooleanNot:
       // Boolean -> Boolean
       CheckValueInputIs(node, 0, Type::Boolean());
@@ -525,6 +596,11 @@ void Verifier::Visitor::Pre(Node* node) {
       CheckValueInputIs(node, 0, Type::Number());
       CheckUpperIs(node, Type::Unsigned32());
       break;
+    case IrOpcode::kPlainPrimitiveToNumber:
+      // PlainPrimitive -> Number
+      CheckValueInputIs(node, 0, Type::PlainPrimitive());
+      CheckUpperIs(node, Type::Number());
+      break;
     case IrOpcode::kStringEqual:
     case IrOpcode::kStringLessThan:
     case IrOpcode::kStringLessThanOrEqual:
@@ -542,10 +618,6 @@ void Verifier::Visitor::Pre(Node* node) {
     case IrOpcode::kReferenceEqual: {
       // (Unique, Any) -> Boolean  and
       // (Any, Unique) -> Boolean
-      if (typing == TYPED) {
-        CHECK(bounds(ValueInput(node, 0)).upper->Is(Type::Unique()) ||
-              bounds(ValueInput(node, 1)).upper->Is(Type::Unique()));
-      }
       CheckUpperIs(node, Type::Boolean());
       break;
     }
@@ -674,6 +746,7 @@ void Verifier::Visitor::Pre(Node* node) {
     case IrOpcode::kWord32Sar:
     case IrOpcode::kWord32Ror:
     case IrOpcode::kWord32Equal:
+    case IrOpcode::kWord32Clz:
     case IrOpcode::kWord64And:
     case IrOpcode::kWord64Or:
     case IrOpcode::kWord64Xor:
@@ -712,9 +785,10 @@ void Verifier::Visitor::Pre(Node* node) {
     case IrOpcode::kFloat64Mul:
     case IrOpcode::kFloat64Div:
     case IrOpcode::kFloat64Mod:
+    case IrOpcode::kFloat64Max:
+    case IrOpcode::kFloat64Min:
     case IrOpcode::kFloat64Sqrt:
-    case IrOpcode::kFloat64Floor:
-    case IrOpcode::kFloat64Ceil:
+    case IrOpcode::kFloat64RoundDown:
     case IrOpcode::kFloat64RoundTruncate:
     case IrOpcode::kFloat64RoundTiesAway:
     case IrOpcode::kFloat64Equal:
@@ -730,20 +804,41 @@ void Verifier::Visitor::Pre(Node* node) {
     case IrOpcode::kChangeFloat32ToFloat64:
     case IrOpcode::kChangeFloat64ToInt32:
     case IrOpcode::kChangeFloat64ToUint32:
+    case IrOpcode::kFloat64ExtractLowWord32:
+    case IrOpcode::kFloat64ExtractHighWord32:
+    case IrOpcode::kFloat64InsertLowWord32:
+    case IrOpcode::kFloat64InsertHighWord32:
     case IrOpcode::kLoadStackPointer:
     case IrOpcode::kCheckedLoad:
     case IrOpcode::kCheckedStore:
       // TODO(rossberg): Check.
       break;
   }
-}
+}  // NOLINT(readability/fn_size)
 
 
 void Verifier::Run(Graph* graph, Typing typing) {
-  Visitor visitor(graph->zone(), typing);
-  CHECK_NE(NULL, graph->start());
-  CHECK_NE(NULL, graph->end());
-  graph->VisitNodeInputsFromEnd(&visitor);
+  CHECK_NOT_NULL(graph->start());
+  CHECK_NOT_NULL(graph->end());
+  Zone zone;
+  Visitor visitor(&zone, typing);
+  AllNodes all(&zone, graph);
+  for (Node* node : all.live) visitor.Check(node);
+
+  // Check the uniqueness of projections.
+  for (Node* proj : all.live) {
+    if (proj->opcode() != IrOpcode::kProjection) continue;
+    Node* node = proj->InputAt(0);
+    for (Node* other : node->uses()) {
+      if (all.IsLive(other) && other != proj &&
+          other->opcode() == IrOpcode::kProjection &&
+          ProjectionIndexOf(other->op()) == ProjectionIndexOf(proj->op())) {
+        V8_Fatal(__FILE__, __LINE__,
+                 "Node #%d:%s has duplicate projections #%d and #%d",
+                 node->id(), node->op()->mnemonic(), proj->id(), other->id());
+      }
+    }
+  }
 }
 
 
@@ -793,7 +888,7 @@ static void CheckInputsDominate(Schedule* schedule, BasicBlock* block,
                           use_pos)) {
       V8_Fatal(__FILE__, __LINE__,
                "Node #%d:%s in B%d is not dominated by input@%d #%d:%s",
-               node->id(), node->op()->mnemonic(), block->id().ToInt(), j,
+               node->id(), node->op()->mnemonic(), block->rpo_number(), j,
                input->id(), input->op()->mnemonic());
     }
   }
@@ -806,8 +901,8 @@ static void CheckInputsDominate(Schedule* schedule, BasicBlock* block,
     if (!Dominates(schedule, ctl, node)) {
       V8_Fatal(__FILE__, __LINE__,
                "Node #%d:%s in B%d is not dominated by control input #%d:%s",
-               node->id(), node->op()->mnemonic(), block->id(), ctl->id(),
-               ctl->op()->mnemonic());
+               node->id(), node->op()->mnemonic(), block->rpo_number(),
+               ctl->id(), ctl->op()->mnemonic());
     }
   }
 }
@@ -815,7 +910,7 @@ static void CheckInputsDominate(Schedule* schedule, BasicBlock* block,
 
 void ScheduleVerifier::Run(Schedule* schedule) {
   const size_t count = schedule->BasicBlockCount();
-  Zone tmp_zone(schedule->zone()->isolate());
+  Zone tmp_zone;
   Zone* zone = &tmp_zone;
   BasicBlock* start = schedule->start();
   BasicBlockVector* rpo_order = schedule->rpo_order();
@@ -826,15 +921,13 @@ void ScheduleVerifier::Run(Schedule* schedule) {
        ++b) {
     CHECK_EQ((*b), schedule->GetBlockById((*b)->id()));
     // All predecessors and successors should be in rpo and in this schedule.
-    for (BasicBlock::Predecessors::iterator j = (*b)->predecessors_begin();
-         j != (*b)->predecessors_end(); ++j) {
-      CHECK_GE((*j)->rpo_number(), 0);
-      CHECK_EQ((*j), schedule->GetBlockById((*j)->id()));
+    for (BasicBlock const* predecessor : (*b)->predecessors()) {
+      CHECK_GE(predecessor->rpo_number(), 0);
+      CHECK_EQ(predecessor, schedule->GetBlockById(predecessor->id()));
     }
-    for (BasicBlock::Successors::iterator j = (*b)->successors_begin();
-         j != (*b)->successors_end(); ++j) {
-      CHECK_GE((*j)->rpo_number(), 0);
-      CHECK_EQ((*j), schedule->GetBlockById((*j)->id()));
+    for (BasicBlock const* successor : (*b)->successors()) {
+      CHECK_GE(successor->rpo_number(), 0);
+      CHECK_EQ(successor, schedule->GetBlockById(successor->id()));
     }
   }
 
@@ -846,10 +939,10 @@ void ScheduleVerifier::Run(Schedule* schedule) {
     BasicBlock* dom = block->dominator();
     if (b == 0) {
       // All blocks except start should have a dominator.
-      CHECK_EQ(NULL, dom);
+      CHECK_NULL(dom);
     } else {
       // Check that the immediate dominator appears somewhere before the block.
-      CHECK_NE(NULL, dom);
+      CHECK_NOT_NULL(dom);
       CHECK_LT(dom->rpo_number(), block->rpo_number());
     }
   }
@@ -903,7 +996,7 @@ void ScheduleVerifier::Run(Schedule* schedule) {
       BasicBlock* idom = block->dominator();
       if (idom != NULL && !block_doms->Contains(idom->id().ToInt())) {
         V8_Fatal(__FILE__, __LINE__, "Block B%d is not dominated by B%d",
-                 block->id().ToInt(), idom->id().ToInt());
+                 block->rpo_number(), idom->rpo_number());
       }
       for (size_t s = 0; s < block->SuccessorCount(); s++) {
         BasicBlock* succ = block->SuccessorAt(s);
@@ -941,7 +1034,7 @@ void ScheduleVerifier::Run(Schedule* schedule) {
             !dominators[idom->id().ToSize()]->Contains(dom->id().ToInt())) {
           V8_Fatal(__FILE__, __LINE__,
                    "Block B%d is not immediately dominated by B%d",
-                   block->id().ToInt(), idom->id().ToInt());
+                   block->rpo_number(), idom->rpo_number());
         }
       }
     }

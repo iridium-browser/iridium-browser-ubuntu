@@ -6,6 +6,7 @@
 #include "web/SuspendableScriptExecutor.h"
 
 #include "bindings/core/v8/ScriptController.h"
+#include "bindings/core/v8/ScriptSourceCode.h"
 #include "core/dom/Document.h"
 #include "core/frame/LocalFrame.h"
 #include "platform/UserGestureIndicator.h"
@@ -14,29 +15,24 @@
 
 namespace blink {
 
-void SuspendableScriptExecutor::createAndRun(LocalFrame* frame, int worldID, const Vector<ScriptSourceCode>& sources, int extensionGroup, bool userGesture, WebScriptExecutionCallback* callback)
+void SuspendableScriptExecutor::createAndRun(LocalFrame* frame, int worldID, const WillBeHeapVector<ScriptSourceCode>& sources, int extensionGroup, bool userGesture, WebScriptExecutionCallback* callback)
 {
     RefPtrWillBeRawPtr<SuspendableScriptExecutor> executor = adoptRefWillBeNoop(new SuspendableScriptExecutor(frame, worldID, sources, extensionGroup, userGesture, callback));
-    executor->run();
     executor->ref();
-}
-
-void SuspendableScriptExecutor::resume()
-{
-    executeAndDestroySelf();
+    executor->run();
 }
 
 void SuspendableScriptExecutor::contextDestroyed()
 {
     // this method can only be called if the script was not called in run()
     // and context remained suspend (method resume has never called)
-    ActiveDOMObject::contextDestroyed();
+    SuspendableTimer::contextDestroyed();
     m_callback->completed(Vector<v8::Local<v8::Value>>());
     deref();
 }
 
-SuspendableScriptExecutor::SuspendableScriptExecutor(LocalFrame* frame, int worldID, const Vector<ScriptSourceCode>& sources, int extensionGroup, bool userGesture, WebScriptExecutionCallback* callback)
-    : ActiveDOMObject(frame->document())
+SuspendableScriptExecutor::SuspendableScriptExecutor(LocalFrame* frame, int worldID, const WillBeHeapVector<ScriptSourceCode>& sources, int extensionGroup, bool userGesture, WebScriptExecutionCallback* callback)
+    : SuspendableTimer(frame->document())
     , m_frame(frame)
     , m_worldID(worldID)
     , m_sources(sources)
@@ -50,13 +46,22 @@ SuspendableScriptExecutor::~SuspendableScriptExecutor()
 {
 }
 
+void SuspendableScriptExecutor::fired()
+{
+    executeAndDestroySelf();
+}
+
 void SuspendableScriptExecutor::run()
 {
-    suspendIfNeeded();
     ExecutionContext* context = executionContext();
     ASSERT(context);
-    if (context && !context->activeDOMObjectsAreSuspended())
+    if (!context->activeDOMObjectsAreSuspended()) {
+        suspendIfNeeded();
         executeAndDestroySelf();
+        return;
+    }
+    startOneShot(0, FROM_HERE);
+    suspendIfNeeded();
 }
 
 void SuspendableScriptExecutor::executeAndDestroySelf()
@@ -79,10 +84,13 @@ void SuspendableScriptExecutor::executeAndDestroySelf()
     deref();
 }
 
-void SuspendableScriptExecutor::trace(Visitor* visitor)
+DEFINE_TRACE(SuspendableScriptExecutor)
 {
+#if ENABLE(OILPAN)
     visitor->trace(m_frame);
-    ActiveDOMObject::trace(visitor);
+    visitor->trace(m_sources);
+#endif
+    SuspendableTimer::trace(visitor);
 }
 
 } // namespace blink

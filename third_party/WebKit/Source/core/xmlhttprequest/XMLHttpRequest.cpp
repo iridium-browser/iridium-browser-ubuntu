@@ -23,19 +23,26 @@
 #include "config.h"
 #include "core/xmlhttprequest/XMLHttpRequest.h"
 
+#include "bindings/core/v8/DOMWrapperWorld.h"
 #include "bindings/core/v8/ExceptionState.h"
-#include "core/FetchInitiatorTypeNames.h"
-#include "core/dom/ContextFeatures.h"
+#include "bindings/core/v8/ScriptState.h"
+#include "bindings/core/v8/UnionTypesCore.h"
 #include "core/dom/DOMArrayBuffer.h"
 #include "core/dom/DOMArrayBufferView.h"
 #include "core/dom/DOMException.h"
 #include "core/dom/DOMImplementation.h"
+#include "core/dom/DOMTypedArray.h"
+#include "core/dom/DocumentInit.h"
 #include "core/dom/DocumentParser.h"
 #include "core/dom/ExceptionCode.h"
+#include "core/dom/ExecutionContext.h"
 #include "core/dom/XMLDocument.h"
 #include "core/editing/markup.h"
 #include "core/events/Event.h"
+#include "core/fetch/CrossOriginAccessControl.h"
+#include "core/fetch/FetchInitiatorTypeNames.h"
 #include "core/fetch/FetchUtils.h"
+#include "core/fetch/ResourceLoaderOptions.h"
 #include "core/fileapi/Blob.h"
 #include "core/fileapi/File.h"
 #include "core/fileapi/FileReaderLoader.h"
@@ -50,8 +57,9 @@
 #include "core/inspector/InspectorInstrumentation.h"
 #include "core/inspector/InspectorTraceEvents.h"
 #include "core/loader/ThreadableLoader.h"
-#include "core/streams/ReadableStream.h"
-#include "core/streams/ReadableStreamImpl.h"
+#include "core/page/Chrome.h"
+#include "core/page/ChromeClient.h"
+#include "core/page/Page.h"
 #include "core/streams/Stream.h"
 #include "core/streams/UnderlyingSource.h"
 #include "core/xmlhttprequest/XMLHttpRequestProgressEvent.h"
@@ -64,6 +72,7 @@
 #include "platform/network/ParsedContentType.h"
 #include "platform/network/ResourceError.h"
 #include "platform/network/ResourceRequest.h"
+#include "public/platform/WebDataConsumerHandle.h"
 #include "public/platform/WebURLRequest.h"
 #include "wtf/Assertions.h"
 #include "wtf/RefCountedLeakCounter.h"
@@ -182,7 +191,7 @@ public:
         enqueueToStreamFromHandle();
     }
 
-    void startStream(ReadableStreamImpl<ReadableStreamChunkTypeTraits<DOMArrayBuffer> >* stream)
+    void startStream(ReadableStreamImpl<ReadableStreamChunkTypeTraits<DOMArrayBufferView>>* stream)
     {
         m_stream = stream;
         stream->didSourceStart();
@@ -190,7 +199,7 @@ public:
 
     void didReceiveData(const char* data, size_t size)
     {
-        m_stream->enqueue(DOMArrayBuffer::create(data, size));
+        m_stream->enqueue(DOMUint8Array::create(DOMArrayBuffer::create(data, size), 0, size));
     }
 
     void didReceiveFinishLoadingNotification()
@@ -207,7 +216,7 @@ public:
         }
     }
 
-    void trace(Visitor* visitor) override
+    DEFINE_INLINE_VIRTUAL_TRACE()
     {
         visitor->trace(m_owner);
         visitor->trace(m_stream);
@@ -251,7 +260,7 @@ private:
                 m_needsMore = false;
                 return;
             }
-            m_needsMore = m_stream->enqueue(arrayBuffer.release());
+            m_needsMore = m_stream->enqueue(DOMUint8Array::create(arrayBuffer.release(), 0, size));
         }
     }
 
@@ -259,7 +268,7 @@ private:
     // avoid use-after free, the associated ReadableStream must be closed
     // or errored when m_owner is gone.
     RawPtrWillBeMember<XMLHttpRequest> m_owner;
-    Member<ReadableStreamImpl<ReadableStreamChunkTypeTraits<DOMArrayBuffer>>> m_stream;
+    Member<ReadableStreamImpl<ReadableStreamChunkTypeTraits<DOMArrayBufferView>>> m_stream;
     OwnPtr<WebDataConsumerHandle> m_body;
     bool m_needsMore;
     bool m_hasReadBody;
@@ -294,7 +303,7 @@ public:
         m_loader.cancel();
     }
 
-    void trace(Visitor* visitor)
+    DEFINE_INLINE_TRACE()
     {
         visitor->trace(m_xhr);
     }
@@ -311,9 +320,23 @@ private:
     FileReaderLoader m_loader;
 };
 
-PassRefPtrWillBeRawPtr<XMLHttpRequest> XMLHttpRequest::create(ExecutionContext* context, PassRefPtr<SecurityOrigin> securityOrigin)
+PassRefPtrWillBeRawPtr<XMLHttpRequest> XMLHttpRequest::create(ScriptState* scriptState)
 {
+    RefPtr<SecurityOrigin> securityOrigin;
+    ExecutionContext* context = scriptState->executionContext();
+    if (context->isDocument()) {
+        DOMWrapperWorld& world = scriptState->world();
+        securityOrigin = world.isIsolatedWorld() ? world.isolatedWorldSecurityOrigin() : nullptr;
+    }
     RefPtrWillBeRawPtr<XMLHttpRequest> xmlHttpRequest = adoptRefWillBeNoop(new XMLHttpRequest(context, securityOrigin));
+    xmlHttpRequest->suspendIfNeeded();
+
+    return xmlHttpRequest.release();
+}
+
+PassRefPtrWillBeRawPtr<XMLHttpRequest> XMLHttpRequest::create(ExecutionContext* context)
+{
+    RefPtrWillBeRawPtr<XMLHttpRequest> xmlHttpRequest = adoptRefWillBeNoop(new XMLHttpRequest(context, nullptr));
     xmlHttpRequest->suspendIfNeeded();
 
     return xmlHttpRequest.release();
@@ -461,7 +484,7 @@ Blob* XMLHttpRequest::responseBlob()
             if (m_binaryResponseBuilder && m_binaryResponseBuilder->size()) {
                 size = m_binaryResponseBuilder->size();
                 blobData->appendBytes(m_binaryResponseBuilder->data(), size);
-                blobData->setContentType(finalResponseMIMETypeWithFallback());
+                blobData->setContentType(finalResponseMIMETypeWithFallback().lower());
                 m_binaryResponseBuilder.clear();
             }
             m_responseBlob = Blob::create(BlobDataHandle::create(blobData.release(), size));
@@ -563,12 +586,12 @@ void XMLHttpRequest::setResponseType(const String& responseType, ExceptionState&
     } else if (responseType == "arraybuffer") {
         m_responseTypeCode = ResponseTypeArrayBuffer;
     } else if (responseType == "legacystream") {
-        if (RuntimeEnabledFeatures::streamEnabled())
+        if (RuntimeEnabledFeatures::experimentalStreamEnabled())
             m_responseTypeCode = ResponseTypeLegacyStream;
         else
             return;
     } else if (responseType == "stream") {
-        if (RuntimeEnabledFeatures::streamEnabled())
+        if (RuntimeEnabledFeatures::experimentalStreamEnabled())
             m_responseTypeCode = ResponseTypeStream;
         else
             return;
@@ -645,8 +668,6 @@ void XMLHttpRequest::dispatchReadyStateChangeEvent()
     if (!executionContext())
         return;
 
-    InspectorInstrumentationCookie cookie = InspectorInstrumentation::willDispatchXHRReadyStateChangeEvent(executionContext(), this);
-
     if (m_async || (m_state <= OPENED || m_state == DONE)) {
         TRACE_EVENT1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline"), "XHRReadyStateChange", "data", InspectorXhrReadyStateChangeEvent::data(executionContext(), this));
         XMLHttpRequestProgressEventThrottle::DeferredEventAction action = XMLHttpRequestProgressEventThrottle::Ignore;
@@ -660,13 +681,9 @@ void XMLHttpRequest::dispatchReadyStateChangeEvent()
         TRACE_EVENT_INSTANT1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline"), "UpdateCounters", "data", InspectorUpdateCountersEvent::data());
     }
 
-    InspectorInstrumentation::didDispatchXHRReadyStateChangeEvent(cookie);
     if (m_state == DONE && !m_error) {
         TRACE_EVENT1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline"), "XHRLoad", "data", InspectorXhrLoadEvent::data(executionContext(), this));
-        InspectorInstrumentationCookie cookie = InspectorInstrumentation::willDispatchXHRLoadEvent(executionContext(), this);
         dispatchProgressEventFromSnapshot(EventTypeNames::load);
-        InspectorInstrumentation::didDispatchXHRLoadEvent(cookie);
-
         dispatchProgressEventFromSnapshot(EventTypeNames::loadend);
         TRACE_EVENT_INSTANT1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline"), "UpdateCounters", "data", InspectorUpdateCountersEvent::data());
     }
@@ -687,9 +704,14 @@ void XMLHttpRequest::setWithCredentials(bool value, ExceptionState& exceptionSta
     m_includeCredentials = value;
 }
 
-void XMLHttpRequest::open(const AtomicString& method, const KURL& url, ExceptionState& exceptionState)
+void XMLHttpRequest::open(const AtomicString& method, const String& url, ExceptionState& exceptionState)
 {
     open(method, url, true, exceptionState);
+}
+
+void XMLHttpRequest::open(const AtomicString& method, const String& urlString, bool async, ExceptionState& exceptionState)
+{
+    open(method, executionContext()->completeURL(urlString), async, exceptionState);
 }
 
 void XMLHttpRequest::open(const AtomicString& method, const KURL& url, bool async, ExceptionState& exceptionState)
@@ -763,19 +785,22 @@ void XMLHttpRequest::open(const AtomicString& method, const KURL& url, bool asyn
         m_state = OPENED;
 }
 
-void XMLHttpRequest::open(const AtomicString& method, const KURL& url, bool async, const String& user, ExceptionState& exceptionState)
+void XMLHttpRequest::open(const AtomicString& method, const String& urlString, bool async, const String& user, ExceptionState& exceptionState)
 {
-    KURL urlWithCredentials(url);
-    urlWithCredentials.setUser(user);
+    KURL urlWithCredentials(executionContext()->completeURL(urlString));
+    if (!user.isNull())
+        urlWithCredentials.setUser(user);
 
     open(method, urlWithCredentials, async, exceptionState);
 }
 
-void XMLHttpRequest::open(const AtomicString& method, const KURL& url, bool async, const String& user, const String& password, ExceptionState& exceptionState)
+void XMLHttpRequest::open(const AtomicString& method, const String& urlString, bool async, const String& user, const String& password, ExceptionState& exceptionState)
 {
-    KURL urlWithCredentials(url);
-    urlWithCredentials.setUser(user);
-    urlWithCredentials.setPass(password);
+    KURL urlWithCredentials(executionContext()->completeURL(urlString));
+    if (!user.isNull())
+        urlWithCredentials.setUser(user);
+    if (!password.isNull())
+        urlWithCredentials.setPass(password);
 
     open(method, urlWithCredentials, async, exceptionState);
 }
@@ -794,8 +819,46 @@ bool XMLHttpRequest::initSend(ExceptionState& exceptionState)
     return true;
 }
 
+void XMLHttpRequest::send(const ArrayBufferOrArrayBufferViewOrBlobOrDocumentOrStringOrFormData& data, ExceptionState& exceptionState)
+{
+    if (data.isNull()) {
+        send(exceptionState);
+        return;
+    }
+
+    InspectorInstrumentation::willSendXMLHttpRequest(executionContext(), url());
+    if (data.isArrayBuffer()) {
+        send(data.getAsArrayBuffer().get(), exceptionState);
+        return;
+    }
+
+    if (data.isArrayBufferView()) {
+        send(data.getAsArrayBufferView().get(), exceptionState);
+        return;
+    }
+
+    if (data.isBlob()) {
+        send(data.getAsBlob(), exceptionState);
+        return;
+    }
+
+    if (data.isDocument()) {
+        send(data.getAsDocument().get(), exceptionState);
+        return;
+    }
+
+    if (data.isFormData()) {
+        send(data.getAsFormData().get(), exceptionState);
+        return;
+    }
+
+    ASSERT(data.isString());
+    send(data.getAsString(), exceptionState);
+}
+
 void XMLHttpRequest::send(ExceptionState& exceptionState)
 {
+    InspectorInstrumentation::willSendXMLHttpRequest(executionContext(), url());
     send(String(), exceptionState);
 }
 
@@ -1004,7 +1067,6 @@ void XMLHttpRequest::createRequest(PassRefPtr<FormData> httpBody, ExceptionState
     resourceLoaderOptions.allowCredentials = (m_sameOriginRequest || m_includeCredentials) ? AllowStoredCredentials : DoNotAllowStoredCredentials;
     resourceLoaderOptions.credentialsRequested = m_includeCredentials ? ClientRequestedCredentials : ClientDidNotRequestCredentials;
     resourceLoaderOptions.securityOrigin = securityOrigin();
-    resourceLoaderOptions.mixedContentBlockingTreatment = TreatAsActiveContent;
 
     // When responseType is set to "blob", we redirect the downloaded data to a
     // file-handle directly.
@@ -1023,6 +1085,7 @@ void XMLHttpRequest::createRequest(PassRefPtr<FormData> httpBody, ExceptionState
     m_error = false;
 
     if (m_async) {
+        UseCounter::count(&executionContext, UseCounter::XMLHttpRequestAsynchronous);
         if (m_upload)
             request.setReportUploadProgress(true);
 
@@ -1538,7 +1601,7 @@ PassRefPtr<BlobDataHandle> XMLHttpRequest::createBlobDataHandleFromResponse()
         // FIXME: finalResponseMIMETypeWithFallback() defaults to
         // text/xml which may be incorrect. Replace it with
         // finalResponseMIMEType() after compatibility investigation.
-        blobData->setContentType(finalResponseMIMETypeWithFallback());
+        blobData->setContentType(finalResponseMIMETypeWithFallback().lower());
     }
     return BlobDataHandle::create(blobData.release(), m_lengthDownloadedToFile);
 }
@@ -1578,6 +1641,12 @@ void XMLHttpRequest::endLoading()
     m_loaderIdentifier = 0;
 
     changeState(DONE);
+
+    if (!executionContext()->isDocument() || !document() || !document()->frame() || !document()->frame()->page())
+        return;
+
+    if (status() >= 200 && status() < 300)
+        document()->frame()->page()->chrome().client().xhrSucceeded(document()->frame());
 }
 
 void XMLHttpRequest::didSendData(unsigned long long bytesSent, unsigned long long totalBytesToBeSent)
@@ -1616,7 +1685,7 @@ void XMLHttpRequest::didReceiveResponse(unsigned long identifier, const Resource
         ASSERT(!m_responseStream);
         ASSERT(!m_responseStreamSource);
         m_responseStreamSource = new ReadableStreamSource(this, handle);
-        m_responseStream = new ReadableStreamImpl<ReadableStreamChunkTypeTraits<DOMArrayBuffer> >(executionContext(), m_responseStreamSource);
+        m_responseStream = new ReadableStreamImpl<ReadableStreamChunkTypeTraits<DOMArrayBufferView>>(m_responseStreamSource);
         m_responseStreamSource->startStream(m_responseStream);
 
         changeState(HEADERS_RECEIVED);
@@ -1714,7 +1783,7 @@ void XMLHttpRequest::didReceiveData(const char* data, unsigned len)
         if (!m_responseStream) {
             ASSERT(!m_responseStreamSource);
             m_responseStreamSource = new ReadableStreamSource(this, nullptr);
-            m_responseStream = new ReadableStreamImpl<ReadableStreamChunkTypeTraits<DOMArrayBuffer> >(executionContext(), m_responseStreamSource);
+            m_responseStream = new ReadableStreamImpl<ReadableStreamChunkTypeTraits<DOMArrayBufferView>>(m_responseStreamSource);
             m_responseStreamSource->startStream(m_responseStream);
         }
         m_responseStreamSource->didReceiveData(data, len);
@@ -1791,7 +1860,7 @@ bool XMLHttpRequest::hasPendingActivity() const
     // DocumentParserClient callbacks may be called.
     if (m_loader || m_responseDocumentParser)
         return true;
-    if (m_responseStream && (m_responseStream->state() == ReadableStream::Readable || m_responseStream->state() == ReadableStream::Waiting))
+    if (m_responseStream && m_responseStream->isLocked())
         return true;
     return m_eventDispatchRecursionLevel > 0;
 }
@@ -1812,7 +1881,7 @@ ExecutionContext* XMLHttpRequest::executionContext() const
     return ActiveDOMObject::executionContext();
 }
 
-void XMLHttpRequest::trace(Visitor* visitor)
+DEFINE_TRACE(XMLHttpRequest)
 {
     visitor->trace(m_responseBlob);
     visitor->trace(m_responseLegacyStream);

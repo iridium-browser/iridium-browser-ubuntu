@@ -2,28 +2,28 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "components/history/core/android/android_urls_database.h"
+#include "components/history/core/browser/android/android_urls_database.h"
 
 #include "base/files/file_path.h"
 #include "base/files/scoped_temp_dir.h"
 #include "base/path_service.h"
-#include "chrome/browser/history/history_database.h"
-#include "chrome/browser/history/history_unittest_base.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/test/base/testing_profile.h"
 #include "components/history/core/browser/history_constants.h"
+#include "components/history/core/browser/history_database.h"
+#include "components/history/core/test/history_unittest_base.h"
+#include "components/history/core/test/test_history_database.h"
 
 namespace history {
 
 class AndroidURLsMigrationTest : public HistoryUnitTestBase {
  public:
-  AndroidURLsMigrationTest() {
-  }
-  virtual ~AndroidURLsMigrationTest() {}
+  AndroidURLsMigrationTest() {}
+  ~AndroidURLsMigrationTest() override {}
 
  protected:
-  virtual void SetUp() {
+  void SetUp() override {
     profile_.reset(new TestingProfile);
 
     base::FilePath data_path;
@@ -45,7 +45,7 @@ class AndroidURLsMigrationTest : public HistoryUnitTestBase {
 // Disabled as this does not correctly set up all the tables so that migration
 // fails. See http://crbug.com/175460 .
 TEST_F(AndroidURLsMigrationTest, DISABLED_MigrateToVersion22) {
-  HistoryDatabase db;
+  TestHistoryDatabase db;
   ASSERT_EQ(sql::INIT_OK, db.Init(history_db_name_));
   // Migration has done.
   // The column of previous table shouldn't exist.

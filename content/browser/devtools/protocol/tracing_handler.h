@@ -8,8 +8,8 @@
 #include <set>
 #include <string>
 
-#include "base/debug/trace_event.h"
 #include "base/memory/weak_ptr.h"
+#include "base/trace_event/trace_event.h"
 #include "content/browser/devtools/protocol/devtools_protocol_handler.h"
 #include "content/public/browser/tracing_controller.h"
 
@@ -50,7 +50,8 @@ class TracingHandler {
   void OnCategoriesReceived(DevToolsCommandId command_id,
                             const std::set<std::string>& category_set);
 
-  base::debug::TraceOptions TraceOptionsFromString(const std::string* options);
+  base::trace_event::TraceOptions TraceOptionsFromString(
+      const std::string* options);
 
   void SetupTimer(double usage_reporting_interval);
 

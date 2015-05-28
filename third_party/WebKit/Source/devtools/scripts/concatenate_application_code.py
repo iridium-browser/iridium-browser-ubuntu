@@ -110,7 +110,7 @@ class ReleaseBuilder(AppBuilder):
     def build_app(self):
         self._build_html()
         self._build_app_script()
-        for module in filter(lambda desc: not desc.get('type'), self.descriptors.application.values()):
+        for module in filter(lambda desc: (not desc.get('type') or desc.get('type') == 'remote'), self.descriptors.application.values()):
             self._concatenate_dynamic_module(module['name'])
         for module in filter(lambda desc: desc.get('type') == 'worker', self.descriptors.application.values()):
             self._concatenate_worker(module['name'])
@@ -158,6 +158,12 @@ class ReleaseBuilder(AppBuilder):
             # Stylesheets list is not used at runtime.
             if stylesheets is not None:
                 del module['stylesheets']
+            condition = self.descriptors.application[name].get('condition')
+            if condition:
+                module['condition'] = condition
+            type = self.descriptors.application[name].get('type')
+            if type == 'remote':
+                module['remote'] = True
             result.append(module)
         return json.dumps(result)
 

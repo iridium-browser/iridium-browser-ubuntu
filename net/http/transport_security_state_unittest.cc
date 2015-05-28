@@ -15,7 +15,6 @@
 #include "base/strings/string_piece.h"
 #include "crypto/sha2.h"
 #include "net/base/net_errors.h"
-#include "net/base/net_log.h"
 #include "net/base/test_completion_callback.h"
 #include "net/base/test_data_directory.h"
 #include "net/cert/asn1_util.h"
@@ -25,6 +24,7 @@
 #include "net/cert/x509_cert_types.h"
 #include "net/cert/x509_certificate.h"
 #include "net/http/http_util.h"
+#include "net/log/net_log.h"
 #include "net/ssl/ssl_info.h"
 #include "net/test/cert_test_util.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -55,42 +55,45 @@ class TransportSecurityStateTest : public testing::Test {
     state->enable_static_pins_ = true;
   }
 
+  static HashValueVector GetSampleSPKIHashes() {
+    HashValueVector spki_hashes;
+    HashValue hash(HASH_VALUE_SHA1);
+    memset(hash.data(), 0, hash.size());
+    spki_hashes.push_back(hash);
+    return spki_hashes;
+  }
+
  protected:
   bool GetStaticDomainState(TransportSecurityState* state,
                             const std::string& host,
                             TransportSecurityState::DomainState* result) {
     return state->GetStaticDomainState(host, result);
   }
-
-  void EnableHost(TransportSecurityState* state,
-                  const std::string& host,
-                  const TransportSecurityState::DomainState& domain_state) {
-    return state->EnableHost(host, domain_state);
-  }
 };
 
 TEST_F(TransportSecurityStateTest, SimpleMatches) {
   TransportSecurityState state;
-  TransportSecurityState::DomainState domain_state;
   const base::Time current_time(base::Time::Now());
   const base::Time expiry = current_time + base::TimeDelta::FromSeconds(1000);
 
-  EXPECT_FALSE(state.GetDynamicDomainState("yahoo.com", &domain_state));
+  EXPECT_FALSE(state.ShouldUpgradeToSSL("yahoo.com"));
   bool include_subdomains = false;
   state.AddHSTS("yahoo.com", expiry, include_subdomains);
-  EXPECT_TRUE(state.GetDynamicDomainState("yahoo.com", &domain_state));
+  EXPECT_TRUE(state.ShouldUpgradeToSSL("yahoo.com"));
+  EXPECT_TRUE(state.ShouldSSLErrorsBeFatal("yahoo.com"));
+  EXPECT_FALSE(state.ShouldUpgradeToSSL("foo.yahoo.com"));
+  EXPECT_FALSE(state.ShouldSSLErrorsBeFatal("foo.yahoo.com"));
 }
 
 TEST_F(TransportSecurityStateTest, MatchesCase1) {
   TransportSecurityState state;
-  TransportSecurityState::DomainState domain_state;
   const base::Time current_time(base::Time::Now());
   const base::Time expiry = current_time + base::TimeDelta::FromSeconds(1000);
 
-  EXPECT_FALSE(state.GetDynamicDomainState("yahoo.com", &domain_state));
+  EXPECT_FALSE(state.ShouldUpgradeToSSL("yahoo.com"));
   bool include_subdomains = false;
   state.AddHSTS("YAhoo.coM", expiry, include_subdomains);
-  EXPECT_TRUE(state.GetDynamicDomainState("yahoo.com", &domain_state));
+  EXPECT_TRUE(state.ShouldUpgradeToSSL("yahoo.com"));
 }
 
 TEST_F(TransportSecurityStateTest, Fuzz) {
@@ -117,80 +120,280 @@ TEST_F(TransportSecurityStateTest, Fuzz) {
 
 TEST_F(TransportSecurityStateTest, MatchesCase2) {
   TransportSecurityState state;
-  TransportSecurityState::DomainState domain_state;
   const base::Time current_time(base::Time::Now());
   const base::Time expiry = current_time + base::TimeDelta::FromSeconds(1000);
 
-  EXPECT_FALSE(state.GetDynamicDomainState("YAhoo.coM", &domain_state));
+  EXPECT_FALSE(state.ShouldUpgradeToSSL("YAhoo.coM"));
   bool include_subdomains = false;
   state.AddHSTS("yahoo.com", expiry, include_subdomains);
-  EXPECT_TRUE(state.GetDynamicDomainState("YAhoo.coM", &domain_state));
+  EXPECT_TRUE(state.ShouldUpgradeToSSL("YAhoo.coM"));
 }
 
 TEST_F(TransportSecurityStateTest, SubdomainMatches) {
   TransportSecurityState state;
-  TransportSecurityState::DomainState domain_state;
   const base::Time current_time(base::Time::Now());
   const base::Time expiry = current_time + base::TimeDelta::FromSeconds(1000);
 
-  EXPECT_FALSE(state.GetDynamicDomainState("yahoo.com", &domain_state));
+  EXPECT_FALSE(state.ShouldUpgradeToSSL("yahoo.com"));
   bool include_subdomains = true;
   state.AddHSTS("yahoo.com", expiry, include_subdomains);
-  EXPECT_TRUE(state.GetDynamicDomainState("yahoo.com", &domain_state));
-  EXPECT_TRUE(state.GetDynamicDomainState("foo.yahoo.com", &domain_state));
-  EXPECT_TRUE(state.GetDynamicDomainState("foo.bar.yahoo.com", &domain_state));
-  EXPECT_TRUE(
-      state.GetDynamicDomainState("foo.bar.baz.yahoo.com", &domain_state));
-  EXPECT_FALSE(state.GetDynamicDomainState("com", &domain_state));
+  EXPECT_TRUE(state.ShouldUpgradeToSSL("yahoo.com"));
+  EXPECT_TRUE(state.ShouldUpgradeToSSL("foo.yahoo.com"));
+  EXPECT_TRUE(state.ShouldUpgradeToSSL("foo.bar.yahoo.com"));
+  EXPECT_TRUE(state.ShouldUpgradeToSSL("foo.bar.baz.yahoo.com"));
+  EXPECT_FALSE(state.ShouldUpgradeToSSL("com"));
+  EXPECT_FALSE(state.ShouldUpgradeToSSL("notyahoo.com"));
 }
 
-TEST_F(TransportSecurityStateTest, InvalidDomains) {
+// Tests that a more-specific HSTS or HPKP rule overrides a less-specific rule
+// with it, regardless of the includeSubDomains bit. This is a regression test
+// for https://crbug.com/469957.
+TEST_F(TransportSecurityStateTest, SubdomainCarveout) {
   TransportSecurityState state;
-  TransportSecurityState::DomainState domain_state;
-  const base::Time current_time(base::Time::Now());
-  const base::Time expiry = current_time + base::TimeDelta::FromSeconds(1000);
-
-  EXPECT_FALSE(state.GetDynamicDomainState("yahoo.com", &domain_state));
-  bool include_subdomains = true;
-  state.AddHSTS("yahoo.com", expiry, include_subdomains);
-  EXPECT_TRUE(state.GetDynamicDomainState("www-.foo.yahoo.com", &domain_state));
-  EXPECT_TRUE(
-      state.GetDynamicDomainState("2\x01.foo.yahoo.com", &domain_state));
-}
-
-TEST_F(TransportSecurityStateTest, DeleteAllDynamicDataSince) {
-  TransportSecurityState state;
-  TransportSecurityState::DomainState domain_state;
   const base::Time current_time(base::Time::Now());
   const base::Time expiry = current_time + base::TimeDelta::FromSeconds(1000);
   const base::Time older = current_time - base::TimeDelta::FromSeconds(1000);
 
-  EXPECT_FALSE(state.GetDynamicDomainState("yahoo.com", &domain_state));
+  state.AddHSTS("example1.com", expiry, true);
+  state.AddHSTS("foo.example1.com", expiry, false);
+
+  state.AddHPKP("example2.com", expiry, true, GetSampleSPKIHashes());
+  state.AddHPKP("foo.example2.com", expiry, false, GetSampleSPKIHashes());
+
+  EXPECT_TRUE(state.ShouldUpgradeToSSL("example1.com"));
+  EXPECT_TRUE(state.ShouldUpgradeToSSL("foo.example1.com"));
+
+  // The foo.example1.com rule overrides the example1.com rule, so
+  // bar.foo.example1.com has no HSTS state.
+  EXPECT_FALSE(state.ShouldUpgradeToSSL("bar.foo.example1.com"));
+  EXPECT_FALSE(state.ShouldSSLErrorsBeFatal("bar.foo.example1.com"));
+
+  EXPECT_TRUE(state.HasPublicKeyPins("example2.com"));
+  EXPECT_TRUE(state.HasPublicKeyPins("foo.example2.com"));
+
+  // The foo.example2.com rule overrides the example1.com rule, so
+  // bar.foo.example2.com has no HPKP state.
+  EXPECT_FALSE(state.HasPublicKeyPins("bar.foo.example2.com"));
+  EXPECT_FALSE(state.ShouldSSLErrorsBeFatal("bar.foo.example2.com"));
+
+  // Expire the foo.example*.com rules.
+  state.AddHSTS("foo.example1.com", older, false);
+  state.AddHPKP("foo.example2.com", older, false, GetSampleSPKIHashes());
+
+  // Now the base example*.com rules apply to bar.foo.example*.com.
+  EXPECT_TRUE(state.ShouldUpgradeToSSL("bar.foo.example1.com"));
+  EXPECT_TRUE(state.ShouldSSLErrorsBeFatal("bar.foo.example1.com"));
+  EXPECT_TRUE(state.HasPublicKeyPins("bar.foo.example2.com"));
+  EXPECT_TRUE(state.ShouldSSLErrorsBeFatal("bar.foo.example2.com"));
+}
+
+TEST_F(TransportSecurityStateTest, FatalSSLErrors) {
+  TransportSecurityState state;
+  const base::Time current_time(base::Time::Now());
+  const base::Time expiry = current_time + base::TimeDelta::FromSeconds(1000);
+
+  state.AddHSTS("example1.com", expiry, false);
+  state.AddHPKP("example2.com", expiry, false, GetSampleSPKIHashes());
+
+  // The presense of either HSTS or HPKP is enough to make SSL errors fatal.
+  EXPECT_TRUE(state.ShouldSSLErrorsBeFatal("example1.com"));
+  EXPECT_TRUE(state.ShouldSSLErrorsBeFatal("example2.com"));
+}
+
+// Tests that HPKP and HSTS state both expire. Also tests that expired entries
+// are pruned.
+TEST_F(TransportSecurityStateTest, Expiration) {
+  TransportSecurityState state;
+  const base::Time current_time(base::Time::Now());
+  const base::Time expiry = current_time + base::TimeDelta::FromSeconds(1000);
+  const base::Time older = current_time - base::TimeDelta::FromSeconds(1000);
+
+  // Note: this test assumes that inserting an entry with an expiration time in
+  // the past works and is pruned on query.
+  state.AddHSTS("example1.com", older, false);
+  EXPECT_TRUE(TransportSecurityState::Iterator(state).HasNext());
+  EXPECT_FALSE(state.ShouldUpgradeToSSL("example1.com"));
+  // Querying |state| for a domain should flush out expired entries.
+  EXPECT_FALSE(TransportSecurityState::Iterator(state).HasNext());
+
+  state.AddHPKP("example1.com", older, false, GetSampleSPKIHashes());
+  EXPECT_TRUE(TransportSecurityState::Iterator(state).HasNext());
+  EXPECT_FALSE(state.HasPublicKeyPins("example1.com"));
+  // Querying |state| for a domain should flush out expired entries.
+  EXPECT_FALSE(TransportSecurityState::Iterator(state).HasNext());
+
+  state.AddHSTS("example1.com", older, false);
+  state.AddHPKP("example1.com", older, false, GetSampleSPKIHashes());
+  EXPECT_TRUE(TransportSecurityState::Iterator(state).HasNext());
+  EXPECT_FALSE(state.ShouldSSLErrorsBeFatal("example1.com"));
+  // Querying |state| for a domain should flush out expired entries.
+  EXPECT_FALSE(TransportSecurityState::Iterator(state).HasNext());
+
+  // Test that HSTS can outlive HPKP.
+  state.AddHSTS("example1.com", expiry, false);
+  state.AddHPKP("example1.com", older, false, GetSampleSPKIHashes());
+  EXPECT_TRUE(state.ShouldUpgradeToSSL("example1.com"));
+  EXPECT_FALSE(state.HasPublicKeyPins("example1.com"));
+
+  // Test that HPKP can outlive HSTS.
+  state.AddHSTS("example2.com", older, false);
+  state.AddHPKP("example2.com", expiry, false, GetSampleSPKIHashes());
+  EXPECT_FALSE(state.ShouldUpgradeToSSL("example2.com"));
+  EXPECT_TRUE(state.HasPublicKeyPins("example2.com"));
+}
+
+TEST_F(TransportSecurityStateTest, InvalidDomains) {
+  TransportSecurityState state;
+  const base::Time current_time(base::Time::Now());
+  const base::Time expiry = current_time + base::TimeDelta::FromSeconds(1000);
+
+  EXPECT_FALSE(state.ShouldUpgradeToSSL("yahoo.com"));
+  bool include_subdomains = true;
+  state.AddHSTS("yahoo.com", expiry, include_subdomains);
+  EXPECT_TRUE(state.ShouldUpgradeToSSL("www-.foo.yahoo.com"));
+  EXPECT_TRUE(state.ShouldUpgradeToSSL("2\x01.foo.yahoo.com"));
+}
+
+// Tests that HPKP and HSTS state are queried independently for subdomain
+// matches.
+TEST_F(TransportSecurityStateTest, IndependentSubdomain) {
+  TransportSecurityState state;
+  const base::Time current_time(base::Time::Now());
+  const base::Time expiry = current_time + base::TimeDelta::FromSeconds(1000);
+
+  state.AddHSTS("example1.com", expiry, true);
+  state.AddHPKP("example1.com", expiry, false, GetSampleSPKIHashes());
+
+  state.AddHSTS("example2.com", expiry, false);
+  state.AddHPKP("example2.com", expiry, true, GetSampleSPKIHashes());
+
+  EXPECT_TRUE(state.ShouldUpgradeToSSL("foo.example1.com"));
+  EXPECT_FALSE(state.HasPublicKeyPins("foo.example1.com"));
+  EXPECT_FALSE(state.ShouldUpgradeToSSL("foo.example2.com"));
+  EXPECT_TRUE(state.HasPublicKeyPins("foo.example2.com"));
+}
+
+// Tests that HPKP and HSTS state are inserted and overridden independently.
+TEST_F(TransportSecurityStateTest, IndependentInsertion) {
+  TransportSecurityState state;
+  const base::Time current_time(base::Time::Now());
+  const base::Time expiry = current_time + base::TimeDelta::FromSeconds(1000);
+
+  // Place an includeSubdomains HSTS entry below a normal HPKP entry.
+  state.AddHSTS("example1.com", expiry, true);
+  state.AddHPKP("foo.example1.com", expiry, false, GetSampleSPKIHashes());
+
+  EXPECT_TRUE(state.ShouldUpgradeToSSL("foo.example1.com"));
+  EXPECT_TRUE(state.HasPublicKeyPins("foo.example1.com"));
+  EXPECT_TRUE(state.ShouldUpgradeToSSL("example1.com"));
+  EXPECT_FALSE(state.HasPublicKeyPins("example1.com"));
+
+  // Drop the includeSubdomains from the HSTS entry.
+  state.AddHSTS("example1.com", expiry, false);
+
+  EXPECT_FALSE(state.ShouldUpgradeToSSL("foo.example1.com"));
+  EXPECT_TRUE(state.HasPublicKeyPins("foo.example1.com"));
+
+  // Place an includeSubdomains HPKP entry below a normal HSTS entry.
+  state.AddHSTS("foo.example2.com", expiry, false);
+  state.AddHPKP("example2.com", expiry, true, GetSampleSPKIHashes());
+
+  EXPECT_TRUE(state.ShouldUpgradeToSSL("foo.example2.com"));
+  EXPECT_TRUE(state.HasPublicKeyPins("foo.example2.com"));
+
+  // Drop the includeSubdomains from the HSTS entry.
+  state.AddHPKP("example2.com", expiry, false, GetSampleSPKIHashes());
+
+  EXPECT_TRUE(state.ShouldUpgradeToSSL("foo.example2.com"));
+  EXPECT_FALSE(state.HasPublicKeyPins("foo.example2.com"));
+}
+
+// Tests that GetDynamicDomainState appropriately stitches together the results
+// of HSTS and HPKP.
+TEST_F(TransportSecurityStateTest, DynamicDomainState) {
+  TransportSecurityState state;
+  const base::Time current_time(base::Time::Now());
+  const base::Time expiry1 = current_time + base::TimeDelta::FromSeconds(1000);
+  const base::Time expiry2 = current_time + base::TimeDelta::FromSeconds(2000);
+
+  state.AddHSTS("example.com", expiry1, true);
+  state.AddHPKP("foo.example.com", expiry2, false, GetSampleSPKIHashes());
+
+  TransportSecurityState::DomainState domain_state;
+  ASSERT_TRUE(state.GetDynamicDomainState("foo.example.com", &domain_state));
+  EXPECT_TRUE(domain_state.ShouldUpgradeToSSL());
+  EXPECT_TRUE(domain_state.HasPublicKeyPins());
+  EXPECT_TRUE(domain_state.sts.include_subdomains);
+  EXPECT_FALSE(domain_state.pkp.include_subdomains);
+  EXPECT_EQ(expiry1, domain_state.sts.expiry);
+  EXPECT_EQ(expiry2, domain_state.pkp.expiry);
+  EXPECT_EQ("example.com", domain_state.sts.domain);
+  EXPECT_EQ("foo.example.com", domain_state.pkp.domain);
+}
+
+// Tests that new pins always override previous pins. This should be true for
+// both pins at the same domain or includeSubdomains pins at a parent domain.
+TEST_F(TransportSecurityStateTest, NewPinsOverride) {
+  TransportSecurityState state;
+  TransportSecurityState::DomainState domain_state;
+  const base::Time current_time(base::Time::Now());
+  const base::Time expiry = current_time + base::TimeDelta::FromSeconds(1000);
+  HashValue hash1(HASH_VALUE_SHA1);
+  memset(hash1.data(), 0x01, hash1.size());
+  HashValue hash2(HASH_VALUE_SHA1);
+  memset(hash2.data(), 0x02, hash1.size());
+  HashValue hash3(HASH_VALUE_SHA1);
+  memset(hash3.data(), 0x03, hash1.size());
+
+  state.AddHPKP("example.com", expiry, true, HashValueVector(1, hash1));
+
+  ASSERT_TRUE(state.GetDynamicDomainState("foo.example.com", &domain_state));
+  ASSERT_EQ(1u, domain_state.pkp.spki_hashes.size());
+  EXPECT_TRUE(domain_state.pkp.spki_hashes[0].Equals(hash1));
+
+  state.AddHPKP("foo.example.com", expiry, false, HashValueVector(1, hash2));
+
+  ASSERT_TRUE(state.GetDynamicDomainState("foo.example.com", &domain_state));
+  ASSERT_EQ(1u, domain_state.pkp.spki_hashes.size());
+  EXPECT_TRUE(domain_state.pkp.spki_hashes[0].Equals(hash2));
+
+  state.AddHPKP("foo.example.com", expiry, false, HashValueVector(1, hash3));
+
+  ASSERT_TRUE(state.GetDynamicDomainState("foo.example.com", &domain_state));
+  ASSERT_EQ(1u, domain_state.pkp.spki_hashes.size());
+  EXPECT_TRUE(domain_state.pkp.spki_hashes[0].Equals(hash3));
+}
+
+TEST_F(TransportSecurityStateTest, DeleteAllDynamicDataSince) {
+  TransportSecurityState state;
+  const base::Time current_time(base::Time::Now());
+  const base::Time expiry = current_time + base::TimeDelta::FromSeconds(1000);
+  const base::Time older = current_time - base::TimeDelta::FromSeconds(1000);
+
+  EXPECT_FALSE(state.ShouldUpgradeToSSL("yahoo.com"));
   bool include_subdomains = false;
   state.AddHSTS("yahoo.com", expiry, include_subdomains);
 
   state.DeleteAllDynamicDataSince(expiry);
-  EXPECT_TRUE(state.GetDynamicDomainState("yahoo.com", &domain_state));
-  EXPECT_EQ(TransportSecurityState::DomainState::MODE_FORCE_HTTPS,
-            domain_state.sts.upgrade_mode);
+  EXPECT_TRUE(state.ShouldUpgradeToSSL("yahoo.com"));
   state.DeleteAllDynamicDataSince(older);
-  EXPECT_TRUE(state.GetDynamicDomainState("yahoo.com", &domain_state));
-  EXPECT_EQ(TransportSecurityState::DomainState::MODE_DEFAULT,
-            domain_state.sts.upgrade_mode);
+  EXPECT_FALSE(state.ShouldUpgradeToSSL("yahoo.com"));
+
+  // |state| should be empty now.
+  EXPECT_FALSE(TransportSecurityState::Iterator(state).HasNext());
 }
 
 TEST_F(TransportSecurityStateTest, DeleteDynamicDataForHost) {
   TransportSecurityState state;
-  TransportSecurityState::DomainState domain_state;
   const base::Time current_time(base::Time::Now());
   const base::Time expiry = current_time + base::TimeDelta::FromSeconds(1000);
   bool include_subdomains = false;
   state.AddHSTS("yahoo.com", expiry, include_subdomains);
 
-  EXPECT_TRUE(state.GetDynamicDomainState("yahoo.com", &domain_state));
-  EXPECT_FALSE(state.GetDynamicDomainState("example.com", &domain_state));
+  EXPECT_TRUE(state.ShouldUpgradeToSSL("yahoo.com"));
+  EXPECT_FALSE(state.ShouldUpgradeToSSL("example.com"));
   EXPECT_TRUE(state.DeleteDynamicDataForHost("yahoo.com"));
-  EXPECT_FALSE(state.GetDynamicDomainState("yahoo.com", &domain_state));
+  EXPECT_FALSE(state.ShouldUpgradeToSSL("yahoo.com"));
 }
 
 TEST_F(TransportSecurityStateTest, EnableStaticPins) {
@@ -243,10 +446,12 @@ TEST_F(TransportSecurityStateTest, PreloadedDomainSet) {
   // chrome://net-internals/#hsts UI. So test that.
   EXPECT_TRUE(
       state.GetStaticDomainState("market.android.com", &domain_state));
-  EXPECT_EQ(domain_state.domain, "market.android.com");
+  EXPECT_EQ(domain_state.sts.domain, "market.android.com");
+  EXPECT_EQ(domain_state.pkp.domain, "market.android.com");
   EXPECT_TRUE(state.GetStaticDomainState(
       "sub.market.android.com", &domain_state));
-  EXPECT_EQ(domain_state.domain, "market.android.com");
+  EXPECT_EQ(domain_state.sts.domain, "market.android.com");
+  EXPECT_EQ(domain_state.pkp.domain, "market.android.com");
 }
 
 static bool StaticShouldRedirect(const char* hostname) {
@@ -626,7 +831,7 @@ static bool AddHash(const std::string& type_and_base64,
 
 TEST_F(TransportSecurityStateTest, PinValidationWithoutRejectedCerts) {
   // kGoodPath is blog.torproject.org.
-  static const char* kGoodPath[] = {
+  static const char* const kGoodPath[] = {
     "sha1/m9lHYJYke9k0GtVZ+bXSQYE8nDI=",
     "sha1/o5OZxATDsgmwgcIfIWIneMJ0jkw=",
     "sha1/wHqYaI2J+6sFZAwRfap9ZbjKzE4=",
@@ -635,7 +840,7 @@ TEST_F(TransportSecurityStateTest, PinValidationWithoutRejectedCerts) {
 
   // kBadPath is plus.google.com via Trustcenter, which is utterly wrong for
   // torproject.org.
-  static const char* kBadPath[] = {
+  static const char* const kBadPath[] = {
     "sha1/4BjDjn8v2lWeUFQnqSs0BgbIcrU=",
     "sha1/gzuEEAB/bkqdQS3EIjk2by7lW+k=",
     "sha1/SOZo+SvSspXXR9gjIBBPM5iQn9Q=",
@@ -697,13 +902,11 @@ TEST_F(TransportSecurityStateTest, OverrideBuiltins) {
   EXPECT_FALSE(StaticShouldRedirect("www.google.com"));
 
   TransportSecurityState state;
-  TransportSecurityState::DomainState domain_state;
   const base::Time current_time(base::Time::Now());
   const base::Time expiry = current_time + base::TimeDelta::FromSeconds(1000);
-  domain_state.sts.expiry = expiry;
-  EnableHost(&state, "www.google.com", domain_state);
+  state.AddHSTS("www.google.com", expiry, true);
 
-  EXPECT_TRUE(state.GetDynamicDomainState("www.google.com", &domain_state));
+  EXPECT_TRUE(state.ShouldUpgradeToSSL("www.google.com"));
 }
 
 TEST_F(TransportSecurityStateTest, GooglePinnedProperties) {

@@ -7,6 +7,9 @@
 #include "base/i18n/string_compare.h"
 #include "components/bookmarks/browser/bookmark_model.h"
 
+using bookmarks::BookmarkModel;
+using bookmarks::BookmarkNode;
+
 namespace enhanced_bookmarks {
 
 // Comparator used to sort bookmarks. No folders are allowed.
@@ -42,8 +45,9 @@ void SortBookmarksByName(std::vector<const BookmarkNode*>& nodes) {
 std::vector<const BookmarkNode*> PrimaryPermanentNodes(BookmarkModel* model) {
   DCHECK(model->loaded());
   std::vector<const BookmarkNode*> nodes;
-  nodes.push_back(model->other_node());
   nodes.push_back(model->mobile_node());
+  nodes.push_back(model->bookmark_bar_node());
+  nodes.push_back(model->other_node());
   return nodes;
 }
 
@@ -61,12 +65,6 @@ std::vector<const BookmarkNode*> RootLevelFolders(BookmarkModel* model) {
         root_level_folders.push_back(node);
     }
   }
-
-  // Add the bookmark bar if it has children.
-  const BookmarkNode* bb_node = model->bookmark_bar_node();
-  if (bb_node->child_count() > 0)
-    root_level_folders.push_back(bb_node);
-
   return root_level_folders;
 }
 

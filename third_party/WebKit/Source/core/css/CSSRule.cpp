@@ -37,8 +37,6 @@ struct SameSizeAsCSSRule : public RefCountedWillBeGarbageCollectedFinalized<Same
 
 static_assert(sizeof(CSSRule) == sizeof(SameSizeAsCSSRule), "CSSRule should stay small");
 
-static_assert(StyleRuleBase::Viewport == static_cast<StyleRuleBase::Type>(CSSRule::VIEWPORT_RULE), "enums should match");
-
 void CSSRule::setCSSText(const String&)
 {
     notImplemented();
@@ -50,7 +48,7 @@ const CSSParserContext& CSSRule::parserContext() const
     return styleSheet ? styleSheet->contents()->parserContext() : strictCSSParserContext();
 }
 
-void CSSRule::trace(Visitor* visitor)
+DEFINE_TRACE(CSSRule)
 {
 #if ENABLE(OILPAN)
     // This makes the parent link strong, which is different from the

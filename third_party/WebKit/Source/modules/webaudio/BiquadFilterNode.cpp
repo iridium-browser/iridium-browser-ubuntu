@@ -23,18 +23,33 @@
  */
 
 #include "config.h"
-
 #if ENABLE(WEB_AUDIO)
-
 #include "modules/webaudio/BiquadFilterNode.h"
 
 namespace blink {
 
 BiquadFilterNode::BiquadFilterNode(AudioContext* context, float sampleRate)
-    : AudioBasicProcessorNode(NodeTypeBiquadFilter, context, sampleRate)
+    : AudioNode(*context)
+    , m_frequency(AudioParam::create(context, 350.0))
+    , m_q(AudioParam::create(context, 1))
+    , m_gain(AudioParam::create(context, 0.0))
+    , m_detune(AudioParam::create(context, 0.0))
 {
-    // Initially setup as lowpass filter.
-    m_processor = new BiquadProcessor(context, sampleRate, 1, false);
+    setHandler(new AudioBasicProcessorHandler(AudioHandler::NodeTypeBiquadFilter, *this, sampleRate, adoptPtr(new BiquadProcessor(sampleRate, 1, m_frequency->handler(), m_q->handler(), m_gain->handler(), m_detune->handler(), false))));
+}
+
+DEFINE_TRACE(BiquadFilterNode)
+{
+    visitor->trace(m_frequency);
+    visitor->trace(m_q);
+    visitor->trace(m_gain);
+    visitor->trace(m_detune);
+    AudioNode::trace(visitor);
+}
+
+BiquadProcessor* BiquadFilterNode::biquadProcessor() const
+{
+    return static_cast<BiquadProcessor*>(static_cast<AudioBasicProcessorHandler&>(handler()).processor());
 }
 
 String BiquadFilterNode::type() const
@@ -96,15 +111,9 @@ void BiquadFilterNode::getFrequencyResponse(const DOMFloat32Array* frequencyHz, 
     if (!frequencyHz || !magResponse || !phaseResponse)
         return;
 
-    int n = std::min(frequencyHz->length(),
-                     std::min(magResponse->length(), phaseResponse->length()));
-
-    if (n) {
-        biquadProcessor()->getFrequencyResponse(n,
-                                                frequencyHz->data(),
-                                                magResponse->data(),
-                                                phaseResponse->data());
-    }
+    int n = std::min(frequencyHz->length(), std::min(magResponse->length(), phaseResponse->length()));
+    if (n)
+        biquadProcessor()->getFrequencyResponse(n, frequencyHz->data(), magResponse->data(), phaseResponse->data());
 }
 
 } // namespace blink

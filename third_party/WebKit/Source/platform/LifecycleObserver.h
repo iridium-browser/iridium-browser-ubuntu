@@ -32,73 +32,55 @@
 
 namespace blink {
 
-template<typename T>
+template<typename T, typename Observer, typename Notifier>
 class LifecycleObserver : public WillBeGarbageCollectedMixin {
-#if ENABLE(OILPAN)
-    USING_PRE_FINALIZER(LifecycleObserver, dispose);
-#endif
 public:
-    typedef T Context;
+    using Context = T;
 
-    enum Type {
-        ActiveDOMObjectType,
-        DocumentLifecycleObserverType,
-        GenericType,
-        PageLifecycleObserverType,
-        DOMWindowLifecycleObserverType
-    };
-
-    explicit LifecycleObserver(Context* context, Type type = GenericType)
-        : m_lifecycleContext(nullptr)
-        , m_observerType(type)
-    {
-#if ENABLE(OILPAN)
-        ThreadState::current()->registerPreFinalizer(*this);
-#endif
-        observeContext(context);
-    }
+#if !ENABLE(OILPAN)
     virtual ~LifecycleObserver()
     {
-#if !ENABLE(OILPAN)
         dispose();
-#endif
     }
+#endif
 
-    virtual void trace(Visitor*) { }
+    DEFINE_INLINE_VIRTUAL_TRACE()
+    {
+        visitor->trace(m_lifecycleContext);
+    }
     virtual void contextDestroyed() { }
+
     void dispose()
     {
-        observeContext(nullptr);
+        setContext(nullptr);
     }
 
     Context* lifecycleContext() const { return m_lifecycleContext; }
     void clearLifecycleContext() { m_lifecycleContext = nullptr; }
-    Type observerType() const { return m_observerType; }
 
 protected:
-    void observeContext(Context*);
+    explicit LifecycleObserver(Context* context)
+        : m_lifecycleContext(nullptr)
+    {
+        setContext(context);
+    }
 
-    Context* m_lifecycleContext;
-    Type m_observerType;
+    void setContext(Context*);
+
+private:
+    RawPtrWillBeWeakMember<Context> m_lifecycleContext;
 };
 
-//
-// These functions should be specialized for each LifecycleObserver instances.
-//
-template<typename T> void observerContext(T*, LifecycleObserver<T>*) { ASSERT_NOT_REACHED(); }
-template<typename T> void unobserverContext(T*, LifecycleObserver<T>*) { ASSERT_NOT_REACHED(); }
-
-
-template<typename T>
-inline void LifecycleObserver<T>::observeContext(typename LifecycleObserver<T>::Context* context)
+template<typename T, typename Observer, typename Notifier>
+inline void LifecycleObserver<T, Observer, Notifier>::setContext(typename LifecycleObserver<T, Observer, Notifier>::Context* context)
 {
     if (m_lifecycleContext)
-        unobserverContext(m_lifecycleContext, this);
+        static_cast<Notifier*>(m_lifecycleContext.get())->removeObserver(static_cast<Observer*>(this));
 
     m_lifecycleContext = context;
 
     if (m_lifecycleContext)
-        observerContext(m_lifecycleContext, this);
+        static_cast<Notifier*>(m_lifecycleContext.get())->addObserver(static_cast<Observer*>(this));
 }
 
 } // namespace blink

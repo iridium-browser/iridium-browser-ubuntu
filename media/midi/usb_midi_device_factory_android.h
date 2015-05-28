@@ -22,15 +22,17 @@ namespace media {
 class MEDIA_EXPORT UsbMidiDeviceFactoryAndroid : public UsbMidiDevice::Factory {
  public:
   UsbMidiDeviceFactoryAndroid();
-  virtual ~UsbMidiDeviceFactoryAndroid();
+  ~UsbMidiDeviceFactoryAndroid() override;
 
   // UsbMidiDevice::Factory implementation.
-  virtual void EnumerateDevices(UsbMidiDeviceDelegate* delegate,
-                                Callback callback) override;
+  void EnumerateDevices(UsbMidiDeviceDelegate* delegate,
+                        Callback callback) override;
 
   void OnUsbMidiDeviceRequestDone(JNIEnv* env,
                                   jobject caller,
                                   jobjectArray devices);
+  void OnUsbMidiDeviceAttached(JNIEnv* env, jobject caller, jobject device);
+  void OnUsbMidiDeviceDetached(JNIEnv* env, jobject caller, jint index);
 
   static bool RegisterUsbMidiDeviceFactory(JNIEnv* env);
 

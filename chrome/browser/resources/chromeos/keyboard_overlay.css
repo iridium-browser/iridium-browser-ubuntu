@@ -6,6 +6,7 @@
 body {
   -webkit-user-select: none;
   background: #fff;
+  font-size: 100%;
   margin: 0;
   overflow: hidden;
   padding: 0;
@@ -64,7 +65,7 @@ body {
   border-radius: 4px;
   color: rgb(151, 151, 151);
   display: -webkit-box;
-  font-size: 75%;
+  font-size: 80%;
   font-weight: bold;
   position: absolute;
 }

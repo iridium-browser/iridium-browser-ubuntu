@@ -5,12 +5,12 @@
 #include "config.h"
 #include "core/paint/ReplicaPainter.h"
 
+#include "core/layout/LayoutReplica.h"
+#include "core/layout/PaintInfo.h"
+#include "core/paint/DeprecatedPaintLayer.h"
+#include "core/paint/DeprecatedPaintLayerPainter.h"
 #include "core/paint/GraphicsContextAnnotator.h"
-#include "core/paint/LayerPainter.h"
-#include "core/paint/RenderDrawingRecorder.h"
-#include "core/rendering/PaintInfo.h"
-#include "core/rendering/RenderLayer.h"
-#include "core/rendering/RenderReplica.h"
+#include "core/paint/LayoutObjectDrawingRecorder.h"
 
 namespace blink {
 
@@ -26,14 +26,15 @@ void ReplicaPainter::paint(const PaintInfo& paintInfo, const LayoutPoint& paintO
     if (paintInfo.phase == PaintPhaseForeground) {
         // Turn around and paint the parent layer. Use temporary clipRects, so that the layer doesn't end up caching clip rects
         // computing using the wrong rootLayer
-        RenderLayer* rootPaintingLayer = m_renderReplica.layer()->transform() ? m_renderReplica.layer()->parent() : m_renderReplica.layer()->enclosingTransformedAncestor();
-        LayerPaintingInfo paintingInfo(rootPaintingLayer, paintInfo.rect, PaintBehaviorNormal, LayoutSize(), 0);
+        DeprecatedPaintLayer* rootPaintingLayer = m_renderReplica.layer()->transform() ? m_renderReplica.layer()->parent() : m_renderReplica.layer()->enclosingTransformedAncestor();
+        DeprecatedPaintLayerPaintingInfo paintingInfo(rootPaintingLayer, LayoutRect(paintInfo.rect), PaintBehaviorNormal, LayoutSize(), 0);
         PaintLayerFlags flags = PaintLayerHaveTransparency | PaintLayerAppliedTransform | PaintLayerUncachedClipRects | PaintLayerPaintingReflection;
-        LayerPainter(*m_renderReplica.layer()->parent()).paintLayer(paintInfo.context, paintingInfo, flags);
+        DeprecatedPaintLayerPainter(*m_renderReplica.layer()->parent()).paintLayer(paintInfo.context, paintingInfo, flags);
     } else if (paintInfo.phase == PaintPhaseMask) {
         LayoutRect paintRect(adjustedPaintOffset, m_renderReplica.size());
-        RenderDrawingRecorder renderDrawingRecorder(paintInfo.context, m_renderReplica, paintInfo.phase, paintRect);
-        m_renderReplica.paintMask(paintInfo, adjustedPaintOffset);
+        LayoutObjectDrawingRecorder drawingRecorder(*paintInfo.context, m_renderReplica, paintInfo.phase, paintRect);
+        if (!drawingRecorder.canUseCachedDrawing())
+            m_renderReplica.paintMask(paintInfo, adjustedPaintOffset);
     }
 }
 

@@ -17,7 +17,7 @@ import org.chromium.chrome.R;
 import org.chromium.chrome.browser.notifications.GoogleServicesNotificationController;
 import org.chromium.chrome.browser.notifications.NotificationConstants;
 import org.chromium.chrome.browser.preferences.PreferencesLauncher;
-import org.chromium.sync.notifier.SyncStatusHelper;
+import org.chromium.sync.AndroidSyncSettings;
 
 /**
  * {@link SyncNotificationController} provides functionality for displaying Android notifications
@@ -27,19 +27,18 @@ public class SyncNotificationController implements ProfileSyncService.SyncStateC
     private static final String TAG = "SyncNotificationController";
     private final Context mApplicationContext;
     private final GoogleServicesNotificationController mNotificationController;
-    private final SyncStatusHelper mSyncStatusHelper;
+    private final AndroidSyncSettings mAndroidSyncSettings;
     private final Class<? extends Activity> mPassphraseRequestActivity;
     private final Class<? extends Fragment> mAccountManagementFragment;
     private final ProfileSyncService mProfileSyncService;
 
     public SyncNotificationController(Context context,
-            GoogleServicesNotificationController controller, ProfileSyncService profileSyncService,
-            SyncStatusHelper syncStatusHelper, Class<? extends Activity> passphraseRequestActivity,
+            Class<? extends Activity> passphraseRequestActivity,
             Class<? extends Fragment> accountManagementFragment) {
         mApplicationContext = context.getApplicationContext();
-        mNotificationController = controller;
-        mProfileSyncService = profileSyncService;
-        mSyncStatusHelper = syncStatusHelper;
+        mNotificationController = GoogleServicesNotificationController.get(context);
+        mProfileSyncService = ProfileSyncService.get(context);
+        mAndroidSyncSettings = AndroidSyncSettings.get(context);
         mPassphraseRequestActivity = passphraseRequestActivity;
         mAccountManagementFragment = accountManagementFragment;
     }
@@ -63,7 +62,7 @@ public class SyncNotificationController implements ProfileSyncService.SyncStateC
         Intent intent;
 
         // Auth errors take precedence over passphrase errors.
-        if (!mSyncStatusHelper.isSyncEnabled()) {
+        if (!mAndroidSyncSettings.isSyncEnabled()) {
             mNotificationController.cancelNotification(NotificationConstants.NOTIFICATION_ID_SYNC);
             return;
         }
@@ -73,10 +72,7 @@ public class SyncNotificationController implements ProfileSyncService.SyncStateC
         } else if (mProfileSyncService.isSyncInitialized()
                 && mProfileSyncService.isPassphraseRequiredForDecryption()) {
             switch (mProfileSyncService.getPassphraseType()) {
-                case IMPLICIT_PASSPHRASE:
-                    message = R.string.sync_need_password;
-                    intent = createPasswordIntent();
-                    break;
+                case IMPLICIT_PASSPHRASE: // Falling through intentionally.
                 case FROZEN_IMPLICIT_PASSPHRASE: // Falling through intentionally.
                 case CUSTOM_PASSPHRASE:
                     message = R.string.sync_need_passphrase;

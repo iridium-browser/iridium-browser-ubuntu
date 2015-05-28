@@ -15,18 +15,19 @@
 #include "base/strings/sys_string_conversions.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"  // IDC_*
+#import "chrome/browser/app_controller_mac.h"
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/bookmarks/chrome_bookmark_client.h"
 #include "chrome/browser/bookmarks/chrome_bookmark_client_factory.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/devtools/devtools_window.h"
+#include "chrome/browser/extensions/extension_commands_global_registry.h"
 #include "chrome/browser/fullscreen.h"
 #include "chrome/browser/profiles/avatar_menu.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_info_cache.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/profiles/profiles_state.h"
-#include "chrome/browser/signin/signin_ui_util.h"
 #include "chrome/browser/themes/theme_service.h"
 #include "chrome/browser/themes/theme_service_factory.h"
 #include "chrome/browser/translate/chrome_translate_client.h"
@@ -97,6 +98,8 @@
 #include "ui/base/l10n/l10n_util_mac.h"
 #include "ui/gfx/mac/scoped_ns_disable_screen_updates.h"
 
+using bookmarks::BookmarkModel;
+using bookmarks::BookmarkNode;
 using l10n_util::GetStringUTF16;
 using l10n_util::GetNSStringWithFixup;
 using l10n_util::GetNSStringFWithFixup;
@@ -205,33 +208,6 @@ using content::WebContents;
 + (BrowserWindowController*)browserWindowControllerForView:(NSView*)view {
   NSWindow* window = [view window];
   return [BrowserWindowController browserWindowControllerForWindow:window];
-}
-
-+ (void)updateSigninItem:(id)signinItem
-              shouldShow:(BOOL)showSigninMenuItem
-          currentProfile:(Profile*)profile {
-  DCHECK([signinItem isKindOfClass:[NSMenuItem class]]);
-  NSMenuItem* signinMenuItem = static_cast<NSMenuItem*>(signinItem);
-
-  // Look for a separator immediately after the menu item so it can be hidden
-  // or shown appropriately along with the signin menu item.
-  NSMenuItem* followingSeparator = nil;
-  NSMenu* menu = [signinItem menu];
-  if (menu) {
-    NSInteger signinItemIndex = [menu indexOfItem:signinMenuItem];
-    DCHECK_NE(signinItemIndex, -1);
-    if ((signinItemIndex + 1) < [menu numberOfItems]) {
-      NSMenuItem* menuItem = [menu itemAtIndex:(signinItemIndex + 1)];
-      if ([menuItem isSeparatorItem]) {
-        followingSeparator = menuItem;
-      }
-    }
-  }
-
-  base::string16 label = signin_ui_util::GetSigninMenuLabel(profile);
-  [signinMenuItem setTitle:l10n_util::FixUpWindowsStyleLabel(label)];
-  [signinMenuItem setHidden:!showSigninMenuItem];
-  [followingSeparator setHidden:!showSigninMenuItem];
 }
 
 // Load the browser window nib and do any Cocoa-specific initialization.
@@ -617,23 +593,23 @@ using content::WebContents;
   BrowserList::SetLastActive(browser_.get());
   [self saveWindowPositionIfNeeded];
 
-  // TODO(dmaclach): Instead of redrawing the whole window, views that care
-  // about the active window state should be registering for notifications.
-  [[self window] setViewsNeedDisplay:YES];
+  [[[self window] contentView] cr_recursivelyInvokeBlock:^(id view) {
+      if ([view conformsToProtocol:@protocol(ThemedWindowDrawing)])
+        [view windowDidChangeActive];
+  }];
 
-  // TODO(viettrungluu): For some reason, the above doesn't suffice.
-  if ([self isInAnyFullscreenMode])
-    [floatingBarBackingView_ setNeedsDisplay:YES];  // Okay even if nil.
+  extensions::ExtensionCommandsGlobalRegistry::Get(browser_->profile())
+      ->set_registry_for_active_window(extension_keybinding_registry_.get());
 }
 
 - (void)windowDidResignMain:(NSNotification*)notification {
-  // TODO(dmaclach): Instead of redrawing the whole window, views that care
-  // about the active window state should be registering for notifications.
-  [[self window] setViewsNeedDisplay:YES];
+  [[[self window] contentView] cr_recursivelyInvokeBlock:^(id view) {
+      if ([view conformsToProtocol:@protocol(ThemedWindowDrawing)])
+        [view windowDidChangeActive];
+  }];
 
-  // TODO(viettrungluu): For some reason, the above doesn't suffice.
-  if ([self isInAnyFullscreenMode])
-    [floatingBarBackingView_ setNeedsDisplay:YES];  // Okay even if nil.
+  extensions::ExtensionCommandsGlobalRegistry::Get(browser_->profile())
+      ->set_registry_for_active_window(nullptr);
 }
 
 // Called when we are activated (when we gain focus).
@@ -1134,9 +1110,9 @@ using content::WebContents;
         case IDC_SHOW_SIGNIN: {
           Profile* original_profile =
               browser_->profile()->GetOriginalProfile();
-          [BrowserWindowController updateSigninItem:item
-                                         shouldShow:enable
-                                     currentProfile:original_profile];
+          [AppController updateSigninItem:item
+                               shouldShow:enable
+                           currentProfile:original_profile];
           break;
         }
         case IDC_BOOKMARK_PAGE: {
@@ -1694,7 +1670,15 @@ using content::WebContents;
 }
 
 - (void)userChangedTheme {
-  [[[[self window] contentView] superview] cr_recursivelySetNeedsDisplay:YES];
+  NSView* rootView = [[[self window] contentView] superview];
+  [rootView cr_recursivelyInvokeBlock:^(id view) {
+      if ([view conformsToProtocol:@protocol(ThemedWindowDrawing)])
+        [view windowDidChangeTheme];
+
+      // TODO(andresantoso): Remove this once all themed views respond to
+      // windowDidChangeTheme above.
+      [view setNeedsDisplay:YES];
+  }];
 }
 
 - (ui::ThemeProvider*)themeProvider {
@@ -2039,10 +2023,6 @@ willAnimateFromState:(BookmarkBar::State)oldState
 
   // Shift to window base coordinates.
   return [[toolbarView superview] convertRect:anchorRect toView:nil];
-}
-
-- (void)layoutInfoBars {
-  [self layoutSubviews];
 }
 
 - (void)sheetDidEnd:(NSWindow*)sheet

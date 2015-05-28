@@ -44,11 +44,18 @@
 #ifndef COMPONENTS_PASSWORD_MANAGER_CORE_BROWSER_AFFILIATION_UTILS_H_
 #define COMPONENTS_PASSWORD_MANAGER_CORE_BROWSER_AFFILIATION_UTILS_H_
 
+#include <iosfwd>
 #include <string>
 #include <vector>
 
+#include "base/containers/hash_tables.h"
 #include "base/logging.h"
+#include "base/time/time.h"
 #include "url/url_parse.h"
+
+namespace base {
+class CommandLine;
+}  // namespace base
 
 namespace password_manager {
 
@@ -99,10 +106,12 @@ class FacetURI {
   bool IsValidAndroidFacetURI() const;
 
   // Returns whether or not this instance represents a valid facet identifier
-  // referring to either a Web or an Android application.
-  bool is_valid() const {
-    return is_valid_;
-  }
+  // referring to either a Web or an Android application. The empty identfier is
+  // not considered valid.
+  bool is_valid() const { return is_valid_; }
+
+  // Returns whether or not this instance represents the empty facet identifier.
+  bool is_empty() const { return canonical_spec_.empty(); }
 
   // Returns the canonical scheme of the encapsulated facet URI, provided it is
   // valid, or the empty string otherwise.
@@ -116,6 +125,11 @@ class FacetURI {
   // Returns the text of the encapsulated canonical URI, which must be valid.
   const std::string& canonical_spec() const {
     DCHECK(is_valid_);
+    return canonical_spec_;
+  }
+
+  // Returns the text of the encapsulated canonical URI, even if it is invalid.
+  const std::string& potentially_invalid_spec() const {
     return canonical_spec_;
   }
 
@@ -137,6 +151,17 @@ class FacetURI {
 // A collection of facets affiliated with each other, i.e. an equivalence class.
 typedef std::vector<FacetURI> AffiliatedFacets;
 
+// A collection of facets affiliated with each other, i.e. an equivalence class,
+// plus a timestamp that indicates the last time the data was updated from an
+// authoritative source.
+struct AffiliatedFacetsWithUpdateTime {
+  AffiliatedFacetsWithUpdateTime();
+  ~AffiliatedFacetsWithUpdateTime();
+
+  AffiliatedFacets facets;
+  base::Time last_update_time;
+};
+
 // Returns whether or not equivalence classes |a| and |b| are equal, that is,
 // whether or not they consist of the same set of facets.
 //
@@ -147,6 +172,26 @@ bool AreEquivalenceClassesEqual(const AffiliatedFacets& a,
 // A shorter way to spell FacetURI::IsValidAndroidFacetURI().
 bool IsValidAndroidFacetURI(const std::string& uri);
 
+// Returns whether or not affiliation based matching is enabled, either via
+// command line flags or field trials. The command line flag, if present, always
+// takes precedence.
+bool IsAffiliationBasedMatchingEnabled(const base::CommandLine& command_line);
+
+// For logging use only.
+std::ostream& operator<<(std::ostream& os, const FacetURI& facet_uri);
+
 }  // namespace password_manager
+
+// Provide a hash function so that hash_sets and maps can contain FacetURIs.
+namespace BASE_HASH_NAMESPACE {
+
+template <>
+struct hash<password_manager::FacetURI> {
+  size_t operator()(const password_manager::FacetURI& facet_uri) const {
+    return hash<std::string>()(facet_uri.potentially_invalid_spec());
+  }
+};
+
+}  // namespace BASE_HASH_NAMESPACE
 
 #endif  // COMPONENTS_PASSWORD_MANAGER_CORE_BROWSER_AFFILIATION_UTILS_H_

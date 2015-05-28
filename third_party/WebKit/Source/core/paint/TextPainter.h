@@ -5,8 +5,8 @@
 #ifndef TextPainter_h
 #define TextPainter_h
 
-#include "core/rendering/FloatToLayoutUnit.h"
-#include "core/rendering/style/RenderStyleConstants.h"
+#include "core/layout/line/FloatToLayoutUnit.h"
+#include "core/style/ComputedStyleConstants.h"
 #include "platform/fonts/TextBlob.h"
 #include "platform/geometry/FloatPoint.h"
 #include "platform/geometry/FloatRect.h"
@@ -19,9 +19,9 @@ namespace blink {
 class Font;
 class GraphicsContext;
 class GraphicsContextStateSaver;
-class RenderCombineText;
-class RenderObject;
-class RenderStyle;
+class LayoutTextCombine;
+class LayoutObject;
+class ComputedStyle;
 class ShadowList;
 class TextRun;
 struct TextRunPaintInfo;
@@ -34,7 +34,7 @@ public:
     ~TextPainter();
 
     void setEmphasisMark(const AtomicString&, TextEmphasisPosition);
-    void setCombinedText(RenderCombineText* combinedText) { m_combinedText = combinedText; }
+    void setCombinedText(LayoutTextCombine* combinedText) { m_combinedText = combinedText; }
 
     static void updateGraphicsContext(GraphicsContext*, const Style&, bool horizontal, GraphicsContextStateSaver&);
 
@@ -57,8 +57,8 @@ public:
         }
         bool operator!=(const Style& other) { return !(*this == other); }
     };
-    static Style textPaintingStyle(RenderObject&, RenderStyle*, bool forceBlackText, bool isPrinting);
-    static Style selectionPaintingStyle(RenderObject&, bool haveSelection, bool forceBlackText, bool isPrinting, const Style& textStyle);
+    static Style textPaintingStyle(LayoutObject&, const ComputedStyle&, bool forceBlackText, bool isPrinting);
+    static Style selectionPaintingStyle(LayoutObject&, bool haveSelection, bool forceBlackText, bool isPrinting, const Style& textStyle);
 
     enum RotationDirection { Counterclockwise, Clockwise };
     static AffineTransform rotation(const FloatRectWillBeLayoutRect& boxRect, RotationDirection);
@@ -87,13 +87,24 @@ private:
     bool m_horizontal;
     AtomicString m_emphasisMark;
     int m_emphasisMarkOffset;
-    RenderCombineText* m_combinedText;
+    LayoutTextCombine* m_combinedText;
 };
 
 inline AffineTransform TextPainter::rotation(const FloatRectWillBeLayoutRect& boxRect, RotationDirection rotationDirection)
 {
-    return rotationDirection == Clockwise ? AffineTransform(0, 1, -1, 0, boxRect.x() + boxRect.maxY(), boxRect.maxY() - boxRect.x())
-        : AffineTransform(0, -1, 1, 0, boxRect.x() - boxRect.maxY(), boxRect.x() + boxRect.maxY());
+    // Why this matrix is correct: consider the case of a clockwise rotation.
+
+    // Let the corner points that define |boxRect| be ABCD, where A is top-left and B is bottom-left.
+
+    // 1. We want B to end up at the same pixel position after rotation as A is before rotation.
+    // 2. Before rotation, B is at (x(), maxY())
+    // 3. Rotating clockwise by 90 degrees places B at the coordinates (-maxY(), x()).
+    // 4. Point A before rotation is at (x(), y())
+    // 5. Therefore the translation from (3) to (4) is (x(), y()) - (-maxY(), x()) = (x() + maxY(), y() - x())
+
+    // A similar argument derives the counter-clockwise case.
+    return rotationDirection == Clockwise ? AffineTransform(0, 1, -1, 0, boxRect.x() + boxRect.maxY(), boxRect.y() - boxRect.x())
+        : AffineTransform(0, -1, 1, 0, boxRect.x() - boxRect.y(), boxRect.x() + boxRect.maxY());
 }
 
 } // namespace blink

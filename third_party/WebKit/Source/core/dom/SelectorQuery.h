@@ -85,7 +85,7 @@ private:
 
 class SelectorQuery {
     WTF_MAKE_NONCOPYABLE(SelectorQuery);
-    WTF_MAKE_FAST_ALLOCATED;
+    WTF_MAKE_FAST_ALLOCATED(SelectorQuery);
 public:
     static PassOwnPtr<SelectorQuery> adopt(CSSSelectorList&);
 
@@ -101,13 +101,13 @@ private:
 };
 
 class SelectorQueryCache {
-    WTF_MAKE_FAST_ALLOCATED;
+    WTF_MAKE_FAST_ALLOCATED(SelectorQueryCache);
 public:
     SelectorQuery* add(const AtomicString&, const Document&, ExceptionState&);
     void invalidate();
 
 private:
-    HashMap<AtomicString, OwnPtr<SelectorQuery> > m_entries;
+    HashMap<AtomicString, OwnPtr<SelectorQuery>> m_entries;
 };
 
 }

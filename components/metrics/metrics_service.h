@@ -27,6 +27,7 @@
 #include "components/metrics/metrics_log.h"
 #include "components/metrics/metrics_log_manager.h"
 #include "components/metrics/metrics_provider.h"
+#include "components/metrics/net/network_metrics_provider.h"
 #include "components/variations/active_field_trials.h"
 
 class MetricsServiceAccessor;
@@ -250,14 +251,10 @@ class MetricsService : public base::HistogramFlattener {
   // The MetricsService has a lifecycle that is stored as a state.
   // See metrics_service.cc for description of this lifecycle.
   enum State {
-    INITIALIZED,                    // Constructor was called.
-    INIT_TASK_SCHEDULED,            // Waiting for deferred init tasks to
-                                    // complete.
-    INIT_TASK_DONE,                 // Waiting for timer to send initial log.
-    SENDING_INITIAL_STABILITY_LOG,  // Initial stability log being sent.
-    SENDING_INITIAL_METRICS_LOG,    // Initial metrics log being sent.
-    SENDING_OLD_LOGS,               // Sending unsent logs from last session.
-    SENDING_CURRENT_LOGS,           // Sending ongoing logs as they accrue.
+    INITIALIZED,          // Constructor was called.
+    INIT_TASK_SCHEDULED,  // Waiting for deferred init tasks to finish.
+    INIT_TASK_DONE,       // Waiting for timer to send initial log.
+    SENDING_LOGS,         // Sending logs an creating new ones when we run out.
   };
 
   enum ShutdownCleanliness {
@@ -332,12 +329,13 @@ class MetricsService : public base::HistogramFlattener {
   // Starts the process of uploading metrics data.
   void StartScheduledUpload();
 
-  // Called by the client when final log info collection is complete.
+  // Called by the client via a callback when final log info collection is
+  // complete.
   void OnFinalLogInfoCollectionDone();
 
-  // Either closes the current log or creates and closes the initial log
-  // (depending on |state_|), and stages it for upload.
-  void StageNewLog();
+  // If recording is enabled, begins uploading the next completed log from
+  // the log manager, staging it if necessary.
+  void SendNextLog();
 
   // Returns true if any of the registered metrics providers have stability
   // metrics to report.
@@ -346,8 +344,9 @@ class MetricsService : public base::HistogramFlattener {
   // Prepares the initial stability log, which is only logged when the previous
   // run of Chrome crashed.  This log contains any stability metrics left over
   // from that previous run, and only these stability metrics.  It uses the
-  // system profile from the previous session.
-  void PrepareInitialStabilityLog();
+  // system profile from the previous session.  Returns true if a log was
+  // created.
+  bool PrepareInitialStabilityLog();
 
   // Prepares the initial metrics log, which includes startup histograms and
   // profiler data, as well as incremental stability-related metrics.
@@ -437,9 +436,6 @@ class MetricsService : public base::HistogramFlattener {
   // The progression of states made by the browser are recorded in the following
   // state.
   State state_;
-
-  // Whether the initial stability log has been recorded during startup.
-  bool has_initial_stability_log_;
 
   // The initial metrics log, used to record startup metrics (histograms and
   // profiler data). Note that if a crash occurred in the previous session, an

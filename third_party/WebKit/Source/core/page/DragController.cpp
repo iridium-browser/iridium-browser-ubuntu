@@ -54,6 +54,8 @@
 #include "core/html/HTMLFormElement.h"
 #include "core/html/HTMLInputElement.h"
 #include "core/html/HTMLPlugInElement.h"
+#include "core/layout/LayoutTheme.h"
+#include "core/layout/LayoutView.h"
 #include "core/loader/FrameLoadRequest.h"
 #include "core/loader/FrameLoader.h"
 #include "core/page/DragClient.h"
@@ -63,13 +65,11 @@
 #include "core/page/EventHandler.h"
 #include "core/page/Page.h"
 #include "core/frame/Settings.h"
-#include "core/rendering/HitTestRequest.h"
-#include "core/rendering/HitTestResult.h"
-#include "core/rendering/RenderImage.h"
-#include "core/rendering/RenderTheme.h"
-#include "core/rendering/RenderView.h"
+#include "core/layout/HitTestRequest.h"
+#include "core/layout/HitTestResult.h"
+#include "core/layout/LayoutImage.h"
 #include "platform/DragImage.h"
-#include "platform/geometry/FloatRect.h"
+#include "platform/geometry/IntRect.h"
 #include "platform/graphics/Image.h"
 #include "platform/graphics/ImageOrientation.h"
 #include "platform/network/ResourceRequest.h"
@@ -111,15 +111,10 @@ static bool dragTypeIsValid(DragSourceAction action)
 
 static PlatformMouseEvent createMouseEvent(DragData* dragData)
 {
-    int keyState = dragData->modifierKeyState();
-    bool shiftKey = static_cast<bool>(keyState & PlatformEvent::ShiftKey);
-    bool ctrlKey = static_cast<bool>(keyState & PlatformEvent::CtrlKey);
-    bool altKey = static_cast<bool>(keyState & PlatformEvent::AltKey);
-    bool metaKey = static_cast<bool>(keyState & PlatformEvent::MetaKey);
-
     return PlatformMouseEvent(dragData->clientPosition(), dragData->globalPosition(),
-        LeftButton, PlatformEvent::MouseMoved, 0, shiftKey, ctrlKey, altKey,
-        metaKey, PlatformMouseEvent::RealOrIndistinguishable, currentTime());
+        LeftButton, PlatformEvent::MouseMoved, 0,
+        static_cast<PlatformEvent::Modifiers>(dragData->modifiers()),
+        PlatformMouseEvent::RealOrIndistinguishable, currentTime());
 }
 
 static PassRefPtrWillBeRawPtr<DataTransfer> createDraggingDataTransfer(DataTransferAccessPolicy policy, DragData* dragData)
@@ -319,8 +314,8 @@ static Element* elementUnderMouse(Document* documentUnderMouse, const IntPoint& 
     LayoutPoint point = roundedLayoutPoint(FloatPoint(p.x() * zoomFactor, p.y() * zoomFactor));
 
     HitTestRequest request(HitTestRequest::ReadOnly | HitTestRequest::Active);
-    HitTestResult result(point);
-    documentUnderMouse->renderView()->hitTest(request, result);
+    HitTestResult result(request, point);
+    documentUnderMouse->layoutView()->hitTest(result);
 
     Node* n = result.innerNode();
     while (n && !n->isElementNode())
@@ -365,7 +360,7 @@ bool DragController::tryDocumentDrag(DragData* dragData, DragDestinationAction a
     }
 
     if ((actionMask & DragDestinationActionEdit) && canProcessDrag(dragData)) {
-        IntPoint point = frameView->windowToContents(dragData->clientPosition());
+        IntPoint point = frameView->rootFrameToContents(dragData->clientPosition());
         Element* element = elementUnderMouse(m_documentUnderMouse.get(), point);
         if (!element)
             return false;
@@ -460,7 +455,7 @@ bool DragController::concludeEditDrag(DragData* dragData)
     if (!m_documentUnderMouse)
         return false;
 
-    IntPoint point = m_documentUnderMouse->view()->windowToContents(dragData->clientPosition());
+    IntPoint point = m_documentUnderMouse->view()->rootFrameToContents(dragData->clientPosition());
     Element* element = elementUnderMouse(m_documentUnderMouse.get(), point);
     if (!element)
         return false;
@@ -473,7 +468,7 @@ bool DragController::concludeEditDrag(DragData* dragData)
     if (dragData->containsFiles() && fileInput) {
         // fileInput should be the element we hit tested for, unless it was made
         // display:none in a drop event handler.
-        ASSERT(fileInput == element || !fileInput->renderer());
+        ASSERT(fileInput == element || !fileInput->layoutObject());
         if (fileInput->isDisabledFormControl())
             return false;
 
@@ -545,12 +540,11 @@ bool DragController::canProcessDrag(DragData* dragData)
     if (!dragData->containsCompatibleContent())
         return false;
 
-    IntPoint point = m_page->deprecatedLocalMainFrame()->view()->windowToContents(dragData->clientPosition());
-    HitTestResult result = HitTestResult(point);
+    IntPoint point = m_page->deprecatedLocalMainFrame()->view()->rootFrameToContents(dragData->clientPosition());
     if (!m_page->deprecatedLocalMainFrame()->contentRenderer())
         return false;
 
-    result = m_page->deprecatedLocalMainFrame()->eventHandler().hitTestResultAtPoint(point);
+    HitTestResult result = m_page->deprecatedLocalMainFrame()->eventHandler().hitTestResultAtPoint(point);
 
     if (!result.innerNonSharedNode())
         return false;
@@ -634,7 +628,7 @@ Node* DragController::draggableNode(const LocalFrame* src, Node* startNode, cons
 
     Node* node = nullptr;
     DragSourceAction candidateDragType = DragSourceActionNone;
-    for (const RenderObject* renderer = startNode->renderer(); renderer; renderer = renderer->parent()) {
+    for (const LayoutObject* renderer = startNode->layoutObject(); renderer; renderer = renderer->parent()) {
         node = renderer->nonPseudoNode();
         if (!node) {
             // Anonymous render blocks don't correspond to actual DOM nodes, so we skip over them
@@ -697,10 +691,10 @@ Node* DragController::draggableNode(const LocalFrame* src, Node* startNode, cons
 static ImageResource* getImageResource(Element* element)
 {
     ASSERT(element);
-    RenderObject* renderer = element->renderer();
+    LayoutObject* renderer = element->layoutObject();
     if (!renderer || !renderer->isImage())
         return nullptr;
-    RenderImage* image = toRenderImage(renderer);
+    LayoutImage* image = toLayoutImage(renderer);
     return image->cachedImage();
 }
 
@@ -708,7 +702,7 @@ static Image* getImage(Element* element)
 {
     ASSERT(element);
     ImageResource* cachedImage = getImageResource(element);
-    // Don't use cachedImage->imageForRenderer() here as that may return BitmapImages for cached SVG Images.
+    // Don't use cachedImage->imageForLayoutObject() here as that may return BitmapImages for cached SVG Images.
     // Users of getImage() want access to the SVGImage, in order to figure out the filename extensions,
     // which would be empty when asking the cached BitmapImages.
     return (cachedImage && !cachedImage->errorOccurred()) ?
@@ -809,8 +803,9 @@ static PassOwnPtr<DragImage> dragImageForImage(Element* element, Image* image, c
     OwnPtr<DragImage> dragImage;
     IntPoint origin;
 
+    InterpolationQuality interpolationQuality = element->ensureComputedStyle()->imageRendering() == ImageRenderingPixelated ? InterpolationNone : InterpolationHigh;
     if (image->size().height() * image->size().width() <= MaxOriginalImageArea
-        && (dragImage = DragImage::create(image, element->renderer() ? element->renderer()->shouldRespectImageOrientation() : DoNotRespectImageOrientation))) {
+        && (dragImage = DragImage::create(image, element->layoutObject() ? element->layoutObject()->shouldRespectImageOrientation() : DoNotRespectImageOrientation, 1 /* deviceScaleFactor */, interpolationQuality))) {
         IntSize originalSize = imageRect.size();
         origin = imageRect.location();
 
@@ -835,7 +830,7 @@ static PassOwnPtr<DragImage> dragImageForImage(Element* element, Image* image, c
 static PassOwnPtr<DragImage> dragImageForLink(const KURL& linkURL, const String& linkText, float deviceScaleFactor, const IntPoint& mouseDraggedPoint, IntPoint& dragLoc)
 {
     FontDescription fontDescription;
-    RenderTheme::theme().systemFont(blink::CSSValueNone, fontDescription);
+    LayoutTheme::theme().systemFont(blink::CSSValueNone, fontDescription);
     OwnPtr<DragImage> dragImage = DragImage::create(linkURL, linkText, fontDescription, deviceScaleFactor);
 
     IntSize size = dragImage ? dragImage->size() : IntSize();
@@ -862,7 +857,7 @@ bool DragController::startDrag(LocalFrame* src, const DragState& state, const Pl
     const KURL& linkURL = hitTestResult.absoluteLinkURL();
     const KURL& imageURL = hitTestResult.absoluteImageURL();
 
-    IntPoint mouseDraggedPoint = src->view()->windowToContents(dragEvent.position());
+    IntPoint mouseDraggedPoint = src->view()->rootFrameToContents(dragEvent.position());
 
     IntPoint dragLocation;
     IntPoint dragOffset;
@@ -933,8 +928,8 @@ void DragController::doSystemDrag(DragImage* image, const IntPoint& dragLocation
     RefPtrWillBeRawPtr<LocalFrame> mainFrame = m_page->deprecatedLocalMainFrame();
     RefPtrWillBeRawPtr<FrameView> mainFrameView = mainFrame->view();
 
-    m_client->startDrag(image, mainFrameView->rootViewToContents(frame->view()->contentsToRootView(dragLocation)),
-        mainFrameView->rootViewToContents(frame->view()->contentsToRootView(eventPos)), dataTransfer, frame, forLink);
+    m_client->startDrag(image, mainFrameView->rootFrameToContents(frame->view()->contentsToRootFrame(dragLocation)),
+        mainFrameView->rootFrameToContents(frame->view()->contentsToRootFrame(eventPos)), dataTransfer, frame, forLink);
     // DragClient::startDrag can cause our Page to dispear, deallocating |this|.
     if (!frame->page())
         return;
@@ -954,12 +949,12 @@ DragOperation DragController::dragOperation(DragData* dragData)
 
 bool DragController::isCopyKeyDown(DragData* dragData)
 {
-    int keyState = dragData->modifierKeyState();
+    int modifiers = dragData->modifiers();
 
 #if OS(MACOSX)
-    return keyState & PlatformEvent::AltKey;
+    return modifiers & PlatformEvent::AltKey;
 #else
-    return keyState & PlatformEvent::CtrlKey;
+    return modifiers & PlatformEvent::CtrlKey;
 #endif
 }
 
@@ -967,7 +962,7 @@ void DragController::cleanupAfterSystemDrag()
 {
 }
 
-void DragController::trace(Visitor* visitor)
+DEFINE_TRACE(DragController)
 {
     visitor->trace(m_page);
     visitor->trace(m_documentUnderMouse);

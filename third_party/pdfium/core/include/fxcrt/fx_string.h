@@ -348,7 +348,6 @@ public:
 
     FX_DWORD				GetID(FX_STRSIZE start_pos = 0) const;
 
-    static CFX_ByteString	LoadFromFile(FX_BSTR file_path);
 #define FXFORMAT_SIGNED			1
 #define FXFORMAT_HEX			2
 #define FXFORMAT_CAPITAL		4
@@ -774,7 +773,7 @@ public:
 
     CFX_ByteString			UTF8Encode() const;
 
-    CFX_ByteString			UTF16LE_Encode(FX_BOOL bTerminate = TRUE) const;
+    CFX_ByteString			UTF16LE_Encode() const;
 
     void					ConvertFrom(const CFX_ByteString& str, CFX_CharMap* pCharMap = NULL);
 protected:

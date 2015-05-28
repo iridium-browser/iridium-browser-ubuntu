@@ -294,14 +294,15 @@ void PluginObserver::PluginCrashed(const base::FilePath& plugin_path,
   // process died, |plugin_pid| has been reused by a new process. The
   // consequence is that we will display |IDS_PLUGIN_DISCONNECTED_PROMPT| rather
   // than |IDS_PLUGIN_CRASHED_PROMPT| to the user, which seems acceptable.
-  base::ProcessHandle plugin_handle = base::kNullProcessHandle;
-  bool open_result = base::OpenProcessHandleWithAccess(
-      plugin_pid, PROCESS_QUERY_INFORMATION | SYNCHRONIZE, &plugin_handle);
+  base::Process plugin_process =
+      base::Process::OpenWithAccess(plugin_pid,
+                                    PROCESS_QUERY_INFORMATION | SYNCHRONIZE);
   bool is_running = false;
-  if (open_result) {
-    is_running = base::GetTerminationStatus(plugin_handle, NULL) ==
-        base::TERMINATION_STATUS_STILL_RUNNING;
-    base::CloseProcessHandle(plugin_handle);
+  if (plugin_process.IsValid()) {
+    is_running =
+        base::GetTerminationStatus(plugin_process.Handle(), NULL) ==
+            base::TERMINATION_STATUS_STILL_RUNNING;
+    plugin_process.Close();
   }
 
   if (is_running) {
@@ -337,10 +338,6 @@ bool PluginObserver::OnMessageReceived(
                         OnBlockedOutdatedPlugin)
     IPC_MESSAGE_HANDLER(ChromeViewHostMsg_NPAPINotSupported,
                         OnNPAPINotSupported)
-#if defined(ENABLE_PLUGIN_INSTALLATION)
-    IPC_MESSAGE_HANDLER(ChromeViewHostMsg_FindMissingPlugin,
-                        OnFindMissingPlugin)
-#endif
 
     IPC_MESSAGE_UNHANDLED(return false)
   IPC_END_MESSAGE_MAP()
@@ -381,50 +378,13 @@ void PluginObserver::OnBlockedOutdatedPlugin(int placeholder_id,
     NOTREACHED();
   }
 #else
-  // If we don't support third-party plug-in installation, we shouldn't have
-  // outdated plug-ins.
+  // If we don't support third-party plugin installation, we shouldn't have
+  // outdated plugins.
   NOTREACHED();
 #endif  // defined(ENABLE_PLUGIN_INSTALLATION)
 }
 
 #if defined(ENABLE_PLUGIN_INSTALLATION)
-void PluginObserver::OnFindMissingPlugin(int placeholder_id,
-                                         const std::string& mime_type) {
-  std::string lang = "en-US";  // Oh yes.
-  scoped_ptr<PluginMetadata> plugin_metadata;
-  PluginInstaller* installer = NULL;
-  bool found_plugin = PluginFinder::GetInstance()->FindPlugin(
-      mime_type, lang, &installer, &plugin_metadata);
-  if (!found_plugin) {
-    Send(new ChromeViewMsg_DidNotFindMissingPlugin(placeholder_id));
-    return;
-  }
-  DCHECK(installer);
-  DCHECK(plugin_metadata.get());
-
-  plugin_placeholders_[placeholder_id] =
-      new PluginPlaceholderHost(this, placeholder_id, plugin_metadata->name(),
-                                installer);
-  PluginInstallerInfoBarDelegate::Create(
-      InfoBarService::FromWebContents(web_contents()), installer,
-      plugin_metadata.Pass(),
-      base::Bind(&PluginObserver::InstallMissingPlugin,
-                 weak_ptr_factory_.GetWeakPtr(), installer));
-}
-
-void PluginObserver::InstallMissingPlugin(
-    PluginInstaller* installer,
-    const PluginMetadata* plugin_metadata) {
-  if (plugin_metadata->url_for_display()) {
-    installer->OpenDownloadURL(plugin_metadata->plugin_url(), web_contents());
-  } else {
-    TabModalConfirmDialog::Create(
-        new ConfirmInstallDialogDelegate(
-            web_contents(), installer, plugin_metadata->Clone()),
-        web_contents());
-  }
-}
-
 void PluginObserver::OnRemovePluginPlaceholderHost(int placeholder_id) {
   std::map<int, PluginPlaceholderHost*>::iterator it =
       plugin_placeholders_.find(placeholder_id);
@@ -440,8 +400,10 @@ void PluginObserver::OnRemovePluginPlaceholderHost(int placeholder_id) {
 void PluginObserver::OnOpenAboutPlugins() {
   web_contents()->OpenURL(OpenURLParams(
       GURL(chrome::kChromeUIPluginsURL),
-      content::Referrer(web_contents()->GetURL(),
-                        blink::WebReferrerPolicyDefault),
+      content::Referrer::SanitizeForRequest(
+          GURL(chrome::kChromeUIPluginsURL),
+          content::Referrer(web_contents()->GetURL(),
+                            blink::WebReferrerPolicyDefault)),
       NEW_FOREGROUND_TAB, ui::PAGE_TRANSITION_AUTO_BOOKMARK, false));
 }
 

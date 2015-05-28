@@ -3,6 +3,7 @@
 # found in the LICENSE file.
 
 import("//build/config/ui.gni")
+import("//testing/test.gni")
 
 component("display") {
   sources = [
@@ -55,6 +56,9 @@ component("display") {
 
   if (is_chromeos) {
     deps += [ "//ui/display/types" ]
+    if (use_x11) {
+      deps += [ "//ui/gfx/x" ]
+    }
   }
 
   if (use_ozone) {
@@ -116,6 +120,7 @@ source_set("test_support") {
   ]
   deps = [
     "//base",
+    "//ui/display/types",
     "//ui/gfx",
     "//ui/gfx/geometry",
   ]
@@ -145,6 +150,7 @@ test("display_unittests") {
     deps += [
       ":display",
       ":test_support",
+      "//base/test:test_support",
       "//ui/display/types",
     ]
   }

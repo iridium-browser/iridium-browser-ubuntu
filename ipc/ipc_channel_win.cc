@@ -29,8 +29,9 @@ ChannelWin::State::State(ChannelWin* channel) : is_pending(false) {
 }
 
 ChannelWin::State::~State() {
-  COMPILE_ASSERT(!offsetof(ChannelWin::State, context),
-                 starts_with_io_context);
+  static_assert(offsetof(ChannelWin::State, context) == 0,
+                "ChannelWin::State should have context as its first data"
+                "member.");
 }
 
 ChannelWin::ChannelWin(const IPC::ChannelHandle &channel_handle,
@@ -77,6 +78,7 @@ void ChannelWin::Close() {
 }
 
 bool ChannelWin::Send(Message* message) {
+  DCHECK(!message->HasAttachments());
   DCHECK(thread_check_->CalledOnValidThread());
   DVLOG(2) << "sending message @" << message << " on channel @" << this
            << " with type " << message->type()

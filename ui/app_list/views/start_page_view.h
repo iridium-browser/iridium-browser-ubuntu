@@ -9,18 +9,19 @@
 
 #include "base/basictypes.h"
 #include "ui/app_list/app_list_export.h"
-#include "ui/app_list/views/search_result_container_view.h"
+#include "ui/app_list/views/app_list_page.h"
 
 namespace app_list {
 
 class AllAppsTileItemView;
 class AppListMainView;
 class AppListViewDelegate;
+class CustomLauncherPageBackgroundView;
 class SearchResultTileItemView;
 class TileItemView;
 
 // The start page for the experimental app list.
-class APP_LIST_EXPORT StartPageView : public SearchResultContainerView {
+class APP_LIST_EXPORT StartPageView : public AppListPage {
  public:
   StartPageView(AppListMainView* app_list_main_view,
                 AppListViewDelegate* view_delegate);
@@ -30,38 +31,32 @@ class APP_LIST_EXPORT StartPageView : public SearchResultContainerView {
 
   void UpdateForTesting();
 
-  const std::vector<SearchResultTileItemView*>& tile_views() const {
-    return search_result_tile_views_;
-  }
+  views::View* instant_container() const { return instant_container_; }
+  const std::vector<SearchResultTileItemView*>& tile_views() const;
   TileItemView* all_apps_button() const;
 
-  // Called when the start page view is displayed.
-  void OnShow();
-
-  // Called when the start page view is hidden (while the app list is still
-  // open).
-  void OnHide();
+  // Overridden from AppListPage:
+  gfx::Rect GetPageBoundsForState(AppListModel::State state) const override;
+  gfx::Rect GetSearchBoxBounds() const override;
+  void OnShown() override;
 
   // Overridden from views::View:
   void Layout() override;
   bool OnKeyPressed(const ui::KeyEvent& event) override;
 
-  // Overridden from SearchResultContainerView:
-  void OnContainerSelected(bool from_bottom) override;
+  bool OnMousePressed(const ui::MouseEvent& event) override;
+  bool OnMouseWheel(const ui::MouseWheelEvent& event) override;
+  void OnGestureEvent(ui::GestureEvent* event) override;
+  void OnScrollEvent(ui::ScrollEvent* event) override;
 
-  // Returns search box bounds to use when the start page is active.
-  gfx::Rect GetSearchBoxBounds() const;
-
-  // Updates whether the custom page clickzone is visible.
-  void UpdateCustomPageClickzoneVisibility();
 
  private:
-  // Overridden from SearchResultContainerView:
-  int Update() override;
-  void UpdateSelectedIndex(int old_selected, int new_selected) override;
+  class StartPageTilesContainer;
 
   void InitInstantContainer();
-  void InitTilesContainer();
+  void MaybeOpenCustomLauncherPage();
+
+  void SetCustomLauncherPageSelected(bool selected);
 
   TileItemView* GetTileItemView(size_t index);
 
@@ -72,10 +67,9 @@ class APP_LIST_EXPORT StartPageView : public SearchResultContainerView {
 
   views::View* search_box_spacer_view_;  // Owned by views hierarchy.
   views::View* instant_container_;  // Owned by views hierarchy.
-  views::View* tiles_container_;    // Owned by views hierarchy.
-
-  std::vector<SearchResultTileItemView*> search_result_tile_views_;
-  AllAppsTileItemView* all_apps_button_;
+  CustomLauncherPageBackgroundView*
+      custom_launcher_page_background_;       // Owned by view hierarchy.
+  StartPageTilesContainer* tiles_container_;  // Owned by views hierarchy.
 
   DISALLOW_COPY_AND_ASSIGN(StartPageView);
 };

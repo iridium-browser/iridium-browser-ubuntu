@@ -9,9 +9,67 @@
 #include <vector>
 
 #include "base/memory/scoped_ptr.h"
+#include "media/base/eme_constants.h"
 #include "media/base/media_export.h"
 
 namespace media {
+
+// Provides an interface for querying registered key systems. The exposed API is
+// only intended to support unprefixed EME.
+//
+// Many of the original static methods are still available, they should be
+// migrated into this interface over time (or removed).
+//
+// TODO(sandersd): Provide GetKeySystem() so that it is not necessary to pass
+// |key_system| to every method. http://crbug.com/457438
+class MEDIA_EXPORT KeySystems {
+ public:
+  static KeySystems& GetInstance();
+
+  // Returns whether |key_system| is a supported key system.
+  virtual bool IsSupportedKeySystem(const std::string& key_system) const = 0;
+
+  // Returns whether |init_data_type| is supported by |key_system|.
+  virtual bool IsSupportedInitDataType(
+      const std::string& key_system,
+      EmeInitDataType init_data_type) const = 0;
+
+  // Returns whether the list of codecs are supported together by |key_system|.
+  // TODO(sandersd): Return a rule instead of a bool so that codec selection can
+  // affect other configuration options (namely robustness).
+  virtual bool IsSupportedCodecCombination(
+      const std::string& key_system,
+      EmeMediaType media_type,
+      const std::string& container_mime_type,
+      const std::vector<std::string>& codecs) const = 0;
+
+  // Returns the configuration rule for supporting a robustness requirement.
+  virtual EmeConfigRule GetRobustnessConfigRule(
+      const std::string& key_system,
+      EmeMediaType media_type,
+      const std::string& requested_robustness) const = 0;
+
+  // Returns the configuration rule for supporting persistent-license sessions.
+  virtual EmeConfigRule GetPersistentLicenseSessionConfigRule(
+      const std::string& key_system) const = 0;
+
+  // Returns the configuration rule for supporting persistent-release-message
+  // sessions.
+  virtual EmeConfigRule GetPersistentReleaseMessageSessionConfigRule(
+      const std::string& key_system) const = 0;
+
+  // Returns the configuration rule for supporting a persistent state
+  // requirement.
+  virtual EmeConfigRule GetPersistentStateConfigRule(
+      const std::string& key_system,
+      EmeFeatureRequirement requirement) const = 0;
+
+  // Returns the configuration rule for supporting a distinctive identifier
+  // requirement.
+  virtual EmeConfigRule GetDistinctiveIdentifierConfigRule(
+      const std::string& key_system,
+      EmeFeatureRequirement requirement) const = 0;
+};
 
 // Prefixed EME API only supports prefixed (webkit-) key system name for
 // certain key systems. But internally only unprefixed key systems are
@@ -26,34 +84,27 @@ MEDIA_EXPORT std::string GetUnprefixedKeySystemName(
 MEDIA_EXPORT std::string GetPrefixedKeySystemName(
     const std::string& key_system);
 
-// Returns false if a container-specific |init_data_type| is specified with an
-// inappropriate container.
-// TODO(sandersd): Remove this essentially internal detail if the spec is
-// updated to not convolve the two in a single method call.
-// TODO(sandersd): Use enum values instead of strings. http://crbug.com/417440
-MEDIA_EXPORT bool IsSaneInitDataTypeWithContainer(
-    const std::string& init_data_type,
-    const std::string& container);
-
+// Use for unprefixed EME only!
+// Returns whether |key_system| is a supported key system.
 // Note: Shouldn't be used for prefixed API as the original
-// IsSupportedKeySystemWithMediaMimeType() path reports UMAs, but this path does
-// not.
 MEDIA_EXPORT bool IsSupportedKeySystem(const std::string& key_system);
 
+// Use for prefixed EME only!
 MEDIA_EXPORT bool IsSupportedKeySystemWithInitDataType(
     const std::string& key_system,
-    const std::string& init_data_type);
+    EmeInitDataType init_data_type);
 
+// Use for prefixed EME only!
 // Returns whether |key_system| is a real supported key system that can be
 // instantiated.
 // Abstract parent |key_system| strings will return false.
-// Call IsSupportedKeySystemWithMediaMimeType() to determine whether a
-// |key_system| supports a specific type of media or to check parent key
-// systems.
-MEDIA_EXPORT bool IsConcreteSupportedKeySystem(const std::string& key_system);
+MEDIA_EXPORT bool PrefixedIsSupportedConcreteKeySystem(
+    const std::string& key_system);
 
-// Returns whether |key_sytem| supports the specified media type and codec(s).
-MEDIA_EXPORT bool IsSupportedKeySystemWithMediaMimeType(
+// Use for prefixed EME only!
+// Returns whether |key_system| supports the specified media type and codec(s).
+// To be used with prefixed EME only as it generates UMAs based on the query.
+MEDIA_EXPORT bool PrefixedIsSupportedKeySystemWithMediaMimeType(
     const std::string& mime_type,
     const std::vector<std::string>& codecs,
     const std::string& key_system);
@@ -74,7 +125,10 @@ MEDIA_EXPORT std::string GetPepperType(
 #if defined(UNIT_TEST)
 // Helper functions to add container/codec types for testing purposes.
 MEDIA_EXPORT void AddContainerMask(const std::string& container, uint32 mask);
-MEDIA_EXPORT void AddCodecMask(const std::string& codec, uint32 mask);
+MEDIA_EXPORT void AddCodecMask(
+    EmeMediaType media_type,
+    const std::string& codec,
+    uint32 mask);
 #endif  // defined(UNIT_TEST)
 
 }  // namespace media

@@ -53,9 +53,6 @@ class WebContents;
 class Shell : public WebContentsDelegate,
               public WebContentsObserver {
  public:
-  static const int kDefaultTestWindowWidthDip;
-  static const int kDefaultTestWindowHeightDip;
-
   ~Shell() override;
 
   void LoadURL(const GURL& url);
@@ -70,8 +67,6 @@ class Shell : public WebContentsDelegate,
   void Close();
   void ShowDevTools();
   void ShowDevToolsForElementAt(int x, int y);
-  void ShowDevToolsForTest(const std::string& settings,
-                           const std::string& frontend_url);
   void CloseDevTools();
 #if defined(OS_MACOSX)
   // Resizes the web content view to the given dimensions.
@@ -117,17 +112,17 @@ class Shell : public WebContentsDelegate,
   void AddNewContents(WebContents* source,
                       WebContents* new_contents,
                       WindowOpenDisposition disposition,
-                      const gfx::Rect& initial_pos,
+                      const gfx::Rect& initial_rect,
                       bool user_gesture,
                       bool* was_blocked) override;
   void LoadingStateChanged(WebContents* source,
                            bool to_different_document) override;
 #if defined(OS_ANDROID)
-  virtual void LoadProgressChanged(WebContents* source,
-                                   double progress) override;
+  void LoadProgressChanged(WebContents* source, double progress) override;
 #endif
-  void ToggleFullscreenModeForTab(WebContents* web_contents,
-                                  bool enter_fullscreen) override;
+  void EnterFullscreenModeForTab(WebContents* web_contents,
+                                 const GURL& origin) override;
+  void ExitFullscreenModeForTab(WebContents* web_contents) override;
   bool IsFullscreenForTabOrPending(
       const WebContents* web_contents) const override;
   void RequestToLockMouse(WebContents* web_contents,
@@ -153,6 +148,8 @@ class Shell : public WebContentsDelegate,
   void WorkerCrashed(WebContents* source) override;
   bool HandleContextMenu(const content::ContextMenuParams& params) override;
   void WebContentsFocused(WebContents* contents) override;
+
+  static gfx::Size GetShellDefaultSize();
 
  private:
   enum UIControl {
@@ -210,11 +207,12 @@ class Shell : public WebContentsDelegate,
 
   gfx::NativeView GetContentView();
 
+  void ToggleFullscreenModeForTab(WebContents* web_contents,
+                                  bool enter_fullscreen);
   // WebContentsObserver
   void TitleWasSet(NavigationEntry* entry, bool explicit_set) override;
 
-  void InnerShowDevTools(const std::string& settings,
-                         const std::string& frontend_url);
+  void InnerShowDevTools();
   void OnDevToolsWebContentsDestroyed();
 
   scoped_ptr<ShellJavaScriptDialogManager> dialog_manager_;

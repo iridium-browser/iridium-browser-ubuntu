@@ -57,10 +57,8 @@ class CONTENT_EXPORT RenderWidgetHostViewChildFrame
 
   // RenderWidgetHostViewBase implementation.
   void InitAsPopup(RenderWidgetHostView* parent_host_view,
-                   const gfx::Rect& pos) override;
+                   const gfx::Rect& bounds) override;
   void InitAsFullscreen(RenderWidgetHostView* reference_host_view) override;
-  void WasShown() override;
-  void WasHidden() override;
   void MovePluginWindows(const std::vector<WebPluginGeometry>& moves) override;
   void Blur() override;
   void UpdateCursor(const WebCursor& cursor) override;
@@ -122,8 +120,8 @@ class CONTENT_EXPORT RenderWidgetHostViewChildFrame
 
   // RenderWidgetHostViewBase implementation.
 #if defined(OS_ANDROID)
-  virtual void LockCompositingSurface() override;
-  virtual void UnlockCompositingSurface() override;
+  void LockCompositingSurface() override;
+  void UnlockCompositingSurface() override;
 #endif  // defined(OS_ANDROID)
 
 #if defined(OS_WIN)

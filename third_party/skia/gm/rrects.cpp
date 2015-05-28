@@ -32,7 +32,7 @@ public:
     }
 
 protected:
-    SkString onShortName() SK_OVERRIDE {
+    SkString onShortName() override {
         SkString name("rrect");
         switch (fType) {
             case kBW_Draw_Type:
@@ -54,24 +54,18 @@ protected:
         return name;
     }
 
-    virtual SkISize onISize() SK_OVERRIDE { return SkISize::Make(kImageWidth, kImageHeight); }
+    SkISize onISize() override { return SkISize::Make(kImageWidth, kImageHeight); }
 
-    virtual uint32_t onGetFlags() const SK_OVERRIDE {
-        if (kEffect_Type == fType) {
-            return kGPUOnly_Flag | kSkipTiled_Flag;
-        } else {
-            return kSkipTiled_Flag;
-        }
-    }
-
-    virtual void onDraw(SkCanvas* canvas) SK_OVERRIDE {
+    void onDraw(SkCanvas* canvas) override {
+        GrContext* context = NULL;
 #if SK_SUPPORT_GPU
         GrRenderTarget* rt = canvas->internal_private_accessTopLayerRenderTarget();
-        GrContext* context = rt ? rt->getContext() : NULL;
+        context = rt ? rt->getContext() : NULL;
+#endif
         if (kEffect_Type == fType && NULL == context) {
+            this->drawGpuOnlyMessage(canvas);
             return;
         }
-#endif
 
         SkPaint paint;
         if (kAA_Draw_Type == fType) {
@@ -112,7 +106,7 @@ protected:
                             SkDEBUGFAIL("Couldn't get Gr test target.");
                             return;
                         }
-                        GrDrawState drawState;
+                        GrPipelineBuilder pipelineBuilder;
 
                         SkRRect rrect = fRRects[curRRect];
                         rrect.offset(SkIntToScalar(x), SkIntToScalar(y));
@@ -120,13 +114,15 @@ protected:
                         SkAutoTUnref<GrFragmentProcessor> fp(GrRRectEffect::Create(edgeType,
                                                                                    rrect));
                         if (fp) {
-                            drawState.addCoverageProcessor(fp);
-                            drawState.setRenderTarget(rt);
+                            pipelineBuilder.addCoverageProcessor(fp);
+                            pipelineBuilder.setRenderTarget(rt);
 
                             SkRect bounds = rrect.getBounds();
                             bounds.outset(2.f, 2.f);
 
-                            tt.target()->drawSimpleRect(&drawState, 0xff000000, SkMatrix::I(),
+                            tt.target()->drawSimpleRect(&pipelineBuilder,
+                                                        0xff000000,
+                                                        SkMatrix::I(),
                                                         bounds);
                         } else {
                             drew = false;

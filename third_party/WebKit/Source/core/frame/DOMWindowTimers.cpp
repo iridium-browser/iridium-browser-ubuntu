@@ -45,11 +45,11 @@ namespace blink {
 
 namespace DOMWindowTimers {
 
-static bool isAllowed(ExecutionContext* executionContext, bool isEval)
+static bool isAllowed(ScriptState* scriptState, ExecutionContext* executionContext, bool isEval)
 {
     if (executionContext->isDocument()) {
         Document* document = static_cast<Document*>(executionContext);
-        if (isEval && !document->contentSecurityPolicy()->allowEval())
+        if (isEval && !document->contentSecurityPolicy()->allowEval(scriptState, ContentSecurityPolicy::SendReport, ContentSecurityPolicy::WillNotThrowException))
             return false;
         return true;
     }
@@ -58,7 +58,7 @@ static bool isAllowed(ExecutionContext* executionContext, bool isEval)
         if (!workerGlobalScope->script())
             return false;
         ContentSecurityPolicy* policy = workerGlobalScope->contentSecurityPolicy();
-        if (isEval && policy && !policy->allowEval())
+        if (isEval && policy && !policy->allowEval(scriptState, ContentSecurityPolicy::SendReport, ContentSecurityPolicy::WillNotThrowException))
             return false;
         return true;
     }
@@ -69,21 +69,21 @@ static bool isAllowed(ExecutionContext* executionContext, bool isEval)
 int setTimeout(ScriptState* scriptState, EventTarget& eventTarget, const ScriptValue& handler, int timeout, const Vector<ScriptValue>& arguments)
 {
     ExecutionContext* executionContext = eventTarget.executionContext();
-    if (!isAllowed(executionContext, false))
+    if (!isAllowed(scriptState, executionContext, false))
         return 0;
     if (timeout >= 0 && executionContext->isDocument()) {
         // FIXME: Crude hack that attempts to pass idle time to V8. This should
         // be done using the scheduler instead.
         V8GCForContextDispose::instance().notifyIdle();
     }
-    OwnPtr<ScheduledAction> action = ScheduledAction::create(scriptState, handler, arguments);
+    OwnPtrWillBeRawPtr<ScheduledAction> action = ScheduledAction::create(scriptState, handler, arguments);
     return DOMTimer::install(executionContext, action.release(), timeout, true);
 }
 
 int setTimeout(ScriptState* scriptState, EventTarget& eventTarget, const String& handler, int timeout, const Vector<ScriptValue>&)
 {
     ExecutionContext* executionContext = eventTarget.executionContext();
-    if (!isAllowed(executionContext, true))
+    if (!isAllowed(scriptState, executionContext, true))
         return 0;
     // Don't allow setting timeouts to run empty functions.  Was historically a
     // perfomance issue.
@@ -94,29 +94,29 @@ int setTimeout(ScriptState* scriptState, EventTarget& eventTarget, const String&
         // be done using the scheduler instead.
         V8GCForContextDispose::instance().notifyIdle();
     }
-    OwnPtr<ScheduledAction> action = ScheduledAction::create(scriptState, handler);
+    OwnPtrWillBeRawPtr<ScheduledAction> action = ScheduledAction::create(scriptState, handler);
     return DOMTimer::install(executionContext, action.release(), timeout, true);
 }
 
 int setInterval(ScriptState* scriptState, EventTarget& eventTarget, const ScriptValue& handler, int timeout, const Vector<ScriptValue>& arguments)
 {
     ExecutionContext* executionContext = eventTarget.executionContext();
-    if (!isAllowed(executionContext, false))
+    if (!isAllowed(scriptState, executionContext, false))
         return 0;
-    OwnPtr<ScheduledAction> action = ScheduledAction::create(scriptState, handler, arguments);
+    OwnPtrWillBeRawPtr<ScheduledAction> action = ScheduledAction::create(scriptState, handler, arguments);
     return DOMTimer::install(executionContext, action.release(), timeout, false);
 }
 
 int setInterval(ScriptState* scriptState, EventTarget& eventTarget, const String& handler, int timeout, const Vector<ScriptValue>&)
 {
     ExecutionContext* executionContext = eventTarget.executionContext();
-    if (!isAllowed(executionContext, true))
+    if (!isAllowed(scriptState, executionContext, true))
         return 0;
     // Don't allow setting timeouts to run empty functions.  Was historically a
     // perfomance issue.
     if (handler.isEmpty())
         return 0;
-    OwnPtr<ScheduledAction> action = ScheduledAction::create(scriptState, handler);
+    OwnPtrWillBeRawPtr<ScheduledAction> action = ScheduledAction::create(scriptState, handler);
     return DOMTimer::install(executionContext, action.release(), timeout, false);
 }
 

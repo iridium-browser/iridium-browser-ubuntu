@@ -105,7 +105,10 @@ extensions::AppSorting* GetAppSorting(Profile* profile) {
   return extensions::ExtensionPrefs::Get(profile)->app_sorting();
 }
 
-const color_utils::HSL shift = {-1, 0, 0.6};
+gfx::ImageSkia CreateDisabledIcon(const gfx::ImageSkia& icon) {
+  const color_utils::HSL shift = {-1, 0, 0.6};
+  return gfx::ImageSkiaOperations::CreateHSLShiftedImage(icon, shift);
+}
 
 }  // namespace
 
@@ -121,9 +124,7 @@ ExtensionAppItem::ExtensionAppItem(
       extension_id_(extension_id),
       extension_enable_flow_controller_(NULL),
       extension_name_(extension_name),
-      installing_icon_(
-          gfx::ImageSkiaOperations::CreateHSLShiftedImage(installing_icon,
-                                                          shift)),
+      installing_icon_(CreateDisabledIcon(installing_icon)),
       is_platform_app_(is_platform_app),
       has_overlay_(false) {
   Reload();
@@ -144,23 +145,22 @@ ExtensionAppItem::~ExtensionAppItem() {
 }
 
 bool ExtensionAppItem::NeedsOverlay() const {
-  // The overlay icon is disabled for hosted apps in windowed mode with
-  // streamlined hosted apps.
-  bool streamlined_hosted_apps =
-      extensions::util::IsStreamlinedHostedAppsEnabled();
 #if defined(OS_CHROMEOS)
-  if (!streamlined_hosted_apps)
-    return false;
+  // The overlay is disabled completely in ChromeOS.
+  return false;
 #endif
+
   extensions::LaunchType launch_type =
       GetExtension()
           ? extensions::GetLaunchType(extensions::ExtensionPrefs::Get(profile_),
                                       GetExtension())
           : extensions::LAUNCH_TYPE_WINDOW;
 
+  // The overlay icon is disabled for hosted apps in windowed mode with
+  // bookmark apps enabled.
   return !is_platform_app_ && extension_id_ != extension_misc::kChromeAppId &&
-      (!streamlined_hosted_apps ||
-       launch_type != extensions::LAUNCH_TYPE_WINDOW);
+         (!extensions::util::IsNewBookmarkAppsEnabled() ||
+          launch_type != extensions::LAUNCH_TYPE_WINDOW);
 }
 
 void ExtensionAppItem::Reload() {
@@ -181,14 +181,12 @@ void ExtensionAppItem::UpdateIcon() {
 
   // Use the app icon if the app exists. Turn the image greyscale if the app is
   // not launchable.
-  if (GetExtension()) {
+  if (GetExtension() && icon_) {
     icon = icon_->image_skia();
     const bool enabled = extensions::util::IsAppLaunchable(extension_id_,
                                                            profile_);
-    if (!enabled) {
-      const color_utils::HSL shift = {-1, 0, 0.6};
-      icon = gfx::ImageSkiaOperations::CreateHSLShiftedImage(icon, shift);
-    }
+    if (!enabled)
+      icon = CreateDisabledIcon(icon);
 
     if (GetExtension()->from_bookmark())
       icon = gfx::ImageSkia(new RoundedCornersImageSource(icon), icon.size());

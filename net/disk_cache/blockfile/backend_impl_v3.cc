@@ -12,7 +12,6 @@
 #include "base/message_loop/message_loop.h"
 #include "base/metrics/field_trial.h"
 #include "base/metrics/histogram.h"
-#include "base/metrics/stats_counters.h"
 #include "base/rand_util.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
@@ -91,7 +90,8 @@ int BackendImplV3::Init(const CompletionCallback& callback) {
 // ------------------------------------------------------------------------
 
 bool BackendImplV3::SetMaxSize(int max_bytes) {
-  COMPILE_ASSERT(sizeof(max_bytes) == sizeof(max_size_), unsupported_int_model);
+  static_assert(sizeof(max_bytes) == sizeof(max_size_),
+                "unsupported int model");
   if (max_bytes < 0)
     return false;
 
@@ -229,7 +229,8 @@ bool BackendImplV3::IsLoaded() const {
 }
 
 std::string BackendImplV3::HistogramName(const char* name) const {
-  static const char* names[] = { "Http", "", "Media", "AppCache", "Shader" };
+  static const char* const names[] = {
+    "Http", "", "Media", "AppCache", "Shader" };
   DCHECK_NE(cache_type_, net::MEMORY_CACHE);
   return base::StringPrintf("DiskCache3.%s_%s", name, names[cache_type_]);
 }

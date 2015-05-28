@@ -50,10 +50,10 @@ class AutofillPopupBaseViewTest : public InProcessBrowserTest {
         .WillRepeatedly(Return(native_view));
     EXPECT_CALL(mock_delegate_, ViewDestroyed());
 
-    view_ =
-        new AutofillPopupBaseView(&mock_delegate_,
-                                  views::Widget::GetWidgetForNativeWindow(
-                                      browser()->window()->GetNativeWindow()));
+    view_ = new AutofillPopupBaseView(
+        &mock_delegate_,
+        views::Widget::GetWidgetForNativeWindow(
+            browser()->window()->GetNativeWindow())->GetFocusManager());
   }
 
   void ShowView() {
@@ -122,10 +122,8 @@ IN_PROC_BROWSER_TEST_F(AutofillPopupBaseViewTest, DoubleClickTest) {
 
   ShowView();
 
-  ui::MouseEvent mouse_down(ui::ET_MOUSE_PRESSED,
-                            gfx::Point(0, 0),
-                            gfx::Point(0, 0),
-                            0, 0);
+  ui::MouseEvent mouse_down(ui::ET_MOUSE_PRESSED, gfx::Point(0, 0),
+                            gfx::Point(0, 0), ui::EventTimeForNow(), 0, 0);
   EXPECT_TRUE(static_cast<views::View*>(view_)->OnMousePressed(mouse_down));
 
   // Ignore double clicks.

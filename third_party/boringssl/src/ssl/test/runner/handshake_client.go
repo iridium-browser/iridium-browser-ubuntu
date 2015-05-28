@@ -6,7 +6,6 @@ package main
 
 import (
 	"bytes"
-	"crypto"
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rsa"
@@ -22,13 +21,14 @@ import (
 )
 
 type clientHandshakeState struct {
-	c            *Conn
-	serverHello  *serverHelloMsg
-	hello        *clientHelloMsg
-	suite        *cipherSuite
-	finishedHash finishedHash
-	masterSecret []byte
-	session      *ClientSessionState
+	c             *Conn
+	serverHello   *serverHelloMsg
+	hello         *clientHelloMsg
+	suite         *cipherSuite
+	finishedHash  finishedHash
+	masterSecret  []byte
+	session       *ClientSessionState
+	finishedBytes []byte
 }
 
 func (c *Conn) clientHandshake() error {
@@ -129,13 +129,16 @@ NextCipherSuite:
 		return errors.New("tls: short read from Rand: " + err.Error())
 	}
 
-	if hello.vers >= VersionTLS12 && !c.config.Bugs.NoSignatureAndHashes {
+	if hello.vers >= VersionTLS12 && !c.config.Bugs.NoSignatureAndHashes && (c.cipherSuite == 0 || !c.config.Bugs.NoSignatureAlgorithmsOnRenego) {
 		hello.signatureAndHashes = c.config.signatureAndHashesForClient()
 	}
 
 	var session *ClientSessionState
 	var cacheKey string
 	sessionCache := c.config.ClientSessionCache
+	if c.config.Bugs.NeverResumeOnRenego && c.cipherSuite != 0 {
+		sessionCache = nil
+	}
 
 	if sessionCache != nil {
 		hello.ticketSupported = !c.config.SessionTicketsDisabled
@@ -213,7 +216,11 @@ NextCipherSuite:
 		helloBytes = hello.marshal()
 		c.writeRecord(recordTypeHandshake, helloBytes)
 	}
+	c.dtlsFlushHandshake()
 
+	if err := c.simulatePacketLoss(nil); err != nil {
+		return err
+	}
 	msg, err := c.readHandshake()
 	if err != nil {
 		return err
@@ -233,7 +240,11 @@ NextCipherSuite:
 			hello.cookie = helloVerifyRequest.cookie
 			helloBytes = hello.marshal()
 			c.writeRecord(recordTypeHandshake, helloBytes)
+			c.dtlsFlushHandshake()
 
+			if err := c.simulatePacketLoss(nil); err != nil {
+				return err
+			}
 			msg, err = c.readHandshake()
 			if err != nil {
 				return err
@@ -315,6 +326,15 @@ NextCipherSuite:
 			return err
 		}
 		if err := hs.sendFinished(isResume); err != nil {
+			return err
+		}
+		// Most retransmits are triggered by a timeout, but the final
+		// leg of the handshake is retransmited upon re-receiving a
+		// Finished.
+		if err := c.simulatePacketLoss(func() {
+			c.writeRecord(recordTypeHandshake, hs.finishedBytes)
+			c.dtlsFlushHandshake()
+		}); err != nil {
 			return err
 		}
 		if err := hs.readSessionTicket(); err != nil {
@@ -559,33 +579,39 @@ func (hs *clientHandshakeState) doFullHandshake() error {
 			hasSignatureAndHash: c.vers >= VersionTLS12,
 		}
 
+		// Determine the hash to sign.
+		var signatureType uint8
+		switch c.config.Certificates[0].PrivateKey.(type) {
+		case *ecdsa.PrivateKey:
+			signatureType = signatureECDSA
+		case *rsa.PrivateKey:
+			signatureType = signatureRSA
+		default:
+			c.sendAlert(alertInternalError)
+			return errors.New("unknown private key type")
+		}
+		if c.config.Bugs.IgnorePeerSignatureAlgorithmPreferences {
+			certReq.signatureAndHashes = c.config.signatureAndHashesForClient()
+		}
+		certVerify.signatureAndHash, err = hs.finishedHash.selectClientCertSignatureAlgorithm(certReq.signatureAndHashes, c.config.signatureAndHashesForClient(), signatureType)
+		if err != nil {
+			c.sendAlert(alertInternalError)
+			return err
+		}
+		digest, hashFunc, err := hs.finishedHash.hashForClientCertificate(certVerify.signatureAndHash, hs.masterSecret)
+		if err != nil {
+			c.sendAlert(alertInternalError)
+			return err
+		}
+
 		switch key := c.config.Certificates[0].PrivateKey.(type) {
 		case *ecdsa.PrivateKey:
-			certVerify.signatureAndHash, err = hs.finishedHash.selectClientCertSignatureAlgorithm(certReq.signatureAndHashes, signatureECDSA)
-			if err != nil {
-				break
-			}
-			var digest []byte
-			digest, _, err = hs.finishedHash.hashForClientCertificate(certVerify.signatureAndHash, hs.masterSecret)
-			if err != nil {
-				break
-			}
 			var r, s *big.Int
 			r, s, err = ecdsa.Sign(c.config.rand(), key, digest)
 			if err == nil {
 				signed, err = asn1.Marshal(ecdsaSignature{r, s})
 			}
 		case *rsa.PrivateKey:
-			certVerify.signatureAndHash, err = hs.finishedHash.selectClientCertSignatureAlgorithm(certReq.signatureAndHashes, signatureRSA)
-			if err != nil {
-				break
-			}
-			var digest []byte
-			var hashFunc crypto.Hash
-			digest, hashFunc, err = hs.finishedHash.hashForClientCertificate(certVerify.signatureAndHash, hs.masterSecret)
-			if err != nil {
-				break
-			}
 			signed, err = rsa.SignPKCS1v15(c.config.rand(), key, hashFunc, digest)
 		default:
 			err = errors.New("unknown private key type")
@@ -599,6 +625,7 @@ func (hs *clientHandshakeState) doFullHandshake() error {
 		hs.writeClientHash(certVerify.marshal())
 		c.writeRecord(recordTypeHandshake, certVerify.marshal())
 	}
+	c.dtlsFlushHandshake()
 
 	hs.finishedHash.discardHandshakeBuffer()
 
@@ -826,21 +853,33 @@ func (hs *clientHandshakeState) sendFinished(isResume bool) error {
 		finished.verifyData = hs.finishedHash.clientSum(hs.masterSecret)
 	}
 	c.clientVerify = append(c.clientVerify[:0], finished.verifyData...)
-	finishedBytes := finished.marshal()
-	hs.writeHash(finishedBytes, seqno)
-	postCCSBytes = append(postCCSBytes, finishedBytes...)
+	hs.finishedBytes = finished.marshal()
+	hs.writeHash(hs.finishedBytes, seqno)
+	postCCSBytes = append(postCCSBytes, hs.finishedBytes...)
 
 	if c.config.Bugs.FragmentAcrossChangeCipherSpec {
 		c.writeRecord(recordTypeHandshake, postCCSBytes[:5])
 		postCCSBytes = postCCSBytes[5:]
 	}
+	c.dtlsFlushHandshake()
 
 	if !c.config.Bugs.SkipChangeCipherSpec &&
 		c.config.Bugs.EarlyChangeCipherSpec == 0 {
 		c.writeRecord(recordTypeChangeCipherSpec, []byte{1})
 	}
 
-	c.writeRecord(recordTypeHandshake, postCCSBytes)
+	if c.config.Bugs.AppDataAfterChangeCipherSpec != nil {
+		c.writeRecord(recordTypeApplicationData, c.config.Bugs.AppDataAfterChangeCipherSpec)
+	}
+	if c.config.Bugs.AlertAfterChangeCipherSpec != 0 {
+		c.sendAlert(c.config.Bugs.AlertAfterChangeCipherSpec)
+		return errors.New("tls: simulating post-CCS alert")
+	}
+
+	if !c.config.Bugs.SkipFinished {
+		c.writeRecord(recordTypeHandshake, postCCSBytes)
+		c.dtlsFlushHandshake()
+	}
 	return nil
 }
 

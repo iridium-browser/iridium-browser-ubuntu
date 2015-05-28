@@ -40,6 +40,7 @@
 #include "chromeos/system/statistics_provider.h"
 #include "components/policy/core/common/cloud/cloud_policy_client.h"
 #include "components/policy/core/common/cloud/cloud_policy_constants.h"
+#include "components/policy/core/common/cloud/cloud_policy_core.h"
 #include "components/policy/core/common/cloud/mock_device_management_service.h"
 #include "components/policy/core/common/external_data_fetcher.h"
 #include "components/policy/core/common/schema_registry.h"
@@ -81,11 +82,7 @@ class TestingDeviceCloudPolicyManagerChromeOS
       ServerBackedStateKeysBroker* state_keys_broker)
       : DeviceCloudPolicyManagerChromeOS(
             store.Pass(), task_runner, state_keys_broker) {}
-  virtual ~TestingDeviceCloudPolicyManagerChromeOS() {}
-
-  bool HasStatusProvider() {
-    return client() ? client()->HasStatusProviderForTest() : false;
-  }
+  ~TestingDeviceCloudPolicyManagerChromeOS() override {}
 };
 
 class DeviceCloudPolicyManagerChromeOSTest
@@ -181,8 +178,7 @@ class DeviceCloudPolicyManagerChromeOSTest
         install_attributes_.get(),
         &state_keys_broker_,
         store_,
-        manager_.get(),
-        &device_settings_service_));
+        manager_.get()));
     initializer_->Init();
   }
 
@@ -198,6 +194,7 @@ class DeviceCloudPolicyManagerChromeOSTest
   }
 
   MOCK_METHOD0(OnDeviceCloudPolicyManagerConnected, void());
+  MOCK_METHOD0(OnDeviceCloudPolicyManagerDisconnected, void());
 
   scoped_ptr<EnterpriseInstallAttributes> install_attributes_;
 
@@ -254,8 +251,8 @@ TEST_F(DeviceCloudPolicyManagerChromeOSTest, EnrolledDevice) {
   base::RunLoop().RunUntilIdle();
   Mock::VerifyAndClearExpectations(&device_management_service_);
   ASSERT_TRUE(policy_fetch_job);
-  // Should create a status provider for reporting on enrolled devices.
-  EXPECT_TRUE(manager_->HasStatusProvider());
+  // Should create a status uploader for reporting on enrolled devices.
+  EXPECT_TRUE(manager_->HasStatusUploaderForTest());
   VerifyPolicyPopulated();
 
   manager_->Shutdown();
@@ -293,7 +290,7 @@ TEST_F(DeviceCloudPolicyManagerChromeOSTest, UnmanagedDevice) {
   ASSERT_TRUE(policy_fetch_job);
   // Should create a status provider for reporting on enrolled devices, even
   // those that aren't managed.
-  EXPECT_TRUE(manager_->HasStatusProvider());
+  EXPECT_TRUE(manager_->HasStatusUploaderForTest());
 
   // Switch back to ACTIVE, service the policy fetch and let it propagate.
   device_policy_.policy_data().set_state(em::PolicyData::ACTIVE);
@@ -321,25 +318,34 @@ TEST_F(DeviceCloudPolicyManagerChromeOSTest, ConsumerDevice) {
   ConnectManager();
   EXPECT_TRUE(manager_->policies().Equals(bundle));
   // Should not create a status provider for reporting on consumer devices.
-  EXPECT_FALSE(manager_->HasStatusProvider());
+  EXPECT_FALSE(manager_->HasStatusUploaderForTest());
 
   manager_->Shutdown();
   EXPECT_TRUE(manager_->policies().Equals(bundle));
 }
 
-TEST_F(DeviceCloudPolicyManagerChromeOSTest, ObserverIsNotifiedOnConnected) {
+TEST_F(DeviceCloudPolicyManagerChromeOSTest, ConnectAndDisconnect) {
   LockDevice();
   FlushDeviceSettings();
+  EXPECT_FALSE(manager_->core()->service());  // Not connected.
 
+  // Connect the manager.
   MockDeviceManagementJob* policy_fetch_job = nullptr;
   EXPECT_CALL(device_management_service_,
               CreateJob(DeviceManagementRequestJob::TYPE_POLICY_FETCH, _))
       .WillOnce(device_management_service_.CreateAsyncJob(&policy_fetch_job));
   EXPECT_CALL(device_management_service_, StartJob(_, _, _, _, _, _, _));
   EXPECT_CALL(*this, OnDeviceCloudPolicyManagerConnected());
-
   ConnectManager();
   base::RunLoop().RunUntilIdle();
+  Mock::VerifyAndClearExpectations(&device_management_service_);
+  Mock::VerifyAndClearExpectations(this);
+  EXPECT_TRUE(manager_->core()->service());  // Connected.
+
+  // Disconnect the manager.
+  EXPECT_CALL(*this, OnDeviceCloudPolicyManagerDisconnected());
+  manager_->Disconnect();
+  EXPECT_FALSE(manager_->core()->service());  // Not connnected.
 }
 
 class DeviceCloudPolicyManagerChromeOSEnrollmentTest
@@ -349,6 +355,8 @@ class DeviceCloudPolicyManagerChromeOSEnrollmentTest
     status_ = status;
     done_ = true;
   }
+
+  MOCK_METHOD1(OnUnregistered, void(bool));
 
  protected:
   DeviceCloudPolicyManagerChromeOSEnrollmentTest()
@@ -360,7 +368,7 @@ class DeviceCloudPolicyManagerChromeOSEnrollmentTest
         status_(EnrollmentStatus::ForStatus(EnrollmentStatus::STATUS_SUCCESS)),
         done_(false) {}
 
-  virtual void SetUp() override {
+  void SetUp() override {
     DeviceCloudPolicyManagerChromeOSTest::SetUp();
 
     // Set up test data.
@@ -661,6 +669,44 @@ TEST_F(DeviceCloudPolicyManagerChromeOSEnrollmentTest,
 
   RunTest();
   ExpectSuccessfulEnrollment();
+}
+
+TEST_F(DeviceCloudPolicyManagerChromeOSEnrollmentTest, UnregisterSucceeds) {
+  // Enroll first.
+  RunTest();
+  ExpectSuccessfulEnrollment();
+
+  // Set up mock objects for the upcoming unregistration job.
+  em::DeviceManagementResponse response;
+  response.mutable_unregister_response();
+  EXPECT_CALL(device_management_service_,
+              CreateJob(DeviceManagementRequestJob::TYPE_UNREGISTRATION, _))
+      .WillOnce(device_management_service_.SucceedJob(response));
+  EXPECT_CALL(device_management_service_, StartJob(_, _, _, _, _, _, _));
+  EXPECT_CALL(*this, OnUnregistered(true));
+
+  // Start unregistering.
+  manager_->Unregister(base::Bind(
+      &DeviceCloudPolicyManagerChromeOSEnrollmentTest::OnUnregistered,
+      base::Unretained(this)));
+}
+
+TEST_F(DeviceCloudPolicyManagerChromeOSEnrollmentTest, UnregisterFails) {
+  // Enroll first.
+  RunTest();
+  ExpectSuccessfulEnrollment();
+
+  // Set up mock objects for the upcoming unregistration job.
+  EXPECT_CALL(device_management_service_,
+              CreateJob(DeviceManagementRequestJob::TYPE_UNREGISTRATION, _))
+      .WillOnce(device_management_service_.FailJob(DM_STATUS_REQUEST_FAILED));
+  EXPECT_CALL(device_management_service_, StartJob(_, _, _, _, _, _, _));
+  EXPECT_CALL(*this, OnUnregistered(false));
+
+  // Start unregistering.
+  manager_->Unregister(base::Bind(
+      &DeviceCloudPolicyManagerChromeOSEnrollmentTest::OnUnregistered,
+      base::Unretained(this)));
 }
 
 // A subclass that runs with a blank system salt.

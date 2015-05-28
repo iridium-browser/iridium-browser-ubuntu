@@ -17,9 +17,11 @@
 #include "chrome/browser/signin/signin_header_helper.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_window.h"
+#include "chrome/browser/ui/exclusive_access/exclusive_access_context.h"
 #include "chrome/browser/ui/infobar_container_delegate.h"
 #include "chrome/browser/ui/omnibox/omnibox_popup_model_observer.h"
 #include "chrome/browser/ui/tabs/tab_strip_model_observer.h"
+#include "chrome/browser/ui/views/exclusive_access_bubble_views_context.h"
 #include "chrome/browser/ui/views/frame/browser_frame.h"
 #include "chrome/browser/ui/views/frame/contents_web_view.h"
 #include "chrome/browser/ui/views/frame/immersive_mode_controller.h"
@@ -85,7 +87,9 @@ class BrowserView : public BrowserWindow,
                     public views::ClientView,
                     public InfoBarContainerDelegate,
                     public LoadCompleteListener::Delegate,
-                    public OmniboxPopupModelObserver {
+                    public OmniboxPopupModelObserver,
+                    public ExclusiveAccessContext,
+                    public ExclusiveAccessBubbleViewsContext {
  public:
   // The browser view's class name.
   static const char kViewClassName[];
@@ -119,11 +123,6 @@ class BrowserView : public BrowserWindow,
   // events (such as changing enabling/disabling Aero on Win) can force a need
   // to change some of the bubble's creation parameters.
   void InitStatusBubble();
-
-  // Initializes the permission bubble view. This class is intended to be
-  // created once and then re-used for the life of the browser window. The
-  // bubbles it creates will be associated with a single visible tab.
-  void InitPermissionBubbleView();
 
   // Returns the apparent bounds of the toolbar, in BrowserView coordinates.
   // These differ from |toolbar_.bounds()| in that they match where the toolbar
@@ -275,7 +274,7 @@ class BrowserView : public BrowserWindow,
                        ExclusiveAccessBubbleType bubble_type,
                        bool with_toolbar) override;
   void ExitFullscreen() override;
-  void UpdateFullscreenExitBubbleContent(
+  void UpdateExclusiveAccessExitBubbleContent(
       const GURL& url,
       ExclusiveAccessBubbleType bubble_type) override;
   bool ShouldHideUIForFullscreen() const override;
@@ -285,9 +284,9 @@ class BrowserView : public BrowserWindow,
   void UpdateFullscreenWithToolbar(bool with_toolbar) override;
   bool IsFullscreenWithToolbar() const override;
 #if defined(OS_WIN)
-  virtual void SetMetroSnapMode(bool enable) override;
-  virtual bool IsInMetroSnapMode() const override;
-#endif
+  void SetMetroSnapMode(bool enable) override;
+  bool IsInMetroSnapMode() const override;
+#endif  // defined(OS_WIN)
   LocationBar* GetLocationBar() const override;
   void SetFocusToLocationBar(bool select_all) override;
   void UpdateReloadStopState(bool is_loading, bool force) override;
@@ -308,8 +307,9 @@ class BrowserView : public BrowserWindow,
                                 Profile* profile) override;
   void ShowUpdateChromeDialog() override;
   void ShowBookmarkBubble(const GURL& url, bool already_bookmarked) override;
-  void ShowBookmarkAppBubble(const WebApplicationInfo& web_app_info,
-                             const std::string& extension_id) override;
+  void ShowBookmarkAppBubble(
+      const WebApplicationInfo& web_app_info,
+      const ShowBookmarkAppBubbleCallback& callback) override;
   void ShowTranslateBubble(content::WebContents* contents,
                            translate::TranslateStep step,
                            translate::TranslateErrors::Type error_type,
@@ -335,7 +335,6 @@ class BrowserView : public BrowserWindow,
       bool app_modal,
       const base::Callback<void(bool)>& callback) override;
   void UserChangedTheme() override;
-  int GetExtraRenderViewHeight() const override;
   void WebContentsFocused(content::WebContents* contents) override;
   void ShowWebsiteSettings(Profile* profile,
                            content::WebContents* web_contents,
@@ -360,6 +359,7 @@ class BrowserView : public BrowserWindow,
   int GetRenderViewHeightInsetWithDetachedBookmarkBar() override;
   void ExecuteExtensionCommand(const extensions::Extension* extension,
                                const extensions::Command& command) override;
+  ExclusiveAccessContext* GetExclusiveAccessContext() override;
 
   BookmarkBarView* GetBookmarkBarView() const;
   LocationBarView* GetLocationBarView() const;
@@ -423,8 +423,7 @@ class BrowserView : public BrowserWindow,
   // Overridden from views::View:
   const char* GetClassName() const override;
   void Layout() override;
-  void PaintChildren(gfx::Canvas* canvas,
-                     const views::CullSet& cull_set) override;
+  void PaintChildren(const ui::PaintContext& context) override;
   void ViewHierarchyChanged(
       const ViewHierarchyChangedDetails& details) override;
   void ChildPreferredSizeChanged(View* child) override;
@@ -436,6 +435,18 @@ class BrowserView : public BrowserWindow,
 
   // OmniboxPopupModelObserver overrides
   void OnOmniboxPopupShownOrHidden() override;
+
+  // ExclusiveAccessContext overrides
+  Profile* GetProfile() override;
+  content::WebContents* GetActiveWebContents() override;
+  void HideDownloadShelf() override;
+  void UnhideDownloadShelf() override;
+
+  // ExclusiveAccessBubbleViewsContext overrides
+  ExclusiveAccessManager* GetExclusiveAccessManager() override;
+  bool IsImmersiveModeEnabled() override;
+  views::Widget* GetBubbleAssociatedWidget() override;
+  gfx::Rect GetTopContainerBoundsInScreen() override;
 
   // Testing interface:
   views::View* GetContentsContainerForTest() { return contents_container_; }
@@ -646,7 +657,7 @@ class BrowserView : public BrowserWindow,
 
   // The permission bubble view is the toolkit-specific implementation of the
   // interface used by the manager to display permissions bubbles.
-  scoped_ptr<PermissionBubbleViewViews> permission_bubble_view_;
+  scoped_ptr<PermissionBubbleViewViews> permission_bubble_;
 
   // A mapping between accelerators and commands.
   std::map<ui::Accelerator, int> accelerator_table_;

@@ -19,7 +19,6 @@ namespace content {
 class CONTENT_EXPORT SmoothEventSampler {
  public:
   SmoothEventSampler(base::TimeDelta min_capture_period,
-                     bool events_are_reliable,
                      int redundant_capture_goal);
 
   base::TimeDelta min_capture_period() const { return min_capture_period_; }
@@ -46,7 +45,6 @@ class CONTENT_EXPORT SmoothEventSampler {
   bool HasUnrecordedEvent() const;
 
  private:
-  const bool events_are_reliable_;
   const base::TimeDelta min_capture_period_;
   const int redundant_capture_goal_;
   const base::TimeDelta token_bucket_capacity_;
@@ -177,12 +175,10 @@ class CONTENT_EXPORT VideoCaptureOracle {
   enum Event {
     kTimerPoll,
     kCompositorUpdate,
-    kSoftwarePaint,
     kNumEvents,
   };
 
-  VideoCaptureOracle(base::TimeDelta min_capture_period,
-                     bool events_are_reliable);
+  explicit VideoCaptureOracle(base::TimeDelta min_capture_period);
   virtual ~VideoCaptureOracle();
 
   // Record a event of type |event|, and decide whether the caller should do a

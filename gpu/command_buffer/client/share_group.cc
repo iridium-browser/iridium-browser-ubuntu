@@ -60,9 +60,7 @@ class IdHandler : public IdHandlerInterface {
     (gl_impl->*delete_fn)(n, ids);
     // We need to ensure that the delete call is evaluated on the service side
     // before any other contexts issue commands using these client ids.
-    // TODO(vmiura): Can remove this by virtualizing internal ids, however
-    // this code only affects PPAPI for now.
-    gl_impl->helper()->CommandBufferHelper::Flush();
+    gl_impl->helper()->CommandBufferHelper::OrderingBarrier();
     return true;
   }
 
@@ -74,6 +72,28 @@ class IdHandler : public IdHandlerInterface {
     base::AutoLock auto_lock(lock_);
     bool result = id ? id_allocator_.MarkAsUsed(id) : true;
     (gl_impl->*bind_fn)(target, id);
+    return result;
+  }
+  bool MarkAsUsedForBind(GLES2Implementation* gl_impl,
+                         GLenum target,
+                         GLuint index,
+                         GLuint id,
+                         BindIndexedFn bind_fn) override {
+    base::AutoLock auto_lock(lock_);
+    bool result = id ? id_allocator_.MarkAsUsed(id) : true;
+    (gl_impl->*bind_fn)(target, index, id);
+    return result;
+  }
+  bool MarkAsUsedForBind(GLES2Implementation* gl_impl,
+                         GLenum target,
+                         GLuint index,
+                         GLuint id,
+                         GLintptr offset,
+                         GLsizeiptr size,
+                         BindIndexedRangeFn bind_fn) override {
+    base::AutoLock auto_lock(lock_);
+    bool result = id ? id_allocator_.MarkAsUsed(id) : true;
+    (gl_impl->*bind_fn)(target, index, id, offset, size);
     return result;
   }
 
@@ -166,6 +186,42 @@ class StrictIdHandler : public IdHandlerInterface {
     (gl_impl->*bind_fn)(target, id);
     return true;
   }
+  bool MarkAsUsedForBind(GLES2Implementation* gl_impl,
+                         GLenum target,
+                         GLuint index,
+                         GLuint id,
+                         BindIndexedFn bind_fn) override {
+#ifndef NDEBUG
+    if (id != 0) {
+      base::AutoLock auto_lock(lock_);
+      DCHECK(id_states_[id - 1] == kIdInUse);
+    }
+#endif
+    // StrictIdHandler is used if |bind_generates_resource| is false. In that
+    // case, |bind_fn| will not use Flush() after helper->Bind*(), so it is OK
+    // to call |bind_fn| without holding the lock.
+    (gl_impl->*bind_fn)(target, index, id);
+    return true;
+  }
+  bool MarkAsUsedForBind(GLES2Implementation* gl_impl,
+                         GLenum target,
+                         GLuint index,
+                         GLuint id,
+                         GLintptr offset,
+                         GLsizeiptr size,
+                         BindIndexedRangeFn bind_fn) override {
+#ifndef NDEBUG
+    if (id != 0) {
+      base::AutoLock auto_lock(lock_);
+      DCHECK(id_states_[id - 1] == kIdInUse);
+    }
+#endif
+    // StrictIdHandler is used if |bind_generates_resource| is false. In that
+    // case, |bind_fn| will not use Flush() after helper->Bind*(), so it is OK
+    // to call |bind_fn| without holding the lock.
+    (gl_impl->*bind_fn)(target, index, id, offset, size);
+    return true;
+  }
 
   // Overridden from IdHandlerInterface.
   void FreeContext(GLES2Implementation* gl_impl) override {
@@ -235,6 +291,24 @@ class NonReusedIdHandler : public IdHandlerInterface {
     // This is only used for Shaders and Programs which have no bind.
     return false;
   }
+  bool MarkAsUsedForBind(GLES2Implementation* /* gl_impl */,
+                         GLenum /* target */,
+                         GLuint /* index */,
+                         GLuint /* id */,
+                         BindIndexedFn /* bind_fn */) override {
+    // This is only used for Shaders and Programs which have no bind.
+    return false;
+  }
+  bool MarkAsUsedForBind(GLES2Implementation* /* gl_impl */,
+                         GLenum /* target */,
+                         GLuint /* index */,
+                         GLuint /* id */,
+                         GLintptr /* offset */,
+                         GLsizeiptr /* size */,
+                         BindIndexedRangeFn /* bind_fn */) override {
+    // This is only used for Shaders and Programs which have no bind.
+    return false;
+  }
 
   void FreeContext(GLES2Implementation* gl_impl) override {}
 
@@ -262,7 +336,7 @@ ShareGroup::ShareGroup(bool bind_generates_resource)
       }
     }
   }
-  program_info_manager_.reset(ProgramInfoManager::Create(false));
+  program_info_manager_.reset(new ProgramInfoManager);
 }
 
 void ShareGroup::set_program_info_manager(ProgramInfoManager* manager) {

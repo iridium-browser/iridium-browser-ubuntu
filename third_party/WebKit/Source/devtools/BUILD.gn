@@ -21,7 +21,6 @@ devtools_core_files =
   gypi_values.devtools_host_js_files +
   gypi_values.devtools_main_js_files +
   gypi_values.devtools_platform_js_files +
-  gypi_values.devtools_screencast_js_files +
   gypi_values.devtools_sdk_js_files +
   gypi_values.devtools_toolbox_js_files +
   gypi_values.devtools_toolbox_bootstrap_js_files +
@@ -34,9 +33,10 @@ devtools_extensions_js_files = gypi_values.devtools_extensions_js_files -
   gypi_values.devtools_extension_api_files
 
 devtools_modules_js_files =
+  gypi_values.devtools_accessibility_js_files +
   gypi_values.devtools_audits_js_files +
+  gypi_values.devtools_components_lazy_js_files +
   gypi_values.devtools_console_js_files +
-  gypi_values.devtools_devices_js_files +
   gypi_values.devtools_elements_js_files +
   devtools_extensions_js_files +
   gypi_values.devtools_heap_snapshot_worker_js_files +
@@ -45,12 +45,15 @@ devtools_modules_js_files =
   gypi_values.devtools_profiler_js_files +
   gypi_values.devtools_promises_js_files +
   gypi_values.devtools_resources_js_files +
+  gypi_values.devtools_screencast_js_files +
   gypi_values.devtools_script_formatter_worker_js_files +
   gypi_values.devtools_settings_js_files +
+  gypi_values.devtools_snippets_js_files +
   gypi_values.devtools_source_frame_js_files +
   gypi_values.devtools_sources_js_files +
   gypi_values.devtools_temp_storage_shared_worker_js_files +
-  gypi_values.devtools_timeline_js_files
+  gypi_values.devtools_timeline_js_files +
+  gypi_values.devtools_ui_lazy_js_files
 
 all_devtools_files =
   gypi_values.devtools_cm_css_files +
@@ -118,7 +121,7 @@ action("generate_devtools_grd") {
     ]
     static_files += all_devtools_files + [ "front_end/Runtime.js" ]
   } else {
-    # Release: pick compiled files and lazy-loaded CSS.
+    # Release: pick compiled non-remote files and lazy-loaded CSS.
     generated_files = [
       resources_out_dir + "devtools.css",
       resources_out_dir + "devtools.html",
@@ -129,9 +132,10 @@ action("generate_devtools_grd") {
       resources_out_dir + "toolbox.css",
       resources_out_dir + "toolbox.html",
       resources_out_dir + "toolbox.js",
+      resources_out_dir + "accessibility_module.js",
       resources_out_dir + "audits_module.js",
+      resources_out_dir + "components_lazy_module.js",
       resources_out_dir + "console_module.js",
-      resources_out_dir + "devices_module.js",
       resources_out_dir + "elements_module.js",
       resources_out_dir + "heap_snapshot_worker_module.js",
       resources_out_dir + "layers_module.js",
@@ -139,12 +143,15 @@ action("generate_devtools_grd") {
       resources_out_dir + "profiler_module.js",
       resources_out_dir + "promises_module.js",
       resources_out_dir + "resources_module.js",
+      resources_out_dir + "screencast_module.js",
       resources_out_dir + "script_formatter_worker_module.js",
       resources_out_dir + "settings_module.js",
+      resources_out_dir + "snippets_module.js",
       resources_out_dir + "source_frame_module.js",
       resources_out_dir + "sources_module.js",
       resources_out_dir + "temp_storage_shared_worker_module.js",
       resources_out_dir + "timeline_module.js",
+      resources_out_dir + "ui_lazy_module.js",
       resources_out_dir + "devtools_extension_api.js",
     ]
   }
@@ -233,9 +240,10 @@ action("build_applications") {
       resources_out_dir + "devtools.js",
       resources_out_dir + "inspector.js",
       resources_out_dir + "toolbox.js",
+      resources_out_dir + "accessibility_module.js",
       resources_out_dir + "audits_module.js",
+      resources_out_dir + "components_lazy_module.js",
       resources_out_dir + "console_module.js",
-      resources_out_dir + "devices_module.js",
       resources_out_dir + "elements_module.js",
       resources_out_dir + "heap_snapshot_worker_module.js",
       resources_out_dir + "layers_module.js",
@@ -243,12 +251,15 @@ action("build_applications") {
       resources_out_dir + "profiler_module.js",
       resources_out_dir + "promises_module.js",
       resources_out_dir + "resources_module.js",
+      resources_out_dir + "screencast_module.js",
       resources_out_dir + "script_formatter_worker_module.js",
       resources_out_dir + "settings_module.js",
+      resources_out_dir + "snippets_module.js",
       resources_out_dir + "source_frame_module.js",
       resources_out_dir + "sources_module.js",
       resources_out_dir + "temp_storage_shared_worker_module.js",
       resources_out_dir + "timeline_module.js",
+      resources_out_dir + "ui_lazy_module.js",
     ]
 
     deps = [

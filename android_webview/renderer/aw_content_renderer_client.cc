@@ -7,16 +7,18 @@
 #include "android_webview/common/aw_resource.h"
 #include "android_webview/common/render_view_messages.h"
 #include "android_webview/common/url_constants.h"
+#include "android_webview/renderer/aw_content_settings_client.h"
 #include "android_webview/renderer/aw_key_systems.h"
-#include "android_webview/renderer/aw_permission_client.h"
+#include "android_webview/renderer/aw_message_port_client.h"
+#include "android_webview/renderer/aw_print_web_view_helper_delegate.h"
 #include "android_webview/renderer/aw_render_frame_ext.h"
 #include "android_webview/renderer/aw_render_view_ext.h"
 #include "android_webview/renderer/print_render_frame_observer.h"
-#include "android_webview/renderer/print_web_view_helper.h"
 #include "base/message_loop/message_loop.h"
 #include "base/strings/utf_string_conversions.h"
 #include "components/autofill/content/renderer/autofill_agent.h"
 #include "components/autofill/content/renderer/password_autofill_agent.h"
+#include "components/printing/renderer/print_web_view_helper.h"
 #include "components/visitedlink/renderer/visitedlink_slave.h"
 #include "content/public/common/url_constants.h"
 #include "content/public/renderer/document_state.h"
@@ -86,8 +88,8 @@ bool AwContentRendererClient::HandleNavigation(
   // works fine. This will stop working if android_webview starts swapping out
   // renderers on navigation.
   bool application_initiated =
-      !document_state->navigation_state()->is_content_initiated()
-      || type == blink::WebNavigationTypeBackForward;
+      !document_state->navigation_state()->IsContentInitiated() ||
+      type == blink::WebNavigationTypeBackForward;
 
   // Don't offer application-initiated navigations unless it's a redirect.
   if (application_initiated && !is_redirect)
@@ -119,9 +121,10 @@ bool AwContentRendererClient::HandleNavigation(
 
 void AwContentRendererClient::RenderFrameCreated(
     content::RenderFrame* render_frame) {
-  new AwPermissionClient(render_frame);
+  new AwContentSettingsClient(render_frame);
   new PrintRenderFrameObserver(render_frame);
   new AwRenderFrameExt(render_frame);
+  new AwMessagePortClient(render_frame);
 
   // TODO(jam): when the frame tree moves into content and parent() works at
   // RenderFrame construction, simplify this by just checking parent().
@@ -145,7 +148,10 @@ void AwContentRendererClient::RenderViewCreated(
     content::RenderView* render_view) {
   AwRenderViewExt::RenderViewCreated(render_view);
 
-  new printing::PrintWebViewHelper(render_view);
+  new printing::PrintWebViewHelper(
+      render_view,
+      scoped_ptr<printing::PrintWebViewHelper::Delegate>(
+          new AwPrintWebViewHelperDelegate()));
 }
 
 bool AwContentRendererClient::HasErrorPage(int http_status_code,

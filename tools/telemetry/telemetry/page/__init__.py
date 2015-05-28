@@ -6,8 +6,8 @@ import logging
 import os
 import urlparse
 
-from telemetry import user_story
 from telemetry.page import shared_page_state
+from telemetry import user_story
 from telemetry.util import cloud_storage
 from telemetry.util import path
 
@@ -25,11 +25,12 @@ def _UpdateCredentials(credentials_path):
 class Page(user_story.UserStory):
   def __init__(self, url, page_set=None, base_dir=None, name='',
                credentials_path=None, labels=None, startup_url='',
-               make_javascript_deterministic=True):
+               make_javascript_deterministic=True,
+               shared_page_state_class=shared_page_state.SharedPageState):
     self._url = url
 
     super(Page, self).__init__(
-        shared_page_state.SharedPageState, name=name, labels=labels,
+        shared_page_state_class, name=name, labels=labels,
         is_local=self._scheme in ['file', 'chrome', 'about'],
         make_javascript_deterministic=make_javascript_deterministic)
 
@@ -75,28 +76,10 @@ class Page(user_story.UserStory):
       if startup_url_scheme == 'file':
         raise ValueError('startup_url with local file scheme is not supported')
 
-  def TransferToPageSet(self, another_page_set):
-    """ Transfer this page to another page set.
-    Args:
-      another_page_set: an instance of telemetry.page.PageSet to transfer this
-          page to.
-    Note:
-      This method removes this page instance from the pages list of its current
-      page_set, so one should be careful not to iterate through the list of
-      pages of a page_set and calling this method.
-      For example, the below loop is erroneous:
-        for p in page_set_A.pages:
-          p.TransferToPageSet(page_set_B.pages)
-    """
-    assert self._page_set
-    if another_page_set is self._page_set:
-      return
-    self._page_set.pages.remove(self)
-    self._page_set = another_page_set
-    self._page_set.AddUserStory(self)
-
   def RunNavigateSteps(self, action_runner):
-    action_runner.NavigateToPage(self)
+    url = self.file_path_url_with_scheme if self.is_file else self.url
+    action_runner.Navigate(
+        url, script_to_evaluate_on_commit=self.script_to_evaluate_on_commit)
 
   def RunPageInteractions(self, action_runner):
     """Override this to define custom interactions with the page.
@@ -106,16 +89,6 @@ class Page(user_story.UserStory):
         action_runner.TapElement(text='Next')
     """
     pass
-
-  def CanRunOnBrowser(self, browser_info):
-    """Override this to returns whether this page can be run on specific
-    browser.
-
-    Args:
-      browser_info: an instance of telemetry.core.browser_info.BrowserInfo
-    """
-    assert browser_info
-    return True
 
   def AsDict(self):
     """Converts a page object to a dict suitable for JSON output."""
@@ -194,7 +167,13 @@ class Page(user_story.UserStory):
     return file_path_url
 
   @property
+  def file_path_url_with_scheme(self):
+    return 'file://' + self.file_path_url
+
+  @property
   def serving_dir(self):
+    if not self.is_file:
+      return None
     file_path = os.path.realpath(self.file_path)
     if os.path.isdir(file_path):
       return file_path

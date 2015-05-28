@@ -7,6 +7,7 @@
 
 #include "base/basictypes.h"
 #include "base/compiler_specific.h"
+#include "base/gtest_prod_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/observer_list.h"
@@ -56,8 +57,8 @@ class ZoomController : public content::WebContentsObserver,
     // These zoom changes can be handled manually by listening for the
     // |onZoomChange| event. Zooming in this mode is also on a per-tab basis.
     ZOOM_MODE_MANUAL,
-    // Disables all zooming in this tab. The tab will revert to default (100%)
-    // zoom, and all attempted zoom changes will be ignored.
+    // Disables all zooming in this tab. The tab will revert to the default
+    // zoom level, and all attempted zoom changes will be ignored.
     ZOOM_MODE_DISABLED,
   };
 
@@ -84,6 +85,12 @@ class ZoomController : public content::WebContentsObserver,
     ZoomController::ZoomMode zoom_mode;
     bool can_show_bubble;
   };
+
+  // Since it's possible for a WebContents to not have a ZoomController, provide
+  // a simple, safe and reliable method to find the current zoom level for a
+  // given WebContents*.
+  static double GetZoomLevelForWebContents(
+      const content::WebContents* web_contents);
 
   ~ZoomController() override;
 
@@ -134,6 +141,10 @@ class ZoomController : public content::WebContentsObserver,
 
   // Sets the zoom mode, which defines zoom behavior (see enum ZoomMode).
   void SetZoomMode(ZoomMode zoom_mode);
+
+  // Set and query whether or not the page scale factor is one.
+  void SetPageScaleFactorIsOneForTesting(bool is_one);
+  bool PageScaleFactorIsOne() const;
 
   // content::WebContentsObserver overrides:
   void DidNavigateMainFrame(

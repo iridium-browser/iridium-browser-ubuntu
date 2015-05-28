@@ -87,6 +87,7 @@ class TiledLayerTest : public testing::Test {
     settings_.max_partial_texture_updates = std::numeric_limits<size_t>::max();
     settings_.layer_transforms_should_scale_layer_contents = true;
     settings_.verify_property_trees = true;
+    settings_.impl_side_painting = false;
   }
 
   void SetUp() override {
@@ -94,7 +95,7 @@ class TiledLayerTest : public testing::Test {
     shared_bitmap_manager_.reset(new TestSharedBitmapManager());
     layer_tree_host_ = LayerTreeHost::CreateThreaded(
         &synchonous_output_surface_client_, shared_bitmap_manager_.get(),
-        nullptr, settings_, base::MessageLoopProxy::current(),
+        nullptr, nullptr, settings_, base::MessageLoopProxy::current(),
         impl_thread_.message_loop_proxy(), nullptr);
     synchonous_output_surface_client_.SetLayerTreeHost(layer_tree_host_.get());
     proxy_ = layer_tree_host_->proxy();
@@ -115,8 +116,8 @@ class TiledLayerTest : public testing::Test {
                                                   0,
                                                   false,
                                                   1);
-    host_impl_ = make_scoped_ptr(
-        new FakeLayerTreeHostImpl(proxy_, shared_bitmap_manager_.get()));
+    host_impl_ = make_scoped_ptr(new FakeLayerTreeHostImpl(
+        proxy_, shared_bitmap_manager_.get(), nullptr));
   }
 
   ~TiledLayerTest() override {

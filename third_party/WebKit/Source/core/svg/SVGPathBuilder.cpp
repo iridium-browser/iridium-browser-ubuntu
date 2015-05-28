@@ -24,38 +24,33 @@
 #include "config.h"
 #include "core/svg/SVGPathBuilder.h"
 
+#include "core/svg/SVGPathSeg.h"
 #include "platform/graphics/Path.h"
 
 namespace blink {
 
-void SVGPathBuilder::moveTo(const FloatPoint& targetPoint, bool closed, PathCoordinateMode mode)
+void SVGPathBuilder::emitSegment(const PathSegmentData& segment)
 {
-    m_current = mode == AbsoluteCoordinates ? targetPoint : m_current + targetPoint;
-    if (closed && !m_path.isEmpty())
+    switch (segment.command) {
+    case PathSegMoveToAbs:
+        if (m_closed && !m_path.isEmpty())
+            m_path.closeSubpath();
+        m_path.moveTo(segment.targetPoint);
+        m_closed = false;
+        break;
+    case PathSegLineToAbs:
+        m_path.addLineTo(segment.targetPoint);
+        break;
+    case PathSegClosePath:
         m_path.closeSubpath();
-    m_path.moveTo(m_current);
-}
-
-void SVGPathBuilder::lineTo(const FloatPoint& targetPoint, PathCoordinateMode mode)
-{
-    m_current = mode == AbsoluteCoordinates ? targetPoint : m_current + targetPoint;
-    m_path.addLineTo(m_current);
-}
-
-void SVGPathBuilder::curveToCubic(const FloatPoint& point1, const FloatPoint& point2, const FloatPoint& targetPoint, PathCoordinateMode mode)
-{
-    if (mode == RelativeCoordinates) {
-        m_path.addBezierCurveTo(m_current + point1, m_current + point2, m_current + targetPoint);
-        m_current += targetPoint;
-    } else {
-        m_current = targetPoint;
-        m_path.addBezierCurveTo(point1, point2, m_current);
+        m_closed = true;
+        break;
+    case PathSegCurveToCubicAbs:
+        m_path.addBezierCurveTo(segment.point1, segment.point2, segment.targetPoint);
+        break;
+    default:
+        ASSERT_NOT_REACHED();
     }
-}
-
-void SVGPathBuilder::closePath()
-{
-    m_path.closeSubpath();
 }
 
 }

@@ -51,7 +51,7 @@ public:
     static GamepadList* getGamepads(Navigator&);
     GamepadList* gamepads();
 
-    virtual void trace(Visitor*);
+    DECLARE_VIRTUAL_TRACE();
 
     void didConnectOrDisconnectGamepad(unsigned index, const WebGamepad&, bool connected);
 
@@ -62,6 +62,7 @@ private:
 
     void dispatchOneEvent();
     void didRemoveGamepadEventListeners();
+    bool startUpdatingIfAttached();
 
     // DOMWindowProperty
     virtual void willDestroyGlobalObjectInFrame() override;
@@ -80,7 +81,7 @@ private:
     virtual void didRemoveAllEventListeners(LocalDOMWindow*) override;
 
     PersistentWillBeMember<GamepadList> m_gamepads;
-    PersistentHeapDequeWillBeHeapDeque<Member<Gamepad> > m_pendingEvents;
+    PersistentHeapDequeWillBeHeapDeque<Member<Gamepad>> m_pendingEvents;
     AsyncMethodRunner<NavigatorGamepad> m_dispatchOneEventRunner;
 };
 

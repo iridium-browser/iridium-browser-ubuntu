@@ -22,6 +22,7 @@
 
 class Browser;
 class DownloadShelf;
+class ExclusiveAccessContext;
 class FindBar;
 class GlobalErrorBubbleViewBase;
 class GURL;
@@ -131,7 +132,7 @@ class BrowserWindow : public ui::BaseWindow {
                                ExclusiveAccessBubbleType bubble_type,
                                bool with_toolbar) = 0;
   virtual void ExitFullscreen() = 0;
-  virtual void UpdateFullscreenExitBubbleContent(
+  virtual void UpdateExclusiveAccessExitBubbleContent(
       const GURL& url,
       ExclusiveAccessBubbleType bubble_type) = 0;
 
@@ -221,14 +222,20 @@ class BrowserWindow : public ui::BaseWindow {
   // |already_bookmarked| is true if the url is already bookmarked.
   virtual void ShowBookmarkBubble(const GURL& url, bool already_bookmarked) = 0;
 
+  // Callback type used with the ShowBookmarkAppBubble() method. The boolean
+  // parameter is true when the user accepts the dialog. The WebApplicationInfo
+  // parameter contains the WebApplicationInfo as edited by the user.
+  typedef base::Callback<void(bool, const WebApplicationInfo&)>
+      ShowBookmarkAppBubbleCallback;
+
   // Shows the Bookmark App bubble.
   // See Extension::InitFromValueFlags::FROM_BOOKMARK for a description of
   // bookmark apps.
   //
   // |web_app_info| is the WebApplicationInfo being converted into an app.
-  // |extension_id| is the id of the bookmark app.
-  virtual void ShowBookmarkAppBubble(const WebApplicationInfo& web_app_info,
-                                     const std::string& extension_id) = 0;
+  virtual void ShowBookmarkAppBubble(
+      const WebApplicationInfo& web_app_info,
+      const ShowBookmarkAppBubbleCallback& callback) = 0;
 
   // Shows the translate bubble.
   //
@@ -290,12 +297,6 @@ class BrowserWindow : public ui::BaseWindow {
   // ThemeService calls this when a user has changed his or her theme,
   // indicating that it's time to redraw everything.
   virtual void UserChangedTheme() = 0;
-
-  // Get extra vertical height that the render view should add to its requests
-  // to webkit. This can help prevent sending extraneous layout/repaint requests
-  // when the delegate is in the process of resizing the tab contents view (e.g.
-  // during infobar animations).
-  virtual int GetExtraRenderViewHeight() const = 0;
 
   // Notification that |contents| got the focus through user action (click
   // on the page).
@@ -375,6 +376,7 @@ class BrowserWindow : public ui::BaseWindow {
     AVATAR_BUBBLE_MODE_REAUTH,
     AVATAR_BUBBLE_MODE_CONFIRM_SIGNIN,
     AVATAR_BUBBLE_MODE_SHOW_ERROR,
+    AVATAR_BUBBLE_MODE_FAST_USER_SWITCH,
   };
   virtual void ShowAvatarBubbleFromAvatarButton(AvatarBubbleMode mode,
       const signin::ManageAccountsParams& manage_accounts_params) = 0;
@@ -387,6 +389,9 @@ class BrowserWindow : public ui::BaseWindow {
   // Executes |command| registered by |extension|.
   virtual void ExecuteExtensionCommand(const extensions::Extension* extension,
                                        const extensions::Command& command) = 0;
+
+  // Returns object implementing ExclusiveAccessContext interface.
+  virtual ExclusiveAccessContext* GetExclusiveAccessContext() = 0;
 
  protected:
   friend class BrowserCloseManager;

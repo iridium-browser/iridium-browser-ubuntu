@@ -26,7 +26,7 @@ public:
         , fQuality(quality)
         , fRRect(rrect)
     {
-        this->init(&gRRectBlurKeyNamespaceLabel,
+        this->init(&gRRectBlurKeyNamespaceLabel, 0,
                    sizeof(fSigma) + sizeof(fStyle) + sizeof(fQuality) + sizeof(fRRect));
     }
 
@@ -51,8 +51,8 @@ struct RRectBlurRec : public SkResourceCache::Rec {
     RRectBlurKey   fKey;
     MaskValue      fValue;
 
-    virtual const Key& getKey() const SK_OVERRIDE { return fKey; }
-    virtual size_t bytesUsed() const SK_OVERRIDE { return sizeof(*this) + fValue.fData->size(); }
+    const Key& getKey() const override { return fKey; }
+    size_t bytesUsed() const override { return sizeof(*this) + fValue.fData->size(); }
 
     static bool Visitor(const SkResourceCache::Rec& baseRec, void* contextData) {
         const RRectBlurRec& rec = static_cast<const RRectBlurRec&>(baseRec);
@@ -117,7 +117,7 @@ public:
             fSizes[2] = SkSize::Make(rects[0].x() - rects[1].x(), rects[0].y() - rects[1].y());
         }
 
-        this->init(&gRectsBlurKeyNamespaceLabel,
+        this->init(&gRectsBlurKeyNamespaceLabel, 0,
                    sizeof(fSigma) + sizeof(fStyle) + sizeof(fQuality) + sizeof(fSizes));
     }
 
@@ -142,12 +142,12 @@ struct RectsBlurRec : public SkResourceCache::Rec {
     RectsBlurKey   fKey;
     MaskValue      fValue;
 
-    virtual const Key& getKey() const SK_OVERRIDE { return fKey; }
-    virtual size_t bytesUsed() const SK_OVERRIDE { return sizeof(*this) + fValue.fData->size(); }
+    const Key& getKey() const override { return fKey; }
+    size_t bytesUsed() const override { return sizeof(*this) + fValue.fData->size(); }
 
     static bool Visitor(const SkResourceCache::Rec& baseRec, void* contextData) {
         const RectsBlurRec& rec = static_cast<const RectsBlurRec&>(baseRec);
-        MaskValue* result = (MaskValue*)contextData;
+        MaskValue* result = static_cast<MaskValue*>(contextData);
 
         SkCachedData* tmpData = rec.fValue.fData;
         tmpData->ref();

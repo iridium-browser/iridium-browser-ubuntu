@@ -19,8 +19,6 @@ import android.os.Handler;
 import android.os.Looper;
 import android.os.Message;
 import android.print.PrintDocumentAdapter;
-import android.text.TextUtils;
-import android.util.Base64;
 import android.util.Log;
 import android.view.KeyEvent;
 import android.view.MotionEvent;
@@ -33,7 +31,6 @@ import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputConnection;
 import android.webkit.DownloadListener;
 import android.webkit.FindActionModeCallback;
-import android.webkit.JavascriptInterface;
 import android.webkit.ValueCallback;
 import android.webkit.WebBackForwardList;
 import android.webkit.WebChromeClient;
@@ -49,13 +46,11 @@ import org.chromium.android_webview.AwContentsStatics;
 import org.chromium.android_webview.AwPrintDocumentAdapter;
 import org.chromium.android_webview.AwSettings;
 import org.chromium.base.ThreadUtils;
+import org.chromium.base.annotations.SuppressFBWarnings;
 import org.chromium.content.browser.SmartClipProvider;
-import org.chromium.content_public.browser.LoadUrlParams;
 
 import java.io.BufferedWriter;
 import java.io.File;
-import java.lang.annotation.Annotation;
-import java.util.HashMap;
 import java.util.Map;
 import java.util.Queue;
 import java.util.concurrent.Callable;
@@ -506,117 +501,7 @@ class WebViewChromium implements WebViewProvider, WebViewProvider.ScrollDelegate
     }
 
     @Override
-    public void loadUrl(final String url, Map<String, String> additionalHttpHeaders) {
-        // TODO: We may actually want to do some sanity checks here (like filter about://chrome).
-
-        // For backwards compatibility, apps targeting less than K will have JS URLs evaluated
-        // directly and any result of the evaluation will not replace the current page content.
-        // Matching Chrome behavior more closely; apps targetting >= K that load a JS URL will
-        // have the result of that URL replace the content of the current page.
-        final String javaScriptScheme = "javascript:";
-        if (mAppTargetSdkVersion < Build.VERSION_CODES.KITKAT && url != null
-                && url.startsWith(javaScriptScheme)) {
-            mFactory.startYourEngines(true);
-            if (checkNeedsPost()) {
-                mRunQueue.addTask(new Runnable() {
-                    @Override
-                    public void run() {
-                        mAwContents.evaluateJavaScriptEvenIfNotYetNavigated(
-                                url.substring(javaScriptScheme.length()));
-                    }
-                });
-            } else {
-                mAwContents.evaluateJavaScriptEvenIfNotYetNavigated(
-                        url.substring(javaScriptScheme.length()));
-            }
-            return;
-        }
-
-        LoadUrlParams params = new LoadUrlParams(url);
-        if (additionalHttpHeaders != null) params.setExtraHeaders(additionalHttpHeaders);
-        loadUrlOnUiThread(params);
-    }
-
-    @Override
-    public void loadUrl(String url) {
-        // Early out to match old WebView implementation
-        if (url == null) {
-            return;
-        }
-        loadUrl(url, null);
-    }
-
-    @Override
-    public void postUrl(String url, byte[] postData) {
-        LoadUrlParams params = LoadUrlParams.createLoadHttpPostParams(url, postData);
-        Map<String, String> headers = new HashMap<String, String>();
-        headers.put("Content-Type", "application/x-www-form-urlencoded");
-        params.setExtraHeaders(headers);
-        loadUrlOnUiThread(params);
-    }
-
-    private static String fixupMimeType(String mimeType) {
-        return TextUtils.isEmpty(mimeType) ? "text/html" : mimeType;
-    }
-
-    private static String fixupData(String data) {
-        return TextUtils.isEmpty(data) ? "" : data;
-    }
-
-    private static String fixupBase(String url) {
-        return TextUtils.isEmpty(url) ? "about:blank" : url;
-    }
-
-    private static String fixupHistory(String url) {
-        return TextUtils.isEmpty(url) ? "about:blank" : url;
-    }
-
-    private static boolean isBase64Encoded(String encoding) {
-        return "base64".equals(encoding);
-    }
-
-    @Override
-    public void loadData(String data, String mimeType, String encoding) {
-        loadUrlOnUiThread(LoadUrlParams.createLoadDataParams(
-                fixupData(data), fixupMimeType(mimeType), isBase64Encoded(encoding)));
-    }
-
-    @Override
-    public void loadDataWithBaseURL(String baseUrl, String data, String mimeType, String encoding,
-            String historyUrl) {
-        data = fixupData(data);
-        mimeType = fixupMimeType(mimeType);
-        LoadUrlParams loadUrlParams;
-        baseUrl = fixupBase(baseUrl);
-        historyUrl = fixupHistory(historyUrl);
-
-        if (baseUrl.startsWith("data:")) {
-            // For backwards compatibility with WebViewClassic, we use the value of |encoding|
-            // as the charset, as long as it's not "base64".
-            boolean isBase64 = isBase64Encoded(encoding);
-            loadUrlParams = LoadUrlParams.createLoadDataParamsWithBaseUrl(
-                    data, mimeType, isBase64, baseUrl, historyUrl, isBase64 ? null : encoding);
-        } else {
-            // When loading data with a non-data: base URL, the classic WebView would effectively
-            // "dump" that string of data into the WebView without going through regular URL
-            // loading steps such as decoding URL-encoded entities. We achieve this same behavior by
-            // base64 encoding the data that is passed here and then loading that as a data: URL.
-            try {
-                loadUrlParams = LoadUrlParams.createLoadDataParamsWithBaseUrl(
-                        Base64.encodeToString(data.getBytes("utf-8"), Base64.DEFAULT), mimeType,
-                        true, baseUrl, historyUrl, "utf-8");
-            } catch (java.io.UnsupportedEncodingException e) {
-                Log.wtf(TAG, "Unable to load data string " + data, e);
-                return;
-            }
-        }
-        loadUrlOnUiThread(loadUrlParams);
-    }
-
-    private void loadUrlOnUiThread(final LoadUrlParams loadUrlParams) {
-        // This is the last point that we can delay starting the Chromium backend up
-        // and if the app has not caused us to bind the Chromium UI thread to a background thread
-        // we now bind Chromium's notion of the UI thread to the app main thread.
+    public void loadUrl(final String url, final Map<String, String> additionalHttpHeaders) {
         mFactory.startYourEngines(true);
         if (checkNeedsPost()) {
             // Disallowed in WebView API for apps targetting a new SDK
@@ -624,12 +509,81 @@ class WebViewChromium implements WebViewProvider, WebViewProvider.ScrollDelegate
             mRunQueue.addTask(new Runnable() {
                 @Override
                 public void run() {
-                    mAwContents.loadUrl(loadUrlParams);
+                    mAwContents.loadUrl(url, additionalHttpHeaders);
                 }
             });
             return;
         }
-        mAwContents.loadUrl(loadUrlParams);
+        mAwContents.loadUrl(url, additionalHttpHeaders);
+    }
+
+    @Override
+    public void loadUrl(final String url) {
+        mFactory.startYourEngines(true);
+        if (checkNeedsPost()) {
+            // Disallowed in WebView API for apps targetting a new SDK
+            assert mAppTargetSdkVersion < Build.VERSION_CODES.JELLY_BEAN_MR2;
+            mRunQueue.addTask(new Runnable() {
+                @Override
+                public void run() {
+                    mAwContents.loadUrl(url);
+                }
+            });
+            return;
+        }
+        mAwContents.loadUrl(url);
+    }
+
+    @Override
+    public void postUrl(final String url, final byte[] postData) {
+        mFactory.startYourEngines(true);
+        if (checkNeedsPost()) {
+            // Disallowed in WebView API for apps targetting a new SDK
+            assert mAppTargetSdkVersion < Build.VERSION_CODES.JELLY_BEAN_MR2;
+            mRunQueue.addTask(new Runnable() {
+                @Override
+                public void run() {
+                    mAwContents.postUrl(url, postData);
+                }
+            });
+            return;
+        }
+        mAwContents.postUrl(url, postData);
+    }
+
+    @Override
+    public void loadData(final String data, final String mimeType, final String encoding) {
+        mFactory.startYourEngines(true);
+        if (checkNeedsPost()) {
+            // Disallowed in WebView API for apps targetting a new SDK
+            assert mAppTargetSdkVersion < Build.VERSION_CODES.JELLY_BEAN_MR2;
+            mRunQueue.addTask(new Runnable() {
+                @Override
+                public void run() {
+                    mAwContents.loadData(data, mimeType, encoding);
+                }
+            });
+            return;
+        }
+        mAwContents.loadData(data, mimeType, encoding);
+    }
+
+    @Override
+    public void loadDataWithBaseURL(final String baseUrl, final String data, final String mimeType,
+            final String encoding, final String historyUrl) {
+        mFactory.startYourEngines(true);
+        if (checkNeedsPost()) {
+            // Disallowed in WebView API for apps targetting a new SDK
+            assert mAppTargetSdkVersion < Build.VERSION_CODES.JELLY_BEAN_MR2;
+            mRunQueue.addTask(new Runnable() {
+                @Override
+                public void run() {
+                    mAwContents.loadDataWithBaseURL(baseUrl, data, mimeType, encoding, historyUrl);
+                }
+            });
+            return;
+        }
+        mAwContents.loadDataWithBaseURL(baseUrl, data, mimeType, encoding, historyUrl);
     }
 
     public void evaluateJavaScript(String script, ValueCallback<String> resultCallback) {
@@ -924,9 +878,7 @@ class WebViewChromium implements WebViewProvider, WebViewProvider.ScrollDelegate
             });
             return ret;
         }
-        String url = mAwContents.getUrl();
-        if (url == null || url.trim().isEmpty()) return null;
-        return url;
+        return mAwContents.getUrl();
     }
 
     @Override
@@ -941,9 +893,7 @@ class WebViewChromium implements WebViewProvider, WebViewProvider.ScrollDelegate
             });
             return ret;
         }
-        String url = mAwContents.getOriginalUrl();
-        if (url == null || url.trim().isEmpty()) return null;
-        return url;
+        return mAwContents.getOriginalUrl();
     }
 
     @Override
@@ -1192,6 +1142,7 @@ class WebViewChromium implements WebViewProvider, WebViewProvider.ScrollDelegate
         mAwContents.findAllAsync(searchString);
     }
 
+    @SuppressFBWarnings("RCN_REDUNDANT_NULLCHECK_OF_NONNULL_VALUE")
     @Override
     public boolean showFindDialog(final String text, final boolean showIme) {
         mFactory.startYourEngines(false);
@@ -1344,11 +1295,7 @@ class WebViewChromium implements WebViewProvider, WebViewProvider.ScrollDelegate
             });
             return;
         }
-        Class<? extends Annotation> requiredAnnotation = null;
-        if (mAppTargetSdkVersion >= Build.VERSION_CODES.JELLY_BEAN_MR1) {
-            requiredAnnotation = JavascriptInterface.class;
-        }
-        mAwContents.addPossiblyUnsafeJavascriptInterface(obj, interfaceName, requiredAnnotation);
+        mAwContents.addJavascriptInterface(obj, interfaceName);
     }
 
     @Override
@@ -1448,12 +1395,15 @@ class WebViewChromium implements WebViewProvider, WebViewProvider.ScrollDelegate
         return mAwContents.zoomOut();
     }
 
+    // TODO(paulmiller) Return void for consistency with AwContents.zoomBy and WebView.zoomBy -
+    // tricky because frameworks WebViewProvider.zoomBy must change simultaneously
     @Override
     public boolean zoomBy(float factor) {
         mFactory.startYourEngines(true);
         // This is an L API and therefore we can enforce stricter threading constraints.
         checkThread();
-        return mAwContents.zoomBy(factor);
+        mAwContents.zoomBy(factor);
+        return true;
     }
 
     @Override
@@ -1702,7 +1652,6 @@ class WebViewChromium implements WebViewProvider, WebViewProvider.ScrollDelegate
             });
             return ret;
         }
-        UnimplementedWebViewApi.invoke();
         return false;
     }
 
@@ -1718,7 +1667,6 @@ class WebViewChromium implements WebViewProvider, WebViewProvider.ScrollDelegate
             });
             return ret;
         }
-        UnimplementedWebViewApi.invoke();
         return false;
     }
 
@@ -2122,7 +2070,6 @@ class WebViewChromium implements WebViewProvider, WebViewProvider.ScrollDelegate
     private class InternalAccessAdapter implements AwContents.InternalAccessDelegate {
         @Override
         public boolean drawChild(Canvas arg0, View arg1, long arg2) {
-            UnimplementedWebViewApi.invoke();
             return false;
         }
 
@@ -2134,7 +2081,6 @@ class WebViewChromium implements WebViewProvider, WebViewProvider.ScrollDelegate
 
         @Override
         public boolean super_dispatchKeyEventPreIme(KeyEvent arg0) {
-            UnimplementedWebViewApi.invoke();
             return false;
         }
 
@@ -2167,8 +2113,6 @@ class WebViewChromium implements WebViewProvider, WebViewProvider.ScrollDelegate
 
         @Override
         public boolean super_awakenScrollBars(int arg0, boolean arg1) {
-            // TODO: need method on WebView.PrivateAccess?
-            UnimplementedWebViewApi.invoke();
             return false;
         }
 

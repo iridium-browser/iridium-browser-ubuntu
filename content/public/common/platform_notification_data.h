@@ -41,10 +41,14 @@ struct CONTENT_EXPORT PlatformNotificationData {
 
   // Tag of the notification. Notifications sharing both their origin and their
   // tag will replace the first displayed notification.
-  base::string16 tag;
+  std::string tag;
 
   // URL of the icon which is to be displayed with the notification.
   GURL icon;
+
+  // Whether default notification indicators (sound, vibration, light) should
+  // be suppressed.
+  bool silent;
 };
 
 }  // namespace content

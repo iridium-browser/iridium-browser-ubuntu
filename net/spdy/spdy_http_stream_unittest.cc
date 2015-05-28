@@ -13,7 +13,6 @@
 #include "crypto/ec_private_key.h"
 #include "crypto/ec_signature_creator.h"
 #include "crypto/signature_creator.h"
-#include "net/base/capturing_net_log.h"
 #include "net/base/chunked_upload_data_stream.h"
 #include "net/base/load_timing_info.h"
 #include "net/base/load_timing_info_test_util.h"
@@ -22,6 +21,7 @@
 #include "net/http/http_request_info.h"
 #include "net/http/http_response_headers.h"
 #include "net/http/http_response_info.h"
+#include "net/log/capturing_net_log.h"
 #include "net/socket/next_proto.h"
 #include "net/socket/socket_test_util.h"
 #include "net/spdy/spdy_http_utils.h"
@@ -127,10 +127,11 @@ class SpdyHttpStreamTest : public testing::Test,
   MockECSignatureCreatorFactory ec_signature_creator_factory_;
 };
 
-INSTANTIATE_TEST_CASE_P(
-    NextProto,
-    SpdyHttpStreamTest,
-    testing::Values(kProtoSPDY31, kProtoSPDY4_14, kProtoSPDY4_15));
+INSTANTIATE_TEST_CASE_P(NextProto,
+                        SpdyHttpStreamTest,
+                        testing::Values(kProtoSPDY31,
+                                        kProtoSPDY4_14,
+                                        kProtoSPDY4));
 
 // SpdyHttpStream::GetUploadProgress() should still work even before the
 // stream is initialized.

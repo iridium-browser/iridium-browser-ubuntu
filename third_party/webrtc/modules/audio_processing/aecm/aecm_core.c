@@ -14,10 +14,10 @@
 #include <stddef.h>
 #include <stdlib.h>
 
+#include "webrtc/common_audio/ring_buffer.h"
 #include "webrtc/common_audio/signal_processing/include/real_fft.h"
 #include "webrtc/modules/audio_processing/aecm/include/echo_control_mobile.h"
 #include "webrtc/modules/audio_processing/utility/delay_estimator_wrapper.h"
-#include "webrtc/modules/audio_processing/utility/ring_buffer.h"
 #include "webrtc/system_wrappers/interface/compile_assert_c.h"
 #include "webrtc/system_wrappers/interface/cpu_features_wrapper.h"
 #include "webrtc/typedefs.h"
@@ -794,7 +794,7 @@ void WebRtcAecm_CalcEnergies(AecmCore* aecm,
         tmp16 = 2560 - aecm->farEnergyMin;
         if (tmp16 > 0)
         {
-            tmp16 = (int16_t)WEBRTC_SPL_MUL_16_16_RSFT(tmp16, FAR_ENERGY_VAD_REGION, 9);
+          tmp16 = (int16_t)((tmp16 * FAR_ENERGY_VAD_REGION) >> 9);
         } else
         {
             tmp16 = 0;
@@ -1092,8 +1092,9 @@ void WebRtcAecm_UpdateChannel(AecmCore* aecm,
                     aecm->mseThreshold = (mseAdapt + aecm->mseAdaptOld);
                 } else
                 {
-                    aecm->mseThreshold += WEBRTC_SPL_MUL_16_16_RSFT(mseAdapt
-                            - WEBRTC_SPL_MUL_16_16_RSFT(aecm->mseThreshold, 5, 3), 205, 8);
+                  int scaled_threshold = aecm->mseThreshold * 5 / 8;
+                  aecm->mseThreshold +=
+                      ((mseAdapt - scaled_threshold) * 205) >> 8;
                 }
 
             }

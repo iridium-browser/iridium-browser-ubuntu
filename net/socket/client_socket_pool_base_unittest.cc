@@ -21,14 +21,13 @@
 #include "net/base/load_timing_info.h"
 #include "net/base/load_timing_info_test_util.h"
 #include "net/base/net_errors.h"
-#include "net/base/net_log.h"
-#include "net/base/net_log_unittest.h"
 #include "net/base/request_priority.h"
 #include "net/base/test_completion_callback.h"
 #include "net/http/http_response_headers.h"
+#include "net/log/net_log.h"
+#include "net/log/net_log_unittest.h"
 #include "net/socket/client_socket_factory.h"
 #include "net/socket/client_socket_handle.h"
-#include "net/socket/client_socket_pool_histograms.h"
 #include "net/socket/socket_test_util.h"
 #include "net/socket/ssl_client_socket.h"
 #include "net/socket/stream_socket.h"
@@ -482,12 +481,14 @@ class TestClientSocketPool : public ClientSocketPool {
   TestClientSocketPool(
       int max_sockets,
       int max_sockets_per_group,
-      ClientSocketPoolHistograms* histograms,
       base::TimeDelta unused_idle_socket_timeout,
       base::TimeDelta used_idle_socket_timeout,
       TestClientSocketPoolBase::ConnectJobFactory* connect_job_factory)
-      : base_(NULL, max_sockets, max_sockets_per_group, histograms,
-              unused_idle_socket_timeout, used_idle_socket_timeout,
+      : base_(NULL,
+              max_sockets,
+              max_sockets_per_group,
+              unused_idle_socket_timeout,
+              used_idle_socket_timeout,
               connect_job_factory) {}
 
   ~TestClientSocketPool() override {}
@@ -559,10 +560,6 @@ class TestClientSocketPool : public ClientSocketPool {
 
   base::TimeDelta ConnectionTimeout() const override {
     return base_.ConnectionTimeout();
-  }
-
-  ClientSocketPoolHistograms* histograms() const override {
-    return base_.histograms();
   }
 
   const TestClientSocketPoolBase* base() const { return &base_; }
@@ -658,8 +655,7 @@ class TestConnectJobDelegate : public ConnectJob::Delegate {
 class ClientSocketPoolBaseTest : public testing::Test {
  protected:
   ClientSocketPoolBaseTest()
-      : params_(new TestSocketParams(false /* ignore_limits */)),
-        histograms_("ClientSocketPoolTest") {
+      : params_(new TestSocketParams(false /* ignore_limits */)) {
     connect_backup_jobs_enabled_ =
         internal::ClientSocketPoolBaseHelper::connect_backup_jobs_enabled();
     internal::ClientSocketPoolBaseHelper::set_connect_backup_jobs_enabled(true);
@@ -691,7 +687,6 @@ class ClientSocketPoolBaseTest : public testing::Test {
                                                      &net_log_);
     pool_.reset(new TestClientSocketPool(max_sockets,
                                          max_sockets_per_group,
-                                         &histograms_,
                                          unused_idle_socket_timeout,
                                          used_idle_socket_timeout,
                                          connect_job_factory_));
@@ -732,7 +727,6 @@ class ClientSocketPoolBaseTest : public testing::Test {
   MockClientSocketFactory client_socket_factory_;
   TestConnectJobFactory* connect_job_factory_;
   scoped_refptr<TestSocketParams> params_;
-  ClientSocketPoolHistograms histograms_;
   scoped_ptr<TestClientSocketPool> pool_;
   ClientSocketPoolTest test_base_;
 };
@@ -1748,6 +1742,22 @@ TEST_F(ClientSocketPoolBaseTest,
       NetLog::PHASE_NONE));
   EXPECT_TRUE(LogContainsEndEvent(
       entries, 2, NetLog::TYPE_SOCKET_POOL));
+}
+
+// Check that an async ConnectJob failure does not result in creation of a new
+// ConnectJob when there's another pending request also waiting on its own
+// ConnectJob.  See http://crbug.com/463960.
+TEST_F(ClientSocketPoolBaseTest, AsyncFailureWithPendingRequestWithJob) {
+  CreatePool(2, 2);
+  connect_job_factory_->set_job_type(TestConnectJob::kMockPendingFailingJob);
+
+  EXPECT_EQ(ERR_IO_PENDING, StartRequest("a", DEFAULT_PRIORITY));
+  EXPECT_EQ(ERR_IO_PENDING, StartRequest("a", DEFAULT_PRIORITY));
+
+  EXPECT_EQ(ERR_CONNECTION_FAILED, request(0)->WaitForResult());
+  EXPECT_EQ(ERR_CONNECTION_FAILED, request(1)->WaitForResult());
+
+  EXPECT_EQ(2, client_socket_factory_.allocation_count());
 }
 
 TEST_F(ClientSocketPoolBaseTest, TwoRequestsCancelOne) {

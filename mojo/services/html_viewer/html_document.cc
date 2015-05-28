@@ -14,17 +14,13 @@
 #include "base/thread_task_runner_handle.h"
 #include "media/blink/webencryptedmediaclient_impl.h"
 #include "media/cdm/default_cdm_factory.h"
-#include "mojo/public/cpp/application/connect.h"
-#include "mojo/public/cpp/system/data_pipe.h"
-#include "mojo/public/interfaces/application/shell.mojom.h"
+#include "media/filters/default_media_permission.h"
 #include "mojo/services/html_viewer/blink_input_events_type_converters.h"
 #include "mojo/services/html_viewer/blink_url_request_type_converters.h"
 #include "mojo/services/html_viewer/weblayertreeview_impl.h"
 #include "mojo/services/html_viewer/webmediaplayer_factory.h"
 #include "mojo/services/html_viewer/webstoragenamespace_impl.h"
 #include "mojo/services/html_viewer/weburlloader_impl.h"
-#include "mojo/services/surfaces/public/interfaces/surfaces_service.mojom.h"
-#include "mojo/services/view_manager/public/cpp/view.h"
 #include "skia/ext/refptr.h"
 #include "third_party/WebKit/public/platform/Platform.h"
 #include "third_party/WebKit/public/platform/WebHTTPHeaderVisitor.h"
@@ -37,9 +33,15 @@
 #include "third_party/WebKit/public/web/WebScriptSource.h"
 #include "third_party/WebKit/public/web/WebSettings.h"
 #include "third_party/WebKit/public/web/WebView.h"
+#include "third_party/mojo/src/mojo/public/cpp/application/connect.h"
+#include "third_party/mojo/src/mojo/public/cpp/system/data_pipe.h"
+#include "third_party/mojo/src/mojo/public/interfaces/application/shell.mojom.h"
+#include "third_party/mojo_services/src/surfaces/public/interfaces/surfaces.mojom.h"
+#include "third_party/mojo_services/src/view_manager/public/cpp/view.h"
 #include "third_party/skia/include/core/SkCanvas.h"
 #include "third_party/skia/include/core/SkColor.h"
 #include "third_party/skia/include/core/SkDevice.h"
+#include "ui/gfx/geometry/dip_util.h"
 
 using mojo::AxProvider;
 using mojo::Rect;
@@ -47,6 +49,7 @@ using mojo::ServiceProviderPtr;
 using mojo::URLResponsePtr;
 using mojo::View;
 using mojo::ViewManager;
+using mojo::WeakBindToRequest;
 
 namespace html_viewer {
 namespace {
@@ -96,11 +99,12 @@ bool CanNavigateLocally(blink::WebFrame* frame,
 }  // namespace
 
 HTMLDocument::HTMLDocument(
-    mojo::ServiceProviderPtr provider,
+    mojo::InterfaceRequest<mojo::ServiceProvider> services,
     URLResponsePtr response,
     mojo::Shell* shell,
     scoped_refptr<base::MessageLoopProxy> compositor_thread,
-    WebMediaPlayerFactory* web_media_player_factory)
+    WebMediaPlayerFactory* web_media_player_factory,
+    bool is_headless)
     : response_(response.Pass()),
       shell_(shell),
       web_view_(nullptr),
@@ -108,10 +112,11 @@ HTMLDocument::HTMLDocument(
       view_manager_client_factory_(shell_, this),
       compositor_thread_(compositor_thread),
       web_media_player_factory_(web_media_player_factory),
-      web_encrypted_media_client_(nullptr) {
+      is_headless_(is_headless),
+      device_pixel_ratio_(1.0) {
   exported_services_.AddService(this);
   exported_services_.AddService(&view_manager_client_factory_);
-  WeakBindToPipe(&exported_services_, provider.PassMessagePipe());
+  exported_services_.Bind(services.Pass());
   Load(response_.Pass());
 }
 
@@ -126,15 +131,13 @@ HTMLDocument::~HTMLDocument() {
 
 void HTMLDocument::OnEmbed(
     View* root,
-    mojo::ServiceProviderImpl* embedee_service_provider_impl,
-    scoped_ptr<mojo::ServiceProvider> embedder_service_provider) {
+    mojo::InterfaceRequest<mojo::ServiceProvider> services,
+    mojo::ServiceProviderPtr exposed_services) {
+  DCHECK(!is_headless_);
   root_ = root;
-  embedder_service_provider_ = embedder_service_provider.Pass();
+  embedder_service_provider_ = exposed_services.Pass();
   navigator_host_.set_service_provider(embedder_service_provider_.get());
-
-  blink::WebSize root_size(root_->bounds().width, root_->bounds().height);
-  web_view_->resize(root_size);
-  web_layer_tree_view_impl_->setViewportSize(root_size);
+  UpdateWebviewSizeFromViewSize();
   web_layer_tree_view_impl_->set_view(root_);
   root_->AddObserver(this);
 }
@@ -152,7 +155,10 @@ void HTMLDocument::OnViewManagerDisconnected(ViewManager* view_manager) {
 }
 
 void HTMLDocument::Load(URLResponsePtr response) {
+  DCHECK(!web_view_);
+
   web_view_ = blink::WebView::create(this);
+  touch_handler_.reset(new TouchHandler(web_view_));
   web_layer_tree_view_impl_->set_widget(web_view_);
   ConfigureSettings(web_view_->settings());
   web_view_->setMainFrame(blink::WebLocalFrame::create(this));
@@ -170,25 +176,42 @@ void HTMLDocument::Load(URLResponsePtr response) {
   web_view_->mainFrame()->loadRequest(web_request);
 }
 
+void HTMLDocument::UpdateWebviewSizeFromViewSize() {
+  device_pixel_ratio_ = root_->viewport_metrics().device_pixel_ratio;
+  web_view_->setDeviceScaleFactor(device_pixel_ratio_);
+  const gfx::Size size_in_pixels(root_->bounds().width, root_->bounds().height);
+  const gfx::Size size_in_dips = gfx::ConvertSizeToDIP(
+      root_->viewport_metrics().device_pixel_ratio, size_in_pixels);
+  web_view_->resize(
+      blink::WebSize(size_in_dips.width(), size_in_dips.height()));
+  web_layer_tree_view_impl_->setViewportSize(size_in_pixels);
+}
+
 blink::WebStorageNamespace* HTMLDocument::createSessionStorageNamespace() {
   return new WebStorageNamespaceImpl();
 }
 
 void HTMLDocument::initializeLayerTreeView() {
+  if (is_headless_) {
+    web_layer_tree_view_impl_.reset(
+        new WebLayerTreeViewImpl(compositor_thread_, nullptr, nullptr));
+    return;
+  }
+
   ServiceProviderPtr surfaces_service_provider;
   shell_->ConnectToApplication("mojo:surfaces_service",
-                               GetProxy(&surfaces_service_provider));
-  mojo::SurfacesServicePtr surfaces_service;
-  ConnectToService(surfaces_service_provider.get(), &surfaces_service);
+                               GetProxy(&surfaces_service_provider), nullptr);
+  mojo::SurfacePtr surface;
+  ConnectToService(surfaces_service_provider.get(), &surface);
 
   ServiceProviderPtr gpu_service_provider;
   // TODO(jamesr): Should be mojo:gpu_service
   shell_->ConnectToApplication("mojo:native_viewport_service",
-                               GetProxy(&gpu_service_provider));
+                               GetProxy(&gpu_service_provider), nullptr);
   mojo::GpuPtr gpu_service;
   ConnectToService(gpu_service_provider.get(), &gpu_service);
   web_layer_tree_view_impl_.reset(new WebLayerTreeViewImpl(
-      compositor_thread_, surfaces_service.Pass(), gpu_service.Pass()));
+      compositor_thread_, surface.Pass(), gpu_service.Pass()));
 }
 
 blink::WebLayerTreeView* HTMLDocument::layerTreeView() {
@@ -207,13 +230,19 @@ blink::WebMediaPlayer* HTMLDocument::createMediaPlayer(
     const blink::WebURL& url,
     blink::WebMediaPlayerClient* client,
     blink::WebContentDecryptionModule* initial_cdm) {
-  return web_media_player_factory_->CreateMediaPlayer(frame, url, client,
-                                                      initial_cdm, shell_);
+  blink::WebMediaPlayer* player =
+      web_media_player_factory_
+          ? web_media_player_factory_->CreateMediaPlayer(
+                frame, url, client, GetMediaPermission(), GetCdmFactory(),
+                initial_cdm, shell_)
+          : nullptr;
+  return player;
 }
 
 blink::WebFrame* HTMLDocument::createChildFrame(
     blink::WebLocalFrame* parent,
-    const blink::WebString& frameName) {
+    const blink::WebString& frameName,
+    blink::WebSandboxFlags sandboxFlags) {
   blink::WebLocalFrame* web_frame = blink::WebLocalFrame::create(this);
   parent->appendChild(web_frame);
   return web_frame;
@@ -257,6 +286,8 @@ void HTMLDocument::didAddMessageToConsole(
     const blink::WebString& source_name,
     unsigned source_line,
     const blink::WebString& stack_trace) {
+  VLOG(1) << "[" << source_name.utf8() << "(" << source_line << ")] "
+          << message.text.utf8();
 }
 
 void HTMLDocument::didNavigateWithinPage(
@@ -269,18 +300,17 @@ void HTMLDocument::didNavigateWithinPage(
 
 blink::WebEncryptedMediaClient* HTMLDocument::encryptedMediaClient() {
   if (!web_encrypted_media_client_) {
-    web_encrypted_media_client_ = new media::WebEncryptedMediaClientImpl(
-        make_scoped_ptr(new media::DefaultCdmFactory()));
+    web_encrypted_media_client_.reset(new media::WebEncryptedMediaClientImpl(
+        GetCdmFactory(), GetMediaPermission()));
   }
-  return web_encrypted_media_client_;
+  return web_encrypted_media_client_.get();
 }
 
 void HTMLDocument::OnViewBoundsChanged(View* view,
                                        const Rect& old_bounds,
                                        const Rect& new_bounds) {
   DCHECK_EQ(view, root_);
-  web_view_->resize(
-      blink::WebSize(view->bounds().width, view->bounds().height));
+  UpdateWebviewSizeFromViewSize();
 }
 
 void HTMLDocument::OnViewDestroyed(View* view) {
@@ -289,10 +319,38 @@ void HTMLDocument::OnViewDestroyed(View* view) {
 }
 
 void HTMLDocument::OnViewInputEvent(View* view, const mojo::EventPtr& event) {
+  if (event->pointer_data) {
+    // Blink expects coordintes to be in DIPs.
+    event->pointer_data->x /= device_pixel_ratio_;
+    event->pointer_data->y /= device_pixel_ratio_;
+    event->pointer_data->screen_x /= device_pixel_ratio_;
+    event->pointer_data->screen_y /= device_pixel_ratio_;
+  }
+
+  if ((event->action == mojo::EVENT_TYPE_POINTER_DOWN ||
+       event->action == mojo::EVENT_TYPE_POINTER_UP ||
+       event->action == mojo::EVENT_TYPE_POINTER_CANCEL ||
+       event->action == mojo::EVENT_TYPE_POINTER_MOVE) &&
+      event->pointer_data->kind == mojo::POINTER_KIND_TOUCH) {
+    touch_handler_->OnTouchEvent(*event);
+    return;
+  }
   scoped_ptr<blink::WebInputEvent> web_event =
       event.To<scoped_ptr<blink::WebInputEvent>>();
   if (web_event)
     web_view_->handleInputEvent(*web_event);
+}
+
+media::MediaPermission* HTMLDocument::GetMediaPermission() {
+  if (!media_permission_)
+    media_permission_.reset(new media::DefaultMediaPermission(true));
+  return media_permission_.get();
+}
+
+media::CdmFactory* HTMLDocument::GetCdmFactory() {
+  if (!cdm_factory_)
+    cdm_factory_.reset(new media::DefaultCdmFactory());
+  return cdm_factory_.get();
 }
 
 }  // namespace html_viewer

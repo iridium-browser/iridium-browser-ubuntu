@@ -45,6 +45,8 @@
 #include "net/url_request/url_request_context_getter.h"
 #endif
 
+using bookmarks::BookmarkModel;
+
 namespace {
 
 // A BrowsingDataRemover::Observer that clears all Profile data and then
@@ -59,7 +61,7 @@ class ProfileDataRemover : public BrowsingDataRemover::Observer {
     remover_->Remove(BrowsingDataRemover::REMOVE_ALL, BrowsingDataHelper::ALL);
   }
 
-  virtual ~ProfileDataRemover() {}
+  ~ProfileDataRemover() override {}
 
   void OnBrowsingDataRemoverDone() override {
     remover_->RemoveObserver(this);
@@ -258,39 +260,16 @@ void SigninManagerAndroid::ClearLastSignedInUser() {
   profile_->GetPrefs()->ClearPref(prefs::kGoogleServicesLastUsername);
 }
 
-void SigninManagerAndroid::MergeSessionCompleted(
-    const std::string& account_id,
-    const GoogleServiceAuthError& error) {
-  merge_session_helper_->RemoveObserver(this);
-  merge_session_helper_.reset();
-}
-
 void SigninManagerAndroid::LogInSignedInUser(JNIEnv* env, jobject obj) {
   SigninManagerBase* signin_manager =
       SigninManagerFactory::GetForProfile(profile_);
-  if (switches::IsNewProfileManagement()) {
-    // New Mirror code path that just fires the events and let the
-    // Account Reconcilor handles everything.
+    // Just fire the events and let the Account Reconcilor handles everything.
     AndroidProfileOAuth2TokenService* token_service =
         ProfileOAuth2TokenServiceFactory::GetPlatformSpecificForProfile(
             profile_);
     const std::string& primary_acct =
         signin_manager->GetAuthenticatedAccountId();
     token_service->ValidateAccounts(primary_acct, true);
-
-  } else {
-    DVLOG(1) << "SigninManagerAndroid::LogInSignedInUser "
-        " Manually calling MergeSessionHelper";
-    // Old code path that doesn't depend on the new Account Reconcilor.
-    // We manually login.
-
-    ProfileOAuth2TokenService* token_service =
-        ProfileOAuth2TokenServiceFactory::GetForProfile(profile_);
-    merge_session_helper_.reset(new MergeSessionHelper(
-        token_service, GaiaConstants::kChromeSource,
-        profile_->GetRequestContext(), this));
-    merge_session_helper_->LogIn(signin_manager->GetAuthenticatedAccountId());
-  }
 }
 
 jboolean SigninManagerAndroid::IsSigninAllowedByPolicy(JNIEnv* env,
@@ -324,10 +303,6 @@ static jboolean ShouldLoadPolicyForUser(JNIEnv* env,
 #else
   return false;
 #endif
-}
-
-static jboolean IsNewProfileManagementEnabled(JNIEnv* env, jclass clazz) {
-  return switches::IsNewProfileManagement();
 }
 
 // static

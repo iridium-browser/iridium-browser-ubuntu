@@ -5,6 +5,7 @@
 #include "extensions/browser/extension_web_contents_observer.h"
 
 #include "content/public/browser/child_process_security_policy.h"
+#include "content/public/browser/render_frame_host.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/render_view_host.h"
 #include "content/public/browser/site_instance.h"
@@ -12,30 +13,53 @@
 #include "content/public/common/url_constants.h"
 #include "extensions/browser/extension_prefs.h"
 #include "extensions/browser/extension_registry.h"
-#include "extensions/browser/mojo/service_registration_manager.h"
+#include "extensions/browser/extensions_browser_client.h"
+#include "extensions/browser/mojo/service_registration.h"
+#include "extensions/browser/process_manager.h"
 #include "extensions/browser/view_type_utils.h"
 #include "extensions/common/constants.h"
 #include "extensions/common/extension_messages.h"
 
 namespace extensions {
+namespace {
+
+const Extension* GetExtensionForRenderFrame(
+    content::RenderFrameHost* render_frame_host) {
+  content::SiteInstance* site_instance = render_frame_host->GetSiteInstance();
+  GURL url = render_frame_host->GetLastCommittedURL();
+  if (!url.is_empty()) {
+    if (site_instance->GetSiteURL().GetOrigin() != url.GetOrigin())
+      return nullptr;
+  } else {
+    url = site_instance->GetSiteURL();
+  }
+  content::BrowserContext* browser_context = site_instance->GetBrowserContext();
+  if (!url.SchemeIs(kExtensionScheme))
+    return nullptr;
+
+  return ExtensionRegistry::Get(browser_context)
+      ->enabled_extensions()
+      .GetExtensionOrAppByURL(url);
+}
+
+}  // namespace
 
 ExtensionWebContentsObserver::ExtensionWebContentsObserver(
     content::WebContents* web_contents)
     : content::WebContentsObserver(web_contents),
       browser_context_(web_contents->GetBrowserContext()) {
   NotifyRenderViewType(web_contents->GetRenderViewHost());
+  content::RenderFrameHost* host = web_contents->GetMainFrame();
+  if (host)
+    RenderFrameHostChanged(nullptr, host);
 }
 
-ExtensionWebContentsObserver::~ExtensionWebContentsObserver() {}
+ExtensionWebContentsObserver::~ExtensionWebContentsObserver() {
+}
 
 void ExtensionWebContentsObserver::RenderViewCreated(
     content::RenderViewHost* render_view_host) {
   NotifyRenderViewType(render_view_host);
-
-  // TODO(sammc): Call AddServicesToRenderFrame() for frames that aren't main
-  // frames.
-  ServiceRegistrationManager::GetSharedInstance()->AddServicesToRenderFrame(
-      render_view_host->GetMainFrame());
 
   const Extension* extension = GetExtension(render_view_host);
   if (!extension)
@@ -75,9 +99,12 @@ void ExtensionWebContentsObserver::RenderViewCreated(
       // ExtensionDispatcher knows what Extension is active, not just its ID.
       // This is important for classifying the Extension's JavaScript context
       // correctly (see ExtensionDispatcher::ClassifyJavaScriptContext).
+      // We also have to include the tab-specific permissions here, since it's
+      // an extension process.
       render_view_host->Send(
           new ExtensionMsg_Loaded(std::vector<ExtensionMsg_Loaded_Params>(
-              1, ExtensionMsg_Loaded_Params(extension))));
+              1, ExtensionMsg_Loaded_Params(
+                     extension, true /* include tab permissions */))));
       render_view_host->Send(
           new ExtensionMsg_ActivateExtension(extension->id()));
       break;
@@ -89,6 +116,35 @@ void ExtensionWebContentsObserver::RenderViewCreated(
 
     case Manifest::NUM_LOAD_TYPES:
       NOTREACHED();
+  }
+}
+
+void ExtensionWebContentsObserver::RenderFrameCreated(
+    content::RenderFrameHost* render_frame_host) {
+  const Extension* extension = GetExtensionForRenderFrame(render_frame_host);
+  if (extension) {
+    ExtensionsBrowserClient::Get()->RegisterMojoServices(render_frame_host,
+                                                         extension);
+  }
+}
+
+void ExtensionWebContentsObserver::FrameDeleted(
+    content::RenderFrameHost* render_frame_host) {
+  ProcessManager::Get(browser_context_)->UnregisterRenderFrameHost(
+      render_frame_host);
+}
+
+void ExtensionWebContentsObserver::RenderFrameHostChanged(
+    content::RenderFrameHost* old_host,
+    content::RenderFrameHost* new_host) {
+  ProcessManager* process_manager = ProcessManager::Get(browser_context_);
+  if (old_host)
+    process_manager->UnregisterRenderFrameHost(old_host);
+
+  const Extension* extension = GetExtension(new_host->GetRenderViewHost());
+  if (extension) {
+    process_manager->RegisterRenderFrameHost(
+        web_contents(), new_host, extension);
   }
 }
 

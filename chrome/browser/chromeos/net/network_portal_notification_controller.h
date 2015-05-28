@@ -10,6 +10,14 @@
 #include "base/macros.h"
 #include "base/memory/weak_ptr.h"
 #include "chromeos/network/portal_detector/network_portal_detector.h"
+#include "ui/message_center/notification.h"
+
+namespace extensions {
+
+class Extension;
+class NetworkingConfigService;
+
+}  // namespace extensions
 
 namespace chromeos {
 
@@ -38,13 +46,28 @@ class NetworkPortalNotificationController
     USER_ACTION_METRIC_COUNT
   };
 
+  static const int kUseExtensionButtonIndex;
+  static const int kOpenPortalButtonIndex;
+
   static const char kNotificationId[];
 
   static const char kNotificationMetric[];
   static const char kUserActionMetric[];
 
   NetworkPortalNotificationController();
-  virtual ~NetworkPortalNotificationController();
+  ~NetworkPortalNotificationController();
+
+  // |retry_detection_callback| will be called if the controller learns about a
+  // potential change of the captive portal (e.g. if an extension notifies about
+  // a finished authentication).
+  // |retry_detection_callback| will not be called after this controller is
+  // destroyed.
+  void set_retry_detection_callback(
+      const base::Closure& retry_detection_callback) {
+    retry_detection_callback_ = retry_detection_callback;
+  }
+
+  void DefaultNetworkChanged(const NetworkState* network);
 
   void OnPortalDetectionCompleted(
       const NetworkState* network,
@@ -53,15 +76,59 @@ class NetworkPortalNotificationController
   // Creates NetworkPortalWebDialog.
   void ShowDialog();
 
+  // Destroys NetworkPortalWebDialog.
+  void CloseDialog();
+
   // NULLifies reference to the active dialog.
   void OnDialogDestroyed(const NetworkPortalWebDialog* dialog);
 
+  // Called if an extension has successfully finished authentication to the
+  // previously detected captive portal.
+  void OnExtensionFinishedAuthentication();
+
+  // Ignores "No network" errors in browser tests.
+  void SetIgnoreNoNetworkForTesting();
+
+  // Browser tests should be able to verify that NetworkPortalWebDialog is
+  // shown.
+  const NetworkPortalWebDialog* GetDialogForTesting() const;
+
  private:
+  // Creates the default notification informing the user that a captive portal
+  // has been detected. On click the captive portal login page is opened in the
+  // browser.
+  scoped_ptr<message_center::Notification>
+  CreateDefaultCaptivePortalNotification(const NetworkState* network);
+
+  // Creates an advanced captive portal notification informing the user that a
+  // captive portal has been detected and an extension has registered to perform
+  // captive portal authentication for that network. Gives the user the choice
+  // to either authenticate using that extension or open the captive portal
+  // login page in the browser.
+  scoped_ptr<message_center::Notification>
+  CreateCaptivePortalNotificationForExtension(
+      const NetworkState* network,
+      extensions::NetworkingConfigService* networking_config_service,
+      const extensions::Extension* extension);
+
+  // Constructs a notification to inform the user that a captive portal has been
+  // detected.
+  scoped_ptr<message_center::Notification> GetNotification(
+      const NetworkState* network,
+      const NetworkPortalDetector::CaptivePortalState& state);
+
   // Last network path for which notification was displayed.
   std::string last_network_path_;
 
   // Currently displayed authorization dialog, or NULL if none.
   NetworkPortalWebDialog* dialog_;
+
+  // Do not close Portal Login dialog on "No network" error in browser tests.
+  bool ignore_no_network_for_testing_;
+
+  // This is called if the controller learns about a potential change of the
+  // captive portal.
+  base::Closure retry_detection_callback_;
 
   DISALLOW_COPY_AND_ASSIGN(NetworkPortalNotificationController);
 };

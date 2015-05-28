@@ -83,7 +83,7 @@ PassRefPtrWillBeRawPtr<CSSValueList> CSSValueList::copy()
     return newList.release();
 }
 
-String CSSValueList::customCSSText(CSSTextFormattingFlags formattingFlag) const
+String CSSValueList::customCSSText() const
 {
     StringBuilder result;
     String separator;
@@ -105,10 +105,7 @@ String CSSValueList::customCSSText(CSSTextFormattingFlags formattingFlag) const
     for (unsigned i = 0; i < size; i++) {
         if (!result.isEmpty())
             result.append(separator);
-        if (formattingFlag == AlwaysQuoteCSSString && m_values[i]->isPrimitiveValue())
-            result.append(toCSSPrimitiveValue(m_values[i].get())->customCSSText(AlwaysQuoteCSSString));
-        else
-            result.append(m_values[i]->cssText());
+        result.append(m_values[i]->cssText());
     }
 
     return result.toString();
@@ -117,15 +114,6 @@ String CSSValueList::customCSSText(CSSTextFormattingFlags formattingFlag) const
 bool CSSValueList::equals(const CSSValueList& other) const
 {
     return m_valueListSeparator == other.m_valueListSeparator && compareCSSValueVector(m_values, other.m_values);
-}
-
-bool CSSValueList::equals(const CSSValue& other) const
-{
-    if (m_values.size() != 1)
-        return false;
-
-    const RefPtrWillBeMember<CSSValue>& value = m_values[0];
-    return value && value->equals(other);
 }
 
 bool CSSValueList::hasFailedOrCanceledSubresources() const
@@ -137,7 +125,7 @@ bool CSSValueList::hasFailedOrCanceledSubresources() const
     return false;
 }
 
-void CSSValueList::traceAfterDispatch(Visitor* visitor)
+DEFINE_TRACE_AFTER_DISPATCH(CSSValueList)
 {
     visitor->trace(m_values);
     CSSValue::traceAfterDispatch(visitor);

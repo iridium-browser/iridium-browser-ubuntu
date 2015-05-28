@@ -2,11 +2,11 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-from telemetry import decorators
-from telemetry.core import platform
-from telemetry.core import web_contents
 from telemetry.core.backends import app_backend
-from telemetry.core.forwarders import do_nothing_forwarder
+from telemetry.core import platform
+from telemetry.core.platform import profiling_controller_backend
+from telemetry.core import web_contents
+from telemetry import decorators
 
 
 class ExtensionsNotSupportedException(Exception):
@@ -24,7 +24,9 @@ class BrowserBackend(app_backend.AppBackend):
     self._supports_extensions = supports_extensions
     self.browser_options = browser_options
     self._tab_list_backend_class = tab_list_backend
-    self._forwarder_factory = None
+    self._profiling_controller_backend = (
+        profiling_controller_backend.ProfilingControllerBackend(
+          platform_backend, self))
 
   def SetBrowser(self, browser):
     super(BrowserBackend, self).SetApp(app=browser)
@@ -36,6 +38,10 @@ class BrowserBackend(app_backend.AppBackend):
   @property
   def browser(self):
     return self.app
+
+  @property
+  def profiling_controller_backend(self):
+    return self._profiling_controller_backend
 
   @property
   def browser_type(self):
@@ -71,21 +77,12 @@ class BrowserBackend(app_backend.AppBackend):
   def supports_system_info(self):
     return False
 
-  @property
-  def forwarder_factory(self):
-    if not self._forwarder_factory:
-      self._forwarder_factory = do_nothing_forwarder.DoNothingForwarderFactory()
-    return self._forwarder_factory
-
   def StartTracing(self, trace_options, custom_categories=None,
                    timeout=web_contents.DEFAULT_WEB_CONTENTS_TIMEOUT):
     raise NotImplementedError()
 
   def StopTracing(self, trace_data_builder):
     raise NotImplementedError()
-
-  def GetRemotePort(self, port):
-    return port
 
   def Start(self):
     raise NotImplementedError()

@@ -75,9 +75,17 @@ void LayerTestCommon::VerifyQuadsAreOccluded(const QuadList& quads,
 
   // Quads that are fully occluded on one axis only should be shrunken.
   for (const auto& quad : quads) {
-    DCHECK(quad->quadTransform().IsIdentityOrIntegerTranslation());
     gfx::Rect target_rect =
         MathUtil::MapEnclosingClippedRect(quad->quadTransform(), quad->rect);
+    if (!quad->quadTransform().IsIdentityOrIntegerTranslation()) {
+      DCHECK(quad->quadTransform().IsPositiveScaleOrTranslation())
+          << quad->quadTransform().ToString();
+      gfx::RectF target_rectf =
+          MathUtil::MapClippedRect(quad->quadTransform(), quad->rect);
+      // Scale transforms allowed, as long as the final transformed rect
+      // ends up on integer boundaries for ease of testing.
+      DCHECK_EQ(target_rectf.ToString(), gfx::RectF(target_rect).ToString());
+    }
     gfx::Rect target_visible_rect = MathUtil::MapEnclosingClippedRect(
         quad->quadTransform(), quad->visible_rect);
 
@@ -129,27 +137,29 @@ void LayerTestCommon::LayerImplTest::AppendQuadsWithOcclusion(
   Occlusion occlusion(layer_impl->draw_transform(),
                       SimpleEnclosedRegion(occluded),
                       SimpleEnclosedRegion());
+  layer_impl->draw_properties().occlusion_in_content_space = occlusion;
 
   layer_impl->WillDraw(DRAW_MODE_HARDWARE, resource_provider());
-  layer_impl->AppendQuads(render_pass_.get(), occlusion, &data);
+  layer_impl->AppendQuads(render_pass_.get(), &data);
   layer_impl->DidDraw(resource_provider());
 }
 
 void LayerTestCommon::LayerImplTest::AppendQuadsForPassWithOcclusion(
     LayerImpl* layer_impl,
-    const RenderPassId& id,
+    RenderPass* given_render_pass,
     const gfx::Rect& occluded) {
-  AppendQuadsData data(id);
+  AppendQuadsData data;
 
-  render_pass_->quad_list.clear();
-  render_pass_->shared_quad_state_list.clear();
+  given_render_pass->quad_list.clear();
+  given_render_pass->shared_quad_state_list.clear();
 
   Occlusion occlusion(layer_impl->draw_transform(),
                       SimpleEnclosedRegion(occluded),
                       SimpleEnclosedRegion());
+  layer_impl->draw_properties().occlusion_in_content_space = occlusion;
 
   layer_impl->WillDraw(DRAW_MODE_HARDWARE, resource_provider());
-  layer_impl->AppendQuads(render_pass_.get(), occlusion, &data);
+  layer_impl->AppendQuads(given_render_pass, &data);
   layer_impl->DidDraw(resource_provider());
 }
 
@@ -160,12 +170,12 @@ void LayerTestCommon::LayerImplTest::AppendSurfaceQuadsWithOcclusion(
 
   render_pass_->quad_list.clear();
   render_pass_->shared_quad_state_list.clear();
-  occlusion_tracker_.set_occluded_target_rect_for_contributing_surface(
-      occluded);
-  bool for_replica = false;
-  RenderPassId id(1, 1);
+
   surface_impl->AppendQuads(
-      render_pass_.get(), occlusion_tracker_, &data, for_replica, id);
+      render_pass_.get(), gfx::Transform(),
+      Occlusion(gfx::Transform(), SimpleEnclosedRegion(occluded),
+                SimpleEnclosedRegion()),
+      SK_ColorBLACK, 1.f, nullptr, &data, RenderPassId(1, 1));
 }
 
 }  // namespace cc

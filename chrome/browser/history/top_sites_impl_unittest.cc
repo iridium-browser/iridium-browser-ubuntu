@@ -7,19 +7,18 @@
 #include "base/message_loop/message_loop.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/task/cancelable_task_tracker.h"
-#include "chrome/browser/chrome_notification_types.h"
-#include "chrome/browser/history/history_notifications.h"
 #include "chrome/browser/history/history_service_factory.h"
-#include "chrome/browser/history/history_unittest_base.h"
-#include "chrome/browser/history/top_sites.h"
+#include "chrome/browser/history/top_sites_factory.h"
 #include "chrome/browser/history/top_sites_impl.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/test/base/testing_profile.h"
 #include "components/history/core/browser/history_db_task.h"
 #include "components/history/core/browser/history_types.h"
+#include "components/history/core/browser/top_sites.h"
 #include "components/history/core/browser/top_sites_cache.h"
-#include "content/public/browser/notification_service.h"
+#include "components/history/core/browser/top_sites_observer.h"
+#include "components/history/core/test/history_unittest_base.h"
 #include "content/public/test/test_browser_thread.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/skia/include/core/SkBitmap.h"
@@ -28,47 +27,27 @@
 
 using content::BrowserThread;
 
-class TestTopSitesObserver : public history::TopSitesObserver {
- public:
-  explicit TestTopSitesObserver(Profile* profile, history::TopSites* top_sites);
-  virtual ~TestTopSitesObserver();
-  // TopSitesObserver:
-  void TopSitesLoaded(history::TopSites* top_sites) override;
-  void TopSitesChanged(history::TopSites* top_sites) override;
-
- private:
-  Profile* profile_;
-  history::TopSites* top_sites_;
-};
-
-TestTopSitesObserver::~TestTopSitesObserver() {
-  top_sites_->RemoveObserver(this);
-}
-
-TestTopSitesObserver::TestTopSitesObserver(Profile* profile,
-                                           history::TopSites* top_sites)
-    : profile_(profile), top_sites_(top_sites) {
-  DCHECK(top_sites_);
-  top_sites_->AddObserver(this);
-}
-
-void TestTopSitesObserver::TopSitesLoaded(history::TopSites* top_sites) {
-  content::NotificationService::current()->Notify(
-      chrome::NOTIFICATION_TOP_SITES_LOADED,
-      content::Source<Profile>(profile_),
-      content::Details<history::TopSites>(top_sites));
-}
-
-void TestTopSitesObserver::TopSitesChanged(history::TopSites* top_sites) {
-  content::NotificationService::current()->Notify(
-      chrome::NOTIFICATION_TOP_SITES_CHANGED,
-      content::Source<Profile>(profile_),
-      content::NotificationService::NoDetails());
-}
-
 namespace history {
 
 namespace {
+
+static const char kPrepopulatedPageURL[] =
+    "http://www.google.com/int/chrome/welcome.html";
+
+// Create a TopSites implementation for testing.
+scoped_refptr<RefcountedKeyedService> BuildTopSitesImpl(
+    content::BrowserContext* context) {
+  PrepopulatedPageList prepopulated_pages;
+  prepopulated_pages.push_back(PrepopulatedPage(GURL(kPrepopulatedPageURL),
+                                                base::string16(), -1, -1, 0));
+
+  scoped_refptr<TopSitesImpl> top_sites =
+      new TopSitesImpl(static_cast<Profile*>(context), prepopulated_pages);
+  top_sites->Init(
+      context->GetPath().Append(chrome::kTopSitesFilename),
+      BrowserThread::GetMessageLoopProxyForThread(BrowserThread::DB));
+  return top_sites;
+}
 
 // Used by WaitForHistory, see it for details.
 class WaitForHistoryTask : public HistoryDBTask {
@@ -178,13 +157,12 @@ class TopSitesImplTest : public HistoryUnitTestBase {
     profile_.reset(new TestingProfile);
     if (CreateHistoryAndTopSites()) {
       ASSERT_TRUE(profile_->CreateHistoryService(false, false));
-      CreateTopSitesAndObserver();
+      ResetTopSites();
       profile_->BlockUntilTopSitesLoaded();
     }
   }
 
   void TearDown() override {
-    top_sites_observer_.reset();
     profile_.reset();
   }
 
@@ -236,33 +214,30 @@ class TopSitesImplTest : public HistoryUnitTestBase {
   }
 
   TopSitesImpl* top_sites() {
-    return static_cast<TopSitesImpl*>(profile_->GetTopSites());
+    return static_cast<TopSitesImpl*>(
+        TopSitesFactory::GetForProfile(profile_.get()).get());
   }
   TestingProfile* profile() {return profile_.get();}
   HistoryService* history_service() {
-    return HistoryServiceFactory::GetForProfile(profile_.get(),
-                                                Profile::EXPLICIT_ACCESS);
+    return HistoryServiceFactory::GetForProfile(
+        profile_.get(), ServiceAccessType::EXPLICIT_ACCESS);
   }
 
-  MostVisitedURLList GetPrepopulatePages() {
-    return top_sites()->GetPrepopulatePages();
+  PrepopulatedPageList GetPrepopulatedPages() {
+    return top_sites()->GetPrepopulatedPages();
   }
 
   // Returns true if the TopSitesQuerier contains the prepopulate data starting
   // at |start_index|.
   void ContainsPrepopulatePages(const TopSitesQuerier& querier,
                                 size_t start_index) {
-    MostVisitedURLList prepopulate_urls = GetPrepopulatePages();
-    ASSERT_LE(start_index + prepopulate_urls.size(), querier.urls().size());
-    for (size_t i = 0; i < prepopulate_urls.size(); ++i) {
-      EXPECT_EQ(prepopulate_urls[i].url.spec(),
-                querier.urls()[start_index + i].url.spec()) << " @ index " <<
-          i;
+    PrepopulatedPageList prepopulate_pages = GetPrepopulatedPages();
+    ASSERT_LE(start_index + prepopulate_pages.size(), querier.urls().size());
+    for (size_t i = 0; i < prepopulate_pages.size(); ++i) {
+      EXPECT_EQ(prepopulate_pages[i].most_visited.url.spec(),
+                querier.urls()[start_index + i].url.spec())
+          << " @ index " << i;
     }
-  }
-
-  // Used for callbacks from history.
-  void EmptyCallback() {
   }
 
   // Quit the current message loop when invoked. Useful when running a nested
@@ -320,7 +295,7 @@ class TopSitesImplTest : public HistoryUnitTestBase {
   // Recreates top sites. This forces top sites to reread from the db.
   void RecreateTopSitesAndBlock() {
     // Recreate TopSites and wait for it to load.
-    CreateTopSitesAndObserver();
+    ResetTopSites();
     // As history already loaded we have to fake this call.
     profile()->BlockUntilTopSitesLoaded();
   }
@@ -365,13 +340,14 @@ class TopSitesImplTest : public HistoryUnitTestBase {
     top_sites()->thread_safe_cache_->SetTopSites(empty);
   }
 
-  void CreateTopSitesAndObserver() {
-    if (top_sites_observer_)
-      top_sites_observer_.reset();
-
-    profile_->CreateTopSites();
-    top_sites_observer_.reset(
-        new TestTopSitesObserver(profile_.get(), profile_->GetTopSites()));
+  void ResetTopSites() {
+    // TopSites shutdown takes some time as it happens on the DB thread and does
+    // not support the existence of two TopSitesImpl for a single profile (due
+    // to database locking). TestingProfile::DestroyTopSites() waits for the
+    // TopSites cleanup to complete before returning.
+    profile_->DestroyTopSites();
+    TopSitesFactory::GetInstance()->SetTestingFactory(profile_.get(),
+                                                      BuildTopSitesImpl);
   }
 
  private:
@@ -379,7 +355,6 @@ class TopSitesImplTest : public HistoryUnitTestBase {
   content::TestBrowserThread ui_thread_;
   content::TestBrowserThread db_thread_;
   scoped_ptr<TestingProfile> profile_;
-  scoped_ptr<TestTopSitesObserver> top_sites_observer_;
   // To cancel HistoryService tasks.
   base::CancelableTaskTracker history_tracker_;
 
@@ -687,7 +662,7 @@ TEST_F(TopSitesImplTest, GetMostVisited) {
   ASSERT_EQ(1, querier.number_of_callbacks());
 
   // 2 extra prepopulated URLs.
-  ASSERT_EQ(2u + GetPrepopulatePages().size(), querier.urls().size());
+  ASSERT_EQ(2u + GetPrepopulatedPages().size(), querier.urls().size());
   EXPECT_EQ(news, querier.urls()[0].url);
   EXPECT_EQ(google, querier.urls()[1].url);
   ASSERT_NO_FATAL_FAILURE(ContainsPrepopulatePages(querier, 2));
@@ -720,7 +695,7 @@ TEST_F(TopSitesImplTest, SaveToDB) {
   {
     TopSitesQuerier querier;
     querier.QueryTopSites(top_sites(), false);
-    ASSERT_EQ(1u + GetPrepopulatePages().size(), querier.urls().size());
+    ASSERT_EQ(1u + GetPrepopulatedPages().size(), querier.urls().size());
     EXPECT_EQ(asdf_url, querier.urls()[0].url);
     EXPECT_EQ(asdf_title, querier.urls()[0].title);
     ASSERT_NO_FATAL_FAILURE(ContainsPrepopulatePages(querier, 1));
@@ -748,7 +723,7 @@ TEST_F(TopSitesImplTest, SaveToDB) {
   {
     TopSitesQuerier querier;
     querier.QueryTopSites(top_sites(), false);
-    ASSERT_EQ(2u + GetPrepopulatePages().size(), querier.urls().size());
+    ASSERT_EQ(2u + GetPrepopulatedPages().size(), querier.urls().size());
     EXPECT_EQ(asdf_url, querier.urls()[0].url);
     EXPECT_EQ(asdf_title, querier.urls()[0].title);
     EXPECT_EQ(google_url, querier.urls()[1].url);
@@ -795,7 +770,7 @@ TEST_F(TopSitesImplTest, SaveForcedToDB) {
   TopSitesQuerier querier;
   querier.QueryAllTopSites(top_sites(), true, true);
 
-  ASSERT_EQ(4u + GetPrepopulatePages().size(), querier.urls().size());
+  ASSERT_EQ(4u + GetPrepopulatedPages().size(), querier.urls().size());
   EXPECT_EQ(GURL("http://forced1"), querier.urls()[0].url);
   EXPECT_EQ(base::ASCIIToUTF16("forced1"), querier.urls()[0].title);
   SkBitmap thumbnail = GetThumbnail(GURL("http://forced1"));
@@ -845,7 +820,7 @@ TEST_F(TopSitesImplTest, RealDatabase) {
     TopSitesQuerier querier;
     querier.QueryTopSites(top_sites(), false);
 
-    ASSERT_EQ(1u + GetPrepopulatePages().size(), querier.urls().size());
+    ASSERT_EQ(1u + GetPrepopulatedPages().size(), querier.urls().size());
     EXPECT_EQ(asdf_url, querier.urls()[0].url);
     EXPECT_EQ(asdf_title, querier.urls()[0].title);
     ASSERT_NO_FATAL_FAILURE(ContainsPrepopulatePages(querier, 1));
@@ -879,7 +854,7 @@ TEST_F(TopSitesImplTest, RealDatabase) {
     TopSitesQuerier querier;
     querier.QueryTopSites(top_sites(), false);
 
-    ASSERT_EQ(2u + GetPrepopulatePages().size(), querier.urls().size());
+    ASSERT_EQ(2u + GetPrepopulatedPages().size(), querier.urls().size());
     EXPECT_EQ(google1_url, querier.urls()[0].url);
     EXPECT_EQ(google_title, querier.urls()[0].title);
     ASSERT_EQ(3u, querier.urls()[0].redirects.size());
@@ -948,7 +923,7 @@ TEST_F(TopSitesImplTest, DeleteNotifications) {
     TopSitesQuerier querier;
     querier.QueryTopSites(top_sites(), false);
 
-    ASSERT_EQ(GetPrepopulatePages().size() + 2, querier.urls().size());
+    ASSERT_EQ(GetPrepopulatedPages().size() + 2, querier.urls().size());
   }
 
   DeleteURL(news_url);
@@ -960,7 +935,7 @@ TEST_F(TopSitesImplTest, DeleteNotifications) {
     TopSitesQuerier querier;
     querier.QueryTopSites(top_sites(), false);
 
-    ASSERT_EQ(1u + GetPrepopulatePages().size(), querier.urls().size());
+    ASSERT_EQ(1u + GetPrepopulatedPages().size(), querier.urls().size());
     EXPECT_EQ(google_title, querier.urls()[0].title);
     ASSERT_NO_FATAL_FAILURE(ContainsPrepopulatePages(querier, 1));
   }
@@ -972,7 +947,7 @@ TEST_F(TopSitesImplTest, DeleteNotifications) {
     TopSitesQuerier querier;
     querier.QueryTopSites(top_sites(), false);
 
-    ASSERT_EQ(1u + GetPrepopulatePages().size(), querier.urls().size());
+    ASSERT_EQ(1u + GetPrepopulatedPages().size(), querier.urls().size());
     EXPECT_EQ(google_title, querier.urls()[0].title);
     ASSERT_NO_FATAL_FAILURE(ContainsPrepopulatePages(querier, 1));
   }
@@ -986,7 +961,7 @@ TEST_F(TopSitesImplTest, DeleteNotifications) {
     TopSitesQuerier querier;
     querier.QueryTopSites(top_sites(), false);
 
-    ASSERT_EQ(GetPrepopulatePages().size(), querier.urls().size());
+    ASSERT_EQ(GetPrepopulatedPages().size(), querier.urls().size());
     ASSERT_NO_FATAL_FAILURE(ContainsPrepopulatePages(querier, 0));
   }
 
@@ -997,7 +972,7 @@ TEST_F(TopSitesImplTest, DeleteNotifications) {
     TopSitesQuerier querier;
     querier.QueryTopSites(top_sites(), false);
 
-    ASSERT_EQ(GetPrepopulatePages().size(), querier.urls().size());
+    ASSERT_EQ(GetPrepopulatedPages().size(), querier.urls().size());
     ASSERT_NO_FATAL_FAILURE(ContainsPrepopulatePages(querier, 0));
   }
 }
@@ -1030,7 +1005,7 @@ TEST_F(TopSitesImplTest, GetUpdateDelay) {
 // has loaded.
 TEST_F(TopSitesImplTest, NotifyCallbacksWhenLoaded) {
   // Recreate top sites. It won't be loaded now.
-  CreateTopSitesAndObserver();
+  ResetTopSites();
 
   EXPECT_FALSE(IsTopSitesLoaded());
 
@@ -1053,11 +1028,11 @@ TEST_F(TopSitesImplTest, NotifyCallbacksWhenLoaded) {
 
   // Now we should have gotten the callbacks.
   EXPECT_EQ(1, querier1.number_of_callbacks());
-  EXPECT_EQ(GetPrepopulatePages().size(), querier1.urls().size());
+  EXPECT_EQ(GetPrepopulatedPages().size(), querier1.urls().size());
   EXPECT_EQ(1, querier2.number_of_callbacks());
-  EXPECT_EQ(GetPrepopulatePages().size(), querier2.urls().size());
+  EXPECT_EQ(GetPrepopulatedPages().size(), querier2.urls().size());
   EXPECT_EQ(1, querier3.number_of_callbacks());
-  EXPECT_EQ(GetPrepopulatePages().size(), querier3.urls().size());
+  EXPECT_EQ(GetPrepopulatedPages().size(), querier3.urls().size());
 
   // Reset the top sites.
   MostVisitedURLList pages;
@@ -1071,7 +1046,7 @@ TEST_F(TopSitesImplTest, NotifyCallbacksWhenLoaded) {
   SetTopSites(pages);
 
   // Recreate top sites. It won't be loaded now.
-  CreateTopSitesAndObserver();
+  ResetTopSites();
 
   EXPECT_FALSE(IsTopSitesLoaded());
 
@@ -1088,7 +1063,7 @@ TEST_F(TopSitesImplTest, NotifyCallbacksWhenLoaded) {
 
   // Now we should have gotten the callbacks.
   EXPECT_EQ(1, querier4.number_of_callbacks());
-  ASSERT_EQ(2u + GetPrepopulatePages().size(), querier4.urls().size());
+  ASSERT_EQ(2u + GetPrepopulatedPages().size(), querier4.urls().size());
 
   EXPECT_EQ("http://1.com/", querier4.urls()[0].url.spec());
   EXPECT_EQ("http://2.com/", querier4.urls()[1].url.spec());
@@ -1106,7 +1081,7 @@ TEST_F(TopSitesImplTest, NotifyCallbacksWhenLoaded) {
 
   EXPECT_EQ(1, querier5.number_of_callbacks());
 
-  ASSERT_EQ(3u + GetPrepopulatePages().size(), querier5.urls().size());
+  ASSERT_EQ(3u + GetPrepopulatedPages().size(), querier5.urls().size());
   EXPECT_EQ("http://1.com/", querier5.urls()[0].url.spec());
   EXPECT_EQ("http://2.com/", querier5.urls()[1].url.spec());
   EXPECT_EQ("http://3.com/", querier5.urls()[2].url.spec());
@@ -1116,7 +1091,7 @@ TEST_F(TopSitesImplTest, NotifyCallbacksWhenLoaded) {
 // Makes sure canceled requests are not notified.
 TEST_F(TopSitesImplTest, CancelingRequestsForTopSites) {
   // Recreate top sites. It won't be loaded now.
-  CreateTopSitesAndObserver();
+  ResetTopSites();
 
   EXPECT_FALSE(IsTopSitesLoaded());
 
@@ -1138,7 +1113,7 @@ TEST_F(TopSitesImplTest, CancelingRequestsForTopSites) {
 
   // The first callback should succeed.
   EXPECT_EQ(1, querier1.number_of_callbacks());
-  EXPECT_EQ(GetPrepopulatePages().size(), querier1.urls().size());
+  EXPECT_EQ(GetPrepopulatedPages().size(), querier1.urls().size());
 
   // And the canceled callback should not be notified.
   EXPECT_EQ(0, querier2.number_of_callbacks());
@@ -1254,7 +1229,6 @@ TEST_F(TopSitesImplTest, BlacklistingWithoutPrepopulated) {
   }
 }
 
-#if !defined(OS_ANDROID)
 // Tests variations of blacklisting including blacklisting prepopulated pages.
 // This test is disable for Android because Android does not have any
 // prepopulated pages.
@@ -1274,7 +1248,8 @@ TEST_F(TopSitesImplTest, BlacklistingWithPrepopulated) {
   // Blacklist google.com.
   top_sites()->AddBlacklistedURL(GURL("http://google.com/"));
 
-  GURL prepopulate_url = GetPrepopulatePages()[0].url;
+  DCHECK_GE(GetPrepopulatedPages().size(), 1u);
+  GURL prepopulate_url = GetPrepopulatedPages()[0].most_visited.url;
 
   EXPECT_TRUE(top_sites()->HasBlacklistedItems());
   EXPECT_TRUE(top_sites()->IsBlacklisted(GURL("http://google.com/")));
@@ -1285,7 +1260,7 @@ TEST_F(TopSitesImplTest, BlacklistingWithPrepopulated) {
   {
     TopSitesQuerier q;
     q.QueryTopSites(top_sites(), true);
-    ASSERT_EQ(1u + GetPrepopulatePages().size(), q.urls().size());
+    ASSERT_EQ(1u + GetPrepopulatedPages().size(), q.urls().size());
     EXPECT_EQ("http://bbc.com/", q.urls()[0].url.spec());
     ASSERT_NO_FATAL_FAILURE(ContainsPrepopulatePages(q, 1));
   }
@@ -1295,7 +1270,7 @@ TEST_F(TopSitesImplTest, BlacklistingWithPrepopulated) {
   {
     TopSitesQuerier q;
     q.QueryTopSites(top_sites(), true);
-    ASSERT_EQ(1u + GetPrepopulatePages().size(), q.urls().size());
+    ASSERT_EQ(1u + GetPrepopulatedPages().size(), q.urls().size());
     EXPECT_EQ("http://bbc.com/", q.urls()[0].url.spec());
     ASSERT_NO_FATAL_FAILURE(ContainsPrepopulatePages(q, 1));
   }
@@ -1308,7 +1283,7 @@ TEST_F(TopSitesImplTest, BlacklistingWithPrepopulated) {
   {
     TopSitesQuerier q;
     q.QueryTopSites(top_sites(), true);
-    ASSERT_EQ(1u + GetPrepopulatePages().size() - 1, q.urls().size());
+    ASSERT_EQ(1u + GetPrepopulatedPages().size() - 1, q.urls().size());
     EXPECT_EQ("http://bbc.com/", q.urls()[0].url.spec());
     for (size_t i = 1; i < q.urls().size(); ++i)
       EXPECT_NE(prepopulate_url.spec(), q.urls()[i].url.spec());
@@ -1323,7 +1298,7 @@ TEST_F(TopSitesImplTest, BlacklistingWithPrepopulated) {
   {
     TopSitesQuerier q;
     q.QueryTopSites(top_sites(), true);
-    ASSERT_EQ(2u + GetPrepopulatePages().size() - 1, q.urls().size());
+    ASSERT_EQ(2u + GetPrepopulatedPages().size() - 1, q.urls().size());
     EXPECT_EQ("http://bbc.com/", q.urls()[0].url.spec());
     EXPECT_EQ("http://google.com/", q.urls()[1].url.spec());
     // Android has only one prepopulated page which has been blacklisted, so
@@ -1331,7 +1306,7 @@ TEST_F(TopSitesImplTest, BlacklistingWithPrepopulated) {
     if (q.urls().size() > 2)
       EXPECT_NE(prepopulate_url.spec(), q.urls()[2].url.spec());
     else
-      EXPECT_EQ(1u, GetPrepopulatePages().size());
+      EXPECT_EQ(1u, GetPrepopulatedPages().size());
   }
 
   // Remove all blacklisted sites.
@@ -1341,25 +1316,24 @@ TEST_F(TopSitesImplTest, BlacklistingWithPrepopulated) {
   {
     TopSitesQuerier q;
     q.QueryTopSites(top_sites(), true);
-    ASSERT_EQ(2u + GetPrepopulatePages().size(), q.urls().size());
+    ASSERT_EQ(2u + GetPrepopulatedPages().size(), q.urls().size());
     EXPECT_EQ("http://bbc.com/", q.urls()[0].url.spec());
     EXPECT_EQ("http://google.com/", q.urls()[1].url.spec());
     ASSERT_NO_FATAL_FAILURE(ContainsPrepopulatePages(q, 2));
   }
 }
-#endif
 
 // Makes sure prepopulated pages exist.
 TEST_F(TopSitesImplTest, AddPrepopulatedPages) {
   TopSitesQuerier q;
   q.QueryTopSites(top_sites(), true);
-  EXPECT_EQ(GetPrepopulatePages().size(), q.urls().size());
+  EXPECT_EQ(GetPrepopulatedPages().size(), q.urls().size());
   ASSERT_NO_FATAL_FAILURE(ContainsPrepopulatePages(q, 0));
 
   MostVisitedURLList pages = q.urls();
   EXPECT_FALSE(AddPrepopulatedPages(&pages));
 
-  EXPECT_EQ(GetPrepopulatePages().size(), pages.size());
+  EXPECT_EQ(GetPrepopulatedPages().size(), pages.size());
   q.set_urls(pages);
   ASSERT_NO_FATAL_FAILURE(ContainsPrepopulatePages(q, 0));
 }
@@ -1517,7 +1491,7 @@ TEST_F(TopSitesImplTest, SetForcedTopSitesWithCollisions) {
   querier.QueryAllTopSites(top_sites(), false, true);
 
   // Check URLs. When collision occurs, the incoming one is always preferred.
-  ASSERT_EQ(7u + GetPrepopulatePages().size(), querier.urls().size());
+  ASSERT_EQ(7u + GetPrepopulatedPages().size(), querier.urls().size());
   EXPECT_EQ("http://url/0", querier.urls()[0].url.spec());
   EXPECT_EQ(1000u, querier.urls()[0].last_forced_time.ToJsTime());
   EXPECT_EQ("http://collision/1", querier.urls()[1].url.spec());
@@ -1551,7 +1525,7 @@ TEST_F(TopSitesImplTest, SetTopSitesIdentical) {
   querier.QueryAllTopSites(top_sites(), false, true);
 
   // Check URLs. When collision occurs, the incoming one is always preferred.
-  ASSERT_EQ(3u + GetPrepopulatePages().size(), querier.urls().size());
+  ASSERT_EQ(3u + GetPrepopulatedPages().size(), querier.urls().size());
   EXPECT_EQ("http://url/0", querier.urls()[0].url.spec());
   EXPECT_EQ(1000u, querier.urls()[0].last_forced_time.ToJsTime());
   EXPECT_EQ("http://url/1", querier.urls()[1].url.spec());
@@ -1578,7 +1552,7 @@ TEST_F(TopSitesImplTest, SetTopSitesWithAlreadyExistingForcedURLs) {
   querier.QueryAllTopSites(top_sites(), false, true);
 
   // Check URLs. When collision occurs, the non-forced one is always preferred.
-  ASSERT_EQ(2u + GetPrepopulatePages().size(), querier.urls().size());
+  ASSERT_EQ(2u + GetPrepopulatedPages().size(), querier.urls().size());
   EXPECT_EQ("http://url/0", querier.urls()[0].url.spec());
   EXPECT_EQ("http://url/0/redir", querier.urls()[0].redirects[0].spec());
   EXPECT_TRUE(querier.urls()[0].last_forced_time.is_null());
@@ -1608,7 +1582,7 @@ TEST_F(TopSitesImplTest, AddForcedURL) {
   // Check URLs.
   TopSitesQuerier querier;
   querier.QueryAllTopSites(top_sites(), false, true);
-  ASSERT_EQ(8u + GetPrepopulatePages().size(), querier.urls().size());
+  ASSERT_EQ(8u + GetPrepopulatedPages().size(), querier.urls().size());
   EXPECT_EQ("http://forced/3", querier.urls()[0].url.spec());
   EXPECT_EQ(1000u, querier.urls()[0].last_forced_time.ToJsTime());
   EXPECT_EQ("http://forced/0", querier.urls()[1].url.spec());
@@ -1638,7 +1612,7 @@ TEST_F(TopSitesImplTest, AddForcedURL) {
 
   // Check relevant URLs.
   querier.QueryAllTopSites(top_sites(), false, true);
-  ASSERT_EQ(8u + GetPrepopulatePages().size(), querier.urls().size());
+  ASSERT_EQ(8u + GetPrepopulatedPages().size(), querier.urls().size());
   EXPECT_EQ("http://forced/1", querier.urls()[0].url.spec());
   EXPECT_EQ(1000u, querier.urls()[0].last_forced_time.ToJsTime());
   EXPECT_EQ("http://forced/3", querier.urls()[3].url.spec());
@@ -1650,7 +1624,7 @@ TEST_F(TopSitesImplTest, AddForcedURL) {
   EXPECT_TRUE(AddForcedURL(GURL("http://forced/5"),
                            base::Time::FromJsTime(4000)));
   querier.QueryAllTopSites(top_sites(), false, true);
-  ASSERT_EQ(9u + GetPrepopulatePages().size(), querier.urls().size());
+  ASSERT_EQ(9u + GetPrepopulatedPages().size(), querier.urls().size());
   EXPECT_EQ(4000u, querier.urls()[3].last_forced_time.ToJsTime());
   EXPECT_EQ(4000u, querier.urls()[4].last_forced_time.ToJsTime());
   // We don't care which order they get sorted in.

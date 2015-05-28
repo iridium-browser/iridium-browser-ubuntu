@@ -73,7 +73,11 @@ RenderFrameProxy* RenderFrameProxy::CreateFrameProxy(
     // should not wind up here.
     RenderFrameProxy* parent =
         RenderFrameProxy::FromRoutingID(parent_routing_id);
-    web_frame = parent->web_frame()->createRemoteChild("", proxy.get());
+    web_frame = parent->web_frame()->createRemoteChild(
+        blink::WebString::fromUTF8(replicated_state.name),
+        RenderFrameImpl::ContentToWebSandboxFlags(
+            replicated_state.sandbox_flags),
+        proxy.get());
     render_view = parent->render_view();
   }
 
@@ -116,6 +120,15 @@ RenderFrameProxy::RenderFrameProxy(int routing_id, int frame_routing_id)
 }
 
 RenderFrameProxy::~RenderFrameProxy() {
+  // TODO(nasko): Set the render_frame_proxy to null to avoid a double deletion
+  // when detaching the main frame. This can be removed once RenderFrameImpl and
+  // RenderFrameProxy have been completely decoupled. See
+  // https://crbug.com/357747.
+  RenderFrameImpl* render_frame =
+      RenderFrameImpl::FromRoutingID(frame_routing_id_);
+  if (render_frame)
+    render_frame->set_render_frame_proxy(nullptr);
+
   render_view()->UnregisterRenderFrameProxy(this);
 
   FrameMap::iterator it = g_frame_map.Get().find(web_frame_);
@@ -157,6 +170,32 @@ void RenderFrameProxy::SetReplicatedState(const FrameReplicationState& state) {
   DCHECK(web_frame_);
   web_frame_->setReplicatedOrigin(blink::WebSecurityOrigin::createFromString(
       blink::WebString::fromUTF8(state.origin.string())));
+  web_frame_->setReplicatedSandboxFlags(
+      RenderFrameImpl::ContentToWebSandboxFlags(state.sandbox_flags));
+  web_frame_->setReplicatedName(blink::WebString::fromUTF8(state.name));
+}
+
+// Update the proxy's SecurityContext and FrameOwner with new sandbox flags
+// that were set by its parent in another process.
+//
+// Normally, when a frame's sandbox attribute is changed dynamically, the
+// frame's FrameOwner is updated with the new sandbox flags right away, while
+// the frame's SecurityContext is updated when the frame is navigated and the
+// new sandbox flags take effect.
+//
+// Currently, there is no use case for a proxy's pending FrameOwner sandbox
+// flags, so there's no message sent to proxies when the sandbox attribute is
+// first updated.  Instead, the update message is sent and this function is
+// called when the new flags take effect, so that the proxy updates its
+// SecurityContext. This is needed to ensure that sandbox flags are inherited
+// properly if this proxy ever parents a local frame.  The proxy's FrameOwner
+// flags are also updated here with the caveat that the FrameOwner won't learn
+// about updates to its flags until they take effect.
+void RenderFrameProxy::OnDidUpdateSandboxFlags(SandboxFlags flags) {
+  web_frame_->setReplicatedSandboxFlags(
+      RenderFrameImpl::ContentToWebSandboxFlags(flags));
+  web_frame_->setFrameOwnerSandboxFlags(
+      RenderFrameImpl::ContentToWebSandboxFlags(flags));
 }
 
 bool RenderFrameProxy::OnMessageReceived(const IPC::Message& msg) {
@@ -169,6 +208,9 @@ bool RenderFrameProxy::OnMessageReceived(const IPC::Message& msg) {
     IPC_MESSAGE_HANDLER(FrameMsg_DisownOpener, OnDisownOpener)
     IPC_MESSAGE_HANDLER(FrameMsg_DidStartLoading, OnDidStartLoading)
     IPC_MESSAGE_HANDLER(FrameMsg_DidStopLoading, OnDidStopLoading)
+    IPC_MESSAGE_HANDLER(FrameMsg_DidUpdateSandboxFlags, OnDidUpdateSandboxFlags)
+    IPC_MESSAGE_HANDLER(FrameMsg_DispatchLoad, OnDispatchLoad)
+    IPC_MESSAGE_HANDLER(FrameMsg_DidUpdateName, OnDidUpdateName)
     IPC_MESSAGE_UNHANDLED(handled = false)
   IPC_END_MESSAGE_MAP()
 
@@ -191,6 +233,13 @@ void RenderFrameProxy::OnChildFrameProcessGone() {
 }
 
 void RenderFrameProxy::OnCompositorFrameSwapped(const IPC::Message& message) {
+  // If this WebFrame has already been detached, its parent will be null. This
+  // can happen when swapping a WebRemoteFrame with a WebLocalFrame, where this
+  // message may arrive after the frame was removed from the frame tree, but
+  // before the frame has been destroyed. http://crbug.com/446575.
+  if (!web_frame()->parent())
+    return;
+
   FrameMsg_CompositorFrameSwapped::Param param;
   if (!FrameMsg_CompositorFrameSwapped::Read(&message, &param))
     return;
@@ -246,6 +295,14 @@ void RenderFrameProxy::OnDidStopLoading() {
   web_frame_->didStopLoading();
 }
 
+void RenderFrameProxy::OnDispatchLoad() {
+  web_frame_->DispatchLoadEventForFrameOwner();
+}
+
+void RenderFrameProxy::OnDidUpdateName(const std::string& name) {
+  web_frame_->setReplicatedName(blink::WebString::fromUTF8(name));
+}
+
 void RenderFrameProxy::frameDetached() {
   if (web_frame_->parent())
     web_frame_->parent()->removeChild(web_frame_);
@@ -268,19 +325,8 @@ void RenderFrameProxy::postMessageEvent(
   if (!target_origin.isNull())
     params.target_origin = target_origin.toString();
 
-  blink::WebMessagePortChannelArray channels = event.releaseChannels();
-  if (!channels.isEmpty()) {
-    std::vector<int> message_port_ids(channels.size());
-     // Extract the port IDs from the channel array.
-     for (size_t i = 0; i < channels.size(); ++i) {
-       WebMessagePortChannelImpl* webchannel =
-           static_cast<WebMessagePortChannelImpl*>(channels[i]);
-       message_port_ids[i] = webchannel->message_port_id();
-       webchannel->QueueMessages();
-       DCHECK_NE(message_port_ids[i], MSG_ROUTING_NONE);
-     }
-     params.message_port_ids = message_port_ids;
-  }
+  params.message_ports =
+      WebMessagePortChannelImpl::ExtractMessagePortIDs(event.releaseChannels());
 
   // Include the routing ID for the source frame (if one exists), which the
   // browser process will translate into the routing ID for the equivalent

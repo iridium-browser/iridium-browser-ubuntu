@@ -1,11 +1,11 @@
 # Copyright 2014 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
-'''A container for timeline-based events and traces and can handle importing
+"""A container for timeline-based events and traces and can handle importing
 raw event data from different sources. This model closely resembles that in the
 trace_viewer project:
 https://code.google.com/p/trace-viewer/
-'''
+"""
 
 from operator import attrgetter
 
@@ -13,8 +13,8 @@ from telemetry.timeline import async_slice as async_slice_module
 from telemetry.timeline import bounds
 from telemetry.timeline import event_container
 from telemetry.timeline import inspector_importer
-from telemetry.timeline import slice as slice_module
 from telemetry.timeline import process as process_module
+from telemetry.timeline import slice as slice_module
 from telemetry.timeline import surface_flinger_importer
 from telemetry.timeline import tab_id_importer
 from telemetry.timeline import trace_data as trace_data_module
@@ -62,6 +62,7 @@ class TimelineModel(event_container.TimelineEventContainer):
     self._thread_time_bounds = {}
     self._processes = {}
     self._browser_process = None
+    self._gpu_process = None
     self._surface_flinger_process = None
     self._frozen = False
     self._tab_ids_to_renderer_threads_map = {}
@@ -101,6 +102,16 @@ class TimelineModel(event_container.TimelineEventContainer):
   #pylint: disable=E0202
   def browser_process(self, browser_process):
     self._browser_process = browser_process
+
+  @property
+  #pylint: disable=E0202
+  def gpu_process(self):
+    return self._gpu_process
+
+  @gpu_process.setter
+  #pylint: disable=E0202
+  def gpu_process(self, gpu_process):
+    self._gpu_process = gpu_process
 
   @property
   #pylint: disable=E0202

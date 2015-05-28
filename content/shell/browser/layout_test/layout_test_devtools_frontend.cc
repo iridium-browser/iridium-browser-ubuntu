@@ -19,27 +19,16 @@ LayoutTestDevToolsFrontend* LayoutTestDevToolsFrontend::Show(
     WebContents* inspected_contents,
     const std::string& settings,
     const std::string& frontend_url) {
-  scoped_refptr<DevToolsAgentHost> agent(
-      DevToolsAgentHost::GetOrCreateFor(inspected_contents));
   Shell* shell = Shell::CreateNewWindow(inspected_contents->GetBrowserContext(),
                                         GURL(),
                                         NULL,
                                         gfx::Size());
   LayoutTestDevToolsFrontend* devtools_frontend =
-      new LayoutTestDevToolsFrontend(shell, agent.get());
+      new LayoutTestDevToolsFrontend(shell, inspected_contents);
 
   shell->LoadURL(GetDevToolsPathAsURL(settings, frontend_url));
 
   return devtools_frontend;
-}
-
-LayoutTestDevToolsFrontend::LayoutTestDevToolsFrontend(
-    Shell* frontend_shell,
-    DevToolsAgentHost* agent_host)
-    : ShellDevToolsFrontend(frontend_shell, agent_host) {
-}
-
-LayoutTestDevToolsFrontend::~LayoutTestDevToolsFrontend() {
 }
 
 // static.
@@ -68,6 +57,26 @@ GURL LayoutTestDevToolsFrontend::GetDevToolsPathAsURL(
                                      result.spec().c_str(),
                                      settings.c_str()));
   return result;
+}
+
+void LayoutTestDevToolsFrontend::ReuseFrontend(const std::string& settings,
+                                               const std::string frontend_url) {
+  DisconnectFromTarget();
+  frontend_shell()->LoadURL(GetDevToolsPathAsURL(settings, frontend_url));
+}
+
+LayoutTestDevToolsFrontend::LayoutTestDevToolsFrontend(
+    Shell* frontend_shell,
+    WebContents* inspected_contents)
+    : ShellDevToolsFrontend(frontend_shell, inspected_contents) {
+}
+
+LayoutTestDevToolsFrontend::~LayoutTestDevToolsFrontend() {
+}
+
+void LayoutTestDevToolsFrontend::AgentHostClosed(
+    DevToolsAgentHost* agent_host, bool replaced) {
+  // Do not close the front-end shell.
 }
 
 void LayoutTestDevToolsFrontend::RenderProcessGone(

@@ -6,9 +6,13 @@
 
 #include "base/mac/foundation_util.h"
 #import "ui/views/cocoa/views_nswindow_delegate.h"
+#include "ui/views/controls/menu/menu_controller.h"
+#include "ui/views/widget/native_widget_mac.h"
 
 @interface NativeWidgetMacNSWindow ()
 - (ViewsNSWindowDelegate*)viewsNSWindowDelegate;
+- (views::Widget*)viewsWidget;
+- (BOOL)hasViewsMenuActive;
 @end
 
 @implementation NativeWidgetMacNSWindow
@@ -17,14 +21,44 @@
   return base::mac::ObjCCastStrict<ViewsNSWindowDelegate>([self delegate]);
 }
 
-// Override canBecome{Key,Main}Window to always return YES, otherwise Windows
-// with a styleMask of NSBorderlessWindowMask default to NO.
+- (views::Widget*)viewsWidget {
+  return [[self viewsNSWindowDelegate] nativeWidgetMac]->GetWidget();
+}
+
+- (BOOL)hasViewsMenuActive {
+  views::MenuController* menuController =
+      views::MenuController::GetActiveInstance();
+  return menuController && menuController->owner() == [self viewsWidget];
+}
+
+// Ignore [super canBecome{Key,Main}Window]. The default is NO for windows with
+// NSBorderlessWindowMask, which is not the desired behavior.
+// Note these can be called via -[NSWindow close] while the widget is being torn
+// down, so check for a delegate.
 - (BOOL)canBecomeKeyWindow {
-  return YES;
+  return [self delegate] && [self viewsWidget]->CanActivate();
 }
 
 - (BOOL)canBecomeMainWindow {
-  return YES;
+  return [self delegate] && [self viewsWidget]->CanActivate();
+}
+
+// Override sendEvent to allow key events to be forwarded to a toolkit-views
+// menu while it is active, and while still allowing any native subview to
+// retain firstResponder status.
+- (void)sendEvent:(NSEvent*)event {
+  NSEventType type = [event type];
+  if ((type != NSKeyDown && type != NSKeyUp) || ![self hasViewsMenuActive]) {
+    [super sendEvent:event];
+    return;
+  }
+
+  // Send to the menu, after converting the event into an action message using
+  // the content view.
+  if (type == NSKeyDown)
+    [[self contentView] keyDown:event];
+  else
+    [[self contentView] keyUp:event];
 }
 
 // Override display, since this is the first opportunity Cocoa gives to detect
@@ -49,6 +83,28 @@
   [[self viewsNSWindowDelegate] onWindowOrderWillChange:orderingMode];
   [super orderWindow:orderingMode relativeTo:otherWindowNumber];
   [[self viewsNSWindowDelegate] onWindowOrderChanged:nil];
+}
+
+// NSResponder implementation.
+
+- (void)cursorUpdate:(NSEvent*)theEvent {
+  // The cursor provided by the delegate should only be applied within the
+  // content area. This is because we rely on the contentView to track the
+  // mouse cursor and forward cursorUpdate: messages up the responder chain.
+  // The cursorUpdate: isn't handled in BridgedContentView because views-style
+  // SetCapture() conflicts with the way tracking events are processed for
+  // the view during a drag. Since the NSWindow is still in the responder chain
+  // overriding cursorUpdate: here handles both cases.
+  if (!NSPointInRect([theEvent locationInWindow], [[self contentView] frame])) {
+    [super cursorUpdate:theEvent];
+    return;
+  }
+
+  NSCursor* cursor = [[self viewsNSWindowDelegate] cursor];
+  if (cursor)
+    [cursor set];
+  else
+    [super cursorUpdate:theEvent];
 }
 
 @end

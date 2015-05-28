@@ -35,7 +35,6 @@
 #include "core/EventNames.h"
 #include "core/EventTargetNames.h"
 #include "core/EventTypeNames.h"
-#include "core/FetchInitiatorTypeNames.h"
 #include "core/HTMLNames.h"
 #include "core/HTMLTokenizerNames.h"
 #include "core/InputTypeNames.h"
@@ -50,12 +49,14 @@
 #include "core/dom/Document.h"
 #include "core/dom/StyleChangeReason.h"
 #include "core/events/EventFactory.h"
+#include "core/fetch/FetchInitiatorTypeNames.h"
 #include "core/html/parser/HTMLParserThread.h"
 #include "core/workers/WorkerThread.h"
 #include "platform/EventTracer.h"
 #include "platform/FontFamilyNames.h"
-#include "platform/Partitions.h"
 #include "platform/PlatformThreadData.h"
+#include "platform/weborigin/KURL.h"
+#include "wtf/Partitions.h"
 #include "wtf/text/StringStatics.h"
 
 namespace blink {
@@ -92,6 +93,7 @@ void CoreInitializer::init()
     MediaFeatureNames::init();
     MediaTypeNames::init();
 
+    CSSPrimitiveValue::initUnitTable();
     CSSParserTokenRange::initStaticEOFToken();
 
     // It would make logical sense to do this in WTF::initialize() but there are
@@ -101,8 +103,8 @@ void CoreInitializer::init()
     StyleChangeExtraData::init();
 
     QualifiedName::init();
-    Partitions::init();
     EventTracer::initialize();
+    KURL::initialize();
 
     registerEventFactory();
 
@@ -123,8 +125,6 @@ void CoreInitializer::shutdown()
     // Make sure we stop the HTMLParserThread before Platform::current() is
     // cleared.
     HTMLParserThread::shutdown();
-
-    Partitions::shutdown();
 }
 
 } // namespace blink

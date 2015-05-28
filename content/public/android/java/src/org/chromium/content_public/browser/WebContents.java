@@ -11,6 +11,11 @@ import org.chromium.base.VisibleForTesting;
  */
 public interface WebContents {
     /**
+     * Deletes the Web Contents object.
+     */
+    void destroy();
+
+    /**
      * @return The navigation controller associated with this WebContents.
      */
     NavigationController getNavigationController();
@@ -45,6 +50,7 @@ public interface WebContents {
      * Inserts css into main frame's document.
      */
     void insertCSS(String css);
+
     /**
      * To be called when the ContentView is hidden.
      */
@@ -133,6 +139,14 @@ public interface WebContents {
     public String getUrl();
 
     /**
+     * Gets the last committed URL. It represents the current page that is
+     * displayed in this WebContents. It represents the current security context.
+     *
+     * @return The last committed URL.
+     */
+    public String getLastCommittedUrl();
+
+    /**
      * Get the InCognito state of WebContents.
      *
      * @return whether this WebContents is in InCognito mode or not
@@ -202,4 +216,39 @@ public interface WebContents {
      */
     public void evaluateJavaScript(String script, JavaScriptCallback callback);
 
+    /**
+     * Adds a log message to dev tools console. |level| must be a value of
+     * org.chromium.content_public.common.ConsoleMessageLevel.
+     */
+    public void addMessageToDevToolsConsole(int level, String message);
+
+    /**
+     * Returns whether the initial empty page has been accessed by a script from another
+     * page. Always false after the first commit.
+     *
+     * @return Whether the initial empty page has been accessed by a script.
+     */
+    public boolean hasAccessedInitialDocument();
+
+    /**
+     * This returns the theme color as set by the theme-color meta tag after getting rid of the
+     * alpha.
+     * @param The default color to be returned if the cached color is not valid.
+     * @return The theme color for the content as set by the theme-color meta tag.
+     */
+    public int getThemeColor(int defaultColor);
+
+    /**
+     * Add an observer to the WebContents
+     *
+     * @param observer The observer to add.
+     */
+    void addObserver(WebContentsObserver observer);
+
+    /**
+     * Remove an observer from the WebContents
+     *
+     * @param observer The observer to remove.
+     */
+    void removeObserver(WebContentsObserver observer);
 }

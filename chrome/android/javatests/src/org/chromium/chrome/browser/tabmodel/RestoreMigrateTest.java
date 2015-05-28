@@ -8,6 +8,7 @@ import android.test.InstrumentationTestCase;
 import android.test.suitebuilder.annotation.SmallTest;
 
 import org.chromium.base.ThreadUtils;
+import org.chromium.base.annotations.SuppressFBWarnings;
 import org.chromium.chrome.browser.TabState;
 import org.chromium.chrome.browser.util.StreamUtil;
 import org.chromium.chrome.test.util.ApplicationData;
@@ -32,7 +33,8 @@ public class RestoreMigrateTest extends InstrumentationTestCase {
                         return TabPersistentStore.serializeTabModelSelector(selector);
                     }
                 });
-        File f = TabPersistentStore.getStateFolder(getInstrumentation().getTargetContext(), index);
+        File f = TabPersistentStore.getStateDirectory(
+                getInstrumentation().getTargetContext(), index);
         FileOutputStream fos = null;
         try {
             fos = new FileOutputStream(new File(f, TabPersistentStore.SAVED_STATE_FILE));
@@ -59,6 +61,7 @@ public class RestoreMigrateTest extends InstrumentationTestCase {
      * @throws ExecutionException
      */
     @SuppressWarnings("unused")
+    @SuppressFBWarnings("DLS_DEAD_LOCAL_STORE")
     @SmallTest
     public void testMigrateData() throws IOException, InterruptedException, ExecutionException {
         ApplicationData.clearAppData(getInstrumentation().getTargetContext());
@@ -84,7 +87,8 @@ public class RestoreMigrateTest extends InstrumentationTestCase {
         TabPersistentStore.waitForMigrationToFinish();
 
         // Check that the files were moved.
-        File newDir = TabPersistentStore.getStateFolder(getInstrumentation().getTargetContext(), 0);
+        File newDir =
+                TabPersistentStore.getStateDirectory(getInstrumentation().getTargetContext(), 0);
         File newStateFile = new File(newDir, TabPersistentStore.SAVED_STATE_FILE);
         File newTab0 = new File(newDir, TabState.SAVED_TAB_STATE_FILE_PREFIX + "0");
         File newTab1 = new File(newDir, TabState.SAVED_TAB_STATE_FILE_PREFIX + "1");
@@ -113,6 +117,7 @@ public class RestoreMigrateTest extends InstrumentationTestCase {
      * @throws ExecutionException
      */
     @SuppressWarnings("unused")
+    @SuppressFBWarnings("DLS_DEAD_LOCAL_STORE")
     @SmallTest
     public void testSkipMigrateData() throws IOException, InterruptedException, ExecutionException {
         ApplicationData.clearAppData(getInstrumentation().getTargetContext());
@@ -132,7 +137,8 @@ public class RestoreMigrateTest extends InstrumentationTestCase {
         assertTrue("Could not create tab 3 file", tab3.createNewFile());
 
         // Write new state files
-        File newDir = TabPersistentStore.getStateFolder(getInstrumentation().getTargetContext(), 0);
+        File newDir =
+                TabPersistentStore.getStateDirectory(getInstrumentation().getTargetContext(), 0);
         File newStateFile = new File(newDir, TabPersistentStore.SAVED_STATE_FILE);
         File newTab4 = new File(newDir, TabState.SAVED_TAB_STATE_FILE_PREFIX + "4");
 
@@ -169,6 +175,7 @@ public class RestoreMigrateTest extends InstrumentationTestCase {
      * @throws ExecutionException
      */
     @SuppressWarnings("unused")
+    @SuppressFBWarnings("DLS_DEAD_LOCAL_STORE")
     @SmallTest
     public void testMigrationLeavesOtherFilesAlone() throws IOException, InterruptedException,
             ExecutionException {
@@ -195,7 +202,8 @@ public class RestoreMigrateTest extends InstrumentationTestCase {
         assertTrue("Could not find other file", otherFile.exists());
 
         // Check that the files were moved.
-        File newDir = TabPersistentStore.getStateFolder(getInstrumentation().getTargetContext(), 0);
+        File newDir =
+                TabPersistentStore.getStateDirectory(getInstrumentation().getTargetContext(), 0);
         File newStateFile = new File(newDir, TabPersistentStore.SAVED_STATE_FILE);
         File newTab0 = new File(newDir, TabState.SAVED_TAB_STATE_FILE_PREFIX + "0");
         File newOtherFile = new File(newDir, "other.file");

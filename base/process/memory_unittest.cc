@@ -105,37 +105,6 @@ TEST(ProcessMemoryTest, EnableLFH) {
 // test suite setup and does not need to be done again, else mach_override
 // will fail.
 
-#if !defined(ADDRESS_SANITIZER)
-// The following code tests the system implementation of malloc() thus no need
-// to test it under AddressSanitizer.
-TEST(ProcessMemoryTest, MacMallocFailureDoesNotTerminate) {
-#if ARCH_CPU_32_BITS
-  // The Mavericks malloc library changed in a way which breaks the tricks used
-  // to implement EnableTerminationOnOutOfMemory() with UncheckedMalloc() under
-  // 32-bit.  Under 64-bit the oom_killer code handles this.
-  if (base::mac::IsOSMavericksOrLater())
-    return;
-#endif
-
-  // Test that ENOMEM doesn't crash via CrMallocErrorBreak two ways: the exit
-  // code and lack of the error string. The number of bytes is one less than
-  // MALLOC_ABSOLUTE_MAX_SIZE, more than which the system early-returns NULL and
-  // does not call through malloc_error_break(). See the comment at
-  // EnableTerminationOnOutOfMemory() for more information.
-  void* buf = NULL;
-  ASSERT_EXIT(
-      {
-        base::EnableTerminationOnOutOfMemory();
-
-        buf = malloc(std::numeric_limits<size_t>::max() - (2 * PAGE_SIZE) - 1);
-      },
-      testing::KilledBySignal(SIGTRAP),
-      "\\*\\*\\* error: can't allocate region.*\\n?.*");
-
-  base::debug::Alias(buf);
-}
-#endif  // !defined(ADDRESS_SANITIZER)
-
 TEST(ProcessMemoryTest, MacTerminateOnHeapCorruption) {
   // Assert that freeing an unallocated pointer will crash the process.
   char buf[9];
@@ -150,10 +119,8 @@ TEST(ProcessMemoryTest, MacTerminateOnHeapCorruption) {
   ASSERT_DEATH(free(buf), "attempting free on address which "
       "was not malloc\\(\\)-ed");
 #else
-  ASSERT_DEATH(free(buf), "being freed.*\\n?\\.*"
-      "\\*\\*\\* set a breakpoint in malloc_error_break to debug.*\\n?.*"
-      "Terminating process due to a potential for future heap corruption");
-#endif  // ARCH_CPU_64_BITS || defined(ADDRESS_SANITIZER)
+  ADD_FAILURE() << "This test is not supported in this build configuration.";
+#endif
 }
 
 #endif  // defined(OS_MACOSX)

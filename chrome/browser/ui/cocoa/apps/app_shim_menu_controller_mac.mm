@@ -75,6 +75,44 @@ void RemoveMenuItemWithTag(NSMenuItem* top_level_item,
     [submenu removeItem:nextItem];
 }
 
+// Sets the menu item with |item_tag| in |top_level_item| visible.
+// If |has_alternate| is true, the item immediately following |item_tag| is
+// assumed to be its (only) alternate. Since AppKit is unable to hide items
+// with alternates, |has_alternate| will cause -[NSMenuItem alternate] to be
+// removed when hiding and restored when showing.
+void SetItemWithTagVisible(NSMenuItem* top_level_item,
+                           NSInteger item_tag,
+                           bool visible,
+                           bool has_alternate) {
+  NSMenu* submenu = [top_level_item submenu];
+  NSMenuItem* menu_item = [submenu itemWithTag:item_tag];
+  DCHECK(menu_item);
+
+  if (visible != [menu_item isHidden])
+    return;
+
+  if (!has_alternate) {
+    [menu_item setHidden:!visible];
+    return;
+  }
+
+  NSInteger next_index = [submenu indexOfItem:menu_item] + 1;
+  DCHECK_LT(next_index, [submenu numberOfItems]);
+
+  NSMenuItem* alternate_item = [submenu itemAtIndex:next_index];
+  if (!visible) {
+    // When hiding (only), we can verify the assumption that the item following
+    // |item_tag| is actually an alternate.
+    DCHECK([alternate_item isAlternate]);
+  }
+
+  // The alternate item visibility should always be in sync.
+  DCHECK_EQ([alternate_item isHidden], [menu_item isHidden]);
+  [alternate_item setAlternate:visible];
+  [alternate_item setHidden:!visible];
+  [menu_item setHidden:!visible];
+}
+
 }  // namespace
 
 // Used by AppShimMenuController to manage menu items that are a copy of a
@@ -102,6 +140,14 @@ void RemoveMenuItemWithTag(NSMenuItem* top_level_item,
               resourceId:(int)resourceId
                   action:(SEL)action
            keyEquivalent:(NSString*)keyEquivalent;
+// Retain the source item given |menuTag| and |sourceItemTag|. Copy
+// the menu item given |menuTag| and |targetItemTag|.
+// This is useful when we want a doppelganger with a different source item.
+// For example, if there are conflicting key equivalents.
+- (id)initWithMenuTag:(NSInteger)menuTag
+        sourceItemTag:(NSInteger)sourceItemTag
+        targetItemTag:(NSInteger)targetItemTag
+        keyEquivalent:(NSString*)keyEquivalent;
 // Set the title using |resourceId_| and unset the source item's key equivalent.
 - (void)enableForApp:(const extensions::Extension*)app;
 // Restore the source item's key equivalent.
@@ -131,6 +177,20 @@ void RemoveMenuItemWithTag(NSMenuItem* top_level_item,
     [menuItem_ setTarget:controller];
     [menuItem_ setTag:itemTag];
     resourceId_ = resourceId;
+  }
+  return self;
+}
+
+- (id)initWithMenuTag:(NSInteger)menuTag
+        sourceItemTag:(NSInteger)sourceItemTag
+        targetItemTag:(NSInteger)targetItemTag
+        keyEquivalent:(NSString*)keyEquivalent {
+  if ((self = [super init])) {
+    menuItem_.reset([GetItemByTag(menuTag, targetItemTag) copy]);
+    sourceItem_.reset([GetItemByTag(menuTag, sourceItemTag) retain]);
+    DCHECK(menuItem_);
+    DCHECK(sourceItem_);
+    sourceKeyEquivalent_.reset([[sourceItem_ keyEquivalent] copy]);
   }
   return self;
 }
@@ -222,6 +282,13 @@ void RemoveMenuItemWithTag(NSMenuItem* top_level_item,
               resourceId:0
                   action:nil
            keyEquivalent:@"n"]);
+  // Since the "Close Window" menu item will have the same shortcut as "Close
+  // Tab" on the Chrome menu, we need to create a doppelganger.
+  closeWindowDoppelganger_.reset([[DoppelgangerMenuItem alloc]
+                initWithMenuTag:IDC_FILE_MENU
+                  sourceItemTag:IDC_CLOSE_TAB
+                  targetItemTag:IDC_CLOSE_WINDOW
+                  keyEquivalent:@"w"]);
   // For apps, the "Window" part of "New Window" is dropped to match the default
   // menu set given to Cocoa Apps.
   [[newDoppelganger_ menuItem] setTitle:l10n_util::GetNSString(IDS_NEW_MAC)];
@@ -260,24 +327,12 @@ void RemoveMenuItemWithTag(NSMenuItem* top_level_item,
   [[fileMenuItem_ submenu] addItem:[newDoppelganger_ menuItem]];
   [[fileMenuItem_ submenu] addItem:[openDoppelganger_ menuItem]];
   [[fileMenuItem_ submenu] addItem:[NSMenuItem separatorItem]];
-  AddDuplicateItem(fileMenuItem_, IDC_FILE_MENU, IDC_CLOSE_WINDOW);
-  // Set the expected key equivalent explicitly here because
-  // -[AppControllerMac adjustCloseWindowMenuItemKeyEquivalent:] sets it to
-  // "W" (Cmd+Shift+w) when a tabbed window has focus; it will change it back
-  // to Cmd+w when a non-tabbed window has focus.
-  NSMenuItem* closeWindowMenuItem =
-      [[fileMenuItem_ submenu] itemWithTag:IDC_CLOSE_WINDOW];
-  [closeWindowMenuItem setKeyEquivalent:@"w"];
-  [closeWindowMenuItem setKeyEquivalentModifierMask:NSCommandKeyMask];
+  [[fileMenuItem_ submenu] addItem:[closeWindowDoppelganger_ menuItem]];
 
-  // Edit menu. This copies the menu entirely and removes
-  // "Paste and Match Style" and "Find". This is because the last two items,
-  // "Start Dictation" and "Special Characters" are added by OSX, so we can't
-  // copy them explicitly.
+  // Edit menu. We copy the menu because the last two items, "Start Dictation"
+  // and "Special Characters" are added by OSX, so we can't copy them
+  // explicitly.
   editMenuItem_.reset([[[NSApp mainMenu] itemWithTag:IDC_EDIT_MENU] copy]);
-  RemoveMenuItemWithTag(editMenuItem_,
-                        IDC_CONTENT_CONTEXT_PASTE_AND_MATCH_STYLE, NO);
-  RemoveMenuItemWithTag(editMenuItem_, IDC_FIND_MENU, NO);
 
   // View menu. Remove "Always Show Bookmark Bar" and separator.
   viewMenuItem_.reset([[[NSApp mainMenu] itemWithTag:IDC_VIEW_MENU] copy]);
@@ -318,9 +373,9 @@ void RemoveMenuItemWithTag(NSMenuItem* top_level_item,
   // http://crbug.com/406944.
   base::mac::ScopedNSAutoreleasePool pool;
 
-  id window = [notification object];
   NSString* name = [notification name];
   if ([name isEqualToString:NSWindowDidBecomeMainNotification]) {
+    id window = [notification object];
     extensions::AppWindow* appWindow =
         AppWindowRegistryUtil::GetAppWindowForNativeWindowAnyProfile(
             window);
@@ -339,15 +394,18 @@ void RemoveMenuItemWithTag(NSMenuItem* top_level_item,
     else
       [self removeMenuItems];
   } else if ([name isEqualToString:NSWindowWillCloseNotification]) {
-    // If there are any other windows that can become main, leave the menu. It
-    // will be changed when another window becomes main. Otherwise, restore the
-    // Chrome menu.
-    for (NSWindow* w : [NSApp windows]) {
-      if ([w canBecomeMainWindow] && ![w isEqual:window])
-        return;
-    }
-
-    [self removeMenuItems];
+    // If the window being closed has main status, reset back to the Chrome
+    // menu. This once scanned [NSApp windows] to predict whether we could
+    // expect another Chrome window to become main, and skip the reset. However,
+    // panels need to do strange things during window close to ensure panels
+    // never get chosen for key status over a browser window (which is likely
+    // because they are given an elevated [NSWindow level]). Trying to handle
+    // this case is not robust. Unfortunately, resetting the menu to Chrome
+    // unconditionally means that if another packaged app window becomes key,
+    // the menu will flicker. TODO(tapted): Investigate restoring the logic when
+    // the panel code is removed.
+    if ([[notification object] isMainWindow])
+      [self removeMenuItems];
   } else {
     NOTREACHED();
   }
@@ -373,13 +431,21 @@ void RemoveMenuItemWithTag(NSMenuItem* top_level_item,
   [quitDoppelganger_ enableForApp:app];
   [newDoppelganger_ enableForApp:app];
   [openDoppelganger_ enableForApp:app];
+  [closeWindowDoppelganger_ enableForApp:app];
 
   [appMenuItem_ setTitle:appId];
   [[appMenuItem_ submenu] setTitle:title];
 
   [mainMenu addItem:appMenuItem_];
   [mainMenu addItem:fileMenuItem_];
+
+  SetItemWithTagVisible(editMenuItem_,
+                        IDC_CONTENT_CONTEXT_PASTE_AND_MATCH_STYLE,
+                        app->is_hosted_app(), true);
+  SetItemWithTagVisible(editMenuItem_, IDC_FIND_MENU, app->is_hosted_app(),
+                        false);
   [mainMenu addItem:editMenuItem_];
+
   if (app->is_hosted_app()) {
     [mainMenu addItem:viewMenuItem_];
     [mainMenu addItem:historyMenuItem_];
@@ -412,6 +478,7 @@ void RemoveMenuItemWithTag(NSMenuItem* top_level_item,
   [quitDoppelganger_ disable];
   [newDoppelganger_ disable];
   [openDoppelganger_ disable];
+  [closeWindowDoppelganger_ disable];
 }
 
 - (void)quitCurrentPlatformApp {

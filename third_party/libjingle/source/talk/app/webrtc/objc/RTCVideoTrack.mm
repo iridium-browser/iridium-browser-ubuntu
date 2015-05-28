@@ -1,6 +1,6 @@
 /*
  * libjingle
- * Copyright 2013, Google Inc.
+ * Copyright 2013 Google Inc.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -45,6 +45,12 @@
     _adapters = [NSMutableArray array];
   }
   return self;
+}
+
+- (void)dealloc {
+  for (RTCVideoRendererAdapter *adapter in _adapters) {
+    self.nativeVideoTrack->RemoveRenderer(adapter.nativeVideoRenderer);
+  }
 }
 
 - (void)addRenderer:(id<RTCVideoRenderer>)renderer {

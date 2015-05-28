@@ -2,10 +2,11 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+from telemetry import benchmark
+
 from benchmarks import silk_flags
 from measurements import repaint as repaint_measurement
 import page_sets
-from telemetry import benchmark
 
 
 class _Repaint(benchmark.Benchmark):
@@ -22,6 +23,10 @@ class _Repaint(benchmark.Benchmark):
                       default=None,
                       help='Height of invalidations for fixed_size mode.')
 
+  @classmethod
+  def Name(cls):
+    return 'repaint'
+
   def CreatePageTest(self, options):
     return repaint_measurement.Repaint(options.mode, options.width,
                                        options.height)
@@ -32,6 +37,10 @@ class RepaintKeyMobileSites(_Repaint):
 
   http://www.chromium.org/developers/design-documents/rendering-benchmarks"""
   page_set = page_sets.KeyMobileSitesRepaintPageSet
+
+  @classmethod
+  def Name(cls):
+    return 'repaint.key_mobile_sites_repaint'
 
 
 @benchmark.Enabled('android')
@@ -44,3 +53,7 @@ class RepaintGpuRasterizationKeyMobileSites(_Repaint):
   page_set = page_sets.KeyMobileSitesRepaintPageSet
   def CustomizeBrowserOptions(self, options):
     silk_flags.CustomizeBrowserOptionsForGpuRasterization(options)
+  @classmethod
+  def Name(cls):
+    return 'repaint.gpu_rasterization.key_mobile_sites_repaint'
+

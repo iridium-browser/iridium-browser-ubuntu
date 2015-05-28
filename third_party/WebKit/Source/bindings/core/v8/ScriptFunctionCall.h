@@ -45,11 +45,6 @@ public:
 
     void appendArgument(const ScriptValue&);
     void appendArgument(const String&);
-    void appendArgument(const char*);
-    void appendArgument(long);
-    void appendArgument(long long);
-    void appendArgument(unsigned);
-    void appendArgument(unsigned long);
     void appendArgument(int);
     void appendArgument(bool);
     void appendArgument(const Vector<ScriptValue>&);
@@ -65,7 +60,6 @@ public:
     ScriptFunctionCall(const ScriptValue& thisObject, const String& name);
     ScriptValue call(bool& hadException, bool reportExceptions = true);
     ScriptValue call();
-    ScriptValue construct(bool& hadException, bool reportExceptions = true);
 
 protected:
     ScriptValue m_thisObject;

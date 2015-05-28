@@ -35,8 +35,8 @@
 #include "core/css/resolver/TransformBuilder.h"
 #include "core/dom/ExceptionCode.h"
 #include "core/frame/UseCounter.h"
-#include "core/rendering/style/RenderStyle.h"
-#include "core/rendering/style/StyleInheritedData.h"
+#include "core/style/ComputedStyle.h"
+#include "core/style/StyleInheritedData.h"
 #include "wtf/MathExtras.h"
 
 namespace blink {
@@ -57,6 +57,13 @@ CSSMatrix::CSSMatrix(const String& s, ExceptionState& exceptionState)
     setMatrixValue(s, exceptionState);
 }
 
+static inline PassRefPtr<ComputedStyle> createInitialStyle()
+{
+    RefPtr<ComputedStyle> initialStyle = ComputedStyle::create();
+    initialStyle->font().update(nullptr);
+    return initialStyle;
+}
+
 void CSSMatrix::setMatrixValue(const String& string, ExceptionState& exceptionState)
 {
     if (string.isEmpty())
@@ -68,13 +75,9 @@ void CSSMatrix::setMatrixValue(const String& string, ExceptionState& exceptionSt
         if (value->isPrimitiveValue() && (toCSSPrimitiveValue(value.get()))->getValueID() == CSSValueNone)
             return;
 
-        // FIXME: This has a null pointer crash if we use ex units (crbug.com/414145)
-        DEFINE_STATIC_REF(RenderStyle, defaultStyle, RenderStyle::createDefaultStyle());
+        DEFINE_STATIC_REF(ComputedStyle, initialStyle, createInitialStyle());
         TransformOperations operations;
-        if (!TransformBuilder::createTransformOperations(value.get(), CSSToLengthConversionData(defaultStyle, defaultStyle, nullptr, 1.0f), operations)) {
-            exceptionState.throwDOMException(SyntaxError, "Failed to interpret '" + string + "' as a transformation operation.");
-            return;
-        }
+        TransformBuilder::createTransformOperations(*value, CSSToLengthConversionData(initialStyle, initialStyle, nullptr, 1.0f), operations);
 
         // Convert transform operations to a TransformationMatrix. This can fail
         // if a param has a percentage ('%')

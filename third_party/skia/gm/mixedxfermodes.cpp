@@ -31,11 +31,11 @@ protected:
         kNumShapeTypes
     };
 
-    virtual SkString onShortName() SK_OVERRIDE {
+    SkString onShortName() override {
         return SkString("mixed_xfermodes");
     }
 
-    virtual SkISize onISize() SK_OVERRIDE {
+    SkISize onISize() override {
         return SkISize::Make(790, 640);
     }
 
@@ -87,7 +87,7 @@ protected:
         }
     }
 
-    virtual void onDraw(SkCanvas* canvas) SK_OVERRIDE {
+    void onDraw(SkCanvas* canvas) override {
         if (NULL == fBG.get()) {
             static uint32_t kCheckerPixelData[] = { 0xFFFFFFFF,
                                                     0xFFCCCCCC,
@@ -162,11 +162,6 @@ protected:
         canvas->scale(s, s);
         this->drawShape(canvas, p, shapeType);
         canvas->restore();
-    }
-
-    virtual uint32_t onGetFlags() const {
-        // Skip PDF rasterization since rendering this PDF takes forever.
-        return kSkipPDFRasterization_Flag | kSkipTiled_Flag;
     }
 
 private:

@@ -173,6 +173,15 @@ public:
         IsRight          = 1 << 12,
     };
 
+    // The rail mode for a wheel event specifies the axis on which scrolling is
+    // expected to stick. If this axis is set to Free, then scrolling is not
+    // stuck to any axis.
+    enum RailsMode {
+        RailsModeFree       = 0,
+        RailsModeHorizontal = 1,
+        RailsModeVertical   = 2,
+    };
+
     static const int InputModifiers = ShiftKey | ControlKey | AltKey | MetaKey;
 
     double timeStampSeconds; // Seconds since epoch.
@@ -242,6 +251,10 @@ public:
     // on Windows-equivalent codes (thus |windowsKeyCode| above) but it
     // doesn't hurt to have this one around.
     int nativeKeyCode;
+
+    // The DOM code enum of the key pressed as passed by the embedder. DOM
+    // code enum are defined in ui/events/keycodes/dom4/keycode_converter_data.h.
+    int domCode;
 
     // This identifies whether this event was tagged by the system as being
     // a "system key" event (see
@@ -386,6 +399,8 @@ public:
     // instead of scroll.
     bool canScroll;
 
+    RailsMode railsMode;
+
     WebMouseWheelEvent()
         : WebMouseEvent(sizeof(WebMouseWheelEvent))
         , deltaX(0.0f)
@@ -401,6 +416,7 @@ public:
         , scrollByPage(false)
         , hasPreciseScrollingDeltas(false)
         , canScroll(true)
+        , railsMode(RailsModeFree)
     {
     }
 };
@@ -463,6 +479,7 @@ public:
             // the entirety of the generative motion.
             bool previousUpdateInSequencePrevented;
             bool preventPropagation;
+            bool inertial;
         } scrollUpdate;
 
         struct {
@@ -477,6 +494,7 @@ public:
         } flingCancel;
 
         struct {
+            bool zoomDisabled;
             float scale;
         } pinchUpdate;
     } data;
@@ -515,11 +533,15 @@ public:
     // generated.
     bool causesScrollingIfUncanceled;
 
+    // A unique identifier for the touch event.
+    uint64_t uniqueTouchEventId;
+
     WebTouchEvent()
         : WebInputEvent(sizeof(WebTouchEvent))
         , touchesLength(0)
         , cancelable(true)
         , causesScrollingIfUncanceled(false)
+        , uniqueTouchEventId(0)
     {
     }
 };

@@ -44,7 +44,7 @@ public:
     virtual ~WebSocketChannelClient() { }
     virtual void didConnect(const String& subprotocol, const String& extensions) { }
     virtual void didReceiveTextMessage(const String&) { }
-    virtual void didReceiveBinaryMessage(PassOwnPtr<Vector<char> >) { }
+    virtual void didReceiveBinaryMessage(PassOwnPtr<Vector<char>>) { }
     virtual void didError() { }
     virtual void didConsumeBufferedAmount(uint64_t consumed) { }
     virtual void didStartClosingHandshake() { }
@@ -53,7 +53,7 @@ public:
         ClosingHandshakeComplete
     };
     virtual void didClose(ClosingHandshakeCompletionStatus, unsigned short /* code */, const String& /* reason */) { }
-    virtual void trace(Visitor*) { }
+    DEFINE_INLINE_VIRTUAL_TRACE() { }
 
 protected:
     WebSocketChannelClient() { }

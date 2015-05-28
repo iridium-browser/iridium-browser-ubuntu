@@ -5,14 +5,17 @@ Use of this source code is governed by a BSD-style license that can be
 found in the LICENSE file.
 -->
 
+<link rel="import" href="/base/ui/color_scheme.html">
 <link rel="import" href="/base/quad.html">
+<link rel="import" href="/base/range.html">
 <link rel="import" href="/core/trace_model/trace_model.html">
-<link rel="import" href="/core/color_scheme.html">
 <link rel="import" href="/core/importer/importer.html">
 <link rel="import" href="/core/trace_model/instant_event.html">
 <link rel="import" href="/core/trace_model/flow_event.html">
 <link rel="import" href="/core/trace_model/counter_series.html">
 <link rel="import" href="/core/trace_model/slice_group.html">
+<link rel="import" href="/core/trace_model/global_memory_dump.html">
+<link rel="import" href="/core/trace_model/process_memory_dump.html">
 
 <script>
 'use strict';
@@ -67,16 +70,21 @@ tv.exportTo('tv.e.importer', function() {
     this.allAsyncEvents_ = [];
     this.allFlowEvents_ = [];
     this.allObjectEvents_ = [];
+    this.traceEventSampleStackFramesByName_ = {};
+
+    // Dump ID -> {global: (event | undefined), process: [events]}
+    this.allMemoryDumpEvents_ = {};
+
 
     if (typeof(eventData) === 'string' || eventData instanceof String) {
+      eventData = eventData.trim();
       // If the event data begins with a [, then we know it should end with a ].
       // The reason we check for this is because some tracing implementations
       // cannot guarantee that a ']' gets written to the trace file. So, we are
       // forgiving and if this is obviously the case, we fix it up before
       // throwing the string at JSON.parse.
       if (eventData[0] === '[') {
-        eventData = eventData.replace(/[\r|\n]*$/, '')
-                             .replace(/\s*,\s*$/, '');
+        eventData = eventData.replace(/\s*,\s*$/, '');
         if (eventData[eventData.length - 1] !== ']')
           eventData = eventData + ']';
       }
@@ -123,6 +131,7 @@ tv.exportTo('tv.e.importer', function() {
     //   - eventData that starts with { are probably trace_event
     // May be encoded JSON. Treat files that start with { as importable by us.
     if (typeof(eventData) === 'string' || eventData instanceof String) {
+      eventData = eventData.trim();
       return eventData[0] == '{' || eventData[0] == '[';
     }
 
@@ -206,8 +215,10 @@ tv.exportTo('tv.e.importer', function() {
       // Initialize the counter's series fields if needed.
       if (ctr.numSeries === 0) {
         for (var seriesName in event.args) {
-          ctr.addSeries(new tv.c.trace_model.CounterSeries(seriesName,
-              tv.b.ui.getStringColorId(ctr.name + '.' + seriesName)));
+          ctr.addSeries(new tv.c.trace_model.CounterSeries(
+              seriesName,
+              tv.b.ui.getColorIdForGeneralPurposeString(
+                  ctr.name + '.' + seriesName)));
         }
 
         if (ctr.numSeries === 0) {
@@ -251,20 +262,22 @@ tv.exportTo('tv.e.importer', function() {
       }
 
       if (event.ph == 'B') {
-        thread.sliceGroup.beginSlice(event.cat, event.name, event.ts / 1000,
-                                     this.deepCopyIfNeeded_(event.args),
-                                     event.tts / 1000);
-
+        var slice = thread.sliceGroup.beginSlice(
+            event.cat, event.name, event.ts / 1000,
+            this.deepCopyIfNeeded_(event.args),
+            event.tts / 1000);
+        slice.startStackFrame = this.getStackFrameForEvent_(event);
       } else if (event.ph == 'I' || event.ph == 'i') {
-        if (event.s !== undefined  && event.s !== 't')
+        if (event.s !== undefined && event.s !== 't')
           throw new Error('This should never happen');
 
         thread.sliceGroup.beginSlice(event.cat, event.name, event.ts / 1000,
                                      this.deepCopyIfNeeded_(event.args),
                                      event.tts / 1000);
-        thread.sliceGroup.endSlice(event.ts / 1000,
+        var slice = thread.sliceGroup.endSlice(event.ts / 1000,
                                    event.tts / 1000);
-
+        slice.startStackFrame = this.getStackFrameForEvent_(event);
+        slice.endStackFrame = undefined;
       } else {
         if (!thread.sliceGroup.openSliceCount) {
           this.model_.importWarning({
@@ -284,6 +297,8 @@ tv.exportTo('tv.e.importer', function() {
                 event.name + ' in endSlice'
           });
         }
+        slice.endStackFrame = this.getStackFrameForEvent_(event);
+
         for (var arg in event.args) {
           if (slice.args[arg] !== undefined) {
             this.model_.importWarning({
@@ -301,12 +316,14 @@ tv.exportTo('tv.e.importer', function() {
     processCompleteEvent: function(event) {
       var thread = this.model_.getOrCreateProcess(event.pid)
           .getOrCreateThread(event.tid);
-      thread.sliceGroup.pushCompleteSlice(event.cat, event.name,
+      var slice = thread.sliceGroup.pushCompleteSlice(event.cat, event.name,
           event.ts / 1000,
           event.dur === undefined ? undefined : event.dur / 1000,
           event.tts === undefined ? undefined : event.tts / 1000,
           event.tdur === undefined ? undefined : event.tdur / 1000,
           this.deepCopyIfNeeded_(event.args));
+      slice.startStackFrame = this.getStackFrameForEvent_(event);
+      slice.endStackFrame = this.getStackFrameForEvent_(event, true);
     },
 
     processMetadataEvent: function(event) {
@@ -368,7 +385,7 @@ tv.exportTo('tv.e.importer', function() {
           return;
       }
 
-      var colorId = tv.b.ui.getStringColorId(event.name);
+      var colorId = tv.b.ui.getColorIdForGeneralPurposeString(event.name);
       var instantEvent = new constructor(event.cat, event.name,
           colorId, event.ts / 1000, this.deepCopyIfNeeded_(event.args));
 
@@ -391,12 +408,20 @@ tv.exportTo('tv.e.importer', function() {
       var thread = this.model_.getOrCreateProcess(event.pid)
         .getOrCreateThread(event.tid);
 
-      var id = 'te-' + tv.b.GUID.allocate();
-      var stackFrame = new tv.c.trace_model.StackFrame(
-          undefined, id,
-          event.cat, event.name,
-          tv.b.ui.getStringColorId(event.name));
-      this.model_.addStackFrame(stackFrame);
+      var stackFrame = this.getStackFrameForEvent_(event);
+      if (stackFrame === undefined) {
+        stackFrame = this.traceEventSampleStackFramesByName_[
+            event.name];
+      }
+      if (stackFrame === undefined) {
+        var id = 'te-' + tv.b.GUID.allocate();
+        stackFrame = new tv.c.trace_model.StackFrame(
+            undefined, id,
+            event.cat, event.name,
+            tv.b.ui.getColorIdForGeneralPurposeString(event.name));
+        this.model_.addStackFrame(stackFrame);
+        this.traceEventSampleStackFramesByName_[event.name] = stackFrame;
+      }
 
       var sample = new tv.c.trace_model.Sample(
           undefined, thread, 'TRACE_EVENT_SAMPLE',
@@ -405,11 +430,52 @@ tv.exportTo('tv.e.importer', function() {
       this.model_.samples.push(sample);
     },
 
+    getOrCreateMemoryDumpEvents_: function(dumpId) {
+      if (this.allMemoryDumpEvents_[dumpId] === undefined) {
+        this.allMemoryDumpEvents_[dumpId] = {
+          global: undefined,
+          process: []
+        };
+      }
+      return this.allMemoryDumpEvents_[dumpId];
+    },
+
+    processMemoryDumpEvent: function(event) {
+      if (event.id === undefined) {
+        this.model_.importWarning({
+          type: 'memory_dump_parse_error',
+          message: event.ph + ' phase event without a dump ID.'
+        });
+        return;
+      }
+      var events = this.getOrCreateMemoryDumpEvents_(event.id);
+
+      if (event.ph === 'v') {
+        // Add a process memory dump.
+        events.process.push(event);
+      } else if (event.ph === 'V') {
+        // Add a global memory dump (unless already present).
+        if (events.global !== undefined) {
+          this.model_.importWarning({
+            type: 'memory_dump_parse_error',
+            message: 'Multiple V phase events with the same dump ID.'
+          });
+          return;
+        }
+        events.global = event;
+      } else {
+        throw new Error('Invalid memory dump event phase "' + event.ph + '".');
+      }
+    },
+
     /**
      * Walks through the events_ list and outputs the structures discovered to
      * model_.
      */
     importEvents: function() {
+      if (this.stackFrameEvents_)
+        this.importStackFrames_();
+
       var events = this.events_;
       for (var eI = 0; eI < events.length; eI++) {
         var event = events[eI];
@@ -444,6 +510,9 @@ tv.exportTo('tv.e.importer', function() {
         } else if (event.ph === 's' || event.ph === 't' || event.ph === 'f') {
           this.processFlowEvent(event);
 
+        } else if (event.ph === 'v' || event.ph === 'V') {
+          this.processMemoryDumpEvent(event);
+
         } else {
           this.model_.importWarning({
             type: 'parse_error',
@@ -452,21 +521,19 @@ tv.exportTo('tv.e.importer', function() {
           });
         }
       }
-
-      if (this.stackFrameEvents_)
-        this.importStackFrames_();
     },
 
     importStackFrames_: function() {
       var m = this.model_;
       var events = this.stackFrameEvents_;
+
       for (var id in events) {
         var event = events[id];
         var textForColor = event.category ? event.category : event.name;
         var frame = new tv.c.trace_model.StackFrame(
-            undefined, id,
+            undefined, 'g' + id,
             event.category, event.name,
-            tv.b.ui.getStringColorId(textForColor));
+            tv.b.ui.getColorIdForGeneralPurposeString(textForColor));
         m.addStackFrame(frame);
       }
       for (var id in events) {
@@ -474,14 +541,14 @@ tv.exportTo('tv.e.importer', function() {
         if (event.parent === undefined)
           continue;
 
-        var frame = m.stackFrames[id];
+        var frame = m.stackFrames['g' + id];
         if (frame === undefined)
           throw new Error('omg');
         var parentFrame;
         if (event.parent === undefined) {
           parentFrame = undefined;
         } else {
-          parentFrame = m.stackFrames[event.parent];
+          parentFrame = m.stackFrames['g' + event.parent];
           if (parentFrame === undefined)
             throw new Error('omg');
         }
@@ -502,6 +569,52 @@ tv.exportTo('tv.e.importer', function() {
       this.createFlowSlices_();
       this.createExplicitObjects_();
       this.createImplicitObjects_();
+      this.createMemoryDumps_();
+    },
+
+    /* Events can have one or more stack frames associated with them, but
+     * that frame might be encoded either as a stack trace of program counters,
+     * or as a direct stack frame reference. This handles either case and
+     * if found, returns the stackframe.
+     */
+    getStackFrameForEvent_: function(event, opt_lookForEndEvent) {
+      var sf;
+      var stack;
+      if (opt_lookForEndEvent) {
+        sf = event.esf;
+        stack = event.estack;
+      } else {
+        sf = event.sf;
+        stack = event.stack;
+      }
+      if (stack !== undefined && sf !== undefined) {
+        this.model_.importWarning({
+          type: 'stack_frame_and_stack_error',
+          message: 'Event at ' + event.ts +
+              ' cannot have both a stack and a stackframe.'
+        });
+        return undefined;
+      }
+
+      if (stack !== undefined)
+        return this.model_.resolveStackToStackFrame_(event.pid, stack);
+      if (sf === undefined)
+        return undefined;
+
+      var stackFrame = this.model_.stackFrames['g' + sf];
+      if (stackFrame === undefined) {
+        this.model_.importWarning({
+          type: 'sample_import_error',
+          message: 'No frame for ' + sf
+        });
+        return;
+      }
+      return stackFrame;
+    },
+
+    resolveStackToStackFrame_: function(pid, stack) {
+      // TODO(alph,fmeawad): Add codemap resolution code here.
+      return undefined;
     },
 
     importSampleData: function() {
@@ -538,14 +651,7 @@ tv.exportTo('tv.e.importer', function() {
         if (event.cpu !== undefined)
           cpu = m.kernel.getOrCreateCpu(event.cpu);
 
-        var stackFrame = m.stackFrames[event.sf];
-        if (stackFrame === undefined) {
-          m.importWarning({
-            type: 'sample_import_error',
-            message: 'No frame for ' + event.sf
-          });
-          continue;
-        }
+        var stackFrame = this.getStackFrameForEvent_(event);
 
         var sample = new tv.c.trace_model.Sample(
             cpu, thread,
@@ -578,7 +684,7 @@ tv.exportTo('tv.e.importer', function() {
       var legacyEvents = [];
       // Group nestable async events by ID. Events with the same ID should
       // belong to the same parent async event.
-      var nestableAsyncEventsByID = {};
+      var nestableAsyncEventsByKey = {};
       for (var i = 0; i < this.allAsyncEvents_.length; i++) {
         var asyncEventState = this.allAsyncEvents_[i];
         var event = asyncEventState.event;
@@ -587,6 +693,15 @@ tv.exportTo('tv.e.importer', function() {
           legacyEvents.push(asyncEventState);
           continue;
         }
+        if (event.cat === undefined) {
+          this.model_.importWarning({
+            type: 'async_slice_parse_error',
+            message: 'Nestable async events (ph: b, e, or n) require a ' +
+                'cat parameter.'
+          });
+          continue;
+        }
+
         if (event.name === undefined) {
           this.model_.importWarning({
             type: 'async_slice_parse_error',
@@ -596,8 +711,7 @@ tv.exportTo('tv.e.importer', function() {
           continue;
         }
 
-        var id = event.id;
-        if (id === undefined) {
+        if (event.id === undefined) {
           this.model_.importWarning({
             type: 'async_slice_parse_error',
             message: 'Nestable async events (ph: b, e, or n) require an ' +
@@ -605,16 +719,17 @@ tv.exportTo('tv.e.importer', function() {
           });
           continue;
         }
-        if (nestableAsyncEventsByID[id] === undefined)
-           nestableAsyncEventsByID[id] = [];
-        nestableAsyncEventsByID[id].push(asyncEventState);
+        var key = event.cat + ':' + event.id;
+        if (nestableAsyncEventsByKey[key] === undefined)
+           nestableAsyncEventsByKey[key] = [];
+        nestableAsyncEventsByKey[key].push(asyncEventState);
       }
       // Handle legacy async events.
       this.createLegacyAsyncSlices_(legacyEvents);
 
       // Parse nestable async events into AsyncSlices.
-      for (var id in nestableAsyncEventsByID) {
-        var eventStateEntries = nestableAsyncEventsByID[id];
+      for (var key in nestableAsyncEventsByKey) {
+        var eventStateEntries = nestableAsyncEventsByKey[key];
         // Stack of enclosing BEGIN events.
         var parentStack = [];
         for (var i = 0; i < eventStateEntries.length; ++i) {
@@ -664,13 +779,13 @@ tv.exportTo('tv.e.importer', function() {
             startState = eventStateEntry;
             endState = eventStateEntry;
             sliceArgs = eventStateEntry.event.args;
-          } else if (eventStateEntry.event.ph === 'b'){
+          } else if (eventStateEntry.event.ph === 'b') {
             if (eventStateEntry.end === undefined) {
               // Unmatched BEGIN. End it when last event with this ID ends.
               eventStateEntry.end =
                   eventStateEntries[eventStateEntries.length - 1];
               sliceError =
-                  "Slice has no matching END. End time has been adjusted.";
+                  'Slice has no matching END. End time has been adjusted.';
               this.model_.importWarning({
                 type: 'async_slice_parse_error',
                 message: 'Nestable async BEGIN event at ' +
@@ -686,7 +801,8 @@ tv.exportTo('tv.e.importer', function() {
                   return tv.b.concatenateObjects(args1, args2);
                 // Make an argument object to hold the combined params.
                 var args3 = {};
-                args3.params = tv.b.concatenateObjects(args1.params, args2.params);
+                args3.params = tv.b.concatenateObjects(args1.params,
+                                                       args2.params);
                 return tv.b.concatenateObjects(args1, args2, args3);
               }
               sliceArgs = concatenateArguments(eventStateEntry.event.args,
@@ -697,7 +813,7 @@ tv.exportTo('tv.e.importer', function() {
           } else {
             // Unmatched END. Start it at the first event with this ID starts.
             sliceError =
-                "Slice has no matching BEGIN. Start time has been adjusted.";
+                'Slice has no matching BEGIN. Start time has been adjusted.';
             this.model_.importWarning({
               type: 'async_slice_parse_error',
               message: 'Nestable async END event at ' +
@@ -710,6 +826,7 @@ tv.exportTo('tv.e.importer', function() {
             sliceArgs = eventStateEntry.event.args;
           }
 
+          var isTopLevel = (eventStateEntry.parentEntry === undefined);
           var asyncSliceConstructor =
              tv.c.trace_model.AsyncSlice.getConstructor(
                 eventStateEntry.event.cat,
@@ -717,30 +834,32 @@ tv.exportTo('tv.e.importer', function() {
           var slice = new asyncSliceConstructor(
               eventStateEntry.event.cat,
               eventStateEntry.event.name,
-              tv.b.ui.getStringColorId(eventStateEntry.event.name),
+              tv.b.ui.getColorIdForGeneralPurposeString(
+                  eventStateEntry.event.name),
               startState.event.ts / 1000,
               sliceArgs,
-              (endState.event.ts - startState.event.ts) / 1000);
+              (endState.event.ts - startState.event.ts) / 1000,
+              isTopLevel);
 
           slice.startThread = startState.thread;
           slice.endThread = endState.thread;
-          slice.id = id;
+          slice.id = key;
           if (sliceError !== undefined)
             slice.error = sliceError;
           eventStateEntry.slice = slice;
-          // Add slice to parent slice if there is a parent. Otherwise threat
-          // it as a top level slice.
-          if (eventStateEntry.parentEntry !== undefined &&
-              eventStateEntry.parentEntry.slice !== undefined) {
+          // Add the slice to the topLevelSlices array if there is no parent.
+          // Otherwise, add the slice to the subSlices of its parent.
+          if (isTopLevel) {
+            topLevelSlices.push(slice);
+          } else if (eventStateEntry.parentEntry.slice !== undefined) {
             if (eventStateEntry.parentEntry.slice.subSlices === undefined)
               eventStateEntry.parentEntry.slice.subSlices = [];
             eventStateEntry.parentEntry.slice.subSlices.push(slice);
-          } else {
-            topLevelSlices.push(slice);
           }
         }
         for (var si = 0; si < topLevelSlices.length; si++) {
-          topLevelSlices[si].startThread.asyncSliceGroup.push(topLevelSlices[si]);
+          topLevelSlices[si].startThread.asyncSliceGroup.push(
+              topLevelSlices[si]);
         }
       }
     },
@@ -825,11 +944,12 @@ tv.exportTo('tv.e.importer', function() {
             var slice = new asyncSliceConstructor(
                 events[0].event.cat,
                 name,
-                tv.b.ui.getStringColorId(name),
+                tv.b.ui.getColorIdForGeneralPurposeString(name),
                 events[0].event.ts / 1000,
                 tv.b.concatenateObjects(events[0].event.args,
                                       events[events.length - 1].event.args),
-                (event.ts - events[0].event.ts) / 1000);
+                (event.ts - events[0].event.ts) / 1000,
+                true);
             slice.startThread = events[0].thread;
             slice.endThread = asyncEventState.thread;
             slice.id = id;
@@ -853,7 +973,7 @@ tv.exportTo('tv.e.importer', function() {
                   message: 'At ' + event.event.ts + ', a slice named ' +
                       event.event.name + ' with id=' + event.event.id +
                       ' had a step before the start event.'
-                })
+                });
                 continue;
               }
 
@@ -863,7 +983,7 @@ tv.exportTo('tv.e.importer', function() {
                   message: 'At ' + event.event.ts + ', a slice named ' +
                       event.event.name + ' with id=' + event.event.id +
                       ' had a step after the finish event.'
-                })
+                });
                 continue;
               }
 
@@ -881,7 +1001,7 @@ tv.exportTo('tv.e.importer', function() {
               var subSlice = new asyncSliceConstructor(
                   events[0].event.cat,
                   subName,
-                  tv.b.ui.getStringColorId(subName + j),
+                  tv.b.ui.getColorIdForGeneralPurposeString(subName + j),
                   events[startIndex].event.ts / 1000,
                   this.deepCopyIfNeeded_(events[j].event.args),
                   (events[endIndex].event.ts - events[startIndex].event.ts) /
@@ -954,7 +1074,7 @@ tv.exportTo('tv.e.importer', function() {
             event.cat,
             event.id,
             event.name,
-            tv.b.ui.getStringColorId(event.name),
+            tv.b.ui.getColorIdForGeneralPurposeString(event.name),
             event.ts / 1000,
             this.deepCopyIfNeeded_(event.args));
         thread.sliceGroup.pushSlice(slice);
@@ -1090,8 +1210,10 @@ tv.exportTo('tv.e.importer', function() {
           }
         }
 
-        if (instance)
-          instance.colorId = tv.b.ui.getStringColorId(instance.typeName);
+        if (instance) {
+          instance.colorId = tv.b.ui.getColorIdForGeneralPurposeString(
+              instance.typeName);
+        }
       }
 
       this.allObjectEvents_.sort(function(x, y) {
@@ -1231,6 +1353,52 @@ tv.exportTo('tv.e.importer', function() {
             throw new Error('args cannot have an id field inside it');
           iterObject(snapshot.args, processField, snapshot, this);
         }, this);
+      }, this);
+    },
+
+    createMemoryDumps_: function() {
+      tv.b.iterItems(this.allMemoryDumpEvents_, function(id, events) {
+        // Calculate the range of the global memory dump.
+        var range = new tv.b.Range();
+        if (events.global !== undefined)
+          range.addValue(events.global.ts);
+        for (var i = 0; i < events.process.length; i++)
+          range.addValue(events.process[i].ts);
+
+        // Create the global memory dump.
+        var globalMemoryDump = new tv.c.trace_model.GlobalMemoryDump(
+            this.model_, range.min, this.deepCopyIfNeeded_(events.global));
+        globalMemoryDump.duration = range.range;
+        this.model_.globalMemoryDumps.push(globalMemoryDump);
+
+        // Create individual process memory dumps.
+        if (events.process.length === 0) {
+          this.model_.importWarning({
+              type: 'memory_dump_parse_error',
+              message: 'No process memory dumps associated with global memory' +
+                  ' dump ' + id + '.'
+          });
+        }
+
+        for (var i = 0; i < events.process.length; i++) {
+          var processEvent = events.process[i];
+          var pid = processEvent.pid;
+          if (pid in globalMemoryDump.processMemoryDumps) {
+            this.model_.importWarning({
+              type: 'memory_dump_parse_error',
+              message: 'Multiple process memory dumps with pid=' + pid +
+                  ' for dump id ' + id + '.'
+            });
+            continue;
+          }
+
+          var process = this.model_.getOrCreateProcess(pid);
+          var processMemoryDump = new tv.c.trace_model.ProcessMemoryDump(
+              globalMemoryDump, process, processEvent.ts,
+              this.deepCopyIfNeeded_(processEvent.args));
+          process.memoryDumps.push(processMemoryDump);
+          globalMemoryDump.processMemoryDumps[pid] = processMemoryDump;
+        }
       }, this);
     },
 

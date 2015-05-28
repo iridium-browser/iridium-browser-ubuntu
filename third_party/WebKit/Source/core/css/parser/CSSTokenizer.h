@@ -14,14 +14,30 @@
 namespace blink {
 
 class CSSTokenizerInputStream;
+struct CSSParserString;
+class CSSParserTokenRange;
 
 class CSSTokenizer {
     WTF_MAKE_NONCOPYABLE(CSSTokenizer);
-    WTF_MAKE_FAST_ALLOCATED;
+    WTF_MAKE_FAST_ALLOCATED(CSSTokenizer);
 public:
-    static void tokenize(String, Vector<CSSParserToken>&);
+    class Scope {
+    public:
+        Scope(const String&);
+        CSSParserTokenRange tokenRange();
+
+    private:
+        void storeString(const String& string) { m_stringPool.append(string); }
+        Vector<CSSParserToken> m_tokens;
+        // We only allocate strings when escapes are used.
+        Vector<String> m_stringPool;
+        String m_string;
+
+        friend class CSSTokenizer;
+    };
+
 private:
-    CSSTokenizer(CSSTokenizerInputStream&);
+    CSSTokenizer(CSSTokenizerInputStream&, Scope&);
 
     CSSParserToken nextToken();
 
@@ -42,8 +58,8 @@ private:
     bool consumeUntilCommentEndFound();
 
     bool consumeIfNext(UChar);
-    String consumeName();
-    UChar consumeEscape();
+    CSSParserString consumeName();
+    UChar32 consumeEscape();
 
     bool nextTwoCharsAreValidEscape();
     bool nextCharsAreNumber(UChar);
@@ -51,7 +67,7 @@ private:
     bool nextCharsAreIdentifier(UChar);
     bool nextCharsAreIdentifier();
     CSSParserToken blockStart(CSSParserTokenType);
-    CSSParserToken blockStart(CSSParserTokenType blockType, CSSParserTokenType, String);
+    CSSParserToken blockStart(CSSParserTokenType blockType, CSSParserTokenType, CSSParserString);
     CSSParserToken blockEnd(CSSParserTokenType, CSSParserTokenType startType);
 
     typedef CSSParserToken (CSSTokenizer::*CodePoint)(UChar);
@@ -70,6 +86,7 @@ private:
     CSSParserToken comma(UChar);
     CSSParserToken hyphenMinus(UChar);
     CSSParserToken asterisk(UChar);
+    CSSParserToken lessThan(UChar);
     CSSParserToken solidus(UChar);
     CSSParserToken colon(UChar);
     CSSParserToken semiColon(UChar);
@@ -86,7 +103,10 @@ private:
     CSSParserToken stringStart(UChar);
     CSSParserToken endOfFile(UChar);
 
+    CSSParserString registerString(const String&);
+
     CSSTokenizerInputStream& m_input;
+    Scope& m_scope;
 };
 
 

@@ -45,21 +45,15 @@
 
 namespace {
 
-// The default keepalive delay.  On Linux, keepalives probes will be sent after
-// the socket is idle for this length of time, and the socket will be closed
-// after 9 failed probes.  So the total idle time before close is 10 *
-// kTcpKeepAliveDelaySecs.
-const int kTcpKeepAliveDelaySecs = 10;
-
-const int kMaxSelfSignedCertLifetimeInDays = 2;
+const int kMaxSelfSignedCertLifetimeInDays = 4;
 
 std::string FormatTimeForLogging(base::Time time) {
-  base::Time::Exploded exploded;
-  time.UTCExplode(&exploded);
+  base::Time::Exploded exploded_time;
+  time.UTCExplode(&exploded_time);
   return base::StringPrintf(
-      "%04d-%02d-%02d %02d:%02d:%02d.%03d UTC", exploded.year, exploded.month,
-      exploded.day_of_month, exploded.hour, exploded.minute, exploded.second,
-      exploded.millisecond);
+      "%04d-%02d-%02d %02d:%02d:%02d.%03d UTC", exploded_time.year,
+      exploded_time.month, exploded_time.day_of_month, exploded_time.hour,
+      exploded_time.minute, exploded_time.second, exploded_time.millisecond);
 }
 
 }  // namespace
@@ -79,9 +73,12 @@ ApiResourceManager<core_api::cast_channel::CastSocket>::GetFactoryInstance() {
 
 namespace core_api {
 namespace cast_channel {
-
 CastSocket::CastSocket(const std::string& owner_extension_id)
     : ApiResource(owner_extension_id) {
+}
+
+bool CastSocket::IsPersistent() const {
+  return true;
 }
 
 CastSocketImpl::CastSocketImpl(const std::string& owner_extension_id,
@@ -89,21 +86,25 @@ CastSocketImpl::CastSocketImpl(const std::string& owner_extension_id,
                                ChannelAuthType channel_auth,
                                net::NetLog* net_log,
                                const base::TimeDelta& timeout,
-                               const scoped_refptr<Logger>& logger)
+                               bool keep_alive,
+                               const scoped_refptr<Logger>& logger,
+                               uint64 device_capabilities)
     : CastSocket(owner_extension_id),
-      auth_delegate_(this),
       owner_extension_id_(owner_extension_id),
       channel_id_(0),
       ip_endpoint_(ip_endpoint),
       channel_auth_(channel_auth),
       net_log_(net_log),
+      keep_alive_(keep_alive),
       logger_(logger),
       connect_timeout_(timeout),
       connect_timeout_timer_(new base::OneShotTimer<CastSocketImpl>),
       is_canceled_(false),
+      device_capabilities_(device_capabilities),
       connect_state_(proto::CONN_STATE_NONE),
       error_state_(CHANNEL_ERROR_NONE),
-      ready_state_(READY_STATE_NONE) {
+      ready_state_(READY_STATE_NONE),
+      auth_delegate_(nullptr) {
   DCHECK(net_log_);
   DCHECK(channel_auth_ == CHANNEL_AUTH_TYPE_SSL ||
          channel_auth_ == CHANNEL_AUTH_TYPE_SSL_VERIFIED);
@@ -139,6 +140,10 @@ void CastSocketImpl::set_id(int id) {
 
 ChannelAuthType CastSocketImpl::channel_auth() const {
   return channel_auth_;
+}
+
+bool CastSocketImpl::keep_alive() const {
+  return keep_alive_;
 }
 
 scoped_ptr<net::TCPClientSocket> CastSocketImpl::CreateTcpSocket() {
@@ -191,17 +196,15 @@ bool CastSocketImpl::ExtractPeerCert(std::string* cert) {
   logger_->LogSocketEvent(channel_id_, proto::SSL_INFO_OBTAINED);
 
   // Ensure that the peer cert (which is self-signed) doesn't have an excessive
-  // life-time (i.e. no more than 2 days).
+  // remaining life-time.
   base::Time expiry = ssl_info.cert->valid_expiry();
   base::Time lifetimeLimit =
       base::Time::Now() +
       base::TimeDelta::FromDays(kMaxSelfSignedCertLifetimeInDays);
   if (expiry.is_null() || expiry > lifetimeLimit) {
-    std::string details = FormatTimeForLogging(expiry);
-    details += " " + ip_endpoint().ToString();
-    LOG(ERROR) << "Peer cert has excessive lifetime. details=" << details;
-    logger_->LogSocketEventWithDetails(
-        channel_id_, proto::SSL_CERT_EXCESSIVE_LIFETIME, details);
+    logger_->LogSocketEventWithDetails(channel_id_,
+                                       proto::SSL_CERT_EXCESSIVE_LIFETIME,
+                                       FormatTimeForLogging(expiry));
     return false;
   }
 
@@ -216,12 +219,26 @@ bool CastSocketImpl::ExtractPeerCert(std::string* cert) {
   return result;
 }
 
+bool CastSocketImpl::VerifyChannelPolicy(const AuthResult& result) {
+  if ((device_capabilities_ & CastDeviceCapability::VIDEO_OUT) != 0 &&
+      (result.channel_policies & AuthResult::POLICY_AUDIO_ONLY) != 0) {
+    LOG(ERROR) << "Audio only policy enforced";
+    logger_->LogSocketEventWithDetails(
+        channel_id_, proto::CHANNEL_POLICY_ENFORCED, std::string());
+    return false;
+  }
+  return true;
+}
+
 bool CastSocketImpl::VerifyChallengeReply() {
   AuthResult result = AuthenticateChallengeReply(*challenge_reply_, peer_cert_);
+  logger_->LogSocketChallengeReplyEvent(channel_id_, result);
   if (result.success()) {
     VLOG(1) << result.error_message;
+    if (!VerifyChannelPolicy(result)) {
+      return false;
+    }
   }
-  logger_->LogSocketChallengeReplyEvent(channel_id_, result);
   return result.success();
 }
 
@@ -235,7 +252,7 @@ void CastSocketImpl::Connect(scoped_ptr<CastTransport::Delegate> delegate,
   DCHECK(CalledOnValidThread());
   VLOG_WITH_CONNECTION(1) << "Connect readyState = " << ready_state_;
 
-  read_delegate_ = delegate.Pass();
+  delegate_ = delegate.Pass();
 
   if (ready_state_ != READY_STATE_NONE) {
     logger_->LogSocketEventWithDetails(
@@ -363,14 +380,9 @@ int CastSocketImpl::DoTcpConnect() {
 
 int CastSocketImpl::DoTcpConnectComplete(int connect_result) {
   VLOG_WITH_CONNECTION(1) << "DoTcpConnectComplete: " << connect_result;
+  logger_->LogSocketEventWithRv(channel_id_, proto::TCP_SOCKET_CONNECT_COMPLETE,
+                                connect_result);
   if (connect_result == net::OK) {
-    // Enable TCP-level keep-alive handling.
-    // TODO(kmarshall): Remove TCP keep-alive once protocol-level ping handling
-    // is in place.
-    bool keep_alive = tcp_socket_->SetKeepAlive(true, kTcpKeepAliveDelaySecs);
-    LOG_IF(WARNING, !keep_alive) << "Failed to SetKeepAlive.";
-    logger_->LogSocketEventWithRv(channel_id_, proto::TCP_SOCKET_SET_KEEP_ALIVE,
-                                  keep_alive ? 1 : 0);
     SetConnectState(proto::CONN_STATE_SSL_CONNECT);
   } else {
     SetErrorState(CHANNEL_ERROR_CONNECT_ERROR);
@@ -391,6 +403,8 @@ int CastSocketImpl::DoSslConnect() {
 }
 
 int CastSocketImpl::DoSslConnectComplete(int result) {
+  logger_->LogSocketEventWithRv(channel_id_, proto::SSL_SOCKET_CONNECT_COMPLETE,
+                                result);
   VLOG_WITH_CONNECTION(1) << "DoSslConnectComplete: " << result;
   if (result == net::ERR_CERT_AUTHORITY_INVALID &&
       peer_cert_.empty() && ExtractPeerCert(&peer_cert_)) {
@@ -401,15 +415,17 @@ int CastSocketImpl::DoSslConnectComplete(int result) {
     if (!transport_.get()) {
       // Create a channel transport if one wasn't already set (e.g. by test
       // code).
-      transport_.reset(new CastTransportImpl(
-          this->socket_.get(), &auth_delegate_, channel_id_, ip_endpoint_,
-          channel_auth_, logger_));
+      transport_.reset(new CastTransportImpl(this->socket_.get(), channel_id_,
+                                             ip_endpoint_, channel_auth_,
+                                             logger_));
     }
+    auth_delegate_ = new AuthTransportDelegate(this);
+    transport_->SetReadDelegate(make_scoped_ptr(auth_delegate_));
     if (channel_auth_ == CHANNEL_AUTH_TYPE_SSL_VERIFIED) {
       // Additionally verify the connection with a handshake.
       SetConnectState(proto::CONN_STATE_AUTH_CHALLENGE_SEND);
     } else {
-      transport_->StartReading();
+      transport_->Start();
     }
   } else {
     SetErrorState(CHANNEL_ERROR_AUTHENTICATION_ERROR);
@@ -437,31 +453,41 @@ int CastSocketImpl::DoAuthChallengeSend() {
 int CastSocketImpl::DoAuthChallengeSendComplete(int result) {
   VLOG_WITH_CONNECTION(1) << "DoAuthChallengeSendComplete: " << result;
   if (result < 0) {
+    logger_->LogSocketEventWithRv(channel_id_,
+                                  proto::SEND_AUTH_CHALLENGE_FAILED, result);
     SetErrorState(CHANNEL_ERROR_SOCKET_ERROR);
     return result;
   }
-  transport_->StartReading();
+  transport_->Start();
   SetConnectState(proto::CONN_STATE_AUTH_CHALLENGE_REPLY_COMPLETE);
   return net::ERR_IO_PENDING;
 }
 
 CastSocketImpl::AuthTransportDelegate::AuthTransportDelegate(
     CastSocketImpl* socket)
-    : socket_(socket) {
+    : socket_(socket), error_state_(CHANNEL_ERROR_NONE) {
   DCHECK(socket);
 }
 
-void CastSocketImpl::AuthTransportDelegate::OnError(
-    ChannelError error_state,
-    const LastErrors& last_errors) {
-  socket_->SetErrorState(error_state);
+ChannelError CastSocketImpl::AuthTransportDelegate::error_state() const {
+  return error_state_;
+}
+
+LastErrors CastSocketImpl::AuthTransportDelegate::last_errors() const {
+  return last_errors_;
+}
+
+void CastSocketImpl::AuthTransportDelegate::OnError(ChannelError error_state) {
+  error_state_ = error_state;
   socket_->PostTaskToStartConnectLoop(net::ERR_CONNECTION_FAILED);
 }
 
 void CastSocketImpl::AuthTransportDelegate::OnMessage(
     const CastMessage& message) {
   if (!IsAuthMessage(message)) {
-    socket_->SetErrorState(CHANNEL_ERROR_TRANSPORT_ERROR);
+    error_state_ = CHANNEL_ERROR_TRANSPORT_ERROR;
+    socket_->logger_->LogSocketEvent(socket_->channel_id_,
+                                     proto::AUTH_CHALLENGE_REPLY_INVALID);
     socket_->PostTaskToStartConnectLoop(net::ERR_INVALID_RESPONSE);
   } else {
     socket_->challenge_reply_.reset(new CastMessage(message));
@@ -471,8 +497,16 @@ void CastSocketImpl::AuthTransportDelegate::OnMessage(
   }
 }
 
+void CastSocketImpl::AuthTransportDelegate::Start() {
+}
+
 int CastSocketImpl::DoAuthChallengeReplyComplete(int result) {
   VLOG_WITH_CONNECTION(1) << "DoAuthChallengeReplyComplete: " << result;
+  if (auth_delegate_->error_state() != CHANNEL_ERROR_NONE) {
+    SetErrorState(auth_delegate_->error_state());
+    return net::ERR_CONNECTION_FAILED;
+  }
+  auth_delegate_ = nullptr;
   if (result < 0) {
     return result;
   }
@@ -488,7 +522,7 @@ void CastSocketImpl::DoConnectCallback() {
   VLOG(1) << "DoConnectCallback (error_state = " << error_state_ << ")";
   if (error_state_ == CHANNEL_ERROR_NONE) {
     SetReadyState(READY_STATE_OPEN);
-    transport_->SetReadDelegate(read_delegate_.get());
+    transport_->SetReadDelegate(delegate_.Pass());
   } else {
     SetReadyState(READY_STATE_CLOSED);
     CloseInternal();
@@ -562,6 +596,7 @@ void CastSocketImpl::SetErrorState(ChannelError error_state) {
   DCHECK_EQ(CHANNEL_ERROR_NONE, error_state_);
   error_state_ = error_state;
   logger_->LogSocketErrorState(channel_id_, ErrorStateToProto(error_state_));
+  delegate_->OnError(error_state_);
 }
 }  // namespace cast_channel
 }  // namespace core_api

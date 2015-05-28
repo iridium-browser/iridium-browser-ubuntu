@@ -6,9 +6,9 @@ import os
 import sys
 
 from telemetry import benchmark
-from telemetry import decorators
 from telemetry.core import util
 from telemetry.core import wpr_modes
+from telemetry import decorators
 from telemetry.page import page as page_module
 from telemetry.page import page_set as page_set_module
 from telemetry.page import page_test
@@ -99,9 +99,12 @@ class RecordWprUnitTests(tab_test_case.TabTestCase):
   def testRunPage_AllActions(self):
     record_page_test = record_wpr.RecorderPageTest()
     page = MockPage(page_set=MockPageSet(url=self._url), url=self._url)
+
+    record_page_test.RunNavigateSteps(page, self._tab)
+    self.assertTrue('RunNavigateSteps' in page.func_calls)
+
     record_page_test.RunPage(page, self._tab, results=None)
     self.assertTrue('RunPageInteractions' in page.func_calls)
-    self.assertTrue('RunNavigateSteps' in page.func_calls)
 
   # When the RecorderPageTest is created from a Benchmark, the benchmark will
   # have a PageTest, specified by its test attribute.
@@ -126,7 +129,8 @@ class RecordWprUnitTests(tab_test_case.TabTestCase):
 
   @decorators.Disabled('chromeos') # crbug.com/404868.
   def testWprRecorderWithPageSet(self):
-    flags = ['--browser', self._browser.browser_type]
+    flags = ['--browser', self._browser.browser_type,
+             '--device', self._device]
     mock_page_set = MockPageSet(url=self._url)
     wpr_recorder = record_wpr.WprRecorder(self._test_data_dir,
                                           mock_page_set, flags)
@@ -136,7 +140,8 @@ class RecordWprUnitTests(tab_test_case.TabTestCase):
 
   def testWprRecorderWithBenchmark(self):
     flags = ['--mock-benchmark-url', self._url,
-             '--browser', self._browser.browser_type]
+             '--browser', self._browser.browser_type,
+             '--device', self._device]
     mock_benchmark = MockBenchmark()
     wpr_recorder = record_wpr.WprRecorder(self._test_data_dir, mock_benchmark,
                                           flags)
@@ -150,6 +155,7 @@ class RecordWprUnitTests(tab_test_case.TabTestCase):
        '--page-set-base-dir', self._test_data_dir,
        '--mock-benchmark-url', self._url,
        '--browser', self._browser.browser_type,
+       '--device', self._device
     ]
     mock_benchmark = MockBenchmark()
     wpr_recorder = record_wpr.WprRecorder(

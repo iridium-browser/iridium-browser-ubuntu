@@ -58,7 +58,7 @@ public:
     static IDBTransaction* create(ScriptState*, int64_t, const Vector<String>& objectStoreNames, WebIDBTransactionMode, IDBDatabase*);
     static IDBTransaction* create(ScriptState*, int64_t, IDBDatabase*, IDBOpenDBRequest*, const IDBDatabaseMetadata& previousMetadata);
     virtual ~IDBTransaction();
-    virtual void trace(Visitor*) override;
+    DECLARE_VIRTUAL_TRACE();
 
     static WebIDBTransactionMode stringToMode(const String&, ExceptionState&);
 
@@ -126,12 +126,12 @@ private:
     bool m_contextStopped;
     Member<DOMError> m_error;
 
-    HeapListHashSet<Member<IDBRequest> > m_requestList;
+    HeapListHashSet<Member<IDBRequest>> m_requestList;
 
-    typedef HeapHashMap<String, Member<IDBObjectStore> > IDBObjectStoreMap;
+    typedef HeapHashMap<String, Member<IDBObjectStore>> IDBObjectStoreMap;
     IDBObjectStoreMap m_objectStoreMap;
 
-    typedef HeapHashSet<Member<IDBObjectStore> > IDBObjectStoreSet;
+    typedef HeapHashSet<Member<IDBObjectStore>> IDBObjectStoreSet;
     IDBObjectStoreSet m_deletedObjectStores;
 
     typedef HeapHashMap<Member<IDBObjectStore>, IDBObjectStoreMetadata> IDBObjectStoreMetadataMap;

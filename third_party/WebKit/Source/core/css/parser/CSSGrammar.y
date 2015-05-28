@@ -77,11 +77,11 @@ using namespace HTMLNames;
     // The content of the three below HeapVectors are guaranteed to be kept alive by
     // the corresponding m_parsedRules, m_floatingMediaQueryExpList, and m_parsedKeyFrames
     // lists in BisonCSSParser.h.
-    WillBeHeapVector<RefPtrWillBeMember<StyleRuleBase> >* ruleList;
-    WillBeHeapVector<OwnPtrWillBeMember<MediaQueryExp> >* mediaQueryExpList;
-    WillBeHeapVector<RefPtrWillBeMember<StyleRuleKeyframe> >* keyframeRuleList;
+    WillBeHeapVector<RefPtrWillBeMember<StyleRuleBase>>* ruleList;
+    WillBeHeapVector<OwnPtrWillBeMember<MediaQueryExp>>* mediaQueryExpList;
+    WillBeHeapVector<RefPtrWillBeMember<StyleRuleKeyframe>>* keyframeRuleList;
     CSSParserSelector* selector;
-    Vector<OwnPtr<CSSParserSelector> >* selectorList;
+    Vector<OwnPtr<CSSParserSelector>>* selectorList;
     CSSSelector::MarginBoxType marginBox;
     CSSSelector::Relation relation;
     CSSSelector::AttributeMatchType attributeMatchType;
@@ -552,7 +552,7 @@ block_rule:
 
 before_import_rule:
     /* empty */ {
-        parser->startRuleHeader(CSSRuleSourceData::IMPORT_RULE);
+        parser->startRuleHeader(StyleRule::Import);
     }
     ;
 
@@ -718,7 +718,7 @@ at_rule_body_start:
 
 before_media_rule:
     /* empty */ {
-        parser->startRuleHeader(CSSRuleSourceData::MEDIA_RULE);
+        parser->startRuleHeader(StyleRule::Media);
     }
     ;
 
@@ -749,7 +749,7 @@ supports:
 
 before_supports_rule:
     /* empty */ {
-        parser->startRuleHeader(CSSRuleSourceData::SUPPORTS_RULE);
+        parser->startRuleHeader(StyleRule::Supports);
         parser->markSupportsRuleHeaderStart();
     }
     ;
@@ -826,7 +826,7 @@ supports_declaration_condition:
 
 before_keyframes_rule:
     /* empty */ {
-        parser->startRuleHeader(CSSRuleSourceData::KEYFRAMES_RULE);
+        parser->startRuleHeader(StyleRule::Keyframes);
     }
     ;
 
@@ -918,7 +918,7 @@ keyframes_error_recovery:
 
 before_page_rule:
     /* empty */ {
-        parser->startRuleHeader(CSSRuleSourceData::PAGE_RULE);
+        parser->startRuleHeader(StyleRule::Page);
     }
     ;
 
@@ -1022,7 +1022,7 @@ margin_sym :
 
 before_font_face_rule:
     /* empty */ {
-        parser->startRuleHeader(CSSRuleSourceData::FONT_FACE_RULE);
+        parser->startRuleHeader(StyleRule::FontFace);
     }
     ;
 
@@ -1036,7 +1036,7 @@ font_face:
 before_viewport_rule:
     /* empty */ {
         parser->markViewportRuleBodyStart();
-        parser->startRuleHeader(CSSRuleSourceData::VIEWPORT_RULE);
+        parser->startRuleHeader(StyleRule::Viewport);
     }
     ;
 
@@ -1078,7 +1078,7 @@ maybe_space_before_declaration:
 
 before_selector_list:
     /* empty */ {
-        parser->startRuleHeader(CSSRuleSourceData::STYLE_RULE);
+        parser->startRuleHeader(StyleRule::Style);
         parser->startSelector();
     }
   ;
@@ -1442,7 +1442,7 @@ pseudo:
             $$ = parser->createFloatingSelector();
             $$->setMatch(CSSSelector::PseudoClass);
 
-            Vector<OwnPtr<CSSParserSelector> > selectorVector;
+            Vector<OwnPtr<CSSParserSelector>> selectorVector;
             selectorVector.append(parser->sinkFloatingSelector($4));
             $$->adoptSelectorVector(selectorVector);
 
@@ -1630,12 +1630,12 @@ term:
   | STRING maybe_space { $$.id = CSSValueInvalid; $$.isInt = false; $$.string = $1; $$.unit = CSSPrimitiveValue::CSS_STRING; }
   | IDENT maybe_space { $$ = makeIdentValue($1); }
   /* We might need to actually parse the number from a dimension, but we can't just put something that uses $$.string into unary_term. */
-  | DIMEN maybe_space { $$.id = CSSValueInvalid; $$.string = $1; $$.isInt = false; $$.unit = CSSPrimitiveValue::CSS_DIMENSION; }
-  | unary_operator DIMEN maybe_space { $$.id = CSSValueInvalid; $$.string = $2; $$.isInt = false; $$.unit = CSSPrimitiveValue::CSS_DIMENSION; }
+  | DIMEN maybe_space { $$.id = CSSValueInvalid; $$.string = $1; $$.isInt = false; $$.unit = CSSParserValue::Dimension; }
+  | unary_operator DIMEN maybe_space { $$.id = CSSValueInvalid; $$.string = $2; $$.isInt = false; $$.unit = CSSParserValue::Dimension; }
   | URI maybe_space { $$.id = CSSValueInvalid; $$.string = $1; $$.isInt = false; $$.unit = CSSPrimitiveValue::CSS_URI; }
   | UNICODERANGE maybe_space { $$.id = CSSValueInvalid; $$.string = $1; $$.isInt = false; $$.unit = CSSPrimitiveValue::CSS_UNICODE_RANGE; }
-  | HEX maybe_space { $$.id = CSSValueInvalid; $$.string = $1; $$.isInt = false; $$.unit = CSSPrimitiveValue::CSS_PARSER_HEXCOLOR; }
-  | '#' maybe_space { $$.id = CSSValueInvalid; $$.string = CSSParserString(); $$.isInt = false; $$.unit = CSSPrimitiveValue::CSS_PARSER_HEXCOLOR; } /* Handle error case: "color: #;" */
+  | HEX maybe_space { $$.id = CSSValueInvalid; $$.string = $1; $$.isInt = false; $$.unit = CSSParserValue::HexColor; }
+  | '#' maybe_space { $$.id = CSSValueInvalid; $$.string = CSSParserString(); $$.isInt = false; $$.unit = CSSParserValue::HexColor; } /* Handle error case: "color: #;" */
   /* FIXME: according to the specs a function can have a unary_operator in front. I know no case where this makes sense */
   | function maybe_space
   | calc_function maybe_space

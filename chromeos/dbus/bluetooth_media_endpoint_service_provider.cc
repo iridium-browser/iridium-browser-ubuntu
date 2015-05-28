@@ -4,18 +4,15 @@
 
 #include "chromeos/dbus/bluetooth_media_endpoint_service_provider.h"
 
-#include <string>
-
 #include "base/bind.h"
 #include "base/logging.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/threading/platform_thread.h"
+#include "chromeos/dbus/bluetooth_media_transport_client.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/fake_bluetooth_media_endpoint_service_provider.h"
-#include "dbus/bus.h"
 #include "dbus/exported_object.h"
-#include "dbus/message.h"
 
 namespace {
 
@@ -23,11 +20,14 @@ namespace {
 // Bluetooth Media Endpoint service identifier.
 const char kBluetoothMediaEndpointInterface[] = "org.bluez.MediaEndpoint1";
 
-// Bluetooth Media Endpoint methods.
+// Method names in Bluetooth Media Endpoint interface.
 const char kSetConfiguration[] = "SetConfiguration";
 const char kSelectConfiguration[] = "SelectConfiguration";
 const char kClearConfiguration[] = "ClearConfiguration";
 const char kRelease[] = "Release";
+
+const uint8_t kInvalidCodec = 0xff;
+const char kInvalidState[] = "unknown";
 
 }  // namespace
 
@@ -106,27 +106,69 @@ class CHROMEOS_EXPORT BluetoothMediaEndpointServiceProviderImpl
   void OnExported(const std::string& interface_name,
                   const std::string& method_name,
                   bool success) {
-    LOG_IF(WARNING, !success) << "Failed to export "
-                              << interface_name << "." << method_name;
+    LOG_IF(ERROR, !success) << "Failed to export " << interface_name << "."
+                            << method_name;
   }
 
   // Called by dbus:: when the remote device connects to the Media Endpoint.
   void SetConfiguration(dbus::MethodCall* method_call,
                         dbus::ExportedObject::ResponseSender response_sender) {
+    VLOG(1) << "SetConfiguration";
+
     DCHECK(OnOriginThread());
     DCHECK(delegate_);
 
     dbus::MessageReader reader(method_call);
     dbus::ObjectPath transport_path;
-    dbus::MessageReader properties(method_call);
+    dbus::MessageReader property_reader(method_call);
     if (!reader.PopObjectPath(&transport_path) ||
-        !reader.PopArray(&properties)) {
-      LOG(WARNING) << "SetConfiguration called with incorrect parameters: "
-                   << method_call->ToString();
+        !reader.PopArray(&property_reader)) {
+      LOG(ERROR) << "SetConfiguration called with incorrect parameters: "
+                 << method_call->ToString();
       return;
     }
 
-    delegate_->SetConfiguration(transport_path, properties);
+    // Parses |properties| and passes the property set as a
+    // Delegate::TransportProperties structure to |delegate_|.
+    Delegate::TransportProperties properties;
+    while (property_reader.HasMoreData()) {
+      dbus::MessageReader dict_entry_reader(nullptr);
+      std::string key;
+      if (!property_reader.PopDictEntry(&dict_entry_reader) ||
+          !dict_entry_reader.PopString(&key)) {
+        LOG(ERROR) << "SetConfiguration called with incorrect parameters: "
+                   << method_call->ToString();
+      } else if (key == BluetoothMediaTransportClient::kDeviceProperty) {
+        dict_entry_reader.PopVariantOfObjectPath(&properties.device);
+      } else if (key == BluetoothMediaTransportClient::kUUIDProperty) {
+        dict_entry_reader.PopVariantOfString(&properties.uuid);
+      } else if (key == BluetoothMediaTransportClient::kCodecProperty) {
+        dict_entry_reader.PopVariantOfByte(&properties.codec);
+      } else if (key == BluetoothMediaTransportClient::kConfigurationProperty) {
+        dbus::MessageReader variant_reader(nullptr);
+        const uint8_t* bytes = nullptr;
+        size_t length = 0;
+        dict_entry_reader.PopVariant(&variant_reader);
+        variant_reader.PopArrayOfBytes(&bytes, &length);
+        properties.configuration.assign(bytes, bytes + length);
+      } else if (key == BluetoothMediaTransportClient::kStateProperty) {
+        dict_entry_reader.PopVariantOfString(&properties.state);
+      } else if (key == BluetoothMediaTransportClient::kDelayProperty) {
+        properties.delay.reset(new uint16_t());
+        dict_entry_reader.PopVariantOfUint16(properties.delay.get());
+      } else if (key == BluetoothMediaTransportClient::kVolumeProperty) {
+        properties.volume.reset(new uint16_t());
+        dict_entry_reader.PopVariantOfUint16(properties.volume.get());
+      }
+    }
+
+    if (properties.codec != kInvalidCodec &&
+        properties.state != kInvalidState) {
+      delegate_->SetConfiguration(transport_path, properties);
+    } else {
+      LOG(ERROR) << "SetConfiguration called with incorrect parameters: "
+                 << method_call->ToString();
+    }
 
     response_sender.Run(dbus::Response::FromMethodCall(method_call));
   }
@@ -136,6 +178,8 @@ class CHROMEOS_EXPORT BluetoothMediaEndpointServiceProviderImpl
   void SelectConfiguration(
       dbus::MethodCall* method_call,
       dbus::ExportedObject::ResponseSender response_sender) {
+    VLOG(1) << "SelectConfiguration";
+
     DCHECK(OnOriginThread());
     DCHECK(delegate_);
 
@@ -143,8 +187,8 @@ class CHROMEOS_EXPORT BluetoothMediaEndpointServiceProviderImpl
     const uint8_t* capabilities = nullptr;
     size_t length = 0;
     if (!reader.PopArrayOfBytes(&capabilities, &length)) {
-      LOG(WARNING) << "SelectConfiguration called with incorrect parameters: "
-                   << method_call->ToString();
+      LOG(ERROR) << "SelectConfiguration called with incorrect parameters: "
+                 << method_call->ToString();
       return;
     }
 
@@ -165,14 +209,16 @@ class CHROMEOS_EXPORT BluetoothMediaEndpointServiceProviderImpl
   void ClearConfiguration(
       dbus::MethodCall* method_call,
       dbus::ExportedObject::ResponseSender response_sender) {
+    VLOG(1) << "ClearConfiguration";
+
     DCHECK(OnOriginThread());
     DCHECK(delegate_);
 
     dbus::MessageReader reader(method_call);
     dbus::ObjectPath transport_path;
     if (!reader.PopObjectPath(&transport_path)) {
-      LOG(WARNING) << "ClearConfiguration called with incorrect parameters: "
-                   << method_call->ToString();
+      LOG(ERROR) << "ClearConfiguration called with incorrect parameters: "
+                 << method_call->ToString();
       return;
     }
 
@@ -185,10 +231,12 @@ class CHROMEOS_EXPORT BluetoothMediaEndpointServiceProviderImpl
   // Endpoint.
   void Release(dbus::MethodCall* method_call,
                dbus::ExportedObject::ResponseSender response_sender) {
+    VLOG(1) << "Release";
+
     DCHECK(OnOriginThread());
     DCHECK(delegate_);
 
-    delegate_->Release();
+    delegate_->Released();
 
     response_sender.Run(dbus::Response::FromMethodCall(method_call));
   }
@@ -198,6 +246,8 @@ class CHROMEOS_EXPORT BluetoothMediaEndpointServiceProviderImpl
   void OnConfiguration(dbus::MethodCall* method_call,
                        dbus::ExportedObject::ResponseSender response_sender,
                        const std::vector<uint8_t>& configuration) {
+    VLOG(1) << "OnConfiguration";
+
     DCHECK(OnOriginThread());
 
     // Generates the response to the method call.
@@ -205,7 +255,7 @@ class CHROMEOS_EXPORT BluetoothMediaEndpointServiceProviderImpl
         dbus::Response::FromMethodCall(method_call));
     dbus::MessageWriter writer(response.get());
     if (configuration.empty()) {
-      LOG(WARNING) << "OnConfiguration called with empty configuration.";
+      LOG(ERROR) << "OnConfiguration called with empty configuration.";
       writer.AppendArrayOfBytes(nullptr, 0);
     } else {
       writer.AppendArrayOfBytes(&configuration[0], configuration.size());
@@ -241,11 +291,22 @@ class CHROMEOS_EXPORT BluetoothMediaEndpointServiceProviderImpl
   DISALLOW_COPY_AND_ASSIGN(BluetoothMediaEndpointServiceProviderImpl);
 };
 
+BluetoothMediaEndpointServiceProvider::Delegate::TransportProperties::
+    TransportProperties()
+    : codec(kInvalidCodec),
+      state(kInvalidState) {
+}
+
+BluetoothMediaEndpointServiceProvider::Delegate::TransportProperties::
+    ~TransportProperties() {
+}
+
 BluetoothMediaEndpointServiceProvider::BluetoothMediaEndpointServiceProvider() {
 }
 
-BluetoothMediaEndpointServiceProvider::~BluetoothMediaEndpointServiceProvider()
-{}
+BluetoothMediaEndpointServiceProvider::
+    ~BluetoothMediaEndpointServiceProvider() {
+}
 
 BluetoothMediaEndpointServiceProvider*
     BluetoothMediaEndpointServiceProvider::Create(

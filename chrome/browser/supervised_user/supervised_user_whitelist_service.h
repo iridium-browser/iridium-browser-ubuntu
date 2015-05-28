@@ -45,8 +45,8 @@ class SupervisedUserWhitelistService : public syncer::SyncableService {
 
   SupervisedUserWhitelistService(
       PrefService* prefs,
-      scoped_ptr<component_updater::SupervisedUserWhitelistInstaller>
-          installer);
+      component_updater::SupervisedUserWhitelistInstaller* installer,
+      const std::string& client_id);
   ~SupervisedUserWhitelistService() override;
 
   static void RegisterProfilePrefs(user_prefs::PrefRegistrySyncable* registry);
@@ -98,6 +98,9 @@ class SupervisedUserWhitelistService : public syncer::SyncableService {
                          const std::string& name,
                          bool new_installation);
 
+  void GetLoadedWhitelists(
+      std::vector<scoped_refptr<SupervisedUserSiteList>>* whitelists);
+
   void NotifyWhitelistsChanged();
 
   void OnWhitelistReady(const std::string& id,
@@ -108,7 +111,9 @@ class SupervisedUserWhitelistService : public syncer::SyncableService {
       const scoped_refptr<SupervisedUserSiteList>& whitelist);
 
   PrefService* prefs_;
-  scoped_ptr<component_updater::SupervisedUserWhitelistInstaller> installer_;
+  component_updater::SupervisedUserWhitelistInstaller* installer_;
+
+  std::string client_id_;
   std::vector<SiteListsChangedCallback> site_lists_changed_callbacks_;
 
   // The set of registered whitelists. A whitelist might be registered but not

@@ -82,7 +82,6 @@ using testing::_;
 
 const char kSourceUrl[] = "http://localbike.shop";
 const char kFakeEmail[] = "user@chromium.org";
-const char kFakeFingerprintEncoded[] = "CgVaAwiACA==";
 const char kEditedBillingAddress[] = "123 edited billing address";
 const char* kFieldsFromPage[] =
     { "email",
@@ -130,14 +129,6 @@ scoped_ptr<wallet::WalletItems> CompleteAndValidWalletItems() {
   items->AddInstrument(wallet::GetTestMaskedInstrument());
   items->AddAddress(wallet::GetTestShippingAddress());
   return items.Pass();
-}
-
-scoped_ptr<risk::Fingerprint> GetFakeFingerprint() {
-  scoped_ptr<risk::Fingerprint> fingerprint(new risk::Fingerprint());
-  // Add some data to the proto, else the encoded content is empty.
-  fingerprint->mutable_machine_characteristics()->mutable_screen_size()->
-      set_width(1024);
-  return fingerprint.Pass();
 }
 
 bool HasAnyError(const ValidityMessages& messages, ServerFieldType field) {
@@ -276,12 +267,11 @@ class TestAutofillDialogController
   }
 
   void Init(content::BrowserContext* browser_context) {
-    test_manager_.Init(
-        WebDataServiceFactory::GetAutofillWebDataForProfile(
-            Profile::FromBrowserContext(browser_context),
-            Profile::EXPLICIT_ACCESS),
-        user_prefs::UserPrefs::Get(browser_context),
-        browser_context->IsOffTheRecord());
+    test_manager_.Init(WebDataServiceFactory::GetAutofillWebDataForProfile(
+                           Profile::FromBrowserContext(browser_context),
+                           ServiceAccessType::EXPLICIT_ACCESS),
+                       user_prefs::UserPrefs::Get(browser_context),
+                       browser_context->IsOffTheRecord());
   }
 
   TestAutofillDialogView* GetView() {
@@ -569,7 +559,7 @@ class AutofillDialogControllerTest : public ChromeRenderViewHostTestHarness {
 
   void AcceptAndLoadFakeFingerprint() {
     controller()->OnAccept();
-    controller()->OnDidLoadRiskFingerprintData(GetFakeFingerprint().Pass());
+    controller()->OnDidLoadRiskFingerprintData("a");
   }
 
   // Returns true if the given |section| contains a field of the given |type|.
@@ -744,8 +734,8 @@ TEST_F(AutofillDialogControllerTest, PhoneNumberValidation) {
     const DetailInputs& inputs =
         controller()->RequestedFieldsForSection(section);
     AutofillProfile full_profile(test::GetVerifiedProfile());
-    for (size_t i = 0; i < inputs.size(); ++i) {
-      const ServerFieldType type = inputs[i].type;
+    for (size_t j = 0; j < inputs.size(); ++j) {
+      const ServerFieldType type = inputs[j].type;
       outputs[type] = full_profile.GetInfo(AutofillType(type), "en-US");
     }
 
@@ -1543,7 +1533,7 @@ TEST_F(AutofillDialogControllerTest, AcceptLegalDocuments) {
 
     controller()->OnAccept();
     controller()->OnDidAcceptLegalDocuments();
-    controller()->OnDidLoadRiskFingerprintData(GetFakeFingerprint().Pass());
+    controller()->OnDidLoadRiskFingerprintData("a");
 
     // Now try it all over again with the location disclosure already accepted.
     // Nothing should change.
@@ -2439,8 +2429,8 @@ TEST_F(AutofillDialogControllerTest, RiskLoadsAfterAcceptingLegalDocuments) {
 
   // Simulate a risk load and verify |GetRiskData()| matches the encoded value.
   controller()->OnDidAcceptLegalDocuments();
-  controller()->OnDidLoadRiskFingerprintData(GetFakeFingerprint().Pass());
-  EXPECT_EQ(kFakeFingerprintEncoded, controller()->GetRiskData());
+  controller()->OnDidLoadRiskFingerprintData("a");
+  EXPECT_EQ("a", controller()->GetRiskData());
 }
 
 TEST_F(AutofillDialogControllerTest, NoManageMenuItemForNewWalletUsers) {
@@ -2967,10 +2957,10 @@ TEST_F(AutofillDialogControllerTest, InputEditability) {
   controller()->OnDidGetWalletItems(items.Pass());
   EXPECT_TRUE(controller()->IsEditingExistingData(SECTION_CC_BILLING));
 
-  const DetailInputs& inputs =
-      controller()->RequestedFieldsForSection(SECTION_CC_BILLING);
   FieldValueMap outputs;
-  CopyInitialValues(inputs, &outputs);
+  CopyInitialValues(
+      controller()->RequestedFieldsForSection(SECTION_CC_BILLING),
+      &outputs);
   controller()->GetView()->SetUserInput(SECTION_CC_BILLING, outputs);
 
   for (size_t i = 0; i < arraysize(sections); ++i) {
@@ -3531,7 +3521,7 @@ TEST_F(AutofillDialogControllerTest, LimitedCcChoices) {
   field.autocomplete_attribute = "billing cc-type";
   field.option_contents.push_back(ASCIIToUTF16("Visa"));
   field.option_values.push_back(ASCIIToUTF16("V"));
-  field.option_contents.push_back(ASCIIToUTF16("American Express"));
+  field.option_contents.push_back(ASCIIToUTF16("Amex"));
   field.option_values.push_back(ASCIIToUTF16("AX"));
   form_data.fields.push_back(field);
   ResetControllerWithFormData(form_data);

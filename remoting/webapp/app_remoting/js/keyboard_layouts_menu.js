@@ -19,30 +19,21 @@ var remoting = remoting || {};
  * @constructor
  */
 remoting.KeyboardLayoutsMenu = function(adapter) {
-  /**
-   * @type {remoting.ContextMenuAdapter}
-   * @private
-   */
+  /** @private {remoting.ContextMenuAdapter} */
   this.adapter_ = adapter;
-  /**
-   * @type {remoting.SubmenuManager}
-   * @private
-   */
+  /** @private {remoting.SubmenuManager} */
   this.submenuManager_ = new remoting.SubmenuManager(
       adapter,
       chrome.i18n.getMessage(/*i18n-content*/'KEYBOARD_LAYOUTS_SUBMENU_TITLE'),
       true);
-  /**
-   * @type {string}
-   * @private
-   */
+  /** @private {string} */
   this.currentLayout_ = '';
 
   adapter.addListener(this.onContextMenu_.bind(this));
 };
 
 /**
- * @param {Array.<string>} layouts The keyboard layouts available on the host,
+ * @param {Array<string>} layouts The keyboard layouts available on the host,
  *   for example en-US, de-DE
  * @param {string} currentLayout The layout currently active on the host.
  */
@@ -98,7 +89,7 @@ remoting.KeyboardLayoutsMenu.prototype.setLayout_ =
  *     will match either en-US or en-GB, whichever appears first).
  *   - Otherwise, use the host's current layout.
  *
- * @param {Array.<string>} layouts
+ * @param {Array<string>} layouts
  * @param {string} currentHostLayout
  * @param {function(string):void} onDone
  * @private
@@ -123,7 +114,7 @@ remoting.KeyboardLayoutsMenu.prototype.getBestLayout_ =
     }
   };
 
-  /** @param {Object.<string>} storage */
+  /** @param {Object<string>} storage */
   var chooseLayout = function(storage) {
     var configuredLayout = storage[remoting.KeyboardLayoutsMenu.KEY_];
     var tryLayouts = [ chrome.i18n.getUILanguage() ];
@@ -166,11 +157,11 @@ remoting.KeyboardLayoutsMenu.prototype.makeMenuId_ = function(layout) {
 /**
  * Handle a click on the application's context menu.
  *
- * @param {OnClickData} info
+ * @param {OnClickData=} info
  * @private
  */
 remoting.KeyboardLayoutsMenu.prototype.onContextMenu_ = function(info) {
-  /** @type {Array.<string>} */
+  /** @type {Array<string>} */
   var components = info.menuItemId.split('@');
   if (components.length == 2 &&
       this.makeMenuId_(components[1]) == info.menuItemId) {

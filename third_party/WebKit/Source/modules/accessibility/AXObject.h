@@ -46,7 +46,7 @@ class Element;
 class FrameView;
 class IntPoint;
 class Node;
-class RenderObject;
+class LayoutObject;
 class ScrollableArea;
 class Widget;
 
@@ -56,57 +56,57 @@ enum AccessibilityRole {
     UnknownRole = 0,
     AlertDialogRole,
     AlertRole,
-    AnnotationRole,
+    AnnotationRole, // No mapping to ARIA role
     ApplicationRole,
     ArticleRole,
     BannerRole,
-    BlockquoteRole,
-    BusyIndicatorRole,
+    BlockquoteRole, // No mapping to ARIA role
+    BusyIndicatorRole, // No mapping to ARIA role
     ButtonRole,
-    CanvasRole,
-    CaptionRole,
+    CanvasRole, // No mapping to ARIA role
+    CaptionRole, // No mapping to ARIA role
     CellRole,
     CheckBoxRole,
-    ColorWellRole,
+    ColorWellRole, // No mapping to ARIA role
     ColumnHeaderRole,
-    ColumnRole,
+    ColumnRole, // No mapping to ARIA role
     ComboBoxRole,
     ComplementaryRole,
     ContentInfoRole,
-    DateRole,
-    DateTimeRole,
+    DateRole, // No mapping to ARIA role
+    DateTimeRole, // No mapping to ARIA role
     DefinitionRole,
-    DescriptionListDetailRole,
-    DescriptionListRole,
-    DescriptionListTermRole,
-    DetailsRole,
+    DescriptionListDetailRole, // No mapping to ARIA role
+    DescriptionListRole, // No mapping to ARIA role
+    DescriptionListTermRole, // No mapping to ARIA role
+    DetailsRole, // No mapping to ARIA role
     DialogRole,
     DirectoryRole,
-    DisclosureTriangleRole,
-    DivRole,
+    DisclosureTriangleRole, // No mapping to ARIA role
+    DivRole, // No mapping to ARIA role
     DocumentRole,
-    EmbeddedObjectRole,
-    FigcaptionRole,
-    FigureRole,
+    EmbeddedObjectRole, // No mapping to ARIA role
+    FigcaptionRole, // No mapping to ARIA role
+    FigureRole, // No mapping to ARIA role
     FooterRole,
     FormRole,
     GridRole,
     GroupRole,
     HeadingRole,
-    IframePresentationalRole,
-    IframeRole,
-    IgnoredRole,
-    ImageMapLinkRole,
-    ImageMapRole,
+    IframePresentationalRole, // No mapping to ARIA role
+    IframeRole, // No mapping to ARIA role
+    IgnoredRole, // No mapping to ARIA role
+    ImageMapLinkRole, // No mapping to ARIA role
+    ImageMapRole, // No mapping to ARIA role
     ImageRole,
-    InlineTextBoxRole,
+    InlineTextBoxRole, // No mapping to ARIA role
     LabelRole,
-    LegendRole,
+    LegendRole, // No mapping to ARIA role
     LinkRole,
     ListBoxOptionRole,
     ListBoxRole,
     ListItemRole,
-    ListMarkerRole,
+    ListMarkerRole, // No mapping to ARIA role
     ListRole,
     LogRole,
     MainRole,
@@ -122,43 +122,45 @@ enum AccessibilityRole {
     MenuRole,
     MeterRole,
     NavigationRole,
-    NoneRole,
+    NoneRole, // No mapping to ARIA role
     NoteRole,
-    OutlineRole,
-    ParagraphRole,
+    OutlineRole, // No mapping to ARIA role
+    ParagraphRole, // No mapping to ARIA role
     PopUpButtonRole,
-    PreRole,
+    PreRole, // No mapping to ARIA role
     PresentationalRole,
     ProgressIndicatorRole,
     RadioButtonRole,
     RadioGroupRole,
     RegionRole,
-    RootWebAreaRole,
+    RootWebAreaRole, // No mapping to ARIA role
     RowHeaderRole,
     RowRole,
-    RubyRole,
-    RulerRole,
-    SVGRootRole,
-    ScrollAreaRole,
+    RubyRole, // No mapping to ARIA role
+    RulerRole, // No mapping to ARIA role
+    SVGRootRole, // No mapping to ARIA role
+    ScrollAreaRole, // No mapping to ARIA role
     ScrollBarRole,
-    SeamlessWebAreaRole,
+    SeamlessWebAreaRole, // No mapping to ARIA role
     SearchRole,
+    SearchBoxRole,
     SliderRole,
-    SliderThumbRole,
-    SpinButtonPartRole,
+    SliderThumbRole, // No mapping to ARIA role
+    SpinButtonPartRole, // No mapping to ARIA role
     SpinButtonRole,
     SplitterRole,
-    StaticTextRole,
+    StaticTextRole, // No mapping to ARIA role
     StatusRole,
-    TabGroupRole,
+    SwitchRole,
+    TabGroupRole, // No mapping to ARIA role
     TabListRole,
     TabPanelRole,
     TabRole,
-    TableHeaderContainerRole,
+    TableHeaderContainerRole, // No mapping to ARIA role
     TableRole,
     TextAreaRole,
     TextFieldRole,
-    TimeRole,
+    TimeRole, // No mapping to ARIA role
     TimerRole,
     ToggleButtonRole,
     ToolbarRole,
@@ -166,9 +168,9 @@ enum AccessibilityRole {
     TreeItemRole,
     TreeRole,
     UserInterfaceTooltipRole,
-    WebAreaRole,
-    LineBreakRole,
-    WindowRole,
+    WebAreaRole, // No mapping to ARIA role
+    LineBreakRole, // No mapping to ARIA role
+    WindowRole, // No mapping to ARIA role
     NumRoles
 };
 
@@ -249,6 +251,14 @@ enum AccessibilityTextDirection {
     AccessibilityTextDirectionBottomToTop
 };
 
+enum SortDirection {
+    SortDirectionUndefined = 0,
+    SortDirectionNone,
+    SortDirectionAscending,
+    SortDirectionDescending,
+    SortDirectionOther
+};
+
 enum AccessibilityExpanded {
     ExpandedUndefined = 0,
     ExpandedCollapsed,
@@ -270,9 +280,14 @@ enum InvalidState {
     InvalidStateOther
 };
 
+enum TextUnderElementMode {
+    TextUnderElementAll,
+    TextUnderElementAny // If the text is unimportant, just whether or not it's present
+};
+
 class AXObject : public RefCounted<AXObject> {
 public:
-    typedef Vector<RefPtr<AXObject> > AccessibilityChildrenVector;
+    typedef Vector<RefPtr<AXObject>> AccessibilityChildrenVector;
 
     struct PlainTextRange {
 
@@ -319,7 +334,9 @@ public:
 
     // Determine subclass type.
     virtual bool isAXNodeObject() const { return false; }
-    virtual bool isAXRenderObject() const { return false; }
+    virtual bool isAXLayoutObject() const { return false; }
+    virtual bool isAXListBox() const { return false; }
+    virtual bool isAXListBoxOption() const { return false; }
     virtual bool isAXScrollbar() const { return false; }
     virtual bool isAXScrollView() const { return false; }
     virtual bool isAXSVGRoot() const { return false; }
@@ -349,7 +366,6 @@ public:
     virtual bool isLink() const { return false; }
     virtual bool isList() const { return false; }
     bool isListItem() const { return roleValue() == ListItemRole; }
-    virtual bool isListBoxOption() const { return false; }
     virtual bool isMenu() const { return false; }
     virtual bool isMenuButton() const { return false; }
     virtual bool isMenuList() const { return false; }
@@ -363,6 +379,7 @@ public:
     virtual bool isNonNativeTextControl() const { return false; } // contenteditable or role=textbox
     virtual bool isPasswordField() const { return false; }
     virtual bool isPasswordFieldAndShouldHideValue() const;
+    bool isPresentational() const { return roleValue() == NoneRole || roleValue() == PresentationalRole; }
     virtual bool isProgressIndicator() const { return false; }
     bool isRadioButton() const { return roleValue() == RadioButtonRole; }
     bool isScrollbar() const { return roleValue() == ScrollBarRole; }
@@ -410,6 +427,12 @@ public:
     AXObjectInclusion accessibilityPlatformIncludesObject() const;
     virtual AXObjectInclusion defaultObjectInclusion() const;
     bool isInertOrAriaHidden() const;
+    const AXObject* ariaHiddenRoot() const;
+    bool computeIsInertOrAriaHidden() const;
+    bool isDescendantOfBarrenParent() const;
+    bool computeIsDescendantOfBarrenParent() const;
+    bool isDescendantOfDisabledNode() const;
+    bool computeIsDescendantOfDisabledNode() const;
     bool lastKnownIsIgnoredValue();
     void setLastKnownIsIgnoredValue(bool);
 
@@ -456,6 +479,7 @@ public:
     virtual AXObject* activeDescendant() const { return 0; }
     virtual String ariaAutoComplete() const { return String(); }
     virtual String ariaDescribedByAttribute() const { return String(); }
+    virtual const AtomicString& ariaDropEffect() const { return nullAtom; }
     virtual void ariaFlowToElements(AccessibilityChildrenVector&) const { }
     virtual void ariaControlsElements(AccessibilityChildrenVector&) const { }
     virtual void ariaDescribedbyElements(AccessibilityChildrenVector& describedby) const { };
@@ -476,6 +500,7 @@ public:
     virtual bool supportsARIAFlowTo() const { return false; }
     virtual bool supportsARIAOwns() const { return false; }
     bool supportsRangeValue() const;
+    virtual SortDirection sortDirection() const { return SortDirectionUndefined; }
 
     // ARIA trees.
     // Used by an ARIA tree to get all its rows.
@@ -495,9 +520,9 @@ public:
     bool containerLiveRegionBusy() const;
 
     // Accessibility Text.
-    virtual String textUnderElement() const { return String(); }
+    virtual String textUnderElement(TextUnderElementMode mode = TextUnderElementAll) const { return String(); }
     virtual String accessibilityDescription() const { return String(); }
-    virtual String title() const { return String(); }
+    virtual String title(TextUnderElementMode mode = TextUnderElementAll) const { return String(); }
     virtual String helpText() const { return String(); }
     // Returns result of Accessible Name Calculation algorithm
     // TODO(aboxhall): ensure above and replace title() with this logic
@@ -512,7 +537,7 @@ public:
     // Hit testing.
     // Called on the root AX object to return the deepest available element.
     virtual AXObject* accessibilityHitTest(const IntPoint&) const { return 0; }
-    // Called on the AX object after the render tree determines which is the right AXRenderObject.
+    // Called on the AX object after the layout tree determines which is the right AXLayoutObject.
     virtual AXObject* elementAccessibilityHitTest(const IntPoint&) const;
 
     // High-level accessibility tree access. Other modules should only use these functions.
@@ -536,16 +561,15 @@ public:
     virtual void setNeedsToUpdateChildren() { }
     virtual void clearChildren();
     virtual void detachFromParent() { m_parent = 0; }
-    virtual AXObject* observableObject() const { return 0; }
     virtual AXObject* scrollBar(AccessibilityOrientation) { return 0; }
 
     // Properties of the object's owning document or page.
     virtual double estimatedLoadingProgress() const { return 0; }
     AXObject* focusedUIElement() const;
 
-    // DOM and Render tree access.
+    // DOM and layout tree access.
     virtual Node* node() const { return 0; }
-    virtual RenderObject* renderer() const { return 0; }
+    virtual LayoutObject* layoutObject() const { return 0; }
     virtual Document* document() const;
     virtual FrameView* documentFrameView() const;
     virtual Element* anchorElement() const { return 0; }
@@ -595,8 +619,11 @@ public:
     static bool isARIAControl(AccessibilityRole);
     static bool isARIAInput(AccessibilityRole);
     static AccessibilityRole ariaRoleToWebCoreRole(const String&);
-    static IntRect boundingBoxForQuads(RenderObject*, const Vector<FloatQuad>&);
+    static IntRect boundingBoxForQuads(LayoutObject*, const Vector<FloatQuad>&);
     static const AtomicString& roleName(AccessibilityRole);
+    static bool isInsideFocusableElementOrARIAWidget(const Node&);
+
+    bool hasInheritedPresentationalRole() const { return m_cachedHasInheritedPresentationalRole; }
 
 protected:
     AXID m_id;
@@ -607,6 +634,7 @@ protected:
     LayoutRect m_explicitElementRect;
 
     virtual bool computeAccessibilityIsIgnored() const { return true; }
+    virtual bool computeHasInheritedPresentationalRole() const { return false; }
 
     // If this object itself scrolls, return its ScrollableArea.
     virtual ScrollableArea* getScrollableAreaIfScrollable() const { return 0; }
@@ -624,7 +652,11 @@ protected:
     // The following cached attribute values (the ones starting with m_cached*)
     // are only valid if m_lastModificationCount matches AXObjectCacheImpl::modificationCount().
     mutable int m_lastModificationCount;
-    mutable bool m_cachedIsIgnored;
+    mutable bool m_cachedIsIgnored : 1;
+    mutable bool m_cachedIsInertOrAriaHidden : 1;
+    mutable bool m_cachedIsDescendantOfBarrenParent : 1;
+    mutable bool m_cachedIsDescendantOfDisabledNode : 1;
+    mutable bool m_cachedHasInheritedPresentationalRole : 1;
     mutable const AXObject* m_cachedLiveRegionRoot;
 
     AXObjectCacheImpl* m_axObjectCache;
@@ -632,6 +664,10 @@ protected:
     // Updates the cached attribute values. This may be recursive, so to prevent deadlocks,
     // functions called here may only search up the tree (ancestors), not down.
     void updateCachedAttributeValuesIfNeeded() const;
+
+private:
+    static bool includesARIAWidgetRole(const String&);
+    static bool hasInteractiveARIAAttribute(const Element&);
 };
 
 #define DEFINE_AX_OBJECT_TYPE_CASTS(thisType, predicate) \

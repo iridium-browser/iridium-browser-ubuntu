@@ -23,9 +23,7 @@
  */
 
 #include "config.h"
-
 #if ENABLE(WEB_AUDIO)
-
 #include "modules/webaudio/DelayNode.h"
 
 #include "bindings/core/v8/ExceptionMessages.h"
@@ -37,23 +35,35 @@ namespace blink {
 
 const double maximumAllowedDelayTime = 180;
 
-DelayNode::DelayNode(AudioContext* context, float sampleRate, double maxDelayTime, ExceptionState& exceptionState)
-    : AudioBasicProcessorNode(NodeTypeDelay, context, sampleRate)
+DelayNode::DelayNode(AudioContext* context, float sampleRate, double maxDelayTime)
+    : AudioNode(*context)
+    , m_delayTime(AudioParam::create(context, 0.0))
 {
-    if (maxDelayTime <= 0 || maxDelayTime >= maximumAllowedDelayTime || std::isnan(maxDelayTime)) {
+    setHandler(new AudioBasicProcessorHandler(AudioHandler::NodeTypeDelay, *this, sampleRate, adoptPtr(new DelayProcessor(sampleRate, 1, m_delayTime->handler(), maxDelayTime))));
+}
+
+DelayNode* DelayNode::create(AudioContext* context, float sampleRate, double maxDelayTime, ExceptionState& exceptionState)
+{
+    if (maxDelayTime <= 0 || maxDelayTime >= maximumAllowedDelayTime) {
         exceptionState.throwDOMException(
             NotSupportedError,
             "max delay time (" + String::number(maxDelayTime)
             + ") must be between 0 and " + String::number(maximumAllowedDelayTime)
             + ", exclusive.");
-        return;
+        return nullptr;
     }
-    m_processor = new DelayProcessor(context, sampleRate, 1, maxDelayTime);
+    return new DelayNode(context, sampleRate, maxDelayTime);
 }
 
 AudioParam* DelayNode::delayTime()
 {
-    return delayProcessor()->delayTime();
+    return m_delayTime;
+}
+
+DEFINE_TRACE(DelayNode)
+{
+    visitor->trace(m_delayTime);
+    AudioNode::trace(visitor);
 }
 
 } // namespace blink

@@ -31,8 +31,8 @@ inline SVGCursorElement::SVGCursorElement(Document& document)
     : SVGElement(SVGNames::cursorTag, document)
     , SVGTests(this)
     , SVGURIReference(this)
-    , m_x(SVGAnimatedLength::create(this, SVGNames::xAttr, SVGLength::create(LengthModeWidth), AllowNegativeLengths))
-    , m_y(SVGAnimatedLength::create(this, SVGNames::yAttr, SVGLength::create(LengthModeHeight), AllowNegativeLengths))
+    , m_x(SVGAnimatedLength::create(this, SVGNames::xAttr, SVGLength::create(SVGLengthMode::Width), AllowNegativeLengths))
+    , m_y(SVGAnimatedLength::create(this, SVGNames::yAttr, SVGLength::create(SVGLengthMode::Height), AllowNegativeLengths))
 {
     addToPropertyMap(m_x);
     addToPropertyMap(m_y);
@@ -61,11 +61,6 @@ bool SVGCursorElement::isSupportedAttribute(const QualifiedName& attrName)
     return supportedAttributes.contains<SVGAttributeHashTranslator>(attrName);
 }
 
-void SVGCursorElement::parseAttribute(const QualifiedName& name, const AtomicString& value)
-{
-    parseAttributeNew(name, value);
-}
-
 void SVGCursorElement::addClient(SVGElement* element)
 {
     m_clients.add(element);
@@ -75,7 +70,7 @@ void SVGCursorElement::addClient(SVGElement* element)
 #if !ENABLE(OILPAN)
 void SVGCursorElement::removeClient(SVGElement* element)
 {
-    HashSet<RawPtr<SVGElement> >::iterator it = m_clients.find(element);
+    HashSet<RawPtr<SVGElement>>::iterator it = m_clients.find(element);
     if (it != m_clients.end()) {
         m_clients.remove(it);
         element->cursorElementRemoved();
@@ -102,7 +97,7 @@ void SVGCursorElement::svgAttributeChanged(const QualifiedName& attrName)
         client->setNeedsStyleRecalc(SubtreeStyleChange, StyleChangeReasonForTracing::create(StyleChangeReason::SVGCursor));
 }
 
-void SVGCursorElement::trace(Visitor* visitor)
+DEFINE_TRACE(SVGCursorElement)
 {
 #if ENABLE(OILPAN)
     visitor->trace(m_x);

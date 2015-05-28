@@ -68,7 +68,7 @@ public:
     // ActiveDOMObject
     virtual void stop() override;
 
-    virtual void trace(Visitor*) override;
+    DECLARE_VIRTUAL_TRACE();
 
 private:
     RTCDTMFSender(ExecutionContext*, MediaStreamTrack*, PassOwnPtr<WebRTCDTMFSenderHandler>);
@@ -88,7 +88,7 @@ private:
     bool m_stopped;
 
     Timer<RTCDTMFSender> m_scheduledEventTimer;
-    WillBeHeapVector<RefPtrWillBeMember<Event> > m_scheduledEvents;
+    WillBeHeapVector<RefPtrWillBeMember<Event>> m_scheduledEvents;
 };
 
 } // namespace blink

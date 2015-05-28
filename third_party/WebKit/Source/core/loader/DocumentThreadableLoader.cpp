@@ -57,6 +57,13 @@
 
 namespace blink {
 
+// Max number of CORS redirects handled in DocumentThreadableLoader.
+// Same number as net/url_request/url_request.cc, and
+// same number as https://fetch.spec.whatwg.org/#concept-http-fetch, Step 4.
+// FIXME: currently the number of redirects is counted and limited here and in
+// net/url_request/url_request.cc separately.
+static const int kMaxCORSRedirects = 20;
+
 void DocumentThreadableLoader::loadResourceSynchronously(Document& document, const ResourceRequest& request, ThreadableLoaderClient& client, const ThreadableLoaderOptions& options, const ResourceLoaderOptions& resourceLoaderOptions)
 {
     // The loader will be deleted as soon as this function exits.
@@ -82,8 +89,10 @@ DocumentThreadableLoader::DocumentThreadableLoader(Document& document, Threadabl
     , m_sameOriginRequest(securityOrigin()->canRequest(request.url()))
     , m_simpleRequest(true)
     , m_async(blockingBehavior == LoadAsynchronously)
+    , m_requestContext(request.requestContext())
     , m_timeoutTimer(this, &DocumentThreadableLoader::didTimeout)
     , m_requestStartedSeconds(0.0)
+    , m_corsRedirectLimit(kMaxCORSRedirects)
 {
     ASSERT(client);
     // Setting an outgoing referer is only supported in the async code path.
@@ -259,7 +268,7 @@ void DocumentThreadableLoader::redirectReceived(Resource* resource, ResourceRequ
 
     RefPtr<DocumentThreadableLoader> protect(this);
 
-    if (!isAllowedByContentSecurityPolicy(request.url())) {
+    if (!isAllowedByContentSecurityPolicy(request.url(), ContentSecurityPolicy::DidRedirect)) {
         m_client->didFailRedirectCheck();
 
         clearResource();
@@ -279,7 +288,10 @@ void DocumentThreadableLoader::redirectReceived(Resource* resource, ResourceRequ
     // When using access control, only simple cross origin requests are allowed to redirect. The new request URL must have a supported
     // scheme and not contain the userinfo production. In addition, the redirect response must pass the access control check if the
     // original request was not same-origin.
-    if (m_options.crossOriginRequestPolicy == UseAccessControl) {
+    if (m_corsRedirectLimit <= 0) {
+        m_client->didFailRedirectCheck();
+    } else if (m_options.crossOriginRequestPolicy == UseAccessControl) {
+        --m_corsRedirectLimit;
 
         InspectorInstrumentation::didReceiveCORSRedirectResponse(m_document.frame(), resource->identifier(), m_document.frame()->loader().documentLoader(), redirectResponse, 0);
 
@@ -288,7 +300,7 @@ void DocumentThreadableLoader::redirectReceived(Resource* resource, ResourceRequ
 
         if (m_simpleRequest) {
             allowRedirect = CrossOriginAccessControl::isLegalRedirectLocation(request.url(), accessControlErrorDescription)
-                && (m_sameOriginRequest || passesAccessControlCheck(&m_document, redirectResponse, effectiveAllowCredentials(), securityOrigin(), accessControlErrorDescription));
+                && (m_sameOriginRequest || passesAccessControlCheck(redirectResponse, effectiveAllowCredentials(), securityOrigin(), accessControlErrorDescription));
         } else {
             accessControlErrorDescription = "The request was redirected to '"+ request.url().string() + "', which is disallowed for cross-origin requests that require preflight.";
         }
@@ -367,7 +379,7 @@ void DocumentThreadableLoader::handlePreflightResponse(const ResourceResponse& r
 {
     String accessControlErrorDescription;
 
-    if (!passesAccessControlCheck(&m_document, response, effectiveAllowCredentials(), securityOrigin(), accessControlErrorDescription)) {
+    if (!passesAccessControlCheck(response, effectiveAllowCredentials(), securityOrigin(), accessControlErrorDescription)) {
         handlePreflightFailure(response.url().string(), accessControlErrorDescription);
         return;
     }
@@ -394,7 +406,6 @@ void DocumentThreadableLoader::reportResponseReceived(unsigned long identifier, 
     TRACE_EVENT_INSTANT1(TRACE_DISABLED_BY_DEFAULT("devtools.timeline"), "ResourceReceiveResponse", "data", InspectorReceiveResponseEvent::data(identifier, m_document.frame(), response));
     LocalFrame* frame = m_document.frame();
     InspectorInstrumentation::didReceiveResourceResponse(frame, identifier, loader, response, resource() ? resource()->loader() : 0);
-    // It is essential that inspector gets resource response BEFORE console.
     frame->console().reportResourceResponseReceived(loader, identifier, response);
 }
 
@@ -409,8 +420,16 @@ void DocumentThreadableLoader::handleResponse(unsigned long identifier, const Re
     }
 
     if (response.wasFetchedViaServiceWorker()) {
-        ASSERT(m_fallbackRequestForServiceWorker);
+        // It's still possible to reach here with null m_fallbackRequestForServiceWorker
+        // if the request was for main resource loading (i.e. for SharedWorker), for which
+        // we create DocumentLoader before the controller ServiceWorker is set.
+        ASSERT(m_fallbackRequestForServiceWorker || m_requestContext == WebURLRequest::RequestContextSharedWorker);
         if (response.wasFallbackRequiredByServiceWorker()) {
+            // At this point we must have m_fallbackRequestForServiceWorker.
+            // (For SharedWorker the request won't be CORS or CORS-with-preflight,
+            // therefore fallback-to-network is handled in the browser process
+            // when the ServiceWorker does not call respondWith().)
+            ASSERT(m_fallbackRequestForServiceWorker);
             loadFallbackRequestForServiceWorker();
             return;
         }
@@ -423,7 +442,7 @@ void DocumentThreadableLoader::handleResponse(unsigned long identifier, const Re
 
     if (!m_sameOriginRequest && m_options.crossOriginRequestPolicy == UseAccessControl) {
         String accessControlErrorDescription;
-        if (!passesAccessControlCheck(&m_document, response, effectiveAllowCredentials(), securityOrigin(), accessControlErrorDescription)) {
+        if (!passesAccessControlCheck(response, effectiveAllowCredentials(), securityOrigin(), accessControlErrorDescription)) {
             reportResponseReceived(identifier, response);
             m_client->didFailAccessControlCheck(ResourceError(errorDomainBlinkInternal, 0, response.url().string(), accessControlErrorDescription));
             return;
@@ -431,6 +450,13 @@ void DocumentThreadableLoader::handleResponse(unsigned long identifier, const Re
     }
 
     m_client->didReceiveResponse(identifier, response, handle);
+}
+
+void DocumentThreadableLoader::setSerializedCachedMetadata(Resource*, const char* data, size_t size)
+{
+    if (m_actualRequest)
+        return;
+    m_client->didReceiveCachedMetadata(data, size);
 }
 
 void DocumentThreadableLoader::dataReceived(Resource* resource, const char* data, unsigned dataLength)
@@ -586,7 +612,7 @@ void DocumentThreadableLoader::loadRequest(const ResourceRequest& request, Resou
     // FIXME: A synchronous request does not tell us whether a redirect happened or not, so we guess by comparing the
     // request and response URLs. This isn't a perfect test though, since a server can serve a redirect to the same URL that was
     // requested. Also comparing the request and response URLs as strings will fail if the requestURL still has its credentials.
-    if (requestURL != response.url() && (!isAllowedByContentSecurityPolicy(response.url()) || !isAllowedRedirect(response.url()))) {
+    if (requestURL != response.url() && (!isAllowedByContentSecurityPolicy(response.url(), ContentSecurityPolicy::DidRedirect) || !isAllowedRedirect(response.url()))) {
         m_client->didFailRedirectCheck();
         return;
     }
@@ -608,11 +634,11 @@ bool DocumentThreadableLoader::isAllowedRedirect(const KURL& url) const
     return m_sameOriginRequest && securityOrigin()->canRequest(url);
 }
 
-bool DocumentThreadableLoader::isAllowedByContentSecurityPolicy(const KURL& url) const
+bool DocumentThreadableLoader::isAllowedByContentSecurityPolicy(const KURL& url, ContentSecurityPolicy::RedirectStatus redirectStatus) const
 {
     if (m_options.contentSecurityPolicyEnforcement != EnforceConnectSrcDirective)
         return true;
-    return m_document.contentSecurityPolicy()->allowConnectToSource(url);
+    return m_document.contentSecurityPolicy()->allowConnectToSource(url, redirectStatus);
 }
 
 StoredCredentials DocumentThreadableLoader::effectiveAllowCredentials() const

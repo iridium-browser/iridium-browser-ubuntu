@@ -28,13 +28,13 @@
 #include "core/loader/NavigationPolicy.h"
 #include "core/frame/ConsoleTypes.h"
 #include "core/html/forms/PopupMenuClient.h"
-#include "core/page/FocusType.h"
-#include "core/rendering/style/RenderStyleConstants.h"
+#include "core/style/ComputedStyleConstants.h"
 #include "platform/Cursor.h"
 #include "platform/HostWindow.h"
 #include "platform/PopupMenu.h"
 #include "platform/heap/Handle.h"
 #include "platform/scroll/ScrollTypes.h"
+#include "public/platform/WebFocusType.h"
 #include "wtf/Forward.h"
 #include "wtf/PassOwnPtr.h"
 #include "wtf/Vector.h"
@@ -48,7 +48,6 @@ class DateTimeChooser;
 class DateTimeChooserClient;
 class Element;
 class FileChooser;
-class FloatRect;
 class Frame;
 class GraphicsContext;
 class GraphicsLayer;
@@ -62,6 +61,7 @@ class Node;
 class Page;
 class PagePopupDriver;
 class PopupMenuClient;
+class WebCompositorAnimationTimeline;
 
 struct CompositedSelectionBound;
 struct DateTimeChooserParameters;
@@ -74,17 +74,17 @@ class ChromeClient {
 public:
     virtual void chromeDestroyed() = 0;
 
-    virtual void setWindowRect(const FloatRect&) = 0;
-    virtual FloatRect windowRect() = 0;
+    virtual void setWindowRect(const IntRect&) = 0;
+    virtual IntRect windowRect() = 0;
 
-    virtual FloatRect pageRect() = 0;
+    virtual IntRect pageRect() = 0;
 
     virtual void focus() = 0;
 
-    virtual bool canTakeFocus(FocusType) = 0;
-    virtual void takeFocus(FocusType) = 0;
+    virtual bool canTakeFocus(WebFocusType) = 0;
+    virtual void takeFocus(WebFocusType) = 0;
 
-    virtual void focusedNodeChanged(Node*) = 0;
+    virtual void focusedNodeChanged(Node*, Node*) = 0;
 
     virtual void focusedFrameChanged(LocalFrame*) = 0;
 
@@ -96,9 +96,6 @@ public:
     // request could be fulfilled. The ChromeClient should not load the request.
     virtual Page* createWindow(LocalFrame*, const FrameLoadRequest&, const WindowFeatures&, NavigationPolicy, ShouldSendReferrer) = 0;
     virtual void show(NavigationPolicy) = 0;
-
-    virtual bool canRunModal() = 0;
-    virtual void runModal() = 0;
 
     virtual void setToolbarsVisible(bool) = 0;
     virtual bool toolbarsVisible() = 0;
@@ -134,7 +131,7 @@ public:
 
     // Methods used by HostWindow.
     virtual void invalidateRect(const IntRect&) = 0;
-    virtual IntRect rootViewToScreen(const IntRect&) const = 0;
+    virtual IntRect viewportToScreen(const IntRect&) const = 0;
     virtual blink::WebScreenInfo screenInfo() const = 0;
     virtual void setCursor(const Cursor&) = 0;
     virtual void scheduleAnimation() = 0;
@@ -145,7 +142,8 @@ public:
     virtual void dispatchViewportPropertiesDidChange(const ViewportDescription&) const { }
 
     virtual void contentsSizeChanged(LocalFrame*, const IntSize&) const = 0;
-    virtual void deviceOrPageScaleFactorChanged() const { }
+    virtual void pageScaleFactorChanged() const { }
+    virtual float clampPageScaleFactorToLimits(float scale) const { return scale; }
     virtual void layoutUpdated(LocalFrame*) const { }
 
     virtual void mouseDidMoveOverElement(const HitTestResult&) = 0;
@@ -162,7 +160,7 @@ public:
 
     // This function is used for:
     //  - Mandatory date/time choosers if !ENABLE(INPUT_MULTIPLE_FIELDS_UI)
-    //  - Date/time choosers for types for which RenderTheme::supportsCalendarPicker
+    //  - Date/time choosers for types for which LayoutTheme::supportsCalendarPicker
     //    returns true, if ENABLE(INPUT_MULTIPLE_FIELDS_UI)
     //  - <datalist> UI for date/time input types regardless of
     //    ENABLE(INPUT_MULTIPLE_FIELDS_UI)
@@ -183,6 +181,9 @@ public:
     // it sets it for the WebViewImpl.
     virtual void attachRootGraphicsLayer(GraphicsLayer*, LocalFrame* localRoot) = 0;
 
+    virtual void attachCompositorAnimationTimeline(WebCompositorAnimationTimeline*, LocalFrame* localRoot) { }
+    virtual void detachCompositorAnimationTimeline(WebCompositorAnimationTimeline*, LocalFrame* localRoot) { }
+
     virtual void enterFullScreenForElement(Element*) { }
     virtual void exitFullScreenForElement(Element*) { }
 
@@ -193,7 +194,7 @@ public:
 
     virtual void setTouchAction(TouchAction) = 0;
 
-    // Checks if there is an opened popup, called by RenderMenuList::showPopup().
+    // Checks if there is an opened popup, called by LayoutMenuList::showPopup().
     virtual bool hasOpenedPopup() const = 0;
     virtual PassRefPtrWillBeRawPtr<PopupMenu> createPopupMenu(LocalFrame&, PopupMenuClient*) = 0;
     virtual DOMWindow* pagePopupWindowForTesting() const = 0;
@@ -214,7 +215,7 @@ public:
     virtual bool requestPointerLock() { return false; }
     virtual void requestPointerUnlock() { }
 
-    virtual FloatSize minimumWindowSize() const { return FloatSize(100, 100); }
+    virtual IntSize minimumWindowSize() const { return IntSize(100, 100); }
 
     virtual bool isChromeClientImpl() const { return false; }
 
@@ -223,6 +224,7 @@ public:
     virtual void didEndEditingOnTextField(HTMLInputElement&) { }
     virtual void handleKeyboardEventOnTextField(HTMLInputElement&, KeyboardEvent&) { }
     virtual void textFieldDataListChanged(HTMLInputElement&) { }
+    virtual void xhrSucceeded(LocalFrame*) { }
 
     // Input mehtod editor related functions.
     virtual void didCancelCompositionOnSelectionChange() { }
@@ -233,6 +235,8 @@ public:
     virtual void registerViewportLayers() const { }
 
     virtual void showUnhandledTapUIIfNeeded(IntPoint, Node*, bool) { }
+
+    virtual void didUpdateTopControls() const { }
 
 protected:
     virtual ~ChromeClient() { }

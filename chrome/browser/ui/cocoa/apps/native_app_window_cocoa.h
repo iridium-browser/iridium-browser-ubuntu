@@ -19,10 +19,11 @@
 #include "ui/base/accelerators/accelerator_manager.h"
 #include "ui/gfx/geometry/rect.h"
 
+@class AppNSWindow;
 class ExtensionKeybindingRegistryCocoa;
 class NativeAppWindowCocoa;
-@class ShellNSWindow;
 class SkRegion;
+@class TitlebarBackgroundView;
 
 // A window controller for a minimal window to host a web app view. Passes
 // Objective-C notifications to the C++ bridge.
@@ -166,7 +167,7 @@ class NativeAppWindowCocoa : public extensions::NativeAppWindow,
  private:
   ~NativeAppWindowCocoa() override;
 
-  ShellNSWindow* window() const;
+  AppNSWindow* window() const;
   content::WebContents* WebContents() const;
 
   // Returns the WindowStyleMask based on the type of window frame.
@@ -206,6 +207,7 @@ class NativeAppWindowCocoa : public extensions::NativeAppWindow,
   SkColor inactive_frame_color_;
 
   base::scoped_nsobject<NativeAppWindowController> window_controller_;
+  base::scoped_nsobject<TitlebarBackgroundView> titlebar_background_view_;
 
   // For system drag, the whole window is draggable and the non-draggable areas
   // have to been explicitly excluded.

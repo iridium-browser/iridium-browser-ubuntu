@@ -19,12 +19,12 @@ class SkASTCImageDecoder : public SkImageDecoder {
 public:
     SkASTCImageDecoder() { }
 
-    virtual Format getFormat() const SK_OVERRIDE {
+    Format getFormat() const override {
         return kASTC_Format;
     }
 
 protected:
-    virtual Result onDecode(SkStream* stream, SkBitmap* bm, Mode) SK_OVERRIDE;
+    Result onDecode(SkStream* stream, SkBitmap* bm, Mode) override;
 
 private:
     typedef SkImageDecoder INHERITED;

@@ -21,7 +21,8 @@ WebInspector.AdvancedSearchView = function()
     this._searchResultsElement = this.contentElement.createChild("div");
     this._searchResultsElement.className = "search-results";
 
-    this._search = this._searchPanelElement.createChild("input");
+    this._search = WebInspector.HistoryInput.create();
+    this._searchPanelElement.appendChild(this._search);
     this._search.placeholder = WebInspector.UIString("Search sources");
     this._search.setAttribute("type", "text");
     this._search.classList.add("search-config-search");
@@ -361,7 +362,7 @@ WebInspector.AdvancedSearchView.ToggleDrawerViewActionDelegate.prototype = {
     {
         var searchView = WebInspector.AdvancedSearchView._instance;
         if (!searchView || !searchView.isShowing() || searchView._search !== document.activeElement) {
-            var selection = window.getSelection();
+            var selection = WebInspector.inspectorView.element.getDeepSelection();
             var queryCandidate = "";
             if (selection.rangeCount)
                 queryCandidate = selection.toString().replace(/\r?\n.*/, "");

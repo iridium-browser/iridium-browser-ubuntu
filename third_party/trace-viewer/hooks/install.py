@@ -50,6 +50,9 @@ class Link(object):
     os.symlink(src_path_rel, full_dst_path)
 
 def InstallHooks():
+  if sys.platform == 'win32':
+    return
+
   links = []
   links.append(Link(os.path.join('.git', 'hooks', 'pre-commit'),
                     os.path.join('hooks/pre_commit')))

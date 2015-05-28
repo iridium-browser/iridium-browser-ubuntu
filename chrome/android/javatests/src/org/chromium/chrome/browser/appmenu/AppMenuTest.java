@@ -14,6 +14,8 @@ import android.widget.ListPopupWindow;
 import android.widget.ListView;
 
 import org.chromium.base.ThreadUtils;
+import org.chromium.base.annotations.SuppressFBWarnings;
+import org.chromium.base.test.util.DisabledTest;
 import org.chromium.base.test.util.Feature;
 import org.chromium.chrome.shell.ChromeShellActivity;
 import org.chromium.chrome.shell.ChromeShellActivity.AppMenuHandlerFactory;
@@ -32,6 +34,7 @@ public class AppMenuTest extends ChromeShellTestBase {
     /**
      * AppMenuHandler that will be used to intercept item selections for testing.
      */
+    @SuppressFBWarnings("URF_UNREAD_FIELD")
     public static class AppMenuHandlerForTest extends AppMenuHandler {
         int mLastSelectedItemId = -1;
 
@@ -158,8 +161,12 @@ public class AppMenuTest extends ChromeShellTestBase {
     /**
      * Test that changing orientation hides the menu.
      */
+    /*
     @SmallTest
     @Feature({"Browser", "Main"})
+    crbug.com/458193
+    */
+    @DisabledTest
     public void testChangingOrientationHidesMenu() throws InterruptedException {
         getActivity().setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE);
         showAppMenuAndAssertMenuShown();

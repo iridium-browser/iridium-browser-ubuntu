@@ -7,8 +7,8 @@
 #include "base/bind.h"
 #include "base/i18n/rtl.h"
 #include "base/task/cancelable_task_tracker.h"
-#include "chrome/browser/favicon/favicon_service.h"
 #include "chrome/grit/generated_resources.h"
+#include "components/favicon/core/favicon_service.h"
 #include "components/favicon_base/favicon_types.h"
 #include "components/search_engines/template_url.h"
 #include "components/search_engines/template_url_service.h"
@@ -115,7 +115,7 @@ class TemplateURLTableModel::ModelEntry {
 
 TemplateURLTableModel::TemplateURLTableModel(
     TemplateURLService* template_url_service,
-    FaviconService* favicon_service)
+    favicon::FaviconService* favicon_service)
     : observer_(NULL),
       template_url_service_(template_url_service),
       favicon_service_(favicon_service) {

@@ -18,7 +18,7 @@ public:
     }
 
 protected:
-    virtual SkString onShortName() SK_OVERRIDE {
+    SkString onShortName() override {
         return SkString("pictureimagefilter");
     }
 
@@ -36,9 +36,9 @@ protected:
         fPicture.reset(recorder.endRecording());
     }
 
-    virtual SkISize onISize() SK_OVERRIDE { return SkISize::Make(600, 300); }
+    SkISize onISize() override { return SkISize::Make(600, 300); }
 
-    virtual void onOnceBeforeDraw() SK_OVERRIDE {
+    void onOnceBeforeDraw() override {
         this->makePicture();
     }
 
@@ -51,7 +51,7 @@ protected:
         canvas->restore();
     }
 
-    virtual void onDraw(SkCanvas* canvas) SK_OVERRIDE {
+    void onDraw(SkCanvas* canvas) override {
         canvas->clear(0x00000000);
         {
             SkRect srcRect = SkRect::MakeXYWH(20, 20, 30, 30);
@@ -65,10 +65,10 @@ protected:
                 SkPictureImageFilter::Create(fPicture, emptyRect));
             SkAutoTUnref<SkPictureImageFilter> pictureSourceResampled(
                 SkPictureImageFilter::CreateForLocalSpace(fPicture, fPicture->cullRect(),
-                    SkPaint::kLow_FilterLevel));
+                    kLow_SkFilterQuality));
             SkAutoTUnref<SkPictureImageFilter> pictureSourcePixelated(
                 SkPictureImageFilter::CreateForLocalSpace(fPicture, fPicture->cullRect(),
-                    SkPaint::kNone_FilterLevel));
+                    kNone_SkFilterQuality));
 
             canvas->save();
             // Draw the picture unscaled.
@@ -99,15 +99,6 @@ protected:
             canvas->translate(srcRect.width(), 0);
             fillRectFiltered(canvas, srcRect, pictureSourcePixelated);
         }
-    }
-
-    // SkPictureImageFilter doesn't support serialization yet.
-    uint32_t onGetFlags() const SK_OVERRIDE {
-        return kSkipPicture_Flag            |
-               kSkipPipe_Flag               |
-               kSkipPipeCrossProcess_Flag   |
-               kSkipTiled_Flag              |
-               kSkipScaledReplay_Flag;
     }
 
 private:

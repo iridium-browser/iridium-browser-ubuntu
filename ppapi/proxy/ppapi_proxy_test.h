@@ -10,6 +10,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop/message_loop.h"
 #include "base/synchronization/waitable_event.h"
+#include "base/task_runner.h"
 #include "base/threading/simple_thread.h"
 #include "base/threading/thread.h"
 #include "ppapi/c/pp_instance.h"
@@ -20,6 +21,7 @@
 #include "ppapi/proxy/plugin_resource_tracker.h"
 #include "ppapi/proxy/plugin_var_tracker.h"
 #include "ppapi/proxy/resource_message_test_sink.h"
+#include "ppapi/shared_impl/proxy_lock.h"
 #include "ppapi/shared_impl/test_globals.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
@@ -164,7 +166,8 @@ class PluginProxyTestHarness : public ProxyTestHarnessBase {
   };
 
  private:
-  void CreatePluginGlobals();
+  void CreatePluginGlobals(
+      const scoped_refptr<base::TaskRunner>& ipc_task_runner);
 
   GlobalsConfiguration globals_config_;
   scoped_ptr<PluginGlobals> plugin_globals_;
@@ -290,6 +293,9 @@ class HostProxyTestHarness : public ProxyTestHarnessBase {
   GlobalsConfiguration globals_config_;
   scoped_ptr<ppapi::TestGlobals> host_globals_;
   scoped_ptr<HostDispatcher> host_dispatcher_;
+  // The host side of the real proxy doesn't lock, so this disables locking for
+  // the thread the host side of the test runs on.
+  scoped_ptr<ProxyLock::LockingDisablerForTest> disable_locking_;
   DelegateMock delegate_mock_;
 };
 

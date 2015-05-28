@@ -35,19 +35,19 @@ namespace blink {
 class SpeechRecognitionResult final : public GarbageCollected<SpeechRecognitionResult>, public ScriptWrappable {
     DEFINE_WRAPPERTYPEINFO();
 public:
-    static SpeechRecognitionResult* create(const HeapVector<Member<SpeechRecognitionAlternative> >&, bool final);
+    static SpeechRecognitionResult* create(const HeapVector<Member<SpeechRecognitionAlternative>>&, bool final);
 
     unsigned length() { return m_alternatives.size(); }
     SpeechRecognitionAlternative* item(unsigned index);
     bool isFinal() { return m_final; }
 
-    void trace(Visitor*);
+    DECLARE_TRACE();
 
 private:
-    SpeechRecognitionResult(const HeapVector<Member<SpeechRecognitionAlternative> >&, bool final);
+    SpeechRecognitionResult(const HeapVector<Member<SpeechRecognitionAlternative>>&, bool final);
 
     bool m_final;
-    HeapVector<Member<SpeechRecognitionAlternative> > m_alternatives;
+    HeapVector<Member<SpeechRecognitionAlternative>> m_alternatives;
 };
 
 } // namespace blink

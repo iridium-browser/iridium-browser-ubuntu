@@ -14,13 +14,14 @@ namespace blink {
 class GraphicsContext;
 
 class PLATFORM_EXPORT ClipRecorder {
-    WTF_MAKE_FAST_ALLOCATED;
+    WTF_MAKE_FAST_ALLOCATED(ClipRecorder);
 public:
-    ClipRecorder(DisplayItemClient, GraphicsContext*, DisplayItem::Type, const LayoutRect& clipRect, SkRegion::Op = SkRegion::kIntersect_Op);
+    ClipRecorder(GraphicsContext&, const DisplayItemClientWrapper&, DisplayItem::Type, const LayoutRect& clipRect, SkRegion::Op = SkRegion::kIntersect_Op);
     ~ClipRecorder();
 private:
-    DisplayItemClient m_client;
-    GraphicsContext* m_context;
+    DisplayItemClientWrapper m_client;
+    GraphicsContext& m_context;
+    DisplayItem::Type m_type;
 };
 
 } // namespace blink

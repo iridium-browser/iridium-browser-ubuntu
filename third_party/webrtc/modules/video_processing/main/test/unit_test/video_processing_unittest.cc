@@ -91,8 +91,6 @@ TEST_F(VideoProcessingModuleTest, HandleNullBuffer) {
   VideoProcessingModule::FrameStats stats;
   // Video frame with unallocated buffer.
   I420VideoFrame videoFrame;
-  videoFrame.set_width(width_);
-  videoFrame.set_height(height_);
 
   EXPECT_EQ(-3, vpm_->GetFrameStats(&stats, videoFrame));
 
@@ -105,49 +103,26 @@ TEST_F(VideoProcessingModuleTest, HandleNullBuffer) {
 
 TEST_F(VideoProcessingModuleTest, HandleBadStats) {
   VideoProcessingModule::FrameStats stats;
-  scoped_ptr<uint8_t[]> video_buffer(new uint8_t[frame_length_]);
+  rtc::scoped_ptr<uint8_t[]> video_buffer(new uint8_t[frame_length_]);
   ASSERT_EQ(frame_length_, fread(video_buffer.get(), 1, frame_length_,
                                  source_file_));
-  EXPECT_EQ(0, ConvertToI420(kI420, video_buffer.get(), 0, 0,
-                             width_, height_,
-                             0, kRotateNone, &video_frame_));
+  EXPECT_EQ(0, ConvertToI420(kI420, video_buffer.get(), 0, 0, width_, height_,
+                             0, kVideoRotation_0, &video_frame_));
 
   EXPECT_EQ(-1, vpm_->Deflickering(&video_frame_, &stats));
 
   EXPECT_EQ(-3, vpm_->BrightnessDetection(video_frame_, stats));
-}
-
-TEST_F(VideoProcessingModuleTest, HandleBadSize) {
-  VideoProcessingModule::FrameStats stats;
-
-  video_frame_.ResetSize();
-  video_frame_.set_width(width_);
-  video_frame_.set_height(0);
-  EXPECT_EQ(-3, vpm_->GetFrameStats(&stats, video_frame_));
-
-  EXPECT_EQ(-1, vpm_->ColorEnhancement(&video_frame_));
-
-  EXPECT_EQ(-1, vpm_->Deflickering(&video_frame_, &stats));
-
-  EXPECT_EQ(-3, vpm_->BrightnessDetection(video_frame_, stats));
-
-  EXPECT_EQ(VPM_PARAMETER_ERROR, vpm_->SetTargetResolution(0,0,0));
-
-  I420VideoFrame *out_frame = NULL;
-  EXPECT_EQ(VPM_PARAMETER_ERROR, vpm_->PreprocessFrame(video_frame_,
-                                                       &out_frame));
 }
 
 TEST_F(VideoProcessingModuleTest, IdenticalResultsAfterReset) {
   I420VideoFrame video_frame2;
   VideoProcessingModule::FrameStats stats;
   // Only testing non-static functions here.
-  scoped_ptr<uint8_t[]> video_buffer(new uint8_t[frame_length_]);
+  rtc::scoped_ptr<uint8_t[]> video_buffer(new uint8_t[frame_length_]);
   ASSERT_EQ(frame_length_, fread(video_buffer.get(), 1, frame_length_,
                                 source_file_));
-  EXPECT_EQ(0, ConvertToI420(kI420, video_buffer.get(), 0, 0,
-                             width_, height_,
-                             0, kRotateNone, &video_frame_));
+  EXPECT_EQ(0, ConvertToI420(kI420, video_buffer.get(), 0, 0, width_, height_,
+                             0, kVideoRotation_0, &video_frame_));
   ASSERT_EQ(0, vpm_->GetFrameStats(&stats, video_frame_));
   ASSERT_EQ(0, video_frame2.CopyFrame(video_frame_));
   ASSERT_EQ(0, vpm_->Deflickering(&video_frame_, &stats));
@@ -159,9 +134,8 @@ TEST_F(VideoProcessingModuleTest, IdenticalResultsAfterReset) {
 
   ASSERT_EQ(frame_length_, fread(video_buffer.get(), 1, frame_length_,
                                  source_file_));
-  EXPECT_EQ(0, ConvertToI420(kI420, video_buffer.get(), 0, 0,
-                             width_, height_,
-                             0, kRotateNone, &video_frame_));
+  EXPECT_EQ(0, ConvertToI420(kI420, video_buffer.get(), 0, 0, width_, height_,
+                             0, kVideoRotation_0, &video_frame_));
   ASSERT_EQ(0, vpm_->GetFrameStats(&stats, video_frame_));
   video_frame2.CopyFrame(video_frame_);
   ASSERT_EQ(0, vpm_->BrightnessDetection(video_frame_, stats));
@@ -172,12 +146,11 @@ TEST_F(VideoProcessingModuleTest, IdenticalResultsAfterReset) {
 
 TEST_F(VideoProcessingModuleTest, FrameStats) {
   VideoProcessingModule::FrameStats stats;
-  scoped_ptr<uint8_t[]> video_buffer(new uint8_t[frame_length_]);
+  rtc::scoped_ptr<uint8_t[]> video_buffer(new uint8_t[frame_length_]);
   ASSERT_EQ(frame_length_, fread(video_buffer.get(), 1, frame_length_,
                                  source_file_));
-  EXPECT_EQ(0, ConvertToI420(kI420, video_buffer.get(), 0, 0,
-                             width_, height_,
-                             0, kRotateNone, &video_frame_));
+  EXPECT_EQ(0, ConvertToI420(kI420, video_buffer.get(), 0, 0, width_, height_,
+                             0, kVideoRotation_0, &video_frame_));
 
   EXPECT_FALSE(vpm_->ValidFrameStats(stats));
   EXPECT_EQ(0, vpm_->GetFrameStats(&stats, video_frame_));
@@ -232,13 +205,12 @@ TEST_F(VideoProcessingModuleTest, Resampler) {
   vpm_->EnableTemporalDecimation(false);
 
   // Reading test frame
-  scoped_ptr<uint8_t[]> video_buffer(new uint8_t[frame_length_]);
+  rtc::scoped_ptr<uint8_t[]> video_buffer(new uint8_t[frame_length_]);
   ASSERT_EQ(frame_length_, fread(video_buffer.get(), 1, frame_length_,
                                  source_file_));
   // Using ConvertToI420 to add stride to the image.
-  EXPECT_EQ(0, ConvertToI420(kI420, video_buffer.get(), 0, 0,
-                             width_, height_,
-                             0, kRotateNone, &video_frame_));
+  EXPECT_EQ(0, ConvertToI420(kI420, video_buffer.get(), 0, 0, width_, height_,
+                             0, kVideoRotation_0, &video_frame_));
   // Cropped source frame that will contain the expected visible region.
   I420VideoFrame cropped_source_frame;
   cropped_source_frame.CopyFrame(video_frame_);
@@ -335,11 +307,12 @@ void CropFrame(const uint8_t* source_data,
                int cropped_width,
                int cropped_height,
                I420VideoFrame* cropped_frame) {
-  cropped_frame->set_width(cropped_width);
-  cropped_frame->set_height(cropped_height);
+  cropped_frame->CreateEmptyFrame(cropped_width, cropped_height, cropped_width,
+                                  (cropped_width + 1) / 2,
+                                  (cropped_width + 1) / 2);
   EXPECT_EQ(0,
             ConvertToI420(kI420, source_data, offset_x, offset_y, source_width,
-                          source_height, 0, kRotateNone, cropped_frame));
+                          source_height, 0, kVideoRotation_0, cropped_frame));
 }
 
 void TestSize(const I420VideoFrame& source_frame,

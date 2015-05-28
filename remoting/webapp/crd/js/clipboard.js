@@ -27,22 +27,13 @@ remoting.Clipboard.prototype.ItemTypes = {
   TEXT_UTF8_TYPE: 'text/plain; charset=UTF-8'
 };
 
-/**
- * @private
- * @type {string}
- */
+/** @private {string} */
 remoting.Clipboard.prototype.previousContent = "";
 
-/**
- * @private
- * @type {boolean}
- */
+/** @private {boolean} */
 remoting.Clipboard.prototype.itemFromHostTextPending = false;
 
-/**
- * @private
- * @type {boolean}
- */
+/** @private {boolean} */
 remoting.Clipboard.prototype.blockOneClipboardSend_ = false;
 
 /**
@@ -70,7 +61,7 @@ remoting.Clipboard.prototype.startSession = function() {
  *
  * Currently only text items are supported.
  *
- * @param {remoting.ClipboardData} clipboardData
+ * @param {ClipboardData} clipboardData
  * @return {void} Nothing.
  */
 remoting.Clipboard.prototype.toHost = function(clipboardData) {
@@ -137,7 +128,7 @@ remoting.Clipboard.prototype.fromHost = function(mimeType, item) {
 /**
  * Moves any pending clipboard items to a ClipboardData object.
  *
- * @param {remoting.ClipboardData} clipboardData
+ * @param {ClipboardData} clipboardData
  * @return {boolean} Whether any clipboard items were moved to the ClipboardData
  *     object.
  */

@@ -59,10 +59,8 @@ static bool webp_parse_header(SkStream* stream, int* width, int* height, int* al
         unsigned char* dst = buffer + totalBytesRead;
         const size_t bytesRead = stream->read(dst, bytesToRead);
         if (0 == bytesRead) {
-            // Could not read any bytes. Check to see if we are at the end (exit
-            // condition), and continue reading if not. Important for streams
-            // that do not have all the data ready.
-            continue;
+            SkASSERT(stream->isAtEnd());
+            break;
         }
         bytesToRead -= bytesRead;
         totalBytesRead += bytesRead;
@@ -95,23 +93,19 @@ static bool webp_parse_header(SkStream* stream, int* width, int* height, int* al
 class SkWEBPImageDecoder: public SkImageDecoder {
 public:
     SkWEBPImageDecoder() {
-        fInputStream = NULL;
         fOrigWidth = 0;
         fOrigHeight = 0;
         fHasAlpha = 0;
     }
-    virtual ~SkWEBPImageDecoder() {
-        SkSafeUnref(fInputStream);
-    }
 
-    virtual Format getFormat() const SK_OVERRIDE {
+    Format getFormat() const override {
         return kWEBP_Format;
     }
 
 protected:
-    virtual bool onBuildTileIndex(SkStreamRewindable *stream, int *width, int *height) SK_OVERRIDE;
-    virtual bool onDecodeSubset(SkBitmap* bitmap, const SkIRect& rect) SK_OVERRIDE;
-    virtual Result onDecode(SkStream* stream, SkBitmap* bm, Mode) SK_OVERRIDE;
+    bool onBuildTileIndex(SkStreamRewindable *stream, int *width, int *height) override;
+    bool onDecodeSubset(SkBitmap* bitmap, const SkIRect& rect) override;
+    Result onDecode(SkStream* stream, SkBitmap* bm, Mode) override;
 
 private:
     /**
@@ -125,7 +119,7 @@ private:
 
     bool setDecodeConfig(SkBitmap* decodedBitmap, int width, int height);
 
-    SkStream* fInputStream;
+    SkAutoTDelete<SkStream> fInputStream;
     int fOrigWidth;
     int fOrigHeight;
     int fHasAlpha;
@@ -316,6 +310,7 @@ bool SkWEBPImageDecoder::setDecodeConfig(SkBitmap* decodedBitmap, int width, int
 
 bool SkWEBPImageDecoder::onBuildTileIndex(SkStreamRewindable* stream,
                                           int *width, int *height) {
+    SkAutoTDelete<SkStreamRewindable> streamDeleter(stream);
     int origWidth, origHeight, hasAlpha;
     if (!webp_parse_header(stream, &origWidth, &origHeight, &hasAlpha)) {
         return false;
@@ -329,7 +324,7 @@ bool SkWEBPImageDecoder::onBuildTileIndex(SkStreamRewindable* stream,
     *width = origWidth;
     *height = origHeight;
 
-    SkRefCnt_SafeAssign(this->fInputStream, stream);
+    this->fInputStream.reset(streamDeleter.detach());
     this->fOrigWidth = origWidth;
     this->fOrigHeight = origHeight;
     this->fHasAlpha = hasAlpha;
@@ -588,7 +583,7 @@ static int stream_writer(const uint8_t* data, size_t data_size,
 
 class SkWEBPImageEncoder : public SkImageEncoder {
 protected:
-    virtual bool onEncode(SkWStream* stream, const SkBitmap& bm, int quality) SK_OVERRIDE;
+    bool onEncode(SkWStream* stream, const SkBitmap& bm, int quality) override;
 
 private:
     typedef SkImageEncoder INHERITED;

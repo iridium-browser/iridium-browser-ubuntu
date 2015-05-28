@@ -15,8 +15,6 @@
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/history/chrome_history_client.h"
 #include "chrome/browser/history/chrome_history_client_factory.h"
-#include "chrome/browser/history/download_row.h"
-#include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/history/web_history_service_factory.h"
 #include "chrome/browser/prefs/browser_prefs.h"
@@ -28,7 +26,14 @@
 #include "chrome/test/base/testing_pref_service_syncable.h"
 #include "chrome/test/base/testing_profile.h"
 #include "chrome/test/base/testing_profile_manager.h"
+#include "components/history/content/browser/content_visit_delegate.h"
+#include "components/history/content/browser/download_constants_utils.h"
+#include "components/history/content/browser/history_database_helper.h"
+#include "components/history/core/browser/download_constants.h"
+#include "components/history/core/browser/download_row.h"
 #include "components/history/core/browser/history_constants.h"
+#include "components/history/core/browser/history_database_params.h"
+#include "components/history/core/browser/history_service.h"
 #include "content/public/test/test_browser_thread_bundle.h"
 #include "content/public/test/test_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
@@ -50,10 +55,14 @@ KeyedService* BuildHistoryService(content::BrowserContext* context) {
     return NULL;
   }
 
-  HistoryService* history_service = new HistoryService(
-      ChromeHistoryClientFactory::GetForProfile(profile), profile);
-  if (history_service->Init(profile->GetPath()))
+  history::HistoryService* history_service = new history::HistoryService(
+      ChromeHistoryClientFactory::GetForProfile(profile),
+      scoped_ptr<history::VisitDelegate>());
+  if (history_service->Init(
+          profile->GetPrefs()->GetString(prefs::kAcceptLanguages),
+          history::HistoryDatabaseParamsForPath(profile->GetPath()))) {
     return history_service;
+  }
 
   ADD_FAILURE() << "failed to initialize history service";
   delete history_service;
@@ -74,8 +83,9 @@ class LastDownloadFinderTest : public testing::Test {
   // download to its history.
   void CreateProfileWithDownload() {
     TestingProfile* profile = CreateProfile(SAFE_BROWSING_OPT_IN);
-    HistoryService* history_service =
-        HistoryServiceFactory::GetForProfile(profile, Profile::EXPLICIT_ACCESS);
+    history::HistoryService* history_service =
+        HistoryServiceFactory::GetForProfile(
+            profile, ServiceAccessType::EXPLICIT_ACCESS);
     history_service->CreateDownload(
         CreateTestDownloadRow(),
         base::Bind(&LastDownloadFinderTest::OnDownloadCreated,
@@ -162,8 +172,9 @@ class LastDownloadFinderTest : public testing::Test {
   void AddDownload(Profile* profile, const history::DownloadRow& download) {
     base::RunLoop run_loop;
 
-    HistoryService* history_service =
-        HistoryServiceFactory::GetForProfile(profile, Profile::EXPLICIT_ACCESS);
+    history::HistoryService* history_service =
+        HistoryServiceFactory::GetForProfile(
+            profile, ServiceAccessType::EXPLICIT_ACCESS);
     history_service->CreateDownload(
         download,
         base::Bind(&LastDownloadFinderTest::ContinueOnDownloadCreated,
@@ -183,7 +194,8 @@ class LastDownloadFinderTest : public testing::Test {
   // dtor must be run.
   void FlushHistoryBackend(Profile* profile) {
     base::RunLoop run_loop;
-    HistoryServiceFactory::GetForProfile(profile, Profile::EXPLICIT_ACCESS)
+    HistoryServiceFactory::GetForProfile(profile,
+                                         ServiceAccessType::EXPLICIT_ACCESS)
         ->FlushForTest(run_loop.QuitClosure());
     run_loop.Run();
     // Then make sure anything bounced back to the main thread has been handled.
@@ -218,20 +230,21 @@ class LastDownloadFinderTest : public testing::Test {
         std::vector<GURL>(1, GURL("http://www.google.com")),  // url_chain
         GURL(),                                               // referrer
         "application/octet-stream",                           // mime_type
-        "application/octet-stream",                   // original_mime_type
-        now - base::TimeDelta::FromMinutes(10),       // start
-        now - base::TimeDelta::FromMinutes(9),        // end
-        std::string(),                                // etag
-        std::string(),                                // last_modified
-        47LL,                                         // received
-        47LL,                                         // total
-        content::DownloadItem::COMPLETE,              // download_state
-        content::DOWNLOAD_DANGER_TYPE_NOT_DANGEROUS,  // danger_type
-        content::DOWNLOAD_INTERRUPT_REASON_NONE,      // interrupt_reason,
-        1,                                            // id
-        false,                                        // download_opened
-        std::string(),                                // ext_id
-        std::string());                               // ext_name
+        "application/octet-stream",                  // original_mime_type
+        now - base::TimeDelta::FromMinutes(10),      // start
+        now - base::TimeDelta::FromMinutes(9),       // end
+        std::string(),                               // etag
+        std::string(),                               // last_modified
+        47LL,                                        // received
+        47LL,                                        // total
+        history::DownloadState::COMPLETE,            // download_state
+        history::DownloadDangerType::NOT_DANGEROUS,  // danger_type
+        history::ToHistoryDownloadInterruptReason(
+            content::DOWNLOAD_INTERRUPT_REASON_NONE),  // interrupt_reason,
+        1,                                             // id
+        false,                                         // download_opened
+        std::string(),                                 // ext_id
+        std::string());                                // ext_name
   }
 
   void ExpectNoDownloadFound(

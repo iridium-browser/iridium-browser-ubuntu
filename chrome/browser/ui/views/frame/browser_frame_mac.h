@@ -20,8 +20,13 @@ class BrowserFrameMac : public views::NativeWidgetMac,
  public:
   BrowserFrameMac(BrowserFrame* browser_frame, BrowserView* browser_view);
 
+  // Overridden from views::NativeWidgetMac:
+  void OnWindowWillClose() override;
+  void InitNativeWidget(const views::Widget::InitParams& params) override;
+
   // Overridden from NativeBrowserFrame:
   views::Widget::InitParams GetWidgetParams() override;
+  bool UseCustomFrame() const override;
   bool UsesNativeSystemMenu() const override;
   bool ShouldSaveWindowPlacement() const override;
   void GetWindowPlacement(gfx::Rect* bounds,
@@ -30,10 +35,16 @@ class BrowserFrameMac : public views::NativeWidgetMac,
  protected:
   ~BrowserFrameMac() override;
 
+  // Overridden from views::NativeWidgetMac:
+  gfx::NativeWindow CreateNSWindow(
+      const views::Widget::InitParams& params) override;
+
   // Overridden from NativeBrowserFrame:
   int GetMinimizeButtonOffset() const override;
 
  private:
+  BrowserView* browser_view_;  // Weak. Our ClientView.
+
   DISALLOW_COPY_AND_ASSIGN(BrowserFrameMac);
 };
 

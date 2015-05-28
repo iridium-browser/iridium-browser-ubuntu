@@ -21,23 +21,29 @@
 #include <cstdint>
 #include <memory>
 
-#include "shared_utils.h"
+#include "common/angleutils.h"
 
 class OSWindow;
+
+// A hidden define used in some renderers (currently D3D-only)
+// to init a no-op renderer. Useful for performance testing.
+#ifndef EGL_PLATFORM_ANGLE_DEVICE_TYPE_NULL_ANGLE
+#define EGL_PLATFORM_ANGLE_DEVICE_TYPE_NULL_ANGLE 0x6AC0
+#endif
 
 struct EGLPlatformParameters
 {
     EGLint renderer;
     EGLint majorVersion;
     EGLint minorVersion;
-    EGLint useWarp;
+    EGLint deviceType;
 
     EGLPlatformParameters();
     explicit EGLPlatformParameters(EGLint renderer);
-    EGLPlatformParameters(EGLint renderer, EGLint majorVersion, EGLint minorVersion, EGLint useWarp);
+    EGLPlatformParameters(EGLint renderer, EGLint majorVersion, EGLint minorVersion, EGLint deviceType);
 };
 
-class EGLWindow
+class EGLWindow : angle::NonCopyable
 {
   public:
     EGLWindow(size_t width, size_t height, EGLint glesMajorVersion, const EGLPlatformParameters &platform);
@@ -79,8 +85,6 @@ class EGLWindow
     void destroyGL();
 
   private:
-    DISALLOW_COPY_AND_ASSIGN(EGLWindow);
-
     EGLConfig mConfig;
     EGLDisplay mDisplay;
     EGLSurface mSurface;

@@ -44,8 +44,11 @@ function VolumeInfo(
   this.fileSystem_ = fileSystem;
   this.label_ = label;
   this.displayRoot_ = null;
+
+  /** @type {Object.<string, !FakeEntry>} */
   this.fakeEntries_ = {};
-  this.displayRoot_ = null;
+
+  /** @type {Promise.<!DirectoryEntry>} */
   this.displayRootPromise_ = null;
 
   if (volumeType === VolumeManagerCommon.VolumeType.DRIVE) {
@@ -106,7 +109,7 @@ VolumeInfo.prototype = /** @struct */ {
     return this.displayRoot_;
   },
   /**
-   * @return {Object.<string, Object>} Fake entries.
+   * @return {Object.<string, !FakeEntry>} Fake entries.
    */
   get fakeEntries() {
     return this.fakeEntries_;
@@ -165,10 +168,10 @@ VolumeInfo.prototype = /** @struct */ {
  * Starts resolving the display root and obtains it.  It may take long time for
  * Drive. Once resolved, it is cached.
  *
- * @param {function(DirectoryEntry)=} opt_onSuccess Success callback with the
+ * @param {function(!DirectoryEntry)=} opt_onSuccess Success callback with the
  *     display root directory as an argument.
  * @param {function(*)=} opt_onFailure Failure callback.
- * @return {Promise}
+ * @return {Promise.<!DirectoryEntry>}
  */
 VolumeInfo.prototype.resolveDisplayRoot = function(opt_onSuccess,
                                                    opt_onFailure) {
@@ -177,9 +180,11 @@ VolumeInfo.prototype.resolveDisplayRoot = function(opt_onSuccess,
     // remove this if logic. Call opt_onSuccess() always, instead.
     if (this.volumeType !== VolumeManagerCommon.VolumeType.DRIVE) {
       if (this.fileSystem_)
-        this.displayRootPromise_ = Promise.resolve(this.fileSystem_.root);
+        this.displayRootPromise_ = /** @type {Promise.<!DirectoryEntry>} */ (
+            Promise.resolve(this.fileSystem_.root));
       else
-        this.displayRootPromise_ = Promise.reject(this.error);
+        this.displayRootPromise_ = /** @type {Promise.<!DirectoryEntry>} */ (
+            Promise.reject(this.error));
     } else {
       // For Drive, we need to resolve.
       var displayRootURL = this.fileSystem_.root.toURL() + '/root';
@@ -220,9 +225,9 @@ volumeManagerUtil.validateError = function(error) {
 /**
  * Builds the VolumeInfo data from VolumeMetadata.
  * @param {VolumeMetadata} volumeMetadata Metadata instance for the volume.
- * @param {function(VolumeInfo)} callback Called on completion.
+ * @return {!Promise.<VolumeInfo>} Promise settled with the VolumeInfo instance.
  */
-volumeManagerUtil.createVolumeInfo = function(volumeMetadata, callback) {
+volumeManagerUtil.createVolumeInfo = function(volumeMetadata) {
   var localizedLabel;
   switch (volumeMetadata.volumeType) {
     case VolumeManagerCommon.VolumeType.DOWNLOADS:
@@ -240,57 +245,98 @@ volumeManagerUtil.createVolumeInfo = function(volumeMetadata, callback) {
   }
 
   console.debug('Requesting file system.');
-  chrome.fileManagerPrivate.requestFileSystem(
-      volumeMetadata.volumeId,
-      function(fileSystem) {
-        // TODO(mtomasz): chrome.runtime.lastError should have error reason.
-        if (!fileSystem) {
-          console.error('File system not found: ' + volumeMetadata.volumeId);
-          callback(new VolumeInfo(
-              /** @type {VolumeManagerCommon.VolumeType} */
-              (volumeMetadata.volumeType),
-              volumeMetadata.volumeId,
-              null,  // File system is not found.
-              volumeMetadata.mountCondition,
-              volumeMetadata.deviceType,
-              volumeMetadata.devicePath,
-              volumeMetadata.isReadOnly,
-              volumeMetadata.profile,
-              localizedLabel,
-              volumeMetadata.extensionId,
-              volumeMetadata.hasMedia));
-          return;
-        }
-
-        console.debug('File system obtained: ' + volumeMetadata.volumeId);
-        if (volumeMetadata.volumeType ==
-            VolumeManagerCommon.VolumeType.DRIVE) {
-          // After file system is mounted, we "read" drive grand root
-          // entry at first. This triggers full feed fetch on background.
-          // Note: we don't need to handle errors here, because even if
-          // it fails, accessing to some path later will just become
-          // a fast-fetch and it re-triggers full-feed fetch.
-          fileSystem.root.createReader().readEntries(
-              function() { /* do nothing */ },
-              function(error) {
-                console.error(
-                    'Triggering full feed fetch is failed: ' + error.name);
+  return new Promise(
+      function(resolve, reject) {
+        chrome.fileSystem.requestFileSystem(
+            {
+              volumeId: volumeMetadata.volumeId,
+              writable: !volumeMetadata.isReadOnly
+            },
+            function(isolatedFileSystem) {
+              if (chrome.runtime.lastError)
+                reject(chrome.runtime.lastError.message);
+              else
+                resolve(isolatedFileSystem);
+            });
+      })
+      .then(
+          /**
+           * @param {!FileSystem} isolatedFileSystem
+           */
+          function(isolatedFileSystem) {
+            // Since File System API works on isolated entries only, we need to
+            // convert it back to external one.
+            // TODO(mtomasz): Make Files app work on isolated entries.
+            return new Promise(function(resolve, reject) {
+              chrome.fileManagerPrivate.resolveIsolatedEntries(
+                  [isolatedFileSystem.root],
+                  function(entries) {
+                    if (chrome.runtime.lastError)
+                      reject(chrome.runtime.lastError.message);
+                    else if (!entries[0])
+                      reject('Resolving for external context failed.');
+                    else
+                      resolve(entries[0].filesystem);
+                  });
               });
-        }
-        callback(new VolumeInfo(
-            /** @type {VolumeManagerCommon.VolumeType} */
-            (volumeMetadata.volumeType),
-            volumeMetadata.volumeId,
-            fileSystem,
-            volumeMetadata.mountCondition,
-            volumeMetadata.deviceType,
-            volumeMetadata.devicePath,
-            volumeMetadata.isReadOnly,
-            volumeMetadata.profile,
-            localizedLabel,
-            volumeMetadata.extensionId,
-            volumeMetadata.hasMedia));
-      });
+           })
+      .then(
+          /**
+           * @param {!FileSystem} fileSystem
+           */
+          function(fileSystem) {
+            console.debug('File system obtained: ' + volumeMetadata.volumeId);
+              if (volumeMetadata.volumeType ===
+                  VolumeManagerCommon.VolumeType.DRIVE) {
+                // After file system is mounted, we "read" drive grand root
+                // entry at first. This triggers full feed fetch on background.
+                // Note: we don't need to handle errors here, because even if
+                // it fails, accessing to some path later will just become
+                // a fast-fetch and it re-triggers full-feed fetch.
+                fileSystem.root.createReader().readEntries(
+                    function() { /* do nothing */ },
+                    function(error) {
+                      console.error(
+                          'Triggering full feed fetch is failed: ' +
+                          error.name);
+                    });
+              }
+              return new VolumeInfo(
+                  /** @type {VolumeManagerCommon.VolumeType} */
+                  (volumeMetadata.volumeType),
+                  volumeMetadata.volumeId,
+                  fileSystem,
+                  volumeMetadata.mountCondition,
+                  volumeMetadata.deviceType,
+                  volumeMetadata.devicePath,
+                  volumeMetadata.isReadOnly,
+                  volumeMetadata.profile,
+                  localizedLabel,
+                  volumeMetadata.extensionId,
+                  volumeMetadata.hasMedia);
+      })
+      .catch(
+          /**
+           * @param {*} error
+           */
+          function(error) {
+            console.error('Failed to mount a file system: ' +
+                volumeMetadata.volumeId + ' because of: ' +
+                (error.stack || error));
+            return new VolumeInfo(
+                /** @type {VolumeManagerCommon.VolumeType} */
+                (volumeMetadata.volumeType),
+                volumeMetadata.volumeId,
+                null,  // File system is not found.
+                volumeMetadata.mountCondition,
+                volumeMetadata.deviceType,
+                volumeMetadata.devicePath,
+                volumeMetadata.isReadOnly,
+                volumeMetadata.profile,
+                localizedLabel,
+                volumeMetadata.extensionId,
+                volumeMetadata.hasMedia);
+          });
 };
 
 /**
@@ -414,7 +460,7 @@ VolumeInfoList.prototype.findIndex = function(volumeId) {
 
 /**
  * Searches the information of the volume that contains the passed entry.
- * @param {Entry|Object} entry Entry on the volume to be found.
+ * @param {!Entry|!FakeEntry} entry Entry on the volume to be found.
  * @return {VolumeInfo} The volume's information, or null if not found.
  */
 VolumeInfoList.prototype.findByEntry = function(entry) {
@@ -448,6 +494,42 @@ VolumeInfoList.prototype.findByDevicePath = function(devicePath) {
     }
   }
   return null;
+};
+
+/**
+ * Returns a VolumInfo for the volume ID, or null if not found.
+ *
+ * @param {string} volumeId
+ * @return {VolumeInfo} The volume's information, or null if not found.
+ * @private
+ */
+VolumeInfoList.prototype.findByVolumeId_ = function(volumeId) {
+  var index = this.findIndex(volumeId);
+  return (index !== -1) ?
+      /** @type {VolumeInfo} */ (this.model_.item(index)) :
+      null;
+};
+
+/**
+ * Returns a promise that will be resolved when volume info, identified
+ * by {@code volumeId} is created.
+ *
+ * @param {string} volumeId
+ * @return {!Promise.<!VolumeInfo>} The VolumeInfo. Will not resolve
+ *     if the volume is never mounted.
+ */
+VolumeInfoList.prototype.whenVolumeInfoReady = function(volumeId) {
+  return new Promise(function(fulfill) {
+    var handler = function() {
+      var info = this.findByVolumeId_(volumeId);
+      if (info) {
+        fulfill(info);
+        this.model_.removeEventListener('splice', handler);
+      }
+    }.bind(this);
+    this.model_.addEventListener('splice', handler);
+    handler();
+  }.bind(this));
 };
 
 /**
@@ -586,7 +668,37 @@ VolumeManager.getInstance = function(opt_callback) {
 VolumeManager.revokeInstanceForTesting = function() {
   VolumeManager.instancePromise_ = null;
   VolumeManager.instance_ = null;
-}
+};
+
+/**
+ * Adds new volume info from the given volumeMetadata. If the corresponding
+ * volume info has already been added, the volumeMetadata is ignored.
+ * @param {!VolumeMetadata} volumeMetadata
+ * @return {!Promise<!VolumeInfo>}
+ * @private
+ */
+VolumeManager.prototype.addVolumeMetadata_ = function(volumeMetadata) {
+  return volumeManagerUtil.createVolumeInfo(volumeMetadata).then(
+      /**
+       * @param {!VolumeInfo} volumeInfo
+       * @return {!VolumeInfo}
+       */
+      function(volumeInfo) {
+        if (this.volumeInfoList.findIndex(volumeInfo.volumeId) === -1) {
+          this.volumeInfoList.add(volumeInfo);
+
+          // Update the network connection status, because until the drive is
+          // initialized, the status is set to not ready.
+          // TODO(mtomasz): The connection status should be migrated into
+          // VolumeMetadata.
+          if (volumeMetadata.volumeType ===
+              VolumeManagerCommon.VolumeType.DRIVE) {
+            this.onDriveConnectionStatusChanged_();
+          }
+        }
+        return volumeInfo;
+      }.bind(this));
+};
 
 /**
  * Initializes mount points.
@@ -595,6 +707,8 @@ VolumeManager.revokeInstanceForTesting = function() {
  * @private
  */
 VolumeManager.prototype.initialize_ = function(callback) {
+  chrome.fileManagerPrivate.onMountCompleted.addListener(
+      this.onMountCompleted_.bind(this));
   console.debug('Requesting volume list.');
   chrome.fileManagerPrivate.getVolumeMetadataList(function(volumeMetadataList) {
     console.debug('Volume list fetched with: ' + volumeMetadataList.length +
@@ -605,34 +719,24 @@ VolumeManager.prototype.initialize_ = function(callback) {
     // volumes in the volumeMetadataList are mounted. crbug.com/135477.
     this.mountQueue_.run(function(inCallback) {
       // Create VolumeInfo for each volume.
-      var group = new AsyncUtil.Group();
-      for (var i = 0; i < volumeMetadataList.length; i++) {
-        console.debug('Initializing volume: ' + volumeMetadataList[i].volumeId);
-        group.add(function(volumeMetadata, continueCallback) {
-          volumeManagerUtil.createVolumeInfo(
-              volumeMetadata,
-              function(volumeInfo) {
-                this.volumeInfoList.add(volumeInfo);
-                if (volumeMetadata.volumeType ===
-                    VolumeManagerCommon.VolumeType.DRIVE)
-                  this.onDriveConnectionStatusChanged_();
-                console.debug('Initialized volume: ' + volumeInfo.volumeId);
-                continueCallback();
-              }.bind(this));
-        }.bind(this, volumeMetadataList[i]));
-      }
-      group.run(function() {
-        console.debug('Initialized all volumes.');
-        // Call the callback of the initialize function.
-        callback();
-        // Call the callback of AsyncQueue. Maybe it invokes callbacks
-        // registered by mountCompleted events.
-        inCallback();
-      });
+      Promise.all(
+          volumeMetadataList.map(function(volumeMetadata) {
+            console.debug(
+                'Initializing volume: ' + volumeMetadata.volumeId);
+            return this.addVolumeMetadata_(volumeMetadata).then(
+                function(volumeInfo) {
+                  console.debug('Initialized volume: ' + volumeInfo.volumeId);
+                });
+          }.bind(this)))
+          .then(function() {
+            console.debug('Initialized all volumes.');
+            // Call the callback of the initialize function.
+            callback();
+            // Call the callback of AsyncQueue. Maybe it invokes callbacks
+            // registered by mountCompleted events.
+            inCallback();
+          });
     }.bind(this));
-
-    chrome.fileManagerPrivate.onMountCompleted.addListener(
-        this.onMountCompleted_.bind(this));
   }.bind(this));
 };
 
@@ -647,27 +751,16 @@ VolumeManager.prototype.onMountCompleted_ = function(event) {
       case 'mount':
         var requestKey = this.makeRequestKey_(
             'mount',
-            event.volumeMetadata.sourcePath);
+            event.volumeMetadata.sourcePath || '');
 
         if (event.status === 'success' ||
             event.status ===
                 VolumeManagerCommon.VolumeError.UNKNOWN_FILESYSTEM ||
             event.status ===
                 VolumeManagerCommon.VolumeError.UNSUPPORTED_FILESYSTEM) {
-          volumeManagerUtil.createVolumeInfo(
-              event.volumeMetadata,
+          this.addVolumeMetadata_(event.volumeMetadata).then(
               function(volumeInfo) {
-                this.volumeInfoList.add(volumeInfo);
                 this.finishRequest_(requestKey, event.status, volumeInfo);
-
-                if (volumeInfo.volumeType ===
-                    VolumeManagerCommon.VolumeType.DRIVE) {
-                  // Update the network connection status, because until the
-                  // drive is initialized, the status is set to not ready.
-                  // TODO(mtomasz): The connection status should be migrated
-                  // into VolumeMetadata.
-                  this.onDriveConnectionStatusChanged_();
-                }
                 callback();
               }.bind(this));
         } else {
@@ -774,7 +867,7 @@ VolumeManager.prototype.getCurrentProfileVolumeInfo = function(volumeType) {
 /**
  * Obtains location information from an entry.
  *
- * @param {(Entry|Object)} entry File or directory entry. It can be a fake
+ * @param {(!Entry|!FakeEntry)} entry File or directory entry. It can be a fake
  *     entry.
  * @return {EntryLocation} Location information.
  */

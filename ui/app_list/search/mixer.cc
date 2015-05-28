@@ -23,11 +23,13 @@ const size_t kMaxMainGroupResults = 4;
 const size_t kMaxWebstoreResults = 2;
 const size_t kMaxPeopleResults = 2;
 const size_t kMaxSuggestionsResults = 6;
+const size_t kMaxLauncherSearchResults = 2;
 
 // A value to indicate no max number of results limit.
 const size_t kNoMaxResultsLimit = 0;
 
 void UpdateResult(const SearchResult& source, SearchResult* target) {
+  target->set_display_type(source.display_type());
   target->set_title(source.title());
   target->set_title_tags(source.title_tags());
   target->set_details(source.details());
@@ -60,20 +62,18 @@ class Mixer::Group {
   void FetchResults(bool is_voice_query, const KnownResults& known_results) {
     results_.clear();
 
-    for (Providers::const_iterator provider_it = providers_.begin();
-         provider_it != providers_.end();
-         ++provider_it) {
-      for (SearchProvider::Results::const_iterator result_it =
-               (*provider_it)->results().begin();
-           result_it != (*provider_it)->results().end();
-           ++result_it) {
-        DCHECK_GE((*result_it)->relevance(), 0.0);
-        DCHECK_LE((*result_it)->relevance(), 1.0);
-        DCHECK(!(*result_it)->id().empty());
+    for (const SearchProvider* provider : providers_) {
+      for (SearchResult* result : provider->results()) {
+        DCHECK(!result->id().empty());
+
+        // We cannot rely on providers to give relevance scores in the range
+        // [0.0, 1.0] (e.g., PeopleProvider directly gives values from the
+        // Google+ API). Clamp to that range.
+        double relevance = std::min(std::max(result->relevance(), 0.0), 1.0);
 
         double boost = boost_;
         KnownResults::const_iterator known_it =
-            known_results.find((*result_it)->id());
+            known_results.find(result->id());
         if (known_it != known_results.end()) {
           switch (known_it->second) {
             case PERFECT_PRIMARY:
@@ -95,11 +95,10 @@ class Mixer::Group {
         }
 
         // If this is a voice query, voice results receive a massive boost.
-        if (is_voice_query && (*result_it)->voice_result())
+        if (is_voice_query && result->voice_result())
           boost += 4.0;
 
-        results_.push_back(
-            SortData(*result_it, (*result_it)->relevance() + boost));
+        results_.push_back(SortData(result, relevance + boost));
       }
     }
 
@@ -133,6 +132,8 @@ void Mixer::Init() {
   groups_[WEBSTORE_GROUP].reset(new Group(kMaxWebstoreResults, 1.0));
   groups_[PEOPLE_GROUP].reset(new Group(kMaxPeopleResults, 0.0));
   groups_[SUGGESTIONS_GROUP].reset(new Group(kMaxSuggestionsResults, 3.0));
+  groups_[LAUNCHER_SEARCH_API_GROUP].reset(
+      new Group(kMaxLauncherSearchResults, 0.0));
 }
 
 void Mixer::AddProviderToGroup(GroupId group, SearchProvider* provider) {
@@ -196,23 +197,22 @@ void Mixer::Publish(const SortedResults& new_results,
 
   // A map of the items in |ui_results| that takes ownership of the items.
   IdToResultMap ui_results_map;
-  for (size_t i = 0; i < ui_results->item_count(); ++i) {
-    SearchResult* ui_result = ui_results->GetItemAt(i);
+  for (SearchResult* ui_result : *ui_results)
     ui_results_map[ui_result->id()] = ui_result;
-  }
   // We have to erase all results at once so that observers are notified with
   // meaningful indexes.
   ui_results->RemoveAll();
 
   // Add items back to |ui_results| in the order of |new_results|.
-  for (size_t i = 0; i < new_results.size(); ++i) {
-    SearchResult* new_result = new_results[i].result;
+  for (const SortData& sort_data : new_results) {
+    const SearchResult& new_result = *sort_data.result;
     IdToResultMap::const_iterator ui_result_it =
-        ui_results_map.find(new_result->id());
+        ui_results_map.find(new_result.id());
     if (ui_result_it != ui_results_map.end()) {
       // Update and use the old result if it exists.
       SearchResult* ui_result = ui_result_it->second;
-      UpdateResult(*new_result, ui_result);
+      UpdateResult(new_result, ui_result);
+      ui_result->set_relevance(sort_data.score);
 
       // |ui_results| takes back ownership from |ui_results_map| here.
       ui_results->Add(ui_result);
@@ -221,16 +221,16 @@ void Mixer::Publish(const SortedResults& new_results,
       // results.
       ui_results_map.erase(ui_result->id());
     } else {
+      scoped_ptr<SearchResult> result_copy = new_result.Duplicate();
+      result_copy->set_relevance(sort_data.score);
       // Copy the result from |new_results| otherwise.
-      ui_results->Add(new_result->Duplicate().release());
+      ui_results->Add(result_copy.release());
     }
   }
 
   // Delete the results remaining in the map as they are not in the new results.
-  for (IdToResultMap::const_iterator ui_result_it = ui_results_map.begin();
-       ui_result_it != ui_results_map.end();
-       ++ui_result_it) {
-    delete ui_result_it->second;
+  for (const auto& ui_result : ui_results_map) {
+    delete ui_result.second;
   }
 }
 
@@ -239,14 +239,13 @@ void Mixer::RemoveDuplicates(SortedResults* results) {
   final.reserve(results->size());
 
   std::set<std::string> id_set;
-  for (SortedResults::iterator it = results->begin(); it != results->end();
-       ++it) {
-    const std::string& id = it->result->id();
+  for (const SortData& sort_data : *results) {
+    const std::string& id = sort_data.result->id();
     if (id_set.find(id) != id_set.end())
       continue;
 
     id_set.insert(id);
-    final.push_back(*it);
+    final.push_back(sort_data);
   }
 
   results->swap(final);

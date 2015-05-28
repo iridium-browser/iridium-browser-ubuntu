@@ -40,15 +40,13 @@ class ShutdownPolicyHandlerTest : public testing::Test,
 }
 
   // testing::Test:
-  virtual void SetUp() override {
+void SetUp() override {
     testing::Test::SetUp();
     cros_settings_ = CrosSettings::Get();
     DBusThreadManager::Initialize();
   }
 
-  virtual void TearDown() override {
-    DBusThreadManager::Shutdown();
-  }
+  void TearDown() override { DBusThreadManager::Shutdown(); }
 
   void SetRebootOnShutdown(bool reboot_on_shutdown) {
     const base::FundamentalValue reboot_on_shutdown_value(reboot_on_shutdown);
@@ -113,7 +111,7 @@ TEST_F(ShutdownPolicyHandlerTest, CheckIfRebootOnShutdown) {
                  base::Unretained(this)));
   base::RunLoop().RunUntilIdle();
   EXPECT_TRUE(callback_called_);
-  EXPECT_EQ(true, reboot_on_shutdown_);
+  EXPECT_TRUE(reboot_on_shutdown_);
   // Forbid shutdown.
   SetRebootOnShutdown(false);
   callback_called_ = false;
@@ -122,7 +120,7 @@ TEST_F(ShutdownPolicyHandlerTest, CheckIfRebootOnShutdown) {
                  base::Unretained(this)));
   base::RunLoop().RunUntilIdle();
   EXPECT_TRUE(callback_called_);
-  EXPECT_EQ(false, reboot_on_shutdown_);
+  EXPECT_FALSE(reboot_on_shutdown_);
 }
 
 }  // namespace chromeos

@@ -229,8 +229,9 @@ RUNTIME_FUNCTION(Runtime_StringParseFloat) {
   DCHECK(args.length() == 1);
   CONVERT_ARG_HANDLE_CHECKED(String, subject, 0);
 
-  double value = StringToDouble(isolate->unicode_cache(), subject,
-                                ALLOW_TRAILING_JUNK, base::OS::nan_value());
+  double value =
+      StringToDouble(isolate->unicode_cache(), subject, ALLOW_TRAILING_JUNK,
+                     std::numeric_limits<double>::quiet_NaN());
 
   return *isolate->factory()->NewNumber(value);
 }
@@ -571,13 +572,13 @@ RUNTIME_FUNCTION(Runtime_MaxSmi) {
 }
 
 
-RUNTIME_FUNCTION(RuntimeReference_NumberToString) {
+RUNTIME_FUNCTION(Runtime_NumberToString) {
   SealHandleScope shs(isolate);
   return __RT_impl_Runtime_NumberToStringRT(args, isolate);
 }
 
 
-RUNTIME_FUNCTION(RuntimeReference_IsSmi) {
+RUNTIME_FUNCTION(Runtime_IsSmi) {
   SealHandleScope shs(isolate);
   DCHECK(args.length() == 1);
   CONVERT_ARG_CHECKED(Object, obj, 0);
@@ -585,7 +586,7 @@ RUNTIME_FUNCTION(RuntimeReference_IsSmi) {
 }
 
 
-RUNTIME_FUNCTION(RuntimeReference_IsNonNegativeSmi) {
+RUNTIME_FUNCTION(Runtime_IsNonNegativeSmi) {
   SealHandleScope shs(isolate);
   DCHECK(args.length() == 1);
   CONVERT_ARG_CHECKED(Object, obj, 0);

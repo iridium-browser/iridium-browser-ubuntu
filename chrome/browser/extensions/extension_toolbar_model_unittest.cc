@@ -28,7 +28,9 @@
 #include "extensions/browser/extension_system.h"
 #include "extensions/browser/test_extension_registry_observer.h"
 #include "extensions/common/extension.h"
+#include "extensions/common/extension_builder.h"
 #include "extensions/common/feature_switch.h"
+#include "extensions/common/value_builder.h"
 
 #if defined(USE_AURA)
 #include "ui/aura/env.h"
@@ -53,28 +55,28 @@ class ExtensionToolbarModelTestObserver
 
  private:
   // ExtensionToolbarModel::Observer:
-  void ToolbarExtensionAdded(const Extension* extension, int index) override {
+  void OnToolbarExtensionAdded(const Extension* extension, int index) override {
     ++inserted_count_;
   }
 
-  void ToolbarExtensionRemoved(const Extension* extension) override {
+  void OnToolbarExtensionRemoved(const Extension* extension) override {
     ++removed_count_;
   }
 
-  void ToolbarExtensionMoved(const Extension* extension, int index) override {
+  void OnToolbarExtensionMoved(const Extension* extension, int index) override {
     ++moved_count_;
   }
 
-  void ToolbarExtensionUpdated(const Extension* extension) override {}
+  void OnToolbarExtensionUpdated(const Extension* extension) override {}
 
   bool ShowExtensionActionPopup(const Extension* extension,
                                 bool grant_active_tab) override {
     return false;
   }
 
-  void ToolbarVisibleCountChanged() override {}
+  void OnToolbarVisibleCountChanged() override {}
 
-  void ToolbarHighlightModeChanged(bool is_highlighting) override {
+  void OnToolbarHighlightModeChanged(bool is_highlighting) override {
     // Add one if highlighting, subtract one if not.
     highlight_mode_count_ += is_highlighting ? 1 : -1;
   }
@@ -482,6 +484,78 @@ TEST_F(ExtensionToolbarModelUnitTest, ReorderOnPrefChange) {
   EXPECT_EQ(browser_action_c(), GetExtensionAtIndex(0u));
   EXPECT_EQ(browser_action_b(), GetExtensionAtIndex(1u));
   EXPECT_EQ(browser_action_a(), GetExtensionAtIndex(2u));
+}
+
+// Test that new extensions are always visible on installation and inserted at
+// the "end" of the visible section.
+TEST_F(ExtensionToolbarModelUnitTest, NewToolbarExtensionsAreVisible) {
+  Init();
+
+  // Three extensions with actions.
+  scoped_refptr<const Extension> extension_a =
+      extension_action_test_util::CreateActionExtension(
+          "a", extension_action_test_util::BROWSER_ACTION);
+  scoped_refptr<const Extension> extension_b =
+      extension_action_test_util::CreateActionExtension(
+          "b", extension_action_test_util::BROWSER_ACTION);
+  scoped_refptr<const Extension> extension_c =
+      extension_action_test_util::CreateActionExtension(
+          "c", extension_action_test_util::BROWSER_ACTION);
+  scoped_refptr<const Extension> extension_d =
+      extension_action_test_util::CreateActionExtension(
+          "d", extension_action_test_util::BROWSER_ACTION);
+
+  // We should start off without any extensions.
+  EXPECT_EQ(0u, num_toolbar_items());
+  EXPECT_EQ(0u, toolbar_model()->visible_icon_count());
+
+  // Add one extension. It should be visible.
+  service()->AddExtension(extension_a.get());
+  EXPECT_EQ(1u, num_toolbar_items());
+  EXPECT_EQ(1u, toolbar_model()->visible_icon_count());
+  EXPECT_EQ(extension_a.get(), GetExtensionAtIndex(0u));
+
+  // Hide all extensions.
+  toolbar_model()->SetVisibleIconCount(0);
+  EXPECT_EQ(0u, toolbar_model()->visible_icon_count());
+
+  // Add a new extension - it should be visible, so it should be in the first
+  // index. The other extension should remain hidden.
+  service()->AddExtension(extension_b.get());
+  EXPECT_EQ(2u, num_toolbar_items());
+  EXPECT_EQ(1u, toolbar_model()->visible_icon_count());
+  EXPECT_EQ(extension_b.get(), GetExtensionAtIndex(0u));
+  EXPECT_EQ(extension_a.get(), GetExtensionAtIndex(1u));
+
+  // Show all extensions.
+  toolbar_model()->SetVisibleIconCount(2);
+  EXPECT_EQ(2u, toolbar_model()->visible_icon_count());
+  EXPECT_TRUE(toolbar_model()->all_icons_visible());
+
+  // Add the third extension. Since all extensions are visible, it should go in
+  // the last index.
+  service()->AddExtension(extension_c.get());
+  EXPECT_EQ(3u, num_toolbar_items());
+  EXPECT_EQ(3u, toolbar_model()->visible_icon_count());
+  EXPECT_TRUE(toolbar_model()->all_icons_visible());
+  EXPECT_EQ(extension_b.get(), GetExtensionAtIndex(0u));
+  EXPECT_EQ(extension_a.get(), GetExtensionAtIndex(1u));
+  EXPECT_EQ(extension_c.get(), GetExtensionAtIndex(2u));
+
+  // Hide one extension (two remaining visible).
+  toolbar_model()->SetVisibleIconCount(2);
+  EXPECT_EQ(2u, toolbar_model()->visible_icon_count());
+
+  // Add a fourth extension. It should go at the end of the visible section and
+  // be visible, so it increases visible count by 1, and goes into the third
+  // index. The hidden extension should remain hidden.
+  service()->AddExtension(extension_d.get());
+  EXPECT_EQ(4u, num_toolbar_items());
+  EXPECT_EQ(3u, toolbar_model()->visible_icon_count());
+  EXPECT_EQ(extension_b.get(), GetExtensionAtIndex(0u));
+  EXPECT_EQ(extension_a.get(), GetExtensionAtIndex(1u));
+  EXPECT_EQ(extension_d.get(), GetExtensionAtIndex(2u));
+  EXPECT_EQ(extension_c.get(), GetExtensionAtIndex(3u));
 }
 
 TEST_F(ExtensionToolbarModelUnitTest, ExtensionToolbarHighlightMode) {
@@ -1055,6 +1129,35 @@ TEST_F(ExtensionToolbarModelUnitTest, ToolbarModelPrefChange) {
   EXPECT_EQ(browser_action_a(), GetExtensionAtIndex(2));
   EXPECT_EQ(inserted_and_removed_difference,
             observer()->inserted_count() - observer()->removed_count());
+}
+
+TEST_F(ExtensionToolbarModelUnitTest, ComponentExtesionsAddedToEnd) {
+  Init();
+
+  ASSERT_TRUE(AddBrowserActionExtensions());
+
+  EXPECT_EQ(browser_action_a(), GetExtensionAtIndex(0));
+  EXPECT_EQ(browser_action_b(), GetExtensionAtIndex(1));
+  EXPECT_EQ(browser_action_c(), GetExtensionAtIndex(2));
+
+  const char kName[] = "component";
+  DictionaryBuilder manifest;
+  manifest.Set("name", kName)
+          .Set("description", "An extension")
+          .Set("manifest_version", 2)
+          .Set("version", "1.0.0")
+          .Set("browser_action", DictionaryBuilder().Pass());
+  scoped_refptr<const Extension> component_extension =
+      ExtensionBuilder().SetManifest(manifest.Pass())
+                        .SetID(crx_file::id_util::GenerateId(kName))
+                        .SetLocation(Manifest::COMPONENT)
+                        .Build();
+  service()->AddExtension(component_extension.get());
+
+  EXPECT_EQ(component_extension.get(), GetExtensionAtIndex(0));
+  EXPECT_EQ(browser_action_a(), GetExtensionAtIndex(1));
+  EXPECT_EQ(browser_action_b(), GetExtensionAtIndex(2));
+  EXPECT_EQ(browser_action_c(), GetExtensionAtIndex(3));
 }
 
 }  // namespace extensions

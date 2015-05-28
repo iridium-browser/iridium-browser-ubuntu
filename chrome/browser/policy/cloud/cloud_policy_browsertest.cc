@@ -148,6 +148,11 @@ void GetExpectedDefaultPolicy(PolicyMap* policy_map) {
                   POLICY_SCOPE_USER,
                   new base::FundamentalValue(false),
                   NULL);
+  policy_map->Set(key::kCaptivePortalAuthenticationIgnoresProxy,
+                  POLICY_LEVEL_MANDATORY,
+                  POLICY_SCOPE_USER,
+                  new base::FundamentalValue(false),
+                  NULL);
 #endif
 }
 
@@ -185,6 +190,11 @@ void GetExpectedTestPolicy(PolicyMap* expected, const char* homepage) {
                 new base::StringValue("primary-only"),
                 NULL);
   expected->Set(key::kEasyUnlockAllowed,
+                POLICY_LEVEL_MANDATORY,
+                POLICY_SCOPE_USER,
+                new base::FundamentalValue(false),
+                NULL);
+  expected->Set(key::kCaptivePortalAuthenticationIgnoresProxy,
                 POLICY_LEVEL_MANDATORY,
                 POLICY_SCOPE_USER,
                 new base::FundamentalValue(false),
@@ -288,7 +298,8 @@ class CloudPolicyTest : public InProcessBrowserTest,
 
   PolicyService* GetPolicyService() {
     ProfilePolicyConnector* profile_connector =
-        ProfilePolicyConnectorFactory::GetForProfile(browser()->profile());
+        ProfilePolicyConnectorFactory::GetForBrowserContext(
+            browser()->profile());
     return profile_connector->policy_service();
   }
 

@@ -26,6 +26,7 @@
 #ifndef File_h
 #define File_h
 
+#include "core/CoreExport.h"
 #include "core/fileapi/Blob.h"
 #include "platform/heap/Handle.h"
 #include "wtf/PassRefPtr.h"
@@ -35,10 +36,10 @@ namespace blink {
 
 class ExceptionState;
 class ExecutionContext;
-struct FileMetadata;
+class FileMetadata;
 class KURL;
 
-class File final : public Blob {
+class CORE_EXPORT File final : public Blob {
     DEFINE_WRAPPERTYPEINFO();
 public:
     // AllContentTypes should only be used when the full path/name are trusted; otherwise, it could
@@ -104,6 +105,8 @@ public:
         return new File(path, name, policy, File::IsNotUserVisible);
     }
 
+    File* clone(const String& name = String()) const;
+
     virtual unsigned long long size() const override;
     virtual Blob* slice(long long start, long long end, const String& contentType, ExceptionState&) const override;
     virtual void close(ExecutionContext*, ExceptionState&) override;
@@ -130,7 +133,7 @@ public:
     const String& webkitRelativePath() const { return m_relativePath; }
 
     // Note that this involves synchronous file operation. Think twice before calling this function.
-    void captureSnapshot(long long& snapshotSize, double& snapshotModificationTime) const;
+    void captureSnapshot(long long& snapshotSize, double& snapshotModificationTimeMS) const;
 
     // Returns true if this has a valid snapshot metadata (i.e. m_snapshotSize >= 0).
     bool hasValidSnapshotMetadata() const { return m_snapshotSize >= 0; }
@@ -145,6 +148,7 @@ private:
     File(const String& name, double modificationTime, PassRefPtr<BlobDataHandle>);
     File(const String& name, const FileMetadata&, UserVisibility);
     File(const KURL& fileSystemURL, const FileMetadata&, UserVisibility);
+    File(const File&);
 
     void invalidateSnapshotMetadata() { m_snapshotSize = -1; }
 
@@ -169,7 +173,7 @@ private:
     // If m_snapshotSize is negative (initialized to -1 by default), the snapshot metadata is invalid and we retrieve the latest metadata synchronously in size(), lastModifiedTime() and slice().
     // Otherwise, the snapshot metadata are used directly in those methods.
     long long m_snapshotSize;
-    const double m_snapshotModificationTime;
+    const double m_snapshotModificationTimeMS;
 
     String m_relativePath;
 };

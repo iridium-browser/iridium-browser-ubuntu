@@ -29,13 +29,10 @@
 #include "platform/graphics/Color.h"
 #include "platform/graphics/ColorSpace.h"
 #include "platform/heap/Handle.h"
-
 #include "third_party/skia/include/core/SkImageFilter.h"
-
 #include "wtf/PassOwnPtr.h"
 #include "wtf/RefCounted.h"
 #include "wtf/RefPtr.h"
-#include "wtf/Uint8ClampedArray.h"
 #include "wtf/Vector.h"
 
 namespace blink {
@@ -46,7 +43,7 @@ class TextStream;
 
 class SkiaImageFilterBuilder;
 
-typedef WillBeHeapVector<RefPtrWillBeMember<FilterEffect> > FilterEffectVector;
+typedef WillBeHeapVector<RefPtrWillBeMember<FilterEffect>> FilterEffectVector;
 
 enum FilterEffectType {
     FilterEffectTypeUnknown,
@@ -66,7 +63,7 @@ typedef int DetermineSubregionFlags;
 class PLATFORM_EXPORT FilterEffect : public RefCountedWillBeGarbageCollectedFinalized<FilterEffect> {
 public:
     virtual ~FilterEffect();
-    virtual void trace(Visitor*);
+    DECLARE_VIRTUAL_TRACE();
 
     void clearResult();
     void clearResultsRecursive();
@@ -118,7 +115,7 @@ public:
 
     virtual TextStream& externalRepresentation(TextStream&, int indention = 0) const;
 
-    // The following functions are SVG specific and will move to RenderSVGResourceFilterPrimitive.
+    // The following functions are SVG specific and will move to LayoutSVGResourceFilterPrimitive.
     // See bug https://bugs.webkit.org/show_bug.cgi?id=45614.
     bool hasX() const { return m_hasX; }
     void setHasX(bool value) { m_hasX = value; }
@@ -183,11 +180,11 @@ private:
     FloatRect m_maxEffectRect;
     RawPtrWillBeMember<Filter> m_filter;
 
-    // The following member variables are SVG specific and will move to RenderSVGResourceFilterPrimitive.
+    // The following member variables are SVG specific and will move to LayoutSVGResourceFilterPrimitive.
     // See bug https://bugs.webkit.org/show_bug.cgi?id=45614.
 
     // The subregion of a filter primitive according to the SVG Filter specification in local coordinates.
-    // This is SVG specific and needs to move to RenderSVGResourceFilterPrimitive.
+    // This is SVG specific and needs to move to LayoutSVGResourceFilterPrimitive.
     FloatRect m_filterPrimitiveSubregion;
 
     // x, y, width and height of the actual SVGFE*Element. Is needed to determine the subregion of the

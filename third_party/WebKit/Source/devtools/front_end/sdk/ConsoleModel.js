@@ -55,9 +55,6 @@ WebInspector.ConsoleModel.Events = {
 WebInspector.ConsoleModel.prototype = {
     _enableAgent: function()
     {
-        if (WebInspector.settings.monitoringXHREnabled.get())
-            this._consoleAgent.setMonitoringXHREnabled(true);
-
         this._enablingConsole = true;
 
         /**
@@ -71,21 +68,10 @@ WebInspector.ConsoleModel.prototype = {
     },
 
     /**
-     * @return {boolean}
-     */
-    enablingConsole: function()
-    {
-        return !!this._enablingConsole;
-    },
-
-    /**
      * @param {!WebInspector.ConsoleMessage} msg
      */
     addMessage: function(msg)
     {
-        if (WebInspector.NetworkManager.hasDevToolsRequestHeader(msg.request))
-            return;
-
         msg.index = this._messages.length;
         this._messages.push(msg);
         this._incrementErrorWarningCount(msg);
@@ -185,12 +171,11 @@ WebInspector.ConsoleModel.evaluateCommandInConsole = function(executionContext, 
  * @param {!Array.<!RuntimeAgent.RemoteObject>=} parameters
  * @param {!Array.<!ConsoleAgent.CallFrame>=} stackTrace
  * @param {number=} timestamp
- * @param {boolean=} isOutdated
  * @param {!RuntimeAgent.ExecutionContextId=} executionContextId
  * @param {!ConsoleAgent.AsyncStackTrace=} asyncStackTrace
  * @param {?string=} scriptId
  */
-WebInspector.ConsoleMessage = function(target, source, level, messageText, type, url, line, column, requestId, parameters, stackTrace, timestamp, isOutdated, executionContextId, asyncStackTrace, scriptId)
+WebInspector.ConsoleMessage = function(target, source, level, messageText, type, url, line, column, requestId, parameters, stackTrace, timestamp, executionContextId, asyncStackTrace, scriptId)
 {
     this._target = target;
     this.source = source;
@@ -207,7 +192,6 @@ WebInspector.ConsoleMessage = function(target, source, level, messageText, type,
     /** @type {!Array.<!ConsoleAgent.CallFrame>|undefined} */
     this.stackTrace = stackTrace;
     this.timestamp = timestamp || Date.now();
-    this.isOutdated = isOutdated;
     this.executionContextId = executionContextId || 0;
     this.asyncStackTrace = asyncStackTrace;
     this.scriptId = scriptId || null;
@@ -306,7 +290,6 @@ WebInspector.ConsoleMessage.prototype = {
             this.parameters,
             this.stackTrace,
             this.timestamp,
-            this.isOutdated,
             this.executionContextId,
             this.asyncStackTrace,
             this.scriptId);
@@ -471,7 +454,6 @@ WebInspector.ConsoleDispatcher.prototype = {
             payload.parameters,
             payload.stackTrace,
             payload.timestamp * 1000, // Convert to ms.
-            this._console._enablingConsole,
             payload.executionContextId,
             payload.asyncStackTrace,
             payload.scriptId);

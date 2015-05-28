@@ -36,10 +36,13 @@
 #include "core/dom/AXObjectCache.h"
 #include "core/dom/Document.h"
 #include "core/dom/Node.h"
+#include "core/frame/FrameHost.h"
 #include "core/frame/FrameView.h"
+#include "core/frame/PinchViewport.h"
+#include "core/layout/LayoutView.h"
+#include "core/style/ComputedStyle.h"
 #include "core/page/EventHandler.h"
-#include "core/rendering/RenderView.h"
-#include "core/rendering/style/RenderStyle.h"
+#include "core/page/Page.h"
 #include "modules/accessibility/AXObject.h"
 #include "modules/accessibility/AXTable.h"
 #include "modules/accessibility/AXTableCell.h"
@@ -477,6 +480,14 @@ bool WebAXObject::ariaDescribedby(WebVector<WebAXObject>& describedbyElements) c
     return true;
 }
 
+WebString WebAXObject::ariaDropEffect() const
+{
+    if (isDetached())
+        return WebString();
+
+    return WebString(m_private->ariaDropEffect());
+}
+
 bool WebAXObject::ariaHasPopup() const
 {
     if (isDetached())
@@ -688,12 +699,15 @@ int WebAXObject::hierarchicalLevel() const
     return m_private->hierarchicalLevel();
 }
 
+// FIXME: This method passes in a point that has page scale applied but assumes that (0, 0)
+// is the top left of the visual viewport. In other words, the point has the PinchViewport
+// scale applied, but not the PinchViewport offset. crbug.com/459591.
 WebAXObject WebAXObject::hitTest(const WebPoint& point) const
 {
     if (isDetached())
         return WebAXObject();
 
-    IntPoint contentsPoint = m_private->documentFrameView()->windowToContents(point);
+    IntPoint contentsPoint = m_private->documentFrameView()->soonToBeRemovedUnscaledViewportToContents(point);
     RefPtr<AXObject> hit = m_private->accessibilityHitTest(contentsPoint);
 
     if (hit)
@@ -967,7 +981,7 @@ bool WebAXObject::hasComputedStyle() const
     if (!node)
         return false;
 
-    return node->computedStyle();
+    return node->ensureComputedStyle();
 }
 
 WebString WebAXObject::computedStyleDisplay() const
@@ -983,11 +997,11 @@ WebString WebAXObject::computedStyleDisplay() const
     if (!node)
         return WebString();
 
-    RenderStyle* renderStyle = node->computedStyle();
-    if (!renderStyle)
+    const ComputedStyle* computedStyle = node->ensureComputedStyle();
+    if (!computedStyle)
         return WebString();
 
-    return WebString(CSSPrimitiveValue::create(renderStyle->display())->getStringValue());
+    return WebString(CSSPrimitiveValue::create(computedStyle->display())->getStringValue());
 }
 
 bool WebAXObject::accessibilityIsIgnored() const
@@ -1232,6 +1246,14 @@ unsigned WebAXObject::cellRowSpan() const
     pair<unsigned, unsigned> rowRange;
     toAXTableCell(m_private.get())->rowIndexRange(rowRange);
     return rowRange.second;
+}
+
+WebAXSortDirection WebAXObject::sortDirection() const
+{
+    if (isDetached())
+        return WebAXSortDirectionUndefined;
+
+    return static_cast<WebAXSortDirection>(m_private->sortDirection());
 }
 
 void WebAXObject::loadInlineTextBoxes() const

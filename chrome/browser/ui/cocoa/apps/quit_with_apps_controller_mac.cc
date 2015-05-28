@@ -52,9 +52,9 @@ QuitWithAppsController::QuitWithAppsController()
       base::CommandLine::ForCurrentProcess()->HasSwitch(
           switches::kHostedAppQuitNotification);
 
-  // There is only ever one notification to replace, so use the same replace_id
+  // There is only ever one notification to replace, so use the same tag
   // each time.
-  base::string16 replace_id = base::UTF8ToUTF16(id());
+  std::string tag = id();
 
   message_center::ButtonInfo quit_apps_button_info(
       l10n_util::GetStringUTF16(IDS_QUIT_WITH_APPS_QUIT_LABEL));
@@ -73,11 +73,10 @@ QuitWithAppsController::QuitWithAppsController()
       l10n_util::GetStringUTF16(IDS_QUIT_WITH_APPS_EXPLANATION),
       ui::ResourceBundle::GetSharedInstance().GetImageNamed(
           IDR_PRODUCT_LOGO_128),
-      blink::WebTextDirectionDefault,
       message_center::NotifierId(message_center::NotifierId::SYSTEM_COMPONENT,
                                  kQuitWithAppsNotificationID),
       l10n_util::GetStringUTF16(IDS_QUIT_WITH_APPS_NOTIFICATION_DISPLAY_SOURCE),
-      replace_id,
+      tag,
       rich_notification_data,
       this));
 }
@@ -131,6 +130,12 @@ bool QuitWithAppsController::ShouldQuit() {
     return true;
   }
 
+  // Quit immediately if Chrome is restarting.
+  if (g_browser_process->local_state()->GetBoolean(
+          prefs::kRestartLastSessionOnShutdown)) {
+    return true;
+  }
+
   if (hosted_app_quit_notification_) {
     bool hosted_apps_open = false;
     const BrowserList* browser_list =
@@ -166,14 +171,10 @@ bool QuitWithAppsController::ShouldQuit() {
 
   // If there are browser windows, and this notification has been suppressed for
   // this session or permanently, then just return false to prevent Chrome from
-  // quitting. If there are no browser windows, or Chrome is restarting, always
-  // show the notification.
-  bool is_restart = g_browser_process->local_state()->GetBoolean(
-      prefs::kRestartLastSessionOnShutdown);
+  // quitting. If there are no browser windows, always show the notification.
   bool suppress_always = !g_browser_process->local_state()->GetBoolean(
       prefs::kNotifyWhenAppsKeepChromeAlive);
   if (!chrome::BrowserIterator().done() &&
-      !is_restart &&
       (suppress_for_session_ || suppress_always)) {
     return false;
   }

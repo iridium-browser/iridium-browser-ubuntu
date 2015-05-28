@@ -2,35 +2,54 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
+import functools
 import logging
 import os
+import socket
 import sys
 
-from telemetry import decorators
-from telemetry.core import exceptions
-from telemetry.core import util
+from telemetry.core.backends.chrome_inspector import devtools_http
 from telemetry.core.backends.chrome_inspector import inspector_console
 from telemetry.core.backends.chrome_inspector import inspector_memory
 from telemetry.core.backends.chrome_inspector import inspector_network
 from telemetry.core.backends.chrome_inspector import inspector_page
 from telemetry.core.backends.chrome_inspector import inspector_runtime
-from telemetry.core.backends.chrome_inspector import inspector_timeline
 from telemetry.core.backends.chrome_inspector import inspector_websocket
 from telemetry.core.backends.chrome_inspector import websocket
-from telemetry.core.heap import model as heap_model_module
+from telemetry.core import exceptions
+from telemetry.core import util
+from telemetry import decorators
 from telemetry.image_processing import image_util
 from telemetry.timeline import model as timeline_model_module
-from telemetry.timeline import recording_options
 from telemetry.timeline import trace_data as trace_data_module
 
 
-class InspectorException(Exception):
-  pass
+def _HandleInspectorWebSocketExceptions(func):
+  """Decorator for converting inspector_websocket exceptions.
+
+  When an inspector_websocket exception is thrown in the original function,
+  this decorator converts it into a telemetry exception and adds debugging
+  information.
+  """
+  @functools.wraps(func)
+  def inner(inspector_backend, *args, **kwargs):
+    try:
+      return func(inspector_backend, *args, **kwargs)
+    except (socket.error, websocket.WebSocketException,
+            inspector_websocket.WebSocketDisconnected) as e:
+      inspector_backend._ConvertExceptionFromInspectorWebsocket(e)
+
+  return inner
 
 
 class InspectorBackend(object):
+  """Class for communicating with a devtools client.
+
+  The owner of an instance of this class is responsible for calling
+  Disconnect() before disposing of the instance.
+  """
   def __init__(self, app, devtools_client, context, timeout=60):
-    self._websocket = inspector_websocket.InspectorWebsocket(self._HandleError)
+    self._websocket = inspector_websocket.InspectorWebsocket()
     self._websocket.RegisterDomain(
         'Inspector', self._HandleInspectorDomainNotification)
 
@@ -45,20 +64,28 @@ class InspectorBackend(object):
     logging.debug('InspectorBackend._Connect() to %s', self.debugger_url)
     try:
       self._websocket.Connect(self.debugger_url)
-    except (websocket.WebSocketException, util.TimeoutException) as e:
-      raise InspectorException(e.msg)
+    except (websocket.WebSocketException, exceptions.TimeoutException) as e:
+      self._ConvertExceptionFromInspectorWebsocket(e)
 
     self._console = inspector_console.InspectorConsole(self._websocket)
     self._memory = inspector_memory.InspectorMemory(self._websocket)
     self._page = inspector_page.InspectorPage(
         self._websocket, timeout=timeout)
     self._runtime = inspector_runtime.InspectorRuntime(self._websocket)
-    self._timeline = inspector_timeline.InspectorTimeline(self._websocket)
     self._network = inspector_network.InspectorNetwork(self._websocket)
     self._timeline_model = None
 
+  def Disconnect(self):
+    """Disconnects the inspector websocket.
+
+    This method intentionally leaves the self._websocket object around, so that
+    future calls it to it will fail with a relevant error.
+    """
+    if self._websocket:
+      self._websocket.Disconnect()
+
   def __del__(self):
-    self._websocket.Disconnect()
+    self.Disconnect()
 
   @property
   def app(self):
@@ -66,20 +93,27 @@ class InspectorBackend(object):
 
   @property
   def url(self):
-    for c in self._devtools_client.ListInspectableContexts():
-      if c['id'] == self._context['id']:
-        return c['url']
-    return None
+    """Returns the URL of the tab, as reported by devtools.
 
-  # TODO(chrishenry): Is this intentional? Shouldn't this return
-  # self._context['id'] instead?
+    Raises:
+      devtools_http.DevToolsClientConnectionError
+    """
+    return self._devtools_client.GetUrl(self.id)
+
   @property
   def id(self):
-    return self.debugger_url
+    return self._context['id']
 
   @property
   def debugger_url(self):
     return self._context['webSocketDebuggerUrl']
+
+  def IsInspectable(self):
+    """Whether the tab is inspectable, as reported by devtools."""
+    try:
+      return self._devtools_client.IsInspectable(self.id)
+    except devtools_http.DevToolsClientConnectionError:
+      return False
 
   # Public methods implemented in JavaScript.
 
@@ -91,45 +125,12 @@ class InspectorBackend(object):
       # Displays other than 0 mean we are likely running in something like
       # xvfb where screenshotting doesn't work.
       return False
-    return not self.EvaluateJavaScript("""
-        window.chrome.gpuBenchmarking === undefined ||
-        window.chrome.gpuBenchmarking.beginWindowSnapshotPNG === undefined
-      """)
+    return True
 
+  @_HandleInspectorWebSocketExceptions
   def Screenshot(self, timeout):
     assert self.screenshot_supported, 'Browser does not support screenshotting'
-
-    self.EvaluateJavaScript("""
-        if(!window.__telemetry) {
-          window.__telemetry = {}
-        }
-        window.__telemetry.snapshotComplete = false;
-        window.__telemetry.snapshotData = null;
-        window.chrome.gpuBenchmarking.beginWindowSnapshotPNG(
-          function(snapshot) {
-            window.__telemetry.snapshotData = snapshot;
-            window.__telemetry.snapshotComplete = true;
-          }
-        );
-    """)
-
-    def IsSnapshotComplete():
-      return self.EvaluateJavaScript(
-          'window.__telemetry.snapshotComplete')
-
-    util.WaitFor(IsSnapshotComplete, timeout)
-
-    snap = self.EvaluateJavaScript("""
-      (function() {
-        var data = window.__telemetry.snapshotData;
-        delete window.__telemetry.snapshotComplete;
-        delete window.__telemetry.snapshotData;
-        return data;
-      })()
-    """)
-    if snap:
-      return image_util.FromBase64Png(snap['data'])
-    return None
+    return self._page.CaptureScreenshot(timeout)
 
   # Console public methods.
 
@@ -143,7 +144,15 @@ class InspectorBackend(object):
 
   # Memory public methods.
 
+  @_HandleInspectorWebSocketExceptions
   def GetDOMStats(self, timeout):
+    """Gets memory stats from the DOM.
+
+    Raises:
+      inspector_memory.InspectorMemoryException
+      exceptions.TimeoutException
+      exceptions.DevtoolsTargetCrashException
+    """
     dom_counters = self._memory.GetDOMCounters(timeout)
     return {
       'document_count': dom_counters['documents'],
@@ -153,24 +162,53 @@ class InspectorBackend(object):
 
   # Page public methods.
 
+  @_HandleInspectorWebSocketExceptions
   def WaitForNavigate(self, timeout):
     self._page.WaitForNavigate(timeout)
 
+  @_HandleInspectorWebSocketExceptions
   def Navigate(self, url, script_to_evaluate_on_commit, timeout):
     self._page.Navigate(url, script_to_evaluate_on_commit, timeout)
 
+  @_HandleInspectorWebSocketExceptions
   def GetCookieByName(self, name, timeout):
     return self._page.GetCookieByName(name, timeout)
 
   # Runtime public methods.
 
+  @_HandleInspectorWebSocketExceptions
   def ExecuteJavaScript(self, expr, context_id=None, timeout=60):
+    """Executes a javascript expression without returning the result.
+
+    Raises:
+      exceptions.EvaluateException
+      exceptions.WebSocketDisconnected
+      exceptions.TimeoutException
+      exceptions.DevtoolsTargetCrashException
+    """
     self._runtime.Execute(expr, context_id, timeout)
 
+  @_HandleInspectorWebSocketExceptions
   def EvaluateJavaScript(self, expr, context_id=None, timeout=60):
+    """Evaluates a javascript expression and returns the result.
+
+    Raises:
+      exceptions.EvaluateException
+      exceptions.WebSocketDisconnected
+      exceptions.TimeoutException
+      exceptions.DevtoolsTargetCrashException
+    """
     return self._runtime.Evaluate(expr, context_id, timeout)
 
+  @_HandleInspectorWebSocketExceptions
   def EnableAllContexts(self):
+    """Allows access to iframes.
+
+    Raises:
+      exceptions.WebSocketDisconnected
+      exceptions.TimeoutException
+      exceptions.DevtoolsTargetCrashException
+    """
     return self._runtime.EnableAllContexts()
 
   # Timeline public methods.
@@ -179,104 +217,90 @@ class InspectorBackend(object):
   def timeline_model(self):
     return self._timeline_model
 
-  def StartTimelineRecording(self, options=None):
-    if not options:
-      options = recording_options.TimelineRecordingOptions()
-    if options.record_timeline:
-      self._timeline.Start()
-    if options.record_network:
-      self._network.timeline_recorder.Start()
+  @_HandleInspectorWebSocketExceptions
+  def StartTimelineRecording(self):
+    self._network.timeline_recorder.Start()
 
+  @_HandleInspectorWebSocketExceptions
   def StopTimelineRecording(self):
     builder = trace_data_module.TraceDataBuilder()
-
-    data = self._timeline.Stop()
-    if data:
-      builder.AddEventsTo(trace_data_module.INSPECTOR_TRACE_PART, data)
 
     data = self._network.timeline_recorder.Stop()
     if data:
       builder.AddEventsTo(trace_data_module.INSPECTOR_TRACE_PART, data)
-
-    if builder.HasEventsFor(trace_data_module.INSPECTOR_TRACE_PART):
-      self._timeline_model = timeline_model_module.TimelineModel(
-          builder.AsData(), shift_world_to_zero=False)
-    else:
-      self._timeline_model = None
-
-  @property
-  def is_timeline_recording_running(self):
-    return self._timeline.is_timeline_recording_running
+    self._timeline_model = timeline_model_module.TimelineModel(
+        builder.AsData(), shift_world_to_zero=False)
 
   # Network public methods.
 
+  @_HandleInspectorWebSocketExceptions
   def ClearCache(self):
     self._network.ClearCache()
 
   # Methods used internally by other backends.
 
-  def _IsInspectable(self):
-    contexts = self._devtools_client.ListInspectableContexts()
-    return self._context['id'] in [c['id'] for c in contexts]
-
   def _HandleInspectorDomainNotification(self, res):
     if (res['method'] == 'Inspector.detached' and
         res.get('params', {}).get('reason', '') == 'replaced_with_devtools'):
-      self._WaitForInspectorToGoAwayAndReconnect()
+      self._WaitForInspectorToGoAway()
       return
     if res['method'] == 'Inspector.targetCrashed':
-      raise exceptions.DevtoolsTargetCrashException(self.app)
+      exception = exceptions.DevtoolsTargetCrashException(self.app)
+      self._AddDebuggingInformation(exception)
+      raise exception
 
-  def _HandleError(self, elapsed_time):
-    if self._IsInspectable():
-      raise exceptions.DevtoolsTargetCrashException(self.app,
+  def _WaitForInspectorToGoAway(self):
+    self._websocket.Disconnect()
+    raw_input('The connection to Chrome was lost to the inspector ui.\n'
+              'Please close the inspector and press enter to resume '
+              'Telemetry run...')
+    raise exceptions.DevtoolsTargetCrashException(
+        self.app, 'Devtool connection with the browser was interrupted due to '
+        'the opening of an inspector.')
+
+  def _ConvertExceptionFromInspectorWebsocket(self, error):
+    """Converts an Exception from inspector_websocket.
+
+    This method always raises a Telemetry exception. It appends debugging
+    information. The exact exception raised depends on |error|.
+
+    Args:
+      error: An instance of socket.error or websocket.WebSocketException.
+    Raises:
+      exceptions.TimeoutException: A timeout occured.
+      exceptions.DevtoolsTargetCrashException: On any other error, the most
+        likely explanation is that the devtool's target crashed.
+    """
+    if isinstance(error, websocket.WebSocketTimeoutException):
+      new_error = exceptions.TimeoutException()
+    else:
+      new_error = exceptions.DevtoolsTargetCrashException(self.app)
+
+    original_error_msg = 'Original exception:\n' + str(error)
+    new_error.AddDebuggingMessage(original_error_msg)
+    self._AddDebuggingInformation(new_error)
+
+    raise new_error, None, sys.exc_info()[2]
+
+  def _AddDebuggingInformation(self, error):
+    """Adds debugging information to error.
+
+    Args:
+      error: An instance of exceptions.Error.
+    """
+    if self.IsInspectable():
+      msg = (
           'Received a socket error in the browser connection and the tab '
-          'still exists, assuming it timed out. '
-          'Elapsed=%ds Error=%s' % (elapsed_time, sys.exc_info()[1]))
-    raise exceptions.DevtoolsTargetCrashException(self.app,
-        'Received a socket error in the browser connection and the tab no '
-        'longer exists, assuming it crashed. Error=%s' % sys.exc_info()[1])
+          'still exists. The operation probably timed out.'
+      )
+    else:
+      msg = (
+          'Received a socket error in the browser connection and the tab no '
+          'longer exists. The tab probably crashed.'
+      )
+    error.AddDebuggingMessage(msg)
+    error.AddDebuggingMessage('Debugger url: %s' % self.debugger_url)
 
-  def _WaitForInspectorToGoAwayAndReconnect(self):
-    sys.stderr.write('The connection to Chrome was lost to the Inspector UI.\n')
-    sys.stderr.write('Telemetry is waiting for the inspector to be closed...\n')
-    super(InspectorBackend, self).Disconnect()
-    self._websocket._socket.close()
-    self._websocket._socket = None
-    def IsBack():
-      if not self._IsInspectable():
-        return False
-      try:
-        self._websocket.Connect(self.debugger_url)
-      except exceptions.DevtoolsTargetCrashException, ex:
-        if ex.message.message.find('Handshake Status 500') == 0:
-          return False
-        raise
-      return True
-    util.WaitFor(IsBack, 512)
-    sys.stderr.write('\n')
-    sys.stderr.write('Inspector\'s UI closed. Telemetry will now resume.\n')
-
+  @_HandleInspectorWebSocketExceptions
   def CollectGarbage(self):
     self._page.CollectGarbage()
-
-  def TakeJSHeapSnapshot(self, timeout=120):
-    snapshot = []
-
-    def OnNotification(res):
-      if res['method'] == 'HeapProfiler.addHeapSnapshotChunk':
-        snapshot.append(res['params']['chunk'])
-
-    def OnClose():
-      pass
-
-    self._websocket.RegisterDomain('HeapProfiler', OnNotification, OnClose)
-
-    self._websocket.SyncRequest({'method': 'Page.getResourceTree'}, timeout)
-    self._websocket.SyncRequest({'method': 'Debugger.enable'}, timeout)
-    self._websocket.SyncRequest(
-        {'method': 'HeapProfiler.takeHeapSnapshot'}, timeout)
-    snapshot = ''.join(snapshot)
-
-    self.UnregisterDomain('HeapProfiler')
-    return heap_model_module.Model(snapshot)

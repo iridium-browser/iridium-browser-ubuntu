@@ -1,20 +1,14 @@
-#!/usr/bin/python
 # Copyright (c) 2013 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
 """Unit tests for chromite.lib.git and helpers for testing that module."""
 
-# pylint: disable=bad-continuation
-
 from __future__ import print_function
 
 import functools
+import mock
 import os
-import sys
-
-sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.dirname(
-    os.path.abspath(__file__)))))
 
 from chromite.lib import cros_build_lib
 from chromite.lib import cros_build_lib_unittest
@@ -22,8 +16,6 @@ from chromite.lib import cros_test_lib
 from chromite.lib import git
 from chromite.lib import partial_mock
 from chromite.lib import patch_unittest
-
-import mock
 
 
 class ManifestMock(partial_mock.PartialMock):
@@ -226,28 +218,30 @@ class RawDiffTest(cros_test_lib.MockTestCase):
     self.PatchObject(git, 'RunGit', return_value=result)
 
     entries = git.RawDiff('foo', 'bar')
-    self.assertEqual(entries,
-      [('100644', '100644', 'ac234b2', '077d1f8', 'M', None,
-        'chromeos-base/chromeos-chrome/Manifest', None),
-       ('100644', '100644', '9e5d11b', '806bf9b', 'R', '099',
-        'chromeos-base/chromeos-chrome/'
-        'chromeos-chrome-40.0.2197.0_rc-r1.ebuild',
-        'chromeos-base/chromeos-chrome/'
-        'chromeos-chrome-40.0.2197.2_rc-r1.ebuild'),
-       ('100644', '100644', '70d6e94', '821c642', 'M', None,
-        'chromeos-base/chromeos-chrome/chromeos-chrome-9999.ebuild', None),
-       ('100644', '100644', 'be445f9', 'be445f9', 'R', '100',
-        'chromeos-base/chromium-source/'
-        'chromium-source-40.0.2197.0_rc-r1.ebuild',
-        'chromeos-base/chromium-source/'
-        'chromium-source-40.0.2197.2_rc-r1.ebuild')])
+    self.assertEqual(entries, [
+        ('100644', '100644', 'ac234b2', '077d1f8', 'M', None,
+         'chromeos-base/chromeos-chrome/Manifest', None),
+        ('100644', '100644', '9e5d11b', '806bf9b', 'R', '099',
+         'chromeos-base/chromeos-chrome/'
+         'chromeos-chrome-40.0.2197.0_rc-r1.ebuild',
+         'chromeos-base/chromeos-chrome/'
+         'chromeos-chrome-40.0.2197.2_rc-r1.ebuild'),
+        ('100644', '100644', '70d6e94', '821c642', 'M', None,
+         'chromeos-base/chromeos-chrome/chromeos-chrome-9999.ebuild', None),
+        ('100644', '100644', 'be445f9', 'be445f9', 'R', '100',
+         'chromeos-base/chromium-source/'
+         'chromium-source-40.0.2197.0_rc-r1.ebuild',
+         'chromeos-base/chromium-source/'
+         'chromium-source-40.0.2197.2_rc-r1.ebuild')
+    ])
 
 
 class GitPushTest(cros_test_lib.MockTestCase):
   """Tests for git.GitPush function."""
 
   # Non fast-forward push error message.
-  NON_FF_PUSH_ERROR = ('To https://localhost/repo.git\n'
+  NON_FF_PUSH_ERROR = (
+      'To https://localhost/repo.git\n'
       '! [remote rejected] master -> master (non-fast-forward)\n'
       'error: failed to push some refs to \'https://localhost/repo.git\'\n')
 
@@ -332,12 +326,9 @@ class GitPushTest(cros_test_lib.MockTestCase):
 
 class GitBranchDetectionTest(patch_unittest.GitRepoPatchTestCase):
   """Tests that git library functions related to branch detection work."""
+
   def testDoesCommitExistInRepoWithAmbiguousBranchName(self):
     git1 = self._MakeRepo('git1', self.source)
     git.CreateBranch(git1, 'peach', track=True)
     self.CommitFile(git1, 'peach', 'Keep me.')
     self.assertTrue(git.DoesCommitExistInRepo(git1, 'peach'))
-
-
-if __name__ == '__main__':
-  cros_test_lib.main()

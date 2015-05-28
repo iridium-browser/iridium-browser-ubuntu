@@ -37,7 +37,7 @@ class WebContents;
 class CONTENT_EXPORT SynchronousCompositor {
  public:
   // Must be called once per WebContents instance. Will create the compositor
-  // instance as needed, but only if |client| is non-NULL.
+  // instance as needed, but only if |client| is non-nullptr.
   static void SetClientForWebContents(WebContents* contents,
                                       SynchronousCompositorClient* client);
 
@@ -86,6 +86,11 @@ class CONTENT_EXPORT SynchronousCompositor {
   // scroll offset of the root layer (as returned by
   // SynchronousCompositorClient::GetTotalRootLayerScrollOffset).
   virtual void DidChangeRootLayerScrollOffset() = 0;
+
+  // Called by the embedder to notify that the compositor is active. The
+  // compositor won't ask for vsyncs when it's inactive. NOTE: The compositor
+  // starts off as inactive and needs a SetActive(true) call to begin.
+  virtual void SetIsActive(bool is_active) = 0;
 
  protected:
   virtual ~SynchronousCompositor() {}

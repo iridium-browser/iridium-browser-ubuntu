@@ -109,18 +109,6 @@ public:
     // Called to show the widget according to the given policy.
     virtual void show(WebNavigationPolicy) { }
 
-    // Called to block execution of the current thread until the widget is
-    // closed.
-    virtual void runModal() { }
-
-    // Called to enter/exit fullscreen mode. If enterFullScreen returns true,
-    // then WebWidget::{will,Did}EnterFullScreen should bound resizing the
-    // WebWidget into fullscreen mode. Similarly, when exitFullScreen is
-    // called, WebWidget::{will,Did}ExitFullScreen should bound resizing the
-    // WebWidget out of fullscreen mode.
-    virtual bool enterFullScreen() { return false; }
-    virtual void exitFullScreen() { }
-
     // Called to get/set the position of the widget in screen coordinates.
     virtual WebRect windowRect() { return WebRect(); }
     virtual void setWindowRect(const WebRect&) { }
@@ -179,16 +167,19 @@ public:
     virtual void showImeIfNeeded() { }
 
     // Request that the browser show a UI for an unhandled tap, if needed.
-    // Invoked during the handling of a GestureTap input event whenever the event is
-    // not consumed.  domChanged is true if and only if the DOM tree was modified
-    // during the dispatch of the mouse*, or click events associated with the tap.
-    // tappedPosition is the point where the mouseDown occurred in client coordinates,
-    // and tappedNode is the node that the mouseDown event hit, provided so the UI can
-    // be shown only on certain kinds of nodes in specific locations.
-    // This provides a heuristic to help identify when a page is doing something as
-    // a result of a tap without explicitly consuming the event.
+    // Invoked during the handling of a GestureTap input event whenever the
+    // event is not consumed.
+    // |tappedPosition| is the point where the mouseDown occurred in client
+    // coordinates.
+    // |tappedNode| is the node that the mouseDown event hit, provided so the
+    // UI can be shown only on certain kinds of nodes in specific locations.
+    // |pageChanged| is true if and only if the DOM tree or style was
+    // modified during the dispatch of the mouse*, or click events associated
+    // with the tap.
+    // This provides a heuristic to help identify when a page is doing
+    // something as a result of a tap without explicitly consuming the event.
     virtual void showUnhandledTapUIIfNeeded(const WebPoint& tappedPosition,
-        const WebNode& tappedNode, bool domChanged) { }
+        const WebNode& tappedNode, bool pageChanged) { }
 protected:
     ~WebWidgetClient() { }
 };

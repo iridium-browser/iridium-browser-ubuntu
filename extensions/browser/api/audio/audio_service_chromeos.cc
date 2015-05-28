@@ -22,35 +22,37 @@ class AudioServiceImpl : public AudioService,
                          public chromeos::CrasAudioHandler::AudioObserver {
  public:
   AudioServiceImpl();
-  virtual ~AudioServiceImpl();
+  ~AudioServiceImpl() override;
 
   // Called by listeners to this service to add/remove themselves as observers.
-  virtual void AddObserver(AudioService::Observer* observer) override;
-  virtual void RemoveObserver(AudioService::Observer* observer) override;
+  void AddObserver(AudioService::Observer* observer) override;
+  void RemoveObserver(AudioService::Observer* observer) override;
 
   // Start to query audio device information.
-  virtual void StartGetInfo(const GetInfoCallback& callback) override;
-  virtual void SetActiveDevices(const DeviceIdList& device_list) override;
-  virtual bool SetDeviceProperties(const std::string& device_id,
-                                   bool muted,
-                                   int volume,
-                                   int gain) override;
+  void StartGetInfo(const GetInfoCallback& callback) override;
+  void SetActiveDevices(const DeviceIdList& device_list) override;
+  bool SetDeviceProperties(const std::string& device_id,
+                           bool muted,
+                           int volume,
+                           int gain) override;
 
  protected:
   // chromeos::CrasAudioHandler::AudioObserver overrides.
-  virtual void OnOutputVolumeChanged() override;
-  virtual void OnInputGainChanged() override;
-  virtual void OnOutputMuteChanged() override;
-  virtual void OnInputMuteChanged() override;
-  virtual void OnAudioNodesChanged() override;
-  virtual void OnActiveOutputNodeChanged() override;
-  virtual void OnActiveInputNodeChanged() override;
+  void OnOutputNodeVolumeChanged(uint64_t id, int volume) override;
+  void OnInputNodeGainChanged(uint64_t id, int gain) override;
+  void OnOutputMuteChanged(bool mute_on) override;
+  void OnInputMuteChanged(bool mute_on) override;
+  void OnAudioNodesChanged() override;
+  void OnActiveOutputNodeChanged() override;
+  void OnActiveInputNodeChanged() override;
 
  private:
   void NotifyDeviceChanged();
+  void NotifyLevelChanged(uint64_t id, int level);
+  void NotifyMuteChanged(bool is_input, bool is_muted);
 
-  bool FindDevice(uint64 id, chromeos::AudioDevice* device);
-  uint64 GetIdFromStr(const std::string& id_str);
+  bool FindDevice(uint64_t id, chromeos::AudioDevice* device);
+  uint64_t GetIdFromStr(const std::string& id_str);
 
   // List of observers.
   ObserverList<AudioService::Observer> observer_list_;
@@ -170,7 +172,7 @@ bool AudioServiceImpl::SetDeviceProperties(const std::string& device_id,
   return false;
 }
 
-bool AudioServiceImpl::FindDevice(uint64 id, chromeos::AudioDevice* device) {
+bool AudioServiceImpl::FindDevice(uint64_t id, chromeos::AudioDevice* device) {
   chromeos::AudioDeviceList devices;
   cras_audio_handler_->GetAudioDevices(&devices);
 
@@ -183,28 +185,28 @@ bool AudioServiceImpl::FindDevice(uint64 id, chromeos::AudioDevice* device) {
   return false;
 }
 
-uint64 AudioServiceImpl::GetIdFromStr(const std::string& id_str) {
-  uint64 device_id;
+uint64_t AudioServiceImpl::GetIdFromStr(const std::string& id_str) {
+  uint64_t device_id;
   if (!base::StringToUint64(id_str, &device_id))
     return 0;
   else
     return device_id;
 }
 
-void AudioServiceImpl::OnOutputVolumeChanged() {
-  NotifyDeviceChanged();
+void AudioServiceImpl::OnOutputNodeVolumeChanged(uint64_t id, int volume) {
+  NotifyLevelChanged(id, volume);
 }
 
-void AudioServiceImpl::OnOutputMuteChanged() {
-  NotifyDeviceChanged();
+void AudioServiceImpl::OnOutputMuteChanged(bool mute_on) {
+  NotifyMuteChanged(false, mute_on);
 }
 
-void AudioServiceImpl::OnInputGainChanged() {
-  NotifyDeviceChanged();
+void AudioServiceImpl::OnInputNodeGainChanged(uint64_t id, int gain) {
+  NotifyLevelChanged(id, gain);
 }
 
-void AudioServiceImpl::OnInputMuteChanged() {
-  NotifyDeviceChanged();
+void AudioServiceImpl::OnInputMuteChanged(bool mute_on) {
+  NotifyMuteChanged(true, mute_on);
 }
 
 void AudioServiceImpl::OnAudioNodesChanged() {
@@ -221,6 +223,24 @@ void AudioServiceImpl::OnActiveInputNodeChanged() {
 
 void AudioServiceImpl::NotifyDeviceChanged() {
   FOR_EACH_OBSERVER(AudioService::Observer, observer_list_, OnDeviceChanged());
+}
+
+void AudioServiceImpl::NotifyLevelChanged(uint64_t id, int level) {
+  FOR_EACH_OBSERVER(AudioService::Observer, observer_list_,
+                    OnLevelChanged(base::Uint64ToString(id), level));
+
+  // Notify DeviceChanged event for backward compatibility.
+  // TODO(jennyz): remove this code when the old version of hotrod retires.
+  NotifyDeviceChanged();
+}
+
+void AudioServiceImpl::NotifyMuteChanged(bool is_input, bool is_muted) {
+  FOR_EACH_OBSERVER(AudioService::Observer, observer_list_,
+                    OnMuteChanged(is_input, is_muted));
+
+  // Notify DeviceChanged event for backward compatibility.
+  // TODO(jennyz): remove this code when the old version of hotrod retires.
+  NotifyDeviceChanged();
 }
 
 AudioService* AudioService::CreateInstance() {

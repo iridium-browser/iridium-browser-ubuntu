@@ -6,7 +6,6 @@
 
 #include "base/bind.h"
 #include "base/callback.h"
-#include "base/debug/trace_event.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/memory/ref_counted.h"
@@ -14,6 +13,7 @@
 #include "base/threading/platform_thread.h"
 #include "base/threading/thread_local.h"
 #include "base/threading/worker_pool.h"
+#include "base/trace_event/trace_event.h"
 #include "base/tracked_objects.h"
 
 using tracked_objects::TrackedTime;
@@ -26,14 +26,6 @@ base::LazyInstance<ThreadLocalBoolean>::Leaky
     g_worker_pool_running_on_this_thread = LAZY_INSTANCE_INITIALIZER;
 
 const int kIdleSecondsBeforeExit = 10 * 60;
-
-#ifdef ADDRESS_SANITIZER
-const int kWorkerThreadStackSize = 256 * 1024;
-#else
-// A stack size of 64 KB is too small for the CERT_PKIXVerifyCert
-// function of NSS because of NSS bug 439169.
-const int kWorkerThreadStackSize = 128 * 1024;
-#endif
 
 class WorkerPoolImpl {
  public:
@@ -168,7 +160,7 @@ void PosixDynamicThreadPool::AddTask(PendingTask* pending_task) {
     // which will delete itself on exit.
     WorkerThread* worker =
         new WorkerThread(name_prefix_, this);
-    PlatformThread::CreateNonJoinable(kWorkerThreadStackSize, worker);
+    PlatformThread::CreateNonJoinable(0, worker);
   }
 }
 

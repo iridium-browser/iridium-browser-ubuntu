@@ -5,9 +5,8 @@
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_interceptor.h"
 
 #include "components/data_reduction_proxy/core/browser/data_reduction_proxy_bypass_protocol.h"
-#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_usage_stats.h"
+#include "components/data_reduction_proxy/core/browser/data_reduction_proxy_bypass_stats.h"
 #include "components/data_reduction_proxy/core/common/data_reduction_proxy_headers.h"
-#include "components/data_reduction_proxy/core/common/data_reduction_proxy_params.h"
 #include "net/http/http_response_headers.h"
 #include "net/url_request/url_request.h"
 #include "net/url_request/url_request_context.h"
@@ -18,14 +17,13 @@
 namespace data_reduction_proxy {
 
 DataReductionProxyInterceptor::DataReductionProxyInterceptor(
-    DataReductionProxyParams* params,
-    DataReductionProxyUsageStats* stats,
+    DataReductionProxyConfig* config,
+    DataReductionProxyBypassStats* stats,
     DataReductionProxyEventStore* event_store)
-    : params_(params),
-      usage_stats_(stats),
-      event_store_(event_store),
+    : bypass_stats_(stats),
       bypass_protocol_(
-          new DataReductionProxyBypassProtocol(params, event_store)) {}
+          new DataReductionProxyBypassProtocol(config, event_store)) {
+}
 
 DataReductionProxyInterceptor::~DataReductionProxyInterceptor() {
 }
@@ -36,7 +34,21 @@ net::URLRequestJob* DataReductionProxyInterceptor::MaybeInterceptRequest(
   return nullptr;
 }
 
+net::URLRequestJob* DataReductionProxyInterceptor::MaybeInterceptRedirect(
+    net::URLRequest* request,
+    net::NetworkDelegate* network_delegate,
+    const GURL& location) const {
+  return MaybeInterceptResponseOrRedirect(request, network_delegate);
+}
+
 net::URLRequestJob* DataReductionProxyInterceptor::MaybeInterceptResponse(
+    net::URLRequest* request,
+    net::NetworkDelegate* network_delegate) const {
+  return MaybeInterceptResponseOrRedirect(request, network_delegate);
+}
+
+net::URLRequestJob*
+DataReductionProxyInterceptor::MaybeInterceptResponseOrRedirect(
     net::URLRequest* request,
     net::NetworkDelegate* network_delegate) const {
   if (request->response_info().was_cached)
@@ -44,8 +56,8 @@ net::URLRequestJob* DataReductionProxyInterceptor::MaybeInterceptResponse(
   DataReductionProxyBypassType bypass_type = BYPASS_EVENT_TYPE_MAX;
   bool should_retry = bypass_protocol_->MaybeBypassProxyAndPrepareToRetry(
       request, &bypass_type);
-  if (usage_stats_ && bypass_type != BYPASS_EVENT_TYPE_MAX)
-    usage_stats_->SetBypassType(bypass_type);
+  if (bypass_stats_ && bypass_type != BYPASS_EVENT_TYPE_MAX)
+    bypass_stats_->SetBypassType(bypass_type);
   if (!should_retry)
     return nullptr;
   // Returning non-NULL has the effect of restarting the request with the

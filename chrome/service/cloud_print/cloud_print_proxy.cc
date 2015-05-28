@@ -24,6 +24,7 @@
 
 namespace {
 
+#if !defined(OS_MACOSX)
 void LaunchBrowserProcessWithSwitch(const std::string& switch_string) {
   DCHECK(g_service_process->io_thread()->message_loop_proxy()->
       BelongsToCurrentThread());
@@ -34,6 +35,8 @@ void LaunchBrowserProcessWithSwitch(const std::string& switch_string) {
   }
   base::CommandLine cmd_line(exe_path);
 
+  // Propagate an explicit --user-data-dir value if one was given. The new
+  // browser process will pick up a policy override during initialization.
   const base::CommandLine& process_command_line =
       *base::CommandLine::ForCurrentProcess();
   base::FilePath user_data_dir =
@@ -43,9 +46,9 @@ void LaunchBrowserProcessWithSwitch(const std::string& switch_string) {
   cmd_line.AppendSwitch(switch_string);
 
 #if defined(OS_POSIX) && !defined(OS_MACOSX)
-  base::ProcessHandle pid = 0;
-  base::LaunchProcess(cmd_line, base::LaunchOptions(), &pid);
-  base::EnsureProcessGetsReaped(pid);
+  base::Process process = base::LaunchProcess(cmd_line, base::LaunchOptions());
+  if (process.IsValid())
+    base::EnsureProcessGetsReaped(process.Pid());
 #else
   base::LaunchOptions launch_options;
 #if defined(OS_WIN)
@@ -58,6 +61,8 @@ void LaunchBrowserProcessWithSwitch(const std::string& switch_string) {
 void CheckCloudPrintProxyPolicyInBrowser() {
   LaunchBrowserProcessWithSwitch(switches::kCheckCloudPrintConnectorPolicy);
 }
+
+#endif  // !OS_MACOSX
 
 }  // namespace
 
@@ -212,8 +217,10 @@ void CloudPrintProxy::GetPrinters(std::vector<std::string>* printers) {
 }
 
 void CloudPrintProxy::CheckCloudPrintProxyPolicy() {
+#if !defined(OS_MACOSX)
   g_service_process->io_thread()->message_loop_proxy()->PostTask(
       FROM_HERE, base::Bind(&CheckCloudPrintProxyPolicyInBrowser));
+#endif
 }
 
 void CloudPrintProxy::OnAuthenticated(

@@ -11,6 +11,7 @@
 #include "base/bind.h"
 #include "base/bind_helpers.h"
 #include "base/command_line.h"
+#include "base/containers/scoped_ptr_hash_map.h"
 #include "base/cpu.h"
 #include "base/files/file.h"
 #include "base/lazy_instance.h"
@@ -88,6 +89,23 @@ bool InitializePnaclResourceHost() {
   return true;
 }
 
+bool CanOpenViaFastPath(content::PepperPluginInstance* plugin_instance,
+                        const GURL& gurl) {
+  // Fast path only works for installed file URLs.
+  if (!gurl.SchemeIs("chrome-extension"))
+    return PP_kInvalidFileHandle;
+
+  // IMPORTANT: Make sure the document can request the given URL. If we don't
+  // check, a malicious app could probe the extension system. This enforces a
+  // same-origin policy which prevents the app from requesting resources from
+  // another app.
+  blink::WebSecurityOrigin security_origin =
+      plugin_instance->GetContainer()->element().document().securityOrigin();
+  return security_origin.canRequest(gurl);
+}
+
+// This contains state that is produced by LaunchSelLdr() and consumed
+// by StartPpapiProxy().
 struct InstanceInfo {
   InstanceInfo() : plugin_pid(base::kNullProcessId), plugin_child_id(0) {}
   GURL url;
@@ -97,10 +115,44 @@ struct InstanceInfo {
   IPC::ChannelHandle channel_handle;
 };
 
-typedef std::map<PP_Instance, InstanceInfo> InstanceInfoMap;
+class NaClPluginInstance {
+ public:
+  NaClPluginInstance(PP_Instance instance):
+      nexe_load_manager(instance), pexe_size(0) {}
 
-base::LazyInstance<InstanceInfoMap> g_instance_info =
-    LAZY_INSTANCE_INITIALIZER;
+  NexeLoadManager nexe_load_manager;
+  scoped_ptr<JsonManifest> json_manifest;
+  scoped_ptr<InstanceInfo> instance_info;
+
+  // When translation is complete, this records the size of the pexe in
+  // bytes so that it can be reported in a later load event.
+  uint64_t pexe_size;
+};
+
+typedef base::ScopedPtrHashMap<PP_Instance, NaClPluginInstance> InstanceMap;
+base::LazyInstance<InstanceMap> g_instance_map = LAZY_INSTANCE_INITIALIZER;
+
+NaClPluginInstance* GetNaClPluginInstance(PP_Instance instance) {
+  InstanceMap& map = g_instance_map.Get();
+  InstanceMap::iterator iter = map.find(instance);
+  if (iter == map.end())
+    return NULL;
+  return iter->second;
+}
+
+NexeLoadManager* GetNexeLoadManager(PP_Instance instance) {
+  NaClPluginInstance* nacl_plugin_instance = GetNaClPluginInstance(instance);
+  if (!nacl_plugin_instance)
+    return NULL;
+  return &nacl_plugin_instance->nexe_load_manager;
+}
+
+JsonManifest* GetJsonManifest(PP_Instance instance) {
+  NaClPluginInstance* nacl_plugin_instance = GetNaClPluginInstance(instance);
+  if (!nacl_plugin_instance)
+    return NULL;
+  return nacl_plugin_instance->json_manifest.get();
+}
 
 static const PP_NaClFileInfo kInvalidNaClFileInfo = {
     PP_kInvalidFileHandle,
@@ -111,7 +163,7 @@ static const PP_NaClFileInfo kInvalidNaClFileInfo = {
 int GetRoutingID(PP_Instance instance) {
   // Check that we are on the main renderer thread.
   DCHECK(content::RenderThread::Get());
-  content::RendererPpapiHost *host =
+  content::RendererPpapiHost* host =
       content::RendererPpapiHost::GetForPPInstance(instance);
   if (!host)
     return 0;
@@ -161,16 +213,19 @@ PP_Bool StartPpapiProxy(PP_Instance instance);
 // management.
 class ManifestServiceProxy : public ManifestServiceChannel::Delegate {
  public:
-  ManifestServiceProxy(PP_Instance pp_instance, bool is_helper_process)
-      : pp_instance_(pp_instance), is_helper_process_(is_helper_process) {}
+  ManifestServiceProxy(PP_Instance pp_instance, NaClAppProcessType process_type)
+      : pp_instance_(pp_instance), process_type_(process_type) {}
 
   ~ManifestServiceProxy() override {}
 
   void StartupInitializationComplete() override {
     if (StartPpapiProxy(pp_instance_) == PP_TRUE) {
+      NaClPluginInstance* nacl_plugin_instance =
+          GetNaClPluginInstance(pp_instance_);
       JsonManifest* manifest = GetJsonManifest(pp_instance_);
-      NexeLoadManager* load_manager = NexeLoadManager::Get(pp_instance_);
-      if (load_manager && manifest) {
+      if (nacl_plugin_instance && manifest) {
+        NexeLoadManager* load_manager =
+            &nacl_plugin_instance->nexe_load_manager;
         std::string full_url;
         PP_PNaClOptions pnacl_options;
         bool uses_nonsfi_mode;
@@ -179,8 +234,10 @@ class ManifestServiceProxy : public ManifestServiceChannel::Delegate {
                                     &pnacl_options,
                                     &uses_nonsfi_mode,
                                     &error_info)) {
-          int64_t nexe_size = load_manager->nexe_size();
-          load_manager->ReportLoadSuccess(full_url, nexe_size, nexe_size);
+          int64_t exe_size = nacl_plugin_instance->pexe_size;
+          if (exe_size == 0)
+            exe_size = load_manager->nexe_size();
+          load_manager->ReportLoadSuccess(full_url, exe_size, exe_size);
         }
       }
     }
@@ -192,14 +249,28 @@ class ManifestServiceProxy : public ManifestServiceChannel::Delegate {
     DCHECK(ppapi::PpapiGlobals::Get()->GetMainThreadMessageLoop()->
                BelongsToCurrentThread());
 
+    // For security hardening, disable open_resource() when it is isn't
+    // needed.  PNaCl pexes can't use open_resource(), but general nexes
+    // and the PNaCl translator nexes may use it.
+    if (process_type_ != kNativeNaClProcessType &&
+        process_type_ != kPNaClTranslatorProcessType) {
+      // Return an error.
+      base::MessageLoop::current()->PostTask(
+          FROM_HERE,
+          base::Bind(callback, base::Passed(base::File()), 0, 0));
+      return;
+    }
+
     std::string url;
     // TODO(teravest): Clean up pnacl_options logic in JsonManifest so we don't
     // have to initialize it like this here.
     PP_PNaClOptions pnacl_options;
     pnacl_options.translate = PP_FALSE;
     pnacl_options.is_debug = PP_FALSE;
+    pnacl_options.use_subzero = PP_FALSE;
     pnacl_options.opt_level = 2;
-    if (!ManifestResolveKey(pp_instance_, is_helper_process_, key, &url,
+    bool is_helper_process = process_type_ == kPNaClTranslatorProcessType;
+    if (!ManifestResolveKey(pp_instance_, is_helper_process, key, &url,
                             &pnacl_options)) {
       base::MessageLoop::current()->PostTask(
           FROM_HERE,
@@ -233,7 +304,7 @@ class ManifestServiceProxy : public ManifestServiceChannel::Delegate {
   }
 
   PP_Instance pp_instance_;
-  bool is_helper_process_;
+  NaClAppProcessType process_type_;
   DISALLOW_COPY_AND_ASSIGN(ManifestServiceProxy);
 };
 
@@ -303,24 +374,27 @@ void LaunchSelLdr(PP_Instance instance,
                   const char* alleged_url,
                   const PP_NaClFileInfo* nexe_file_info,
                   PP_Bool uses_nonsfi_mode,
-                  PP_Bool enable_ppapi_dev,
                   PP_NaClAppProcessType pp_process_type,
                   void* imc_handle,
                   PP_CompletionCallback callback) {
   CHECK(ppapi::PpapiGlobals::Get()->GetMainThreadMessageLoop()->
             BelongsToCurrentThread());
   NaClAppProcessType process_type = PP_ToNaClAppProcessType(pp_process_type);
-  bool is_helper_process = process_type == kPNaClTranslatorProcessType;
   // Create the manifest service proxy here, so on error case, it will be
   // destructed (without passing it to ManifestServiceChannel).
   scoped_ptr<ManifestServiceChannel::Delegate> manifest_service_proxy(
-      new ManifestServiceProxy(instance, is_helper_process));
+      new ManifestServiceProxy(instance, process_type));
 
   FileDescriptor result_socket;
   IPC::Sender* sender = content::RenderThread::Get();
   DCHECK(sender);
   int routing_id = GetRoutingID(instance);
-  if (!routing_id) {
+  NexeLoadManager* load_manager = GetNexeLoadManager(instance);
+  DCHECK(load_manager);
+  content::PepperPluginInstance* plugin_instance =
+      content::PepperPluginInstance::Get(instance);
+  DCHECK(plugin_instance);
+  if (!routing_id || !load_manager || !plugin_instance) {
     if (nexe_file_info->handle != PP_kInvalidFileHandle) {
       base::File closer(nexe_file_info->handle);
     }
@@ -337,7 +411,7 @@ void LaunchSelLdr(PP_Instance instance,
   // Conditionally block 'Dev' interfaces. We do this for the NaCl process, so
   // it's clearer to developers when they are using 'Dev' inappropriately. We
   // must also check on the trusted side of the proxy.
-  if (enable_ppapi_dev)
+  if (load_manager->DevInterfacesEnabled())
     perm_bits |= ppapi::PERMISSION_DEV;
   instance_info.permissions =
       ppapi::PpapiPermissions::GetForCommandLine(perm_bits);
@@ -346,6 +420,23 @@ void LaunchSelLdr(PP_Instance instance,
 
   IPC::PlatformFileForTransit nexe_for_transit =
       IPC::InvalidPlatformFileForTransit();
+
+  std::vector<std::pair<
+    std::string /*key*/, std::string /*url*/> > resource_files_to_prefetch;
+  if (process_type == kNativeNaClProcessType && uses_nonsfi_mode) {
+    JsonManifest* manifest = GetJsonManifest(instance);
+    if (manifest)
+      manifest->GetPrefetchableFiles(&resource_files_to_prefetch);
+    for (size_t i = 0; i < resource_files_to_prefetch.size(); ++i) {
+      const GURL gurl(resource_files_to_prefetch[i].second);
+      // Important security check. Do not remove.
+      if (!CanOpenViaFastPath(plugin_instance, gurl)) {
+        resource_files_to_prefetch.clear();
+        break;
+      }
+    }
+  }
+
 #if defined(OS_POSIX)
   if (nexe_file_info->handle != PP_kInvalidFileHandle)
     nexe_for_transit = base::FileDescriptor(nexe_file_info->handle, true);
@@ -363,6 +454,7 @@ void LaunchSelLdr(PP_Instance instance,
               nexe_for_transit,
               nexe_file_info->token_lo,
               nexe_file_info->token_hi,
+              resource_files_to_prefetch,
               routing_id,
               perm_bits,
               PP_ToBool(uses_nonsfi_mode),
@@ -376,14 +468,13 @@ void LaunchSelLdr(PP_Instance instance,
     return;
   }
 
+  load_manager->set_nonsfi(PP_ToBool(uses_nonsfi_mode));
+
   if (!error_message_string.empty()) {
     if (PP_ToBool(main_service_runtime)) {
-      NexeLoadManager* load_manager = NexeLoadManager::Get(instance);
-      if (load_manager) {
-        load_manager->ReportLoadError(PP_NACL_ERROR_SEL_LDR_LAUNCH,
-                                      "ServiceRuntime: failed to start",
-                                      error_message_string);
-      }
+      load_manager->ReportLoadError(PP_NACL_ERROR_SEL_LDR_LAUNCH,
+                                    "ServiceRuntime: failed to start",
+                                    error_message_string);
     }
     ppapi::PpapiGlobals::Get()->GetMainThreadMessageLoop()->PostTask(
         FROM_HERE,
@@ -397,18 +488,12 @@ void LaunchSelLdr(PP_Instance instance,
   instance_info.plugin_child_id = launch_result.plugin_child_id;
 
   // Don't save instance_info if channel handle is invalid.
-  if (IsValidChannelHandle(instance_info.channel_handle))
-    g_instance_info.Get()[instance] = instance_info;
+  if (IsValidChannelHandle(instance_info.channel_handle)) {
+    NaClPluginInstance* nacl_plugin_instance = GetNaClPluginInstance(instance);
+    nacl_plugin_instance->instance_info.reset(new InstanceInfo(instance_info));
+  }
 
   *(static_cast<NaClHandle*>(imc_handle)) = ToNativeHandle(result_socket);
-
-  NexeLoadManager* load_manager = NexeLoadManager::Get(instance);
-  DCHECK(load_manager);
-  if (!load_manager) {
-    PostPPCompletionCallback(callback, PP_ERROR_FAILED);
-    base::SharedMemory::CloseHandle(launch_result.crash_info_shmem_handle);
-    return;
-  }
 
   // Store the crash information shared memory handle.
   load_manager->set_crash_info_shmem_handle(
@@ -430,13 +515,7 @@ void LaunchSelLdr(PP_Instance instance,
   }
 
   // Create the manifest service handle as well.
-  // For security hardening, disable the IPCs for open_resource() when they
-  // aren't needed.  PNaCl pexes can't use open_resource(), but general nexes
-  // and the PNaCl translator nexes may use it.
-  if (load_manager &&
-      (process_type == kNativeNaClProcessType ||
-       process_type == kPNaClTranslatorProcessType) &&
-      IsValidChannelHandle(launch_result.manifest_service_ipc_channel_handle)) {
+  if (IsValidChannelHandle(launch_result.manifest_service_ipc_channel_handle)) {
     scoped_ptr<ManifestServiceChannel> manifest_service_channel(
         new ManifestServiceChannel(
             launch_result.manifest_service_ipc_channel_handle,
@@ -445,16 +524,11 @@ void LaunchSelLdr(PP_Instance instance,
             content::RenderThread::Get()->GetShutdownEvent()));
     load_manager->set_manifest_service_channel(
         manifest_service_channel.Pass());
-  } else {
-    // The manifest service is not used for some cases like PNaCl pexes.
-    // In that case, the socket will not be created, and thus this
-    // condition needs to be handled as success.
-    PostPPCompletionCallback(callback, PP_OK);
   }
 }
 
 PP_Bool StartPpapiProxy(PP_Instance instance) {
-  NexeLoadManager* load_manager = NexeLoadManager::Get(instance);
+  NexeLoadManager* load_manager = GetNexeLoadManager(instance);
   DCHECK(load_manager);
   if (!load_manager)
     return PP_FALSE;
@@ -466,21 +540,20 @@ PP_Bool StartPpapiProxy(PP_Instance instance) {
     return PP_FALSE;
   }
 
-  InstanceInfoMap& map = g_instance_info.Get();
-  InstanceInfoMap::iterator it = map.find(instance);
-  if (it == map.end()) {
+  NaClPluginInstance* nacl_plugin_instance = GetNaClPluginInstance(instance);
+  if (!nacl_plugin_instance->instance_info) {
     DLOG(ERROR) << "Could not find instance ID";
     return PP_FALSE;
   }
-  InstanceInfo instance_info = it->second;
-  map.erase(it);
+  scoped_ptr<InstanceInfo> instance_info =
+      nacl_plugin_instance->instance_info.Pass();
 
   PP_ExternalPluginResult result = plugin_instance->SwitchToOutOfProcessProxy(
-      base::FilePath().AppendASCII(instance_info.url.spec()),
-      instance_info.permissions,
-      instance_info.channel_handle,
-      instance_info.plugin_pid,
-      instance_info.plugin_child_id);
+      base::FilePath().AppendASCII(instance_info->url.spec()),
+      instance_info->permissions,
+      instance_info->channel_handle,
+      instance_info->plugin_pid,
+      instance_info->plugin_child_id);
 
   if (result == PP_EXTERNAL_PLUGIN_OK) {
     // Log the amound of time that has passed between the trusted plugin being
@@ -504,11 +577,6 @@ int UrandomFD(void) {
 #else
   return -1;
 #endif
-}
-
-PP_Bool Are3DInterfacesDisabled() {
-  return PP_FromBool(base::CommandLine::ForCurrentProcess()->HasSwitch(
-                         switches::kDisable3DAPIs));
 }
 
 int32_t BrokerDuplicateHandle(PP_FileHandle source_handle,
@@ -598,24 +666,21 @@ int32_t GetNumberOfProcessors() {
       num_processors : 1;
 }
 
-PP_Bool PPIsNonSFIModeEnabled() {
-  return PP_FromBool(IsNonSFIModeEnabled());
-}
-
 void GetNexeFd(PP_Instance instance,
                const std::string& pexe_url,
                uint32_t opt_level,
                const base::Time& last_modified_time,
                const std::string& etag,
                bool has_no_store_header,
+               bool use_subzero,
                base::Callback<void(int32_t, bool, PP_FileHandle)> callback) {
   if (!InitializePnaclResourceHost()) {
     ppapi::PpapiGlobals::Get()->GetMainThreadMessageLoop()->PostTask(
-    FROM_HERE,
-    base::Bind(callback,
-               static_cast<int32_t>(PP_ERROR_FAILED),
-               false,
-               PP_kInvalidFileHandle));
+        FROM_HERE,
+        base::Bind(callback,
+                   static_cast<int32_t>(PP_ERROR_FAILED),
+                   false,
+                   PP_kInvalidFileHandle));
     return;
   }
 
@@ -628,6 +693,7 @@ void GetNexeFd(PP_Instance instance,
   cache_info.last_modified = last_modified_time;
   cache_info.etag = etag;
   cache_info.has_no_store_header = has_no_store_header;
+  cache_info.use_subzero = use_subzero;
   cache_info.sandbox_isa = GetSandboxArch();
   cache_info.extra_flags = GetCpuFeatures();
 
@@ -638,33 +704,53 @@ void GetNexeFd(PP_Instance instance,
       callback);
 }
 
+void LogTranslationFinishedUMA(const std::string& uma_suffix,
+                               int32_t opt_level,
+                               int32_t unknown_opt_level,
+                               int64_t nexe_size,
+                               int64_t pexe_size,
+                               int64_t compile_time_us,
+                               base::TimeDelta total_time) {
+  HistogramEnumerate("NaCl.Options.PNaCl.OptLevel" + uma_suffix, opt_level,
+                     unknown_opt_level + 1);
+  HistogramKBPerSec("NaCl.Perf.PNaClLoadTime.CompileKBPerSec" + uma_suffix,
+                    pexe_size / 1024, compile_time_us);
+  HistogramSizeKB("NaCl.Perf.Size.PNaClTranslatedNexe" + uma_suffix,
+                  nexe_size / 1024);
+  HistogramSizeKB("NaCl.Perf.Size.Pexe" + uma_suffix, pexe_size / 1024);
+  HistogramRatio("NaCl.Perf.Size.PexeNexeSizePct" + uma_suffix, pexe_size,
+                 nexe_size);
+  HistogramTimeTranslation(
+      "NaCl.Perf.PNaClLoadTime.TotalUncachedTime" + uma_suffix,
+      total_time.InMilliseconds());
+  HistogramKBPerSec(
+      "NaCl.Perf.PNaClLoadTime.TotalUncachedKBPerSec" + uma_suffix,
+      pexe_size / 1024, total_time.InMicroseconds());
+}
+
 void ReportTranslationFinished(PP_Instance instance,
                                PP_Bool success,
                                int32_t opt_level,
+                               PP_Bool use_subzero,
+                               int64_t nexe_size,
                                int64_t pexe_size,
                                int64_t compile_time_us) {
-  if (success == PP_TRUE) {
+  NexeLoadManager* load_manager = GetNexeLoadManager(instance);
+  DCHECK(load_manager);
+  if (success == PP_TRUE && load_manager) {
+    base::TimeDelta total_time =
+        base::Time::Now() - load_manager->pnacl_start_time();
     static const int32_t kUnknownOptLevel = 4;
     if (opt_level < 0 || opt_level > 3)
       opt_level = kUnknownOptLevel;
-    HistogramEnumerate("NaCl.Options.PNaCl.OptLevel",
-                       opt_level,
-                       kUnknownOptLevel + 1);
-    HistogramKBPerSec("NaCl.Perf.PNaClLoadTime.CompileKBPerSec",
-                      pexe_size / 1024,
-                      compile_time_us);
-    HistogramSizeKB("NaCl.Perf.Size.Pexe", pexe_size / 1024);
-
-    NexeLoadManager* load_manager = NexeLoadManager::Get(instance);
-    if (load_manager) {
-      base::TimeDelta total_time = base::Time::Now() -
-                                   load_manager->pnacl_start_time();
-      HistogramTimeTranslation("NaCl.Perf.PNaClLoadTime.TotalUncachedTime",
-                               total_time.InMilliseconds());
-      HistogramKBPerSec("NaCl.Perf.PNaClLoadTime.TotalUncachedKBPerSec",
-                        pexe_size / 1024,
-                        total_time.InMicroseconds());
-    }
+    // Log twice: once to cover all PNaCl UMA, and then a second
+    // time with the more specific UMA (Subzero vs LLC).
+    std::string uma_suffix(use_subzero ? ".Subzero" : ".LLC");
+    LogTranslationFinishedUMA("", opt_level, kUnknownOptLevel, nexe_size,
+                              pexe_size, compile_time_us, total_time);
+    LogTranslationFinishedUMA(uma_suffix, opt_level, kUnknownOptLevel,
+                              nexe_size, pexe_size, compile_time_us,
+                              total_time);
   }
 
   // If the resource host isn't initialized, don't try to do that here.
@@ -672,28 +758,31 @@ void ReportTranslationFinished(PP_Instance instance,
   if (g_pnacl_resource_host.Get().get() == NULL)
     return;
   g_pnacl_resource_host.Get()->ReportTranslationFinished(instance, success);
+
+  // Record the pexe size for reporting in a later load event.
+  NaClPluginInstance* nacl_plugin_instance = GetNaClPluginInstance(instance);
+  if (nacl_plugin_instance) {
+    nacl_plugin_instance->pexe_size = pexe_size;
+  }
 }
 
 PP_FileHandle OpenNaClExecutable(PP_Instance instance,
                                  const char* file_url,
                                  uint64_t* nonce_lo,
                                  uint64_t* nonce_hi) {
-  // Fast path only works for installed file URLs.
-  GURL gurl(file_url);
-  if (!gurl.SchemeIs("chrome-extension"))
+  NexeLoadManager* load_manager = GetNexeLoadManager(instance);
+  DCHECK(load_manager);
+  if (!load_manager)
     return PP_kInvalidFileHandle;
 
   content::PepperPluginInstance* plugin_instance =
       content::PepperPluginInstance::Get(instance);
   if (!plugin_instance)
     return PP_kInvalidFileHandle;
-  // IMPORTANT: Make sure the document can request the given URL. If we don't
-  // check, a malicious app could probe the extension system. This enforces a
-  // same-origin policy which prevents the app from requesting resources from
-  // another app.
-  blink::WebSecurityOrigin security_origin =
-      plugin_instance->GetContainer()->element().document().securityOrigin();
-  if (!security_origin.canRequest(gurl))
+
+  GURL gurl(file_url);
+  // Important security check. Do not remove.
+  if (!CanOpenViaFastPath(plugin_instance, gurl))
     return PP_kInvalidFileHandle;
 
   IPC::PlatformFileForTransit out_fd = IPC::InvalidPlatformFileForTransit();
@@ -705,6 +794,7 @@ PP_FileHandle OpenNaClExecutable(PP_Instance instance,
   if (!sender->Send(
       new NaClHostMsg_OpenNaClExecutable(GetRoutingID(instance),
                                          GURL(file_url),
+                                         !load_manager->nonsfi(),
                                          &out_fd,
                                          nonce_lo,
                                          nonce_hi))) {
@@ -719,7 +809,7 @@ PP_FileHandle OpenNaClExecutable(PP_Instance instance,
 
 void DispatchEvent(PP_Instance instance,
                    PP_NaClEventType event_type,
-                   const char *resource_url,
+                   const char* resource_url,
                    PP_Bool length_is_computable,
                    uint64_t loaded_bytes,
                    uint64_t total_bytes) {
@@ -731,38 +821,32 @@ void DispatchEvent(PP_Instance instance,
   DispatchProgressEvent(instance, event);
 }
 
-void ReportLoadSuccess(PP_Instance instance,
-                       uint64_t loaded_bytes,
-                       uint64_t total_bytes) {
-  NexeLoadManager* load_manager = NexeLoadManager::Get(instance);
-  if (load_manager) {
-    load_manager->ReportLoadSuccess(load_manager->program_url(),
-                                    loaded_bytes,
-                                    total_bytes);
-  }
-}
-
 void ReportLoadError(PP_Instance instance,
                      PP_NaClError error,
                      const char* error_message) {
-  NexeLoadManager* load_manager = NexeLoadManager::Get(instance);
+  NexeLoadManager* load_manager = GetNexeLoadManager(instance);
   if (load_manager)
     load_manager->ReportLoadError(error, error_message);
 }
 
-void ReportLoadAbort(PP_Instance instance) {
-  NexeLoadManager* load_manager = NexeLoadManager::Get(instance);
-  if (load_manager)
-    load_manager->ReportLoadAbort();
-}
-
 void InstanceCreated(PP_Instance instance) {
-  NexeLoadManager::Create(instance);
+  InstanceMap& map = g_instance_map.Get();
+  CHECK(map.find(instance) == map.end()); // Sanity check.
+  scoped_ptr<NaClPluginInstance> new_instance(new NaClPluginInstance(instance));
+  map.add(instance, new_instance.Pass());
 }
 
 void InstanceDestroyed(PP_Instance instance) {
-  DeleteJsonManifest(instance);
-  NexeLoadManager::Delete(instance);
+  InstanceMap& map = g_instance_map.Get();
+  InstanceMap::iterator iter = map.find(instance);
+  CHECK(iter != map.end());
+  // The erase may call NexeLoadManager's destructor prior to removing it from
+  // the map. In that case, it is possible for the trusted Plugin to re-enter
+  // the NexeLoadManager (e.g., by calling ReportLoadError). Passing out the
+  // NexeLoadManager to a local scoped_ptr just ensures that its entry is gone
+  // from the map prior to the destructor being invoked.
+  scoped_ptr<NaClPluginInstance> temp(map.take(instance));
+  map.erase(iter);
 }
 
 PP_Bool NaClDebugEnabledForURL(const char* alleged_nmf_url) {
@@ -778,21 +862,6 @@ PP_Bool NaClDebugEnabledForURL(const char* alleged_nmf_url) {
       should_debug);
 }
 
-void LogToConsole(PP_Instance instance, const char* message) {
-  NexeLoadManager* load_manager = NexeLoadManager::Get(instance);
-  DCHECK(load_manager);
-  if (load_manager)
-    load_manager->LogToConsole(std::string(message));
-}
-
-PP_NaClReadyState GetNaClReadyState(PP_Instance instance) {
-  NexeLoadManager* load_manager = NexeLoadManager::Get(instance);
-  DCHECK(load_manager);
-  if (load_manager)
-    return load_manager->nacl_ready_state();
-  return PP_NACL_READY_STATE_UNSENT;
-}
-
 void Vlog(const char* message) {
   VLOG(1) << message;
 }
@@ -801,18 +870,10 @@ void InitializePlugin(PP_Instance instance,
                       uint32_t argc,
                       const char* argn[],
                       const char* argv[]) {
-  NexeLoadManager* load_manager = NexeLoadManager::Get(instance);
+  NexeLoadManager* load_manager = GetNexeLoadManager(instance);
   DCHECK(load_manager);
   if (load_manager)
     load_manager->InitializePlugin(argc, argn, argv);
-}
-
-int64_t GetNexeSize(PP_Instance instance) {
-  NexeLoadManager* load_manager = NexeLoadManager::Get(instance);
-  DCHECK(load_manager);
-  if (load_manager)
-    return load_manager->nexe_size();
-  return 0;
 }
 
 void DownloadManifestToBuffer(PP_Instance instance,
@@ -824,7 +885,7 @@ bool CreateJsonManifest(PP_Instance instance,
 
 void RequestNaClManifest(PP_Instance instance,
                          PP_CompletionCallback callback) {
-  NexeLoadManager* load_manager = NexeLoadManager::Get(instance);
+  NexeLoadManager* load_manager = GetNexeLoadManager(instance);
   DCHECK(load_manager);
   if (!load_manager) {
     ppapi::PpapiGlobals::Get()->GetMainThreadMessageLoop()->PostTask(
@@ -871,7 +932,7 @@ void RequestNaClManifest(PP_Instance instance,
 }
 
 PP_Var GetManifestBaseURL(PP_Instance instance) {
-  NexeLoadManager* load_manager = NexeLoadManager::Get(instance);
+  NexeLoadManager* load_manager = GetNexeLoadManager(instance);
   DCHECK(load_manager);
   if (!load_manager)
     return PP_MakeUndefined();
@@ -882,16 +943,9 @@ PP_Var GetManifestBaseURL(PP_Instance instance) {
 }
 
 void ProcessNaClManifest(PP_Instance instance, const char* program_url) {
-  nacl::NexeLoadManager* load_manager = NexeLoadManager::Get(instance);
+  nacl::NexeLoadManager* load_manager = GetNexeLoadManager(instance);
   if (load_manager)
     load_manager->ProcessNaClManifest(program_url);
-}
-
-PP_Bool DevInterfacesEnabled(PP_Instance instance) {
-  nacl::NexeLoadManager* load_manager = NexeLoadManager::Get(instance);
-  if (load_manager)
-    return PP_FromBool(load_manager->DevInterfacesEnabled());
-  return PP_FALSE;
 }
 
 void DownloadManifestToBufferCompletion(PP_Instance instance,
@@ -902,7 +956,7 @@ void DownloadManifestToBufferCompletion(PP_Instance instance,
 
 void DownloadManifestToBuffer(PP_Instance instance,
                               struct PP_CompletionCallback callback) {
-  nacl::NexeLoadManager* load_manager = NexeLoadManager::Get(instance);
+  nacl::NexeLoadManager* load_manager = GetNexeLoadManager(instance);
   DCHECK(load_manager);
   content::PepperPluginInstance* plugin_instance =
       content::PepperPluginInstance::Get(instance);
@@ -938,7 +992,7 @@ void DownloadManifestToBufferCompletion(PP_Instance instance,
   HistogramTimeSmall("NaCl.Perf.StartupTime.ManifestDownload",
                      download_time.InMilliseconds());
 
-  nacl::NexeLoadManager* load_manager = NexeLoadManager::Get(instance);
+  nacl::NexeLoadManager* load_manager = GetNexeLoadManager(instance);
   if (!load_manager) {
     callback.func(callback.user_data, PP_ERROR_ABORTED);
     return;
@@ -985,7 +1039,7 @@ bool CreateJsonManifest(PP_Instance instance,
   HistogramSizeKB("NaCl.Perf.Size.Manifest",
                   static_cast<int32_t>(manifest_data.length() / 1024));
 
-  nacl::NexeLoadManager* load_manager = NexeLoadManager::Get(instance);
+  nacl::NexeLoadManager* load_manager = GetNexeLoadManager(instance);
   if (!load_manager)
     return false;
 
@@ -1003,7 +1057,7 @@ bool CreateJsonManifest(PP_Instance instance,
           PP_ToBool(NaClDebugEnabledForURL(manifest_url.c_str()))));
   JsonManifest::ErrorInfo error_info;
   if (j->Init(manifest_data.c_str(), &error_info)) {
-    AddJsonManifest(instance, j.Pass());
+    GetNaClPluginInstance(instance)->json_manifest.reset(j.release());
     return true;
   }
   load_manager->ReportLoadError(error_info.error, error_info.string);
@@ -1014,7 +1068,7 @@ PP_Bool ManifestGetProgramURL(PP_Instance instance,
                               PP_Var* pp_full_url,
                               PP_PNaClOptions* pnacl_options,
                               PP_Bool* pp_uses_nonsfi_mode) {
-  nacl::NexeLoadManager* load_manager = NexeLoadManager::Get(instance);
+  nacl::NexeLoadManager* load_manager = GetNexeLoadManager(instance);
 
   JsonManifest* manifest = GetJsonManifest(instance);
   if (manifest == NULL)
@@ -1027,6 +1081,15 @@ PP_Bool ManifestGetProgramURL(PP_Instance instance,
                               &error_info)) {
     *pp_full_url = ppapi::StringVar::StringToPPVar(full_url);
     *pp_uses_nonsfi_mode = PP_FromBool(uses_nonsfi_mode);
+    // Check if we should use Subzero (x86-32 / non-debugging case for now).
+    if (pnacl_options->opt_level == 0 && !pnacl_options->is_debug &&
+        strcmp(GetSandboxArch(), "x86-32") == 0 &&
+        base::CommandLine::ForCurrentProcess()->HasSwitch(
+            switches::kEnablePNaClSubzero)) {
+      pnacl_options->use_subzero = PP_TRUE;
+      // Subzero -O2 is closer to LLC -O0, so indicate -O2.
+      pnacl_options->opt_level = 2;
+    }
     return PP_TRUE;
   }
 
@@ -1047,7 +1110,7 @@ bool ManifestResolveKey(PP_Instance instance,
     // We can only resolve keys in the files/ namespace.
     const std::string kFilesPrefix = "files/";
     if (key.find(kFilesPrefix) == std::string::npos) {
-      nacl::NexeLoadManager* load_manager = NexeLoadManager::Get(instance);
+      nacl::NexeLoadManager* load_manager = GetNexeLoadManager(instance);
       if (load_manager)
         load_manager->ReportLoadError(PP_NACL_ERROR_MANIFEST_RESOLVE_URL,
                                       "key did not start with files/");
@@ -1068,9 +1131,10 @@ bool ManifestResolveKey(PP_Instance instance,
 
 PP_Bool GetPNaClResourceInfo(PP_Instance instance,
                              PP_Var* llc_tool_name,
-                             PP_Var* ld_tool_name) {
+                             PP_Var* ld_tool_name,
+                             PP_Var* subzero_tool_name) {
   static const char kFilename[] = "chrome://pnacl-translator/pnacl.json";
-  NexeLoadManager* load_manager = NexeLoadManager::Get(instance);
+  NexeLoadManager* load_manager = GetNexeLoadManager(instance);
   DCHECK(load_manager);
   if (!load_manager)
     return PP_FALSE;
@@ -1145,18 +1209,30 @@ PP_Bool GetPNaClResourceInfo(PP_Instance instance,
   if (json_data.isMember("pnacl-llc-name")) {
     Json::Value json_name = json_data["pnacl-llc-name"];
     if (json_name.isString()) {
-      std::string llc_tool_name_str = json_name.asString();
-      *llc_tool_name = ppapi::StringVar::StringToPPVar(llc_tool_name_str);
+      *llc_tool_name = ppapi::StringVar::StringToPPVar(json_name.asString());
     }
   }
 
   if (json_data.isMember("pnacl-ld-name")) {
     Json::Value json_name = json_data["pnacl-ld-name"];
     if (json_name.isString()) {
-      std::string ld_tool_name_str = json_name.asString();
-      *ld_tool_name = ppapi::StringVar::StringToPPVar(ld_tool_name_str);
+      *ld_tool_name = ppapi::StringVar::StringToPPVar(json_name.asString());
     }
   }
+
+  if (json_data.isMember("pnacl-sz-name")) {
+    Json::Value json_name = json_data["pnacl-sz-name"];
+    if (json_name.isString()) {
+      *subzero_tool_name =
+          ppapi::StringVar::StringToPPVar(json_name.asString());
+    }
+  } else {
+    // TODO(jvoung): remove fallback after one chrome release
+    // or when we bump the kMinPnaclVersion.
+    // TODO(jvoung): Just use strings instead of PP_Var!
+    *subzero_tool_name = ppapi::StringVar::StringToPPVar("pnacl-sz.nexe");
+  }
+
   return PP_TRUE;
 }
 
@@ -1283,7 +1359,7 @@ void DownloadNexeCompletion(const DownloadNexeRequest& request,
 
   base::TimeDelta download_time = base::Time::Now() - request.start_time;
 
-  NexeLoadManager* load_manager = NexeLoadManager::Get(request.instance);
+  NexeLoadManager* load_manager = GetNexeLoadManager(request.instance);
   if (load_manager) {
     load_manager->NexeFileDidOpen(pp_error,
                                   target_file,
@@ -1325,7 +1401,7 @@ void DownloadFile(PP_Instance instance,
   DCHECK(ppapi::PpapiGlobals::Get()->GetMainThreadMessageLoop()->
              BelongsToCurrentThread());
 
-  NexeLoadManager* load_manager = NexeLoadManager::Get(instance);
+  NexeLoadManager* load_manager = GetNexeLoadManager(instance);
   DCHECK(load_manager);
   if (!load_manager) {
     base::MessageLoop::current()->PostTask(
@@ -1425,7 +1501,7 @@ void ReportSelLdrStatus(PP_Instance instance,
                         int32_t load_status,
                         int32_t max_status) {
   HistogramEnumerate("NaCl.LoadStatus.SelLdr", load_status, max_status);
-  NexeLoadManager* load_manager = NexeLoadManager::Get(instance);
+  NexeLoadManager* load_manager = GetNexeLoadManager(instance);
   DCHECK(load_manager);
   if (!load_manager)
     return;
@@ -1446,41 +1522,20 @@ void LogTranslateTime(const char* histogram_name,
                  time_in_us / 1000));
 }
 
-void DidOpenManifestEntry(PP_NaClFileInfo* out_file_info,
-                          PP_CompletionCallback callback,
-                          int32_t pp_error,
-                          const PP_NaClFileInfo& file_info) {
-  if (pp_error == PP_OK)
-    *out_file_info = file_info;
-  callback.func(callback.user_data, pp_error);
-}
-
-void OpenManifestEntry(PP_Instance instance,
-                       PP_Bool is_helper_process,
-                       const char* key,
-                       PP_NaClFileInfo* out_file_info,
-                       PP_CompletionCallback callback) {
-  std::string url;
-  PP_PNaClOptions pnacl_options;
-  pnacl_options.translate = PP_FALSE;
-  pnacl_options.is_debug = PP_FALSE;
-  pnacl_options.opt_level = 2;
-  if (!ManifestResolveKey(instance,
-                          PP_ToBool(is_helper_process),
-                          key,
-                          &url,
-                          &pnacl_options)) {
-    PostPPCompletionCallback(callback, PP_ERROR_FAILED);
-  }
-
-  // TODO(teravest): Make a type like PP_NaClFileInfo to use for DownloadFile
-  // that would close the file handle on destruction.
-  DownloadFile(instance, url,
-               base::Bind(&DidOpenManifestEntry, out_file_info, callback));
+void LogBytesCompiledVsDowloaded(PP_Bool use_subzero,
+                                 int64_t pexe_bytes_compiled,
+                                 int64_t pexe_bytes_downloaded) {
+  HistogramRatio("NaCl.Perf.PNaClLoadTime.PctCompiledWhenFullyDownloaded",
+                 pexe_bytes_compiled, pexe_bytes_downloaded);
+  HistogramRatio(
+      use_subzero
+          ? "NaCl.Perf.PNaClLoadTime.PctCompiledWhenFullyDownloaded.Subzero"
+          : "NaCl.Perf.PNaClLoadTime.PctCompiledWhenFullyDownloaded.LLC",
+      pexe_bytes_compiled, pexe_bytes_downloaded);
 }
 
 void SetPNaClStartTime(PP_Instance instance) {
-  NexeLoadManager* load_manager = NexeLoadManager::Get(instance);
+  NexeLoadManager* load_manager = GetNexeLoadManager(instance);
   if (load_manager)
     load_manager->set_pnacl_start_time(base::Time::Now());
 }
@@ -1493,17 +1548,19 @@ class PexeDownloader : public blink::WebURLLoaderClient {
                  scoped_ptr<blink::WebURLLoader> url_loader,
                  const std::string& pexe_url,
                  int32_t pexe_opt_level,
+                 bool use_subzero,
                  const PPP_PexeStreamHandler* stream_handler,
                  void* stream_handler_user_data)
       : instance_(instance),
         url_loader_(url_loader.Pass()),
         pexe_url_(pexe_url),
         pexe_opt_level_(pexe_opt_level),
+        use_subzero_(use_subzero),
         stream_handler_(stream_handler),
         stream_handler_user_data_(stream_handler_user_data),
         success_(false),
         expected_content_length_(-1),
-        weak_factory_(this) { }
+        weak_factory_(this) {}
 
   void Load(const blink::WebURLRequest& request) {
     url_loader_->loadAsynchronously(request, this);
@@ -1541,14 +1598,10 @@ class PexeDownloader : public blink::WebURLLoaderClient {
         has_no_store_header = true;
     }
 
-    GetNexeFd(instance_,
-              pexe_url_,
-              pexe_opt_level_,
-              last_modified_time,
-              etag,
-              has_no_store_header,
-              base::Bind(&PexeDownloader::didGetNexeFd,
-                         weak_factory_.GetWeakPtr()));
+    GetNexeFd(
+        instance_, pexe_url_, pexe_opt_level_, last_modified_time, etag,
+        has_no_store_header, use_subzero_,
+        base::Bind(&PexeDownloader::didGetNexeFd, weak_factory_.GetWeakPtr()));
   }
 
   virtual void didGetNexeFd(int32_t pp_error,
@@ -1560,6 +1613,9 @@ class PexeDownloader : public blink::WebURLLoaderClient {
     }
 
     HistogramEnumerate("NaCl.Perf.PNaClCache.IsHit", cache_hit, 2);
+    HistogramEnumerate(use_subzero_ ? "NaCl.Perf.PNaClCache.IsHit.Subzero"
+                                    : "NaCl.Perf.PNaClCache.IsHit.LLC",
+                       cache_hit, 2);
     if (cache_hit) {
       stream_handler_->DidCacheHit(stream_handler_user_data_, file_handle);
 
@@ -1608,6 +1664,7 @@ class PexeDownloader : public blink::WebURLLoaderClient {
   scoped_ptr<blink::WebURLLoader> url_loader_;
   std::string pexe_url_;
   int32_t pexe_opt_level_;
+  bool use_subzero_;
   const PPP_PexeStreamHandler* stream_handler_;
   void* stream_handler_user_data_;
   bool success_;
@@ -1618,6 +1675,7 @@ class PexeDownloader : public blink::WebURLLoaderClient {
 void StreamPexe(PP_Instance instance,
                 const char* pexe_url,
                 int32_t opt_level,
+                PP_Bool use_subzero,
                 const PPP_PexeStreamHandler* handler,
                 void* handler_user_data) {
   content::PepperPluginInstance* plugin_instance =
@@ -1636,12 +1694,9 @@ void StreamPexe(PP_Instance instance,
       plugin_instance->GetContainer()->element().document();
   scoped_ptr<blink::WebURLLoader> url_loader(
       CreateWebURLLoader(document, gurl));
-  PexeDownloader* downloader = new PexeDownloader(instance,
-                                                  url_loader.Pass(),
-                                                  pexe_url,
-                                                  opt_level,
-                                                  handler,
-                                                  handler_user_data);
+  PexeDownloader* downloader =
+      new PexeDownloader(instance, url_loader.Pass(), pexe_url, opt_level,
+                         PP_ToBool(use_subzero), handler, handler_user_data);
 
   blink::WebURLRequest url_request = CreateWebURLRequest(document, gurl);
   // Mark the request as requesting a PNaCl bitcode file,
@@ -1655,39 +1710,29 @@ void StreamPexe(PP_Instance instance,
 
 const PPB_NaCl_Private nacl_interface = {
   &LaunchSelLdr,
-  &StartPpapiProxy,
   &UrandomFD,
-  &Are3DInterfacesDisabled,
   &BrokerDuplicateHandle,
   &GetReadExecPnaclFd,
   &CreateTemporaryFile,
   &GetNumberOfProcessors,
-  &PPIsNonSFIModeEnabled,
   &ReportTranslationFinished,
   &DispatchEvent,
-  &ReportLoadSuccess,
   &ReportLoadError,
-  &ReportLoadAbort,
   &InstanceCreated,
   &InstanceDestroyed,
-  &NaClDebugEnabledForURL,
   &GetSandboxArch,
-  &LogToConsole,
-  &GetNaClReadyState,
   &Vlog,
   &InitializePlugin,
-  &GetNexeSize,
   &RequestNaClManifest,
   &GetManifestBaseURL,
   &ProcessNaClManifest,
-  &DevInterfacesEnabled,
   &ManifestGetProgramURL,
   &GetPNaClResourceInfo,
   &GetCpuFeatureAttrs,
   &DownloadNexe,
   &ReportSelLdrStatus,
   &LogTranslateTime,
-  &OpenManifestEntry,
+  &LogBytesCompiledVsDowloaded,
   &SetPNaClStartTime,
   &StreamPexe
 };

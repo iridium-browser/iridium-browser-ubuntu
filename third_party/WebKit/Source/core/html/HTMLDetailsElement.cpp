@@ -36,7 +36,7 @@
 #include "core/html/HTMLSummaryElement.h"
 #include "core/html/shadow/DetailsMarkerControl.h"
 #include "core/html/shadow/ShadowElementNames.h"
-#include "core/rendering/RenderBlockFlow.h"
+#include "core/layout/LayoutBlockFlow.h"
 #include "platform/text/PlatformLocale.h"
 
 namespace blink {
@@ -52,7 +52,7 @@ static DetailsEventSender& detailsToggleEventSender()
 PassRefPtrWillBeRawPtr<HTMLDetailsElement> HTMLDetailsElement::create(Document& document)
 {
     RefPtrWillBeRawPtr<HTMLDetailsElement> details = adoptRefWillBeNoop(new HTMLDetailsElement(document));
-    details->ensureUserAgentShadowRoot();
+    details->ensureClosedShadowRoot();
     return details.release();
 }
 
@@ -75,12 +75,12 @@ void HTMLDetailsElement::dispatchPendingEvent(DetailsEventSender* eventSender)
 }
 
 
-RenderObject* HTMLDetailsElement::createRenderer(RenderStyle*)
+LayoutObject* HTMLDetailsElement::createLayoutObject(const ComputedStyle&)
 {
-    return new RenderBlockFlow(this);
+    return new LayoutBlockFlow(this);
 }
 
-void HTMLDetailsElement::didAddUserAgentShadowRoot(ShadowRoot& root)
+void HTMLDetailsElement::didAddClosedShadowRoot(ShadowRoot& root)
 {
     DEFINE_STATIC_LOCAL(const AtomicString, summarySelector, ("summary:first-of-type", AtomicString::ConstructFromLiteral));
 
@@ -105,7 +105,7 @@ Element* HTMLDetailsElement::findMainSummary() const
     if (HTMLSummaryElement* summary = Traversal<HTMLSummaryElement>::firstChild(*this))
         return summary;
 
-    HTMLContentElement* content = toHTMLContentElement(userAgentShadowRoot()->firstChild());
+    HTMLContentElement* content = toHTMLContentElement(closedShadowRoot()->firstChild());
     ASSERT(content->firstChild() && isHTMLSummaryElement(*content->firstChild()));
     return toElement(content->firstChild());
 }
@@ -122,21 +122,21 @@ void HTMLDetailsElement::parseAttribute(const QualifiedName& name, const AtomicS
         detailsToggleEventSender().cancelEvent(this);
         detailsToggleEventSender().dispatchEventSoon(this);
 
-        Element* content = ensureUserAgentShadowRoot().getElementById(ShadowElementNames::detailsContent());
+        Element* content = ensureClosedShadowRoot().getElementById(ShadowElementNames::detailsContent());
         ASSERT(content);
         if (m_isOpen)
             content->removeInlineStyleProperty(CSSPropertyDisplay);
         else
             content->setInlineStyleProperty(CSSPropertyDisplay, CSSValueNone);
 
-        // Invalidate the RenderDetailsMarker in order to turn the arrow signifying if the
+        // Invalidate the LayoutDetailsMarker in order to turn the arrow signifying if the
         // details element is open or closed.
         Element* summary = findMainSummary();
         ASSERT(summary);
 
         Element* control = toHTMLSummaryElement(summary)->markerControl();
-        if (control && control->renderer())
-            control->renderer()->setShouldDoFullPaintInvalidation();
+        if (control && control->layoutObject())
+            control->layoutObject()->setShouldDoFullPaintInvalidation();
 
         return;
     }

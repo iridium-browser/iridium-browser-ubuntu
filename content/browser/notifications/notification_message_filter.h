@@ -9,7 +9,7 @@
 
 #include "base/callback_forward.h"
 #include "content/public/browser/browser_message_filter.h"
-#include "third_party/WebKit/public/platform/WebNotificationPermission.h"
+#include "third_party/WebKit/public/platform/modules/notifications/WebNotificationPermission.h"
 
 class GURL;
 class SkBitmap;
@@ -17,13 +17,16 @@ class SkBitmap;
 namespace content {
 
 class BrowserContext;
+class PlatformNotificationContextImpl;
 struct PlatformNotificationData;
+class PlatformNotificationService;
 class ResourceContext;
 
 class NotificationMessageFilter : public BrowserMessageFilter {
  public:
   NotificationMessageFilter(
       int process_id,
+      PlatformNotificationContextImpl* notification_context,
       ResourceContext* resource_context,
       BrowserContext* browser_context);
 
@@ -48,15 +51,30 @@ class NotificationMessageFilter : public BrowserMessageFilter {
       const SkBitmap& icon,
       const PlatformNotificationData& notification_data);
   void OnShowPersistentNotification(
+      int request_id,
       int64 service_worker_registration_id,
       const GURL& origin,
       const SkBitmap& icon,
       const PlatformNotificationData& notification_data);
+  void OnGetNotifications(int request_id,
+                          int64_t service_worker_registration_id,
+                          const GURL& origin,
+                          const std::string& filter_tag);
   void OnClosePlatformNotification(int notification_id);
   void OnClosePersistentNotification(
+      const GURL& origin,
       const std::string& persistent_notification_id);
 
+  // Verifies that Web Notification permission has been granted for |origin| in
+  // cases where the renderer shouldn't send messages if it weren't the case. If
+  // no permission has been granted, a bad message has been received and the
+  // renderer should be killed accordingly.
+  bool VerifyNotificationPermissionGranted(
+      PlatformNotificationService* service,
+      const GURL& origin);
+
   int process_id_;
+  scoped_refptr<PlatformNotificationContextImpl> notification_context_;
   ResourceContext* resource_context_;
   BrowserContext* browser_context_;
 

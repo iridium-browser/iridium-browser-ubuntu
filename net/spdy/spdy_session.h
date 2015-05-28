@@ -129,10 +129,10 @@ SpdyGoAwayStatus NET_EXPORT_PRIVATE MapNetErrorToGoAwayStatus(Error err);
 
 // If these compile asserts fail then SpdyProtocolErrorDetails needs
 // to be updated with new values, as do the mapping functions above.
-COMPILE_ASSERT(12 == SpdyFramer::LAST_ERROR,
-               SpdyProtocolErrorDetails_SpdyErrors_mismatch);
-COMPILE_ASSERT(17 == RST_STREAM_NUM_STATUS_CODES,
-               SpdyProtocolErrorDetails_RstStreamStatus_mismatch);
+static_assert(12 == SpdyFramer::LAST_ERROR,
+              "SpdyProtocolErrorDetails / Spdy Errors mismatch");
+static_assert(17 == RST_STREAM_NUM_STATUS_CODES,
+              "SpdyProtocolErrorDetails / RstStreamStatus mismatch");
 
 // Splits pushed |headers| into request and response parts. Request headers are
 // the headers specifying resource URL.
@@ -540,6 +540,7 @@ class NET_EXPORT SpdySession : public BufferedSpdyFramerVisitorInterface,
   FRIEND_TEST_ALL_PREFIXES(SpdySessionTest, AdjustRecvWindowSize);
   FRIEND_TEST_ALL_PREFIXES(SpdySessionTest, AdjustSendWindowSize);
   FRIEND_TEST_ALL_PREFIXES(SpdySessionTest, SessionFlowControlInactiveStream);
+  FRIEND_TEST_ALL_PREFIXES(SpdySessionTest, SessionFlowControlPadding);
   FRIEND_TEST_ALL_PREFIXES(SpdySessionTest, SessionFlowControlNoReceiveLeaks);
   FRIEND_TEST_ALL_PREFIXES(SpdySessionTest, SessionFlowControlNoSendLeaks);
   FRIEND_TEST_ALL_PREFIXES(SpdySessionTest, SessionFlowControlEndToEnd);
@@ -833,6 +834,7 @@ class NET_EXPORT SpdySession : public BufferedSpdyFramerVisitorInterface,
                          const char* data,
                          size_t len,
                          bool fin) override;
+  void OnStreamPadding(SpdyStreamId stream_id, size_t len) override;
   void OnSettings(bool clear_persisted) override;
   void OnSetting(SpdySettingsIds id, uint8 flags, uint32 value) override;
   void OnWindowUpdate(SpdyStreamId stream_id,

@@ -8,8 +8,8 @@ from __future__ import print_function
 
 import collections
 import sys
-import traceback
 
+from chromite.cbuildbot import constants
 from chromite.lib import cros_build_lib
 
 
@@ -24,6 +24,12 @@ class StepFailure(Exception):
     3) __str__() should be brief enough to include in a Commit Queue
        failure message.
   """
+
+  # The constants.EXCEPTION_CATEGORY_ALL_CATEGORIES values that this exception
+  # maps to. Subclasses should redefine this class constant to map to a
+  # different category.
+  EXCEPTION_CATEGORY = constants.EXCEPTION_CATEGORY_UNKNOWN
+
   def __init__(self, message=''):
     """Constructor.
 
@@ -58,7 +64,7 @@ def CreateExceptInfo(exception, tb):
   Returns:
     A list of ExceptInfo objects.
   """
-  if issubclass(exception.__class__, CompoundFailure) and exception.exc_infos:
+  if isinstance(exception, CompoundFailure) and exception.exc_infos:
     return exception.exc_infos
 
   return [ExceptInfo(exception.__class__, str(exception), tb)]
@@ -154,12 +160,12 @@ class SetFailureType(object):
       except self.source_exception:
         # Get the information about the original exception.
         exc_type, exc_value, _ = sys.exc_info()
-        exc_traceback = traceback.format_exc()
         if issubclass(exc_type, self.category_exception):
           # Do not re-raise if the exception is a subclass of the set
           # exception type because it offers more information.
           raise
         else:
+          exc_traceback = cros_build_lib.FormatDetailedTraceback()
           exc_infos = CreateExceptInfo(exc_value, exc_traceback)
           raise self.category_exception(exc_infos=exc_infos)
 
@@ -178,6 +184,8 @@ class BuildScriptFailure(StepFailure):
   that developers aren't spammed with giant error messages when common
   commands (e.g. build_packages) fail.
   """
+
+  EXCEPTION_CATEGORY = constants.EXCEPTION_CATEGORY_BUILD
 
   def __init__(self, exception, shortname):
     """Construct a BuildScriptFailure object.
@@ -224,10 +232,14 @@ class PackageBuildFailure(BuildScriptFailure):
 class InfrastructureFailure(CompoundFailure):
   """Raised if a stage fails due to infrastructure issues."""
 
+  EXCEPTION_CATEGORY = constants.EXCEPTION_CATEGORY_INFRA
+
 
 # Chrome OS Test Lab failures.
 class TestLabFailure(InfrastructureFailure):
   """Raised if a stage fails due to hardware lab infrastructure issues."""
+
+  EXCEPTION_CATEGORY = constants.EXCEPTION_CATEGORY_LAB
 
 
 class SuiteTimedOut(TestLabFailure):
@@ -273,6 +285,9 @@ class BuilderFailure(InfrastructureFailure):
   """Raised if a stage fails due to builder issues."""
 
 
+class MasterSlaveVersionMismatchFailure(BuilderFailure):
+  """Raised if a slave build has a different full_version than its master."""
+
 # Crash collection service failures.
 class CrashCollectionFailure(InfrastructureFailure):
   """Raised if a stage fails due to crash collection services."""
@@ -280,6 +295,8 @@ class CrashCollectionFailure(InfrastructureFailure):
 
 class TestFailure(StepFailure):
   """Raised if a test stage (e.g. VMTest) fails."""
+
+  EXCEPTION_CATEGORY = constants.EXCEPTION_CATEGORY_TEST
 
 
 class TestWarning(StepFailure):
@@ -403,3 +420,35 @@ class BuildFailureMessage(object):
       suspects.update(change for change in changes
                       if '/overlays/' in change.project)
     return suspects
+
+
+def ReportStageFailureToCIDB(db, build_stage_id, exception):
+  """Reports stage failure to cidb along with inner exceptions.
+
+  Args:
+    db: A valid cidb handle.
+    build_stage_id: The cidb id for the build stage that failed.
+    exception: The failure exception to report.
+  """
+  outer_failure_id = db.InsertFailure(build_stage_id,
+                                      type(exception).__name__,
+                                      str(exception),
+                                      _GetExceptionCategory(type(exception)))
+
+  # This assumes that CompoundFailure can't be nested.
+  if isinstance(exception, CompoundFailure):
+    for exc_class, exc_str, _ in exception.exc_infos:
+      db.InsertFailure(build_stage_id,
+                       exc_class.__name__,
+                       exc_str,
+                       _GetExceptionCategory(exc_class),
+                       outer_failure_id)
+
+
+def _GetExceptionCategory(exception_class):
+  # Do not use try/catch. If a subclass of StepFailure does not have a valid
+  # EXCEPTION_CATEGORY, it is a programming error, not a runtime error.
+  if issubclass(exception_class, StepFailure):
+    return exception_class.EXCEPTION_CATEGORY
+  else:
+    return constants.EXCEPTION_CATEGORY_UNKNOWN

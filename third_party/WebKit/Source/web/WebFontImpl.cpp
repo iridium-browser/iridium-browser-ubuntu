@@ -85,23 +85,19 @@ float WebFontImpl::xHeight() const
 }
 
 void WebFontImpl::drawText(WebCanvas* canvas, const WebTextRun& run, const WebFloatPoint& leftBaseline,
-                           WebColor color, const WebRect& clip, bool canvasIsOpaque,
-                           int from, int to) const
+                           WebColor color, const WebRect& clip) const
 {
     FontCachePurgePreventer fontCachePurgePreventer;
     FloatRect textClipRect(clip);
     TextRun textRun(run);
     TextRunPaintInfo runInfo(textRun);
-    runInfo.from = from;
-    runInfo.to = to == -1 ? textRun.length() : to;
     runInfo.bounds = textClipRect;
     GraphicsContext gc(canvas, nullptr);
 
     gc.save();
-    gc.setCertainlyOpaque(canvasIsOpaque);
     gc.setFillColor(color);
     gc.clip(textClipRect);
-    m_font.drawText(&gc, runInfo, leftBaseline);
+    gc.drawText(m_font, runInfo, leftBaseline);
     gc.restore();
 }
 

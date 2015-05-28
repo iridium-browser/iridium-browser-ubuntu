@@ -1,6 +1,6 @@
 /*
  * libjingle
- * Copyright 2015, Google Inc.
+ * Copyright 2015 Google Inc.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
@@ -85,7 +85,7 @@ public class LooperExecutor extends Thread implements Executor {
     handler.post(new Runnable() {
       @Override
       public void run() {
-        Looper.myLooper().quitSafely();
+        Looper.myLooper().quit();
         Log.d(TAG, "Looper thread finished.");
       }
     });

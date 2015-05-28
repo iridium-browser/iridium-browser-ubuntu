@@ -13,8 +13,8 @@
 
 #include <vector>
 
+#include "webrtc/base/scoped_ptr.h"
 #include "webrtc/modules/audio_coding/codecs/audio_encoder.h"
-#include "webrtc/system_wrappers/interface/scoped_ptr.h"
 
 namespace webrtc {
 
@@ -33,24 +33,27 @@ class AudioEncoderCopyRed : public AudioEncoder {
   // Caller keeps ownership of the AudioEncoder object.
   explicit AudioEncoderCopyRed(const Config& config);
 
-  virtual ~AudioEncoderCopyRed();
+  ~AudioEncoderCopyRed() override;
 
-  virtual int sample_rate_hz() const OVERRIDE;
-  virtual int num_channels() const OVERRIDE;
-  virtual int Num10MsFramesInNextPacket() const OVERRIDE;
-  virtual int Max10MsFramesInAPacket() const OVERRIDE;
+  int SampleRateHz() const override;
+  int NumChannels() const override;
+  size_t MaxEncodedBytes() const override;
+  int RtpTimestampRateHz() const override;
+  int Num10MsFramesInNextPacket() const override;
+  int Max10MsFramesInAPacket() const override;
+  void SetTargetBitrate(int bits_per_second) override;
+  void SetProjectedPacketLossRate(double fraction) override;
 
  protected:
-  virtual bool EncodeInternal(uint32_t timestamp,
-                              const int16_t* audio,
-                              size_t max_encoded_bytes,
-                              uint8_t* encoded,
-                              EncodedInfo* info) OVERRIDE;
+  EncodedInfo EncodeInternal(uint32_t rtp_timestamp,
+                             const int16_t* audio,
+                             size_t max_encoded_bytes,
+                             uint8_t* encoded) override;
 
  private:
   AudioEncoder* speech_encoder_;
   int red_payload_type_;
-  scoped_ptr<uint8_t[]> secondary_encoded_;
+  rtc::scoped_ptr<uint8_t[]> secondary_encoded_;
   size_t secondary_allocated_;
   EncodedInfoLeaf secondary_info_;
 };

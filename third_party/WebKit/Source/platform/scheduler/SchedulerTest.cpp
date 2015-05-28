@@ -7,9 +7,9 @@
 
 #include "platform/RuntimeEnabledFeatures.h"
 #include "platform/TestingPlatformSupport.h"
-#include "platform/TraceLocation.h"
 #include "public/platform/Platform.h"
 #include "public/platform/WebScheduler.h"
+#include "public/platform/WebTraceLocation.h"
 
 #include <gmock/gmock.h>
 #include <gtest/gtest.h>
@@ -34,29 +34,18 @@ class WebSchedulerForTest : public WebScheduler {
 public:
     WebSchedulerForTest()
         : m_shouldYieldForHighPriorityWork(false)
-        , m_didShutdown(false)
     {
     }
 
     // WebScheduler implementation:
-    void shutdown() override
-    {
-        m_didShutdown = true;
-    }
-
     bool shouldYieldForHighPriorityWork() override
     {
         return m_shouldYieldForHighPriorityWork;
     }
 
-    void postIdleTask(const WebTraceLocation&, IdleTask* task) override
+    void postIdleTask(const WebTraceLocation&, blink::WebThread::IdleTask* task) override
     {
         m_latestIdleTask = adoptPtr(task);
-    }
-
-    bool didShutdown() const
-    {
-        return m_didShutdown;
     }
 
     void setShouldYieldForHighPriorityWork(bool shouldYieldForHighPriorityWork)
@@ -72,9 +61,8 @@ public:
 
 protected:
     bool m_shouldYieldForHighPriorityWork;
-    bool m_didShutdown;
 
-    OwnPtr<WebScheduler::IdleTask> m_latestIdleTask;
+    OwnPtr<blink::WebThread::IdleTask> m_latestIdleTask;
 };
 
 class SchedulerTest : public testing::Test {
@@ -90,13 +78,6 @@ protected:
     OwnPtr<WebSchedulerForTest> m_webScheduler;
     OwnPtr<SchedulerForTest> m_scheduler;
 };
-
-TEST_F(SchedulerTest, TestShutdown)
-{
-    EXPECT_FALSE(m_webScheduler->didShutdown());
-    m_scheduler.clear();
-    EXPECT_TRUE(m_webScheduler->didShutdown());
-}
 
 TEST_F(SchedulerTest, TestShouldYield)
 {

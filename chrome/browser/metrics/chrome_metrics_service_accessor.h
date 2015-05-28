@@ -30,6 +30,7 @@ void RegisterSwReporterComponent(ComponentUpdateService* cus,
 
 namespace extensions {
 class MetricsPrivateGetIsCrashReportingEnabledFunction;
+class FileManagerPrivateIsUMAEnabledFunction;
 }
 
 namespace prerender {
@@ -58,12 +59,14 @@ class ChromeMetricsServiceAccessor : public metrics::MetricsServiceAccessor {
   friend class ::CrashesDOMHandler;
   friend class DataReductionProxyChromeSettings;
   friend class extensions::MetricsPrivateGetIsCrashReportingEnabledFunction;
+  friend class extensions::FileManagerPrivateIsUMAEnabledFunction;
   friend class ::FlashDOMHandler;
   friend class system_logs::ChromeInternalLogSource;
   friend class UmaSessionStats;
   friend class options::BrowserOptionsHandler;
   friend void InitiateMetricsReportingChange(
       bool, const OnMetricsReportingCallbackType&);
+  friend class MetricsServicesManager;
 
   FRIEND_TEST_ALL_PREFIXES(ChromeMetricsServiceAccessorTest,
                            MetricsReportingEnabled);

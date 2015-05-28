@@ -7,12 +7,12 @@
 // formatutils9.cpp: Queries for GL image formats and their translations to D3D9
 // formats.
 
+#include "libANGLE/renderer/d3d/copyimage.h"
 #include "libANGLE/renderer/d3d/d3d9/formatutils9.h"
 #include "libANGLE/renderer/d3d/d3d9/Renderer9.h"
-#include "libANGLE/renderer/generatemip.h"
-#include "libANGLE/renderer/loadimage.h"
-#include "libANGLE/renderer/copyimage.h"
-#include "libANGLE/renderer/vertexconversion.h"
+#include "libANGLE/renderer/d3d/d3d9/vertexconversion.h"
+#include "libANGLE/renderer/d3d/generatemip.h"
+#include "libANGLE/renderer/d3d/loadimage.h"
 
 namespace rx
 {
@@ -560,7 +560,7 @@ const VertexFormat &GetVertexFormatInfo(DWORD supportedDeclTypes, const gl::Vert
     static bool initialized = false;
     static DWORD intializedDeclTypes = 0;
     static VertexFormat formatConverters[NUM_GL_VERTEX_ATTRIB_TYPES][2][4];
-    if (!initialized)
+    if (intializedDeclTypes != supportedDeclTypes)
     {
         const TranslationDescription translations[NUM_GL_VERTEX_ATTRIB_TYPES][2][4] = // [GL types as enumerated by typeIndex()][normalized][size-1]
         {
@@ -591,8 +591,6 @@ const VertexFormat &GetVertexFormatInfo(DWORD supportedDeclTypes, const gl::Vert
         initialized = true;
         intializedDeclTypes = supportedDeclTypes;
     }
-
-    ASSERT(intializedDeclTypes == supportedDeclTypes);
 
     // Pure integer attributes only supported in ES3.0
     ASSERT(!vertexFormat.mPureInteger);

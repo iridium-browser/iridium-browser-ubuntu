@@ -18,13 +18,11 @@ class Message;
 namespace content {
 
 class BrowserContext;
+class DevToolsProtocolHandler;
 
 // Describes interface for managing devtools agents from the browser process.
 class CONTENT_EXPORT DevToolsAgentHostImpl : public DevToolsAgentHost {
  public:
-  // Returns a list of all existing WebContents that can be debugged.
-  static std::vector<WebContents*> GetInspectableWebContents();
-
   // Informs the hosted agent that a client host has attached.
   virtual void Attach() = 0;
 
@@ -32,7 +30,7 @@ class CONTENT_EXPORT DevToolsAgentHostImpl : public DevToolsAgentHost {
   virtual void Detach() = 0;
 
   // Sends a message to the agent.
-  void DispatchProtocolMessage(const std::string& message) override = 0;
+  bool DispatchProtocolMessage(const std::string& message) override;
 
   // Opens the inspector for this host.
   void Inspect(BrowserContext* browser_context);
@@ -52,6 +50,8 @@ class CONTENT_EXPORT DevToolsAgentHostImpl : public DevToolsAgentHost {
  protected:
   DevToolsAgentHostImpl();
   ~DevToolsAgentHostImpl() override;
+
+  scoped_ptr<DevToolsProtocolHandler> protocol_handler_;
 
   void HostClosed();
   void SendMessageToClient(const std::string& message);

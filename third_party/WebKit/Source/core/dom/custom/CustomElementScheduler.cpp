@@ -50,7 +50,7 @@ namespace blink {
 DEFINE_EMPTY_DESTRUCTOR_WILL_BE_REMOVED(CustomElementScheduler)
 
 // FIXME: Consider moving the element's callback queue to ElementRareData.
-typedef WillBeHeapHashMap<RawPtrWillBeMember<Element>, OwnPtrWillBeMember<CustomElementCallbackQueue> > ElementCallbackQueueMap;
+typedef WillBeHeapHashMap<RawPtrWillBeMember<Element>, OwnPtrWillBeMember<CustomElementCallbackQueue>> ElementCallbackQueueMap;
 
 static ElementCallbackQueueMap& callbackQueues()
 {
@@ -124,7 +124,7 @@ void CustomElementScheduler::resolveOrScheduleResolution(PassRefPtrWillBeRawPtr<
 
 CustomElementMicrotaskImportStep* CustomElementScheduler::scheduleImport(HTMLImportChild* import)
 {
-    ASSERT(!import->isDone());
+    ASSERT(!import->hasFinishedLoading());
     ASSERT(import->parent());
 
     // Ownership of the new step is transferred to the parent

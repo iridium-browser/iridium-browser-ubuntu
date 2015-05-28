@@ -6,6 +6,7 @@
 
 #include "native_client/src/trusted/cpu_features/arch/x86/cpu_x86.h"
 
+#include "native_client/src/include/build_config.h"
 /*
  * cpu_x86.c
  * Retrieve and decode CPU model specific feature mask.
@@ -495,8 +496,9 @@ static void GetCPUFeatures(NaClCPUData* data, NaClCPUFeaturesX86 *cpuf) {
    * pretend we don't have the instructions available at all.
    */
   if (!(NaClGetCPUFeatureX86(cpuf, NaClCPUFeatureX86_OSXSAVE)
-        && (data->_xcrv[0] & 6) == 6)) {
+        && ((data->_xcrv[0] & 6) == 6))) {
     NaClSetCPUFeatureX86(cpuf, NaClCPUFeatureX86_AVX, 0);
+    NaClSetCPUFeatureX86(cpuf, NaClCPUFeatureX86_AVX2, 0);
     NaClSetCPUFeatureX86(cpuf, NaClCPUFeatureX86_F16C, 0);
     NaClSetCPUFeatureX86(cpuf, NaClCPUFeatureX86_FMA, 0);
     NaClSetCPUFeatureX86(cpuf, NaClCPUFeatureX86_FMA4, 0);

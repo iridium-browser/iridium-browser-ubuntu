@@ -37,10 +37,23 @@ function InspectorFrontendHostAPI()
     this.events;
 }
 
-/** @typedef {{type:string, id:(number|undefined),
-               label:(string|undefined), enabled:(boolean|undefined), checked:(boolean|undefined),
-               subItems:(!Array.<!InspectorFrontendHostAPI.ContextMenuDescriptor>|undefined)}} */
+/** @typedef
+{{
+    type: string,
+    id: (number|undefined),
+    label: (string|undefined),
+    enabled: (boolean|undefined),
+    checked: (boolean|undefined),
+    subItems: (!Array.<!InspectorFrontendHostAPI.ContextMenuDescriptor>|undefined)
+}} */
 InspectorFrontendHostAPI.ContextMenuDescriptor;
+
+/** @typedef
+{{
+    statusCode: number,
+    headers: (!Object.<string, string>|undefined)
+}} */
+InspectorFrontendHostAPI.LoadNetworkResourceResult;
 
 InspectorFrontendHostAPI.Events = {
     AddExtensions: "addExtensions",
@@ -169,12 +182,6 @@ InspectorFrontendHostAPI.prototype = {
 
     bringToFront: function() { },
 
-    /**
-     * @param {string} browserId
-     * @param {string} url
-     */
-    openUrlOnRemoteDeviceAndInspect: function(browserId, url) { },
-
     closeWindow: function() { },
 
     copyText: function(text) { },
@@ -190,6 +197,14 @@ InspectorFrontendHostAPI.prototype = {
      * @return {?DOMFileSystem}
      */
     isolatedFileSystem: function(fileSystemId, registeredName) { },
+
+    /**
+     * @param {string} url
+     * @param {string} headers
+     * @param {number} streamId
+     * @param {function(!InspectorFrontendHostAPI.LoadNetworkResourceResult)} callback
+     */
+    loadNetworkResource: function(url, headers, streamId, callback) { },
 
     /**
      * @param {!FileSystem} fileSystem
@@ -215,11 +230,6 @@ InspectorFrontendHostAPI.prototype = {
      * @param {string} message
      */
     sendMessageToBackend: function(message) { },
-
-    /**
-     * @param {boolean} enabled
-     */
-    setDeviceCountUpdatesEnabled: function(enabled) { },
 
     /**
      * @param {boolean} enabled
@@ -352,6 +362,7 @@ WebInspector.InspectorFrontendHostStub.prototype = {
      */
     setIsDocked: function(isDocked, callback)
     {
+        setTimeout(callback, 0);
     },
 
     /**
@@ -488,6 +499,18 @@ WebInspector.InspectorFrontendHostStub.prototype = {
 
     /**
      * @override
+     * @param {string} url
+     * @param {string} headers
+     * @param {number} streamId
+     * @param {function(!InspectorFrontendHostAPI.LoadNetworkResourceResult)} callback
+     */
+    loadNetworkResource: function(url, headers, streamId, callback)
+    {
+        callback({statusCode : 404});
+    },
+
+    /**
+     * @override
      * @param {!FileSystem} fileSystem
      */
     upgradeDraggedFileSystemPermissions: function(fileSystem)
@@ -570,23 +593,6 @@ WebInspector.InspectorFrontendHostStub.prototype = {
 
     /**
      * @override
-     * @param {string} browserId
-     * @param {string} url
-     */
-    openUrlOnRemoteDeviceAndInspect: function(browserId, url)
-    {
-    },
-
-    /**
-     * @override
-     * @param {boolean} enabled
-     */
-    setDeviceCountUpdatesEnabled: function(enabled)
-    {
-    },
-
-    /**
-     * @override
      * @param {boolean} enabled
      */
     setDevicesUpdatesEnabled: function(enabled)
@@ -658,7 +664,7 @@ var InspectorFrontendHost = window.InspectorFrontendHost || null;
      */
     function InspectorFrontendAPIImpl()
     {
-        this._debugFrontend = !!Runtime.queryParam("debugFrontend");
+        this._debugFrontend = !!Runtime.queryParam("debugFrontend") || (window["InspectorTest"] && window["InspectorTest"]["debugTest"]);
 
         var descriptors = InspectorFrontendHostAPI.EventDescriptors;
         for (var i = 0; i < descriptors.length; ++i)
@@ -684,22 +690,39 @@ var InspectorFrontendHost = window.InspectorFrontendHost || null;
             {
                 // Single argument methods get dispatched with the param.
                 if (signature.length < 2) {
-                    InspectorFrontendHost.events.dispatchEventToListeners(name, params[0]);
+                    try {
+                        InspectorFrontendHost.events.dispatchEventToListeners(name, params[0]);
+                    } catch(e) {
+                        console.error(e + " " + e.stack);
+                    }
                     return;
                 }
                 var data = {};
                 for (var i = 0; i < signature.length; ++i)
                     data[signature[i]] = params[i];
-                InspectorFrontendHost.events.dispatchEventToListeners(name, data);
+                try {
+                    InspectorFrontendHost.events.dispatchEventToListeners(name, data);
+                } catch(e) {
+                    console.error(e + " " + e.stack);
+                }
             }
+        },
+
+        /**
+         * @param {number} id
+         * @param {string} chunk
+         */
+        streamWrite: function(id, chunk)
+        {
+            WebInspector.Streams.streamWrite(id, chunk);
         }
     }
 
     // FIXME: This file is included into both apps, since the devtools_app needs the InspectorFrontendHostAPI only,
     // so the host instance should not initialized there.
+    initializeInspectorFrontendHost();
+    window.InspectorFrontendAPI = new InspectorFrontendAPIImpl();
     if (!window.DevToolsHost) {
-        initializeInspectorFrontendHost();
-        window.InspectorFrontendAPI = new InspectorFrontendAPIImpl();
         WebInspector.setLocalizationPlatform(InspectorFrontendHost.platform());
     } else {
         WebInspector.setLocalizationPlatform(DevToolsHost.platform());

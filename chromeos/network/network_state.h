@@ -76,6 +76,7 @@ class CHROMEOS_EXPORT NetworkState : public ManagedState {
 
   // Wireless property accessors
   bool connectable() const { return connectable_; }
+  bool is_captive_portal() const { return is_captive_portal_; }
   int signal_strength() const { return signal_strength_; }
 
   // Wifi property accessors
@@ -92,6 +93,12 @@ class CHROMEOS_EXPORT NetworkState : public ManagedState {
   const std::string& payment_url() const { return payment_url_; }
   bool cellular_out_of_credits() const { return cellular_out_of_credits_; }
 
+  // VPN property accessors
+  const std::string& vpn_provider_type() const { return vpn_provider_type_; }
+  const std::string& third_party_vpn_provider_extension_id() const {
+    return third_party_vpn_provider_extension_id_;
+  }
+
   // Returns true if |connection_state_| is a connected/connecting state.
   bool IsConnectedState() const;
   bool IsConnectingState() const;
@@ -101,6 +108,9 @@ class CHROMEOS_EXPORT NetworkState : public ManagedState {
 
   // Returns true if the network properties are stored in a user profile.
   bool IsPrivate() const;
+
+  // Returns the |raw_ssid| as a hex-encoded string
+  std::string GetHexSsid() const;
 
   // Returns a comma separated string of name servers.
   std::string GetDnsServersAsString() const;
@@ -116,9 +126,11 @@ class CHROMEOS_EXPORT NetworkState : public ManagedState {
   // Set the GUID. Called exclusively by NetworkStateHandler.
   void SetGuid(const std::string& guid);
 
-  // Helpers (used e.g. when a state or error is cached)
+  // Helpers (used e.g. when a state, error, or shill dictionary is cached)
   static bool StateIsConnected(const std::string& connection_state);
   static bool StateIsConnecting(const std::string& connection_state);
+  static bool NetworkStateIsCaptivePortal(
+      const base::DictionaryValue& shill_properties);
   static bool ErrorIsValid(const std::string& error);
 
  private:
@@ -143,7 +155,6 @@ class CHROMEOS_EXPORT NetworkState : public ManagedState {
   std::string connection_state_;
   std::string profile_path_;
   std::vector<uint8_t> raw_ssid_;  // Unknown encoding. Not necessarily UTF-8.
-  bool connectable_;
 
   // Reflects the current Shill Service.Error property. This might get cleared
   // by Shill shortly after a failure.
@@ -163,6 +174,8 @@ class CHROMEOS_EXPORT NetworkState : public ManagedState {
   GURL web_proxy_auto_discovery_url_;
 
   // Wireless properties, used for icons and Connect logic.
+  bool connectable_;
+  bool is_captive_portal_;
   int signal_strength_;
 
   // Cellular properties, used for icons, Connect, and Activation.
@@ -172,6 +185,11 @@ class CHROMEOS_EXPORT NetworkState : public ManagedState {
   std::string roaming_;
   std::string payment_url_;
   bool cellular_out_of_credits_;
+
+  // VPN properties, used to construct the display name and to show the correct
+  // configuration dialog.
+  std::string vpn_provider_type_;
+  std::string third_party_vpn_provider_extension_id_;
 
   // TODO(pneubeck): Remove this once (Managed)NetworkConfigurationHandler
   // provides proxy configuration. crbug.com/241775

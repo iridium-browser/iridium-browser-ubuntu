@@ -7,6 +7,8 @@
 
 #include "bindings/core/v8/Dictionary.h"
 #include "bindings/core/v8/UnionTypesCore.h"
+#include "bindings/core/v8/V8AnimationTimingProperties.h"
+#include "bindings/core/v8/V8BindingForTesting.h"
 #include "core/animation/AnimationClock.h"
 #include "core/animation/AnimationNodeTiming.h"
 #include "core/animation/AnimationTestHelper.h"
@@ -49,11 +51,11 @@ protected:
     template<typename T>
     static PassRefPtrWillBeRawPtr<Animation> createAnimation(Element* element, Vector<Dictionary> keyframeDictionaryVector, T timingInput, ExceptionState& exceptionState)
     {
-        return Animation::create(element, EffectInput::convert(element, keyframeDictionaryVector, exceptionState), timingInput);
+        return Animation::create(element, keyframeDictionaryVector, timingInput, exceptionState);
     }
     static PassRefPtrWillBeRawPtr<Animation> createAnimation(Element* element, Vector<Dictionary> keyframeDictionaryVector, ExceptionState& exceptionState)
     {
-        return Animation::create(element, EffectInput::convert(element, keyframeDictionaryVector, exceptionState));
+        return Animation::create(element, keyframeDictionaryVector, exceptionState);
     }
 
     v8::Isolate* m_isolate;
@@ -228,7 +230,8 @@ TEST_F(AnimationAnimationV8Test, SpecifiedGetters)
     setV8ObjectPropertyAsNumber(timingInput, "playbackRate", 2);
     setV8ObjectPropertyAsString(timingInput, "direction", "reverse");
     setV8ObjectPropertyAsString(timingInput, "easing", "step-start");
-    Dictionary timingInputDictionary = Dictionary(v8::Handle<v8::Value>::Cast(timingInput), m_isolate, exceptionState);
+    AnimationTimingProperties timingInputDictionary;
+    V8AnimationTimingProperties::toImpl(m_isolate, timingInput, timingInputDictionary, exceptionState);
 
     RefPtrWillBeRawPtr<Animation> animation = createAnimation(element.get(), jsKeyframes, timingInputDictionary, exceptionState);
 
@@ -249,27 +252,29 @@ TEST_F(AnimationAnimationV8Test, SpecifiedDurationGetter)
 
     v8::Handle<v8::Object> timingInputWithDuration = v8::Object::New(m_isolate);
     setV8ObjectPropertyAsNumber(timingInputWithDuration, "duration", 2.5);
-    Dictionary timingInputDictionaryWithDuration = Dictionary(v8::Handle<v8::Value>::Cast(timingInputWithDuration), m_isolate, exceptionState);
+    AnimationTimingProperties timingInputDictionaryWithDuration;
+    V8AnimationTimingProperties::toImpl(m_isolate, timingInputWithDuration, timingInputDictionaryWithDuration, exceptionState);
 
     RefPtrWillBeRawPtr<Animation> animationWithDuration = createAnimation(element.get(), jsKeyframes, timingInputDictionaryWithDuration, exceptionState);
 
     RefPtrWillBeRawPtr<AnimationNodeTiming> specifiedWithDuration = animationWithDuration->timing();
-    DoubleOrString duration;
-    specifiedWithDuration->getDuration("duration", duration);
-    EXPECT_TRUE(duration.isDouble());
-    EXPECT_EQ(2.5, duration.getAsDouble());
+    UnrestrictedDoubleOrString duration;
+    specifiedWithDuration->duration(duration);
+    EXPECT_TRUE(duration.isUnrestrictedDouble());
+    EXPECT_EQ(2.5, duration.getAsUnrestrictedDouble());
     EXPECT_FALSE(duration.isString());
 
 
     v8::Handle<v8::Object> timingInputNoDuration = v8::Object::New(m_isolate);
-    Dictionary timingInputDictionaryNoDuration = Dictionary(v8::Handle<v8::Value>::Cast(timingInputNoDuration), m_isolate, exceptionState);
+    AnimationTimingProperties timingInputDictionaryNoDuration;
+    V8AnimationTimingProperties::toImpl(m_isolate, timingInputNoDuration, timingInputDictionaryNoDuration, exceptionState);
 
     RefPtrWillBeRawPtr<Animation> animationNoDuration = createAnimation(element.get(), jsKeyframes, timingInputDictionaryNoDuration, exceptionState);
 
     RefPtrWillBeRawPtr<AnimationNodeTiming> specifiedNoDuration = animationNoDuration->timing();
-    DoubleOrString duration2;
-    specifiedNoDuration->getDuration("duration", duration2);
-    EXPECT_FALSE(duration2.isDouble());
+    UnrestrictedDoubleOrString duration2;
+    specifiedNoDuration->duration(duration2);
+    EXPECT_FALSE(duration2.isUnrestrictedDouble());
     EXPECT_TRUE(duration2.isString());
     EXPECT_EQ("auto", duration2.getAsString());
 }
@@ -278,7 +283,8 @@ TEST_F(AnimationAnimationV8Test, SpecifiedSetters)
 {
     Vector<Dictionary, 0> jsKeyframes;
     v8::Handle<v8::Object> timingInput = v8::Object::New(m_isolate);
-    Dictionary timingInputDictionary = Dictionary(v8::Handle<v8::Value>::Cast(timingInput), m_isolate, exceptionState);
+    AnimationTimingProperties timingInputDictionary;
+    V8AnimationTimingProperties::toImpl(m_isolate, timingInput, timingInputDictionary, exceptionState);
     RefPtrWillBeRawPtr<Animation> animation = createAnimation(element.get(), jsKeyframes, timingInputDictionary, exceptionState);
 
     RefPtrWillBeRawPtr<AnimationNodeTiming> specified = animation->timing();
@@ -320,22 +326,25 @@ TEST_F(AnimationAnimationV8Test, SetSpecifiedDuration)
 {
     Vector<Dictionary, 0> jsKeyframes;
     v8::Handle<v8::Object> timingInput = v8::Object::New(m_isolate);
-    Dictionary timingInputDictionary = Dictionary(v8::Handle<v8::Value>::Cast(timingInput), m_isolate, exceptionState);
+    AnimationTimingProperties timingInputDictionary;
+    V8AnimationTimingProperties::toImpl(m_isolate, timingInput, timingInputDictionary, exceptionState);
     RefPtrWillBeRawPtr<Animation> animation = createAnimation(element.get(), jsKeyframes, timingInputDictionary, exceptionState);
 
     RefPtrWillBeRawPtr<AnimationNodeTiming> specified = animation->timing();
 
-    DoubleOrString duration;
-    specified->getDuration("duration", duration);
-    EXPECT_FALSE(duration.isDouble());
+    UnrestrictedDoubleOrString duration;
+    specified->duration(duration);
+    EXPECT_FALSE(duration.isUnrestrictedDouble());
     EXPECT_TRUE(duration.isString());
     EXPECT_EQ("auto", duration.getAsString());
 
-    specified->setDuration("duration", 2.5);
-    DoubleOrString duration2;
-    specified->getDuration("duration", duration2);
-    EXPECT_TRUE(duration2.isDouble());
-    EXPECT_EQ(2.5, duration2.getAsDouble());
+    UnrestrictedDoubleOrString inDuration;
+    inDuration.setUnrestrictedDouble(2.5);
+    specified->setDuration(inDuration);
+    UnrestrictedDoubleOrString duration2;
+    specified->duration(duration2);
+    EXPECT_TRUE(duration2.isUnrestrictedDouble());
+    EXPECT_EQ(2.5, duration2.getAsUnrestrictedDouble());
     EXPECT_FALSE(duration2.isString());
 }
 

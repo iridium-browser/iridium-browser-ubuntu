@@ -87,10 +87,11 @@ void MediaDrmCredentialManager::OnResetCredentialsCompleted(
   media_drm_bridge_.reset();
 }
 
+// TODO(ddorwin): The key system should be passed in. http://crbug.com/459400
 bool MediaDrmCredentialManager::ResetCredentialsInternal(
     SecurityLevel security_level) {
   media_drm_bridge_ =
-      media::MediaDrmBridge::CreateSessionless(kWidevineKeySystem);
+      media::MediaDrmBridge::CreateWithoutSessionSupport(kWidevineKeySystem);
   if (!media_drm_bridge_)
     return false;
 

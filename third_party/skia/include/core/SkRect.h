@@ -11,6 +11,8 @@
 #include "SkPoint.h"
 #include "SkSize.h"
 
+struct SkRect;
+
 /** \struct SkIRect
 
     SkIRect holds four 32 bit integer coordinates for a rectangle
@@ -160,15 +162,22 @@ struct SK_API SkIRect {
     /**
      *  Return a new IRect, built as an offset of this rect.
      */
-    SkIRect makeOffset(int dx, int dy) const {
+    SkIRect makeOffset(int32_t dx, int32_t dy) const {
         return MakeLTRB(fLeft + dx, fTop + dy, fRight + dx, fBottom + dy);
     }
 
     /**
      *  Return a new IRect, built as an inset of this rect.
      */
-    SkIRect makeInset(int dx, int dy) const {
+    SkIRect makeInset(int32_t dx, int32_t dy) const {
         return MakeLTRB(fLeft + dx, fTop + dy, fRight - dx, fBottom - dy);
+    }
+
+    /**
+     *  Return a new Rect, built as an outset of this rect.
+     */
+    SkIRect makeOutset(int32_t dx, int32_t dy) const {
+        return MakeLTRB(fLeft - dx, fTop - dy, fRight + dx, fBottom + dy);
     }
 
     /** Offset set the rectangle by adding dx to its left and right,
@@ -243,6 +252,10 @@ struct SK_API SkIRect {
                 fLeft <= r.fLeft && fTop <= r.fTop &&
                 fRight >= r.fRight && fBottom >= r.fBottom;
     }
+
+    /** Returns true if the specified rectangle r is inside or equal to this rectangle.
+    */
+    bool contains(const SkRect& r) const;
 
     /** Return true if this rectangle contains the specified rectangle.
         For speed, this method does not check if either this or the specified
@@ -602,12 +615,19 @@ struct SK_API SkRect {
     SkRect makeOffset(SkScalar dx, SkScalar dy) const {
         return MakeLTRB(fLeft + dx, fTop + dy, fRight + dx, fBottom + dy);
     }
-
+    
     /**
      *  Return a new Rect, built as an inset of this rect.
      */
     SkRect makeInset(SkScalar dx, SkScalar dy) const {
         return MakeLTRB(fLeft + dx, fTop + dy, fRight - dx, fBottom - dy);
+    }
+
+    /**
+     *  Return a new Rect, built as an outset of this rect.
+     */
+    SkRect makeOutset(SkScalar dx, SkScalar dy) const {
+        return MakeLTRB(fLeft - dx, fTop - dy, fRight + dx, fBottom + dy);
     }
 
     /** Offset set the rectangle by adding dx to its left and right,
@@ -778,6 +798,16 @@ public:
     }
 
     /**
+     * Returns true if the specified rectangle r is inside or equal to this rectangle.
+     */
+    bool contains(const SkIRect& r) const {
+        // todo: can we eliminate the this->isEmpty check?
+        return  !r.isEmpty() && !this->isEmpty() &&
+                fLeft <= SkIntToScalar(r.fLeft) && fTop <= SkIntToScalar(r.fTop) &&
+                fRight >= SkIntToScalar(r.fRight) && fBottom >= SkIntToScalar(r.fBottom);
+    }
+
+    /**
      *  Set the dst rectangle by rounding this rectangle's coordinates to their
      *  nearest integer values using SkScalarRoundToInt.
      */
@@ -879,5 +909,11 @@ public:
     void dump() const { this->dump(false); }
     void dumpHex() const { this->dump(true); }
 };
+
+inline bool SkIRect::contains(const SkRect& r) const {
+    return  !r.isEmpty() && !this->isEmpty() &&     // check for empties
+            (SkScalar)fLeft <= r.fLeft && (SkScalar)fTop <= r.fTop &&
+            (SkScalar)fRight >= r.fRight && (SkScalar)fBottom >= r.fBottom;
+}
 
 #endif

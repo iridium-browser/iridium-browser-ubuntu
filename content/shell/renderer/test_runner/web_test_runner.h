@@ -2,22 +2,22 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef CONTENT_SHELL_RENDERER_TEST_RUNNER_WEBTESTRUNNER_H_
-#define CONTENT_SHELL_RENDERER_TEST_RUNNER_WEBTESTRUNNER_H_
+#ifndef CONTENT_SHELL_RENDERER_TEST_RUNNER_WEB_TEST_RUNNER_H_
+#define CONTENT_SHELL_RENDERER_TEST_RUNNER_WEB_TEST_RUNNER_H_
 
 #include <vector>
 
 namespace blink {
-class WebPermissionClient;
+class WebContentSettingsClient;
 }
 
 namespace content {
 
 class WebTestRunner {
  public:
-  // Returns a mock WebPermissionClient that is used for layout tests. An
+  // Returns a mock WebContentSettings that is used for layout tests. An
   // embedder should use this for all WebViews it creates.
-  virtual blink::WebPermissionClient* GetWebPermissions() const = 0;
+  virtual blink::WebContentSettingsClient* GetWebContentSettings() const = 0;
 
   // After WebTestDelegate::TestFinished was invoked, the following methods
   // can be used to determine what kind of dump the main WebTestProxy can
@@ -39,4 +39,4 @@ class WebTestRunner {
 
 }  // namespace content
 
-#endif  // CONTENT_SHELL_RENDERER_TEST_RUNNER_WEBTESTRUNNER_H_
+#endif  // CONTENT_SHELL_RENDERER_TEST_RUNNER_WEB_TEST_RUNNER_H_

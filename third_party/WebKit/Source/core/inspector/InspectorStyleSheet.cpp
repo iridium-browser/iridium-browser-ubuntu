@@ -39,13 +39,14 @@
 #include "core/css/StyleRule.h"
 #include "core/css/StyleSheetContents.h"
 #include "core/css/parser/CSSParser.h"
+#include "core/css/parser/CSSParserObserver.h"
+#include "core/dom/DOMNodeIds.h"
 #include "core/dom/Document.h"
 #include "core/dom/Element.h"
 #include "core/html/HTMLStyleElement.h"
 #include "core/html/parser/HTMLParserIdioms.h"
 #include "core/inspector/ContentSearchUtils.h"
 #include "core/inspector/InspectorCSSAgent.h"
-#include "core/inspector/InspectorNodeIds.h"
 #include "core/inspector/InspectorPageAgent.h"
 #include "core/inspector/InspectorResourceAgent.h"
 #include "core/svg/SVGStyleElement.h"
@@ -75,7 +76,6 @@ public:
         , m_document(document)
         , m_styleSheetContents(styleSheetContents)
         , m_result(result)
-        , m_commentParser(parserContextForDocument(document))
         , m_propertyRangeStart(UINT_MAX)
         , m_selectorRangeStart(UINT_MAX)
         , m_commentRangeStart(UINT_MAX)
@@ -85,7 +85,7 @@ public:
     }
 
 private:
-    virtual void startRuleHeader(CSSRuleSourceData::Type, unsigned) override;
+    virtual void startRuleHeader(StyleRule::Type, unsigned) override;
     virtual void endRuleHeader(unsigned) override;
     virtual void startSelector(unsigned) override;
     virtual void endSelector(unsigned) override;
@@ -111,7 +111,6 @@ private:
     RawPtrWillBeMember<RuleSourceDataList> m_result;
     RuleSourceDataList m_currentRuleDataStack;
     RefPtrWillBeMember<CSSRuleSourceData> m_currentRuleData;
-    CSSParser m_commentParser;
     unsigned m_propertyRangeStart;
     unsigned m_selectorRangeStart;
     unsigned m_commentRangeStart;
@@ -119,7 +118,7 @@ private:
     unsigned m_mediaQueryExpValueRangeStart;
 };
 
-void StyleSheetHandler::startRuleHeader(CSSRuleSourceData::Type type, unsigned offset)
+void StyleSheetHandler::startRuleHeader(StyleRule::Type type, unsigned offset)
 {
     // Pop off data for a previous invalid rule.
     if (m_currentRuleData)
@@ -343,7 +342,7 @@ void StyleSheetHandler::endComment(unsigned offset)
     // no comments are encountered (will not need m_document and m_styleSheetContents).
     StyleSheetHandler handler(commentText, m_document, m_styleSheetContents, &sourceData);
     RefPtrWillBeRawPtr<MutableStylePropertySet> tempMutableStyle = MutableStylePropertySet::create();
-    m_commentParser.parseDeclaration(tempMutableStyle.get(), commentText, &handler, m_styleSheetContents);
+    CSSParser::parseDeclarationList(parserContextForDocument(m_document), tempMutableStyle.get(), commentText, &handler, m_styleSheetContents);
     WillBeHeapVector<CSSPropertySourceData>& commentPropertyData = sourceData.first()->styleSourceData->propertyData;
     if (commentPropertyData.size() != 1)
         return;
@@ -389,7 +388,7 @@ void StyleSheetHandler::endMediaQuery()
 } // namespace
 
 class ParsedStyleSheet {
-    WTF_MAKE_FAST_ALLOCATED;
+    WTF_MAKE_FAST_ALLOCATED(ParsedStyleSheet);
 public:
     ParsedStyleSheet(CSSStyleSheet* pageStyleSheet);
 
@@ -431,20 +430,20 @@ void ParsedStyleSheet::flattenSourceData(RuleSourceDataList* dataList)
 
         // The m_sourceData->append()'ed types should be exactly the same as in collectFlatRules().
         switch (data->type) {
-        case CSSRuleSourceData::STYLE_RULE:
-        case CSSRuleSourceData::IMPORT_RULE:
-        case CSSRuleSourceData::CHARSET_RULE:
-        case CSSRuleSourceData::PAGE_RULE:
-        case CSSRuleSourceData::FONT_FACE_RULE:
-        case CSSRuleSourceData::VIEWPORT_RULE:
-        case CSSRuleSourceData::KEYFRAMES_RULE:
+        case StyleRule::Style:
+        case StyleRule::Import:
+        case StyleRule::Page:
+        case StyleRule::FontFace:
+        case StyleRule::Viewport:
+        case StyleRule::Keyframes:
             m_sourceData->append(data);
             break;
-        case CSSRuleSourceData::MEDIA_RULE:
-        case CSSRuleSourceData::SUPPORTS_RULE:
+        case StyleRule::Media:
+        case StyleRule::Supports:
             m_sourceData->append(data);
             flattenSourceData(&data->childRules);
             break;
+        case StyleRule::Unknown:
         default:
             break;
         }
@@ -579,7 +578,7 @@ bool InspectorStyle::verifyPropertyText(const String& propertyText, bool canOmit
     RefPtrWillBeRawPtr<StyleSheetContents> styleSheetContents = StyleSheetContents::create(strictCSSParserContext());
     String declarationText = propertyText + (canOmitSemicolon ? ";" : " ") + bogusPropertyName + ": none";
     StyleSheetHandler handler(declarationText, ownerDocument(), styleSheetContents.get(), &sourceData);
-    CSSParser(parserContextForDocument(ownerDocument())).parseDeclaration(tempMutableStyle.get(), declarationText, &handler, styleSheetContents.get());
+    CSSParser::parseDeclarationList(parserContextForDocument(ownerDocument()), tempMutableStyle.get(), declarationText, &handler, styleSheetContents.get());
     WillBeHeapVector<CSSPropertySourceData>& propertyData = sourceData.first()->styleSourceData->propertyData;
     unsigned propertyCount = propertyData.size();
 
@@ -851,7 +850,7 @@ Document* InspectorStyle::ownerDocument() const
     return m_parentStyleSheet->ownerDocument();
 }
 
-void InspectorStyle::trace(Visitor* visitor)
+DEFINE_TRACE(InspectorStyle)
 {
     visitor->trace(m_style);
     visitor->trace(m_parentStyleSheet);
@@ -979,13 +978,14 @@ bool InspectorStyleSheetBase::findPropertyByRange(const SourceRange& sourceRange
     return false;
 }
 
-PassRefPtrWillBeRawPtr<InspectorStyleSheet> InspectorStyleSheet::create(InspectorPageAgent* pageAgent, InspectorResourceAgent* resourceAgent, const String& id, PassRefPtrWillBeRawPtr<CSSStyleSheet> pageStyleSheet, TypeBuilder::CSS::StyleSheetOrigin::Enum origin, const String& documentURL, Listener* listener)
+PassRefPtrWillBeRawPtr<InspectorStyleSheet> InspectorStyleSheet::create(InspectorPageAgent* pageAgent, InspectorResourceAgent* resourceAgent, const String& id, PassRefPtrWillBeRawPtr<CSSStyleSheet> pageStyleSheet, TypeBuilder::CSS::StyleSheetOrigin::Enum origin, const String& documentURL, InspectorCSSAgent* cssAgent)
 {
-    return adoptRefWillBeNoop(new InspectorStyleSheet(pageAgent, resourceAgent, id, pageStyleSheet, origin, documentURL, listener));
+    return adoptRefWillBeNoop(new InspectorStyleSheet(pageAgent, resourceAgent, id, pageStyleSheet, origin, documentURL, cssAgent));
 }
 
-InspectorStyleSheet::InspectorStyleSheet(InspectorPageAgent* pageAgent, InspectorResourceAgent* resourceAgent, const String& id, PassRefPtrWillBeRawPtr<CSSStyleSheet> pageStyleSheet, TypeBuilder::CSS::StyleSheetOrigin::Enum origin, const String& documentURL, Listener* listener)
-    : InspectorStyleSheetBase(id, listener)
+InspectorStyleSheet::InspectorStyleSheet(InspectorPageAgent* pageAgent, InspectorResourceAgent* resourceAgent, const String& id, PassRefPtrWillBeRawPtr<CSSStyleSheet> pageStyleSheet, TypeBuilder::CSS::StyleSheetOrigin::Enum origin, const String& documentURL, InspectorCSSAgent* cssAgent)
+    : InspectorStyleSheetBase(id, cssAgent)
+    , m_cssAgent(cssAgent)
     , m_pageAgent(pageAgent)
     , m_resourceAgent(resourceAgent)
     , m_pageStyleSheet(pageStyleSheet)
@@ -999,8 +999,9 @@ InspectorStyleSheet::~InspectorStyleSheet()
 {
 }
 
-void InspectorStyleSheet::trace(Visitor* visitor)
+DEFINE_TRACE(InspectorStyleSheet)
 {
+    visitor->trace(m_cssAgent);
     visitor->trace(m_pageAgent);
     visitor->trace(m_resourceAgent);
     visitor->trace(m_pageStyleSheet);
@@ -1236,7 +1237,7 @@ bool InspectorStyleSheet::verifySelectorText(const String& selectorText)
 
     // Exactly one rule should be parsed.
     unsigned ruleCount = sourceData.size();
-    if (ruleCount != 1 || sourceData.at(0)->type != CSSRuleSourceData::STYLE_RULE)
+    if (ruleCount != 1 || sourceData.at(0)->type != StyleRule::Style)
         return false;
 
     // Exactly one property should be in style rule.
@@ -1263,7 +1264,7 @@ bool InspectorStyleSheet::verifyMediaText(const String& mediaText)
 
     // Exactly one media rule should be parsed.
     unsigned ruleCount = sourceData.size();
-    if (ruleCount != 1 || sourceData.at(0)->type != CSSRuleSourceData::MEDIA_RULE)
+    if (ruleCount != 1 || sourceData.at(0)->type != StyleRule::Media)
         return false;
 
     // Media rule should have exactly one style rule child.
@@ -1376,7 +1377,7 @@ void InspectorStyleSheet::updateText(const String& newText)
 {
     Element* element = ownerStyleElement();
     if (!element)
-        m_pageAgent->addEditedResourceContent(finalURL(), newText);
+        m_cssAgent->addEditedStyleSheet(finalURL(), newText);
     m_parsedStyleSheet->setText(newText);
 }
 
@@ -1418,7 +1419,7 @@ PassRefPtr<TypeBuilder::CSS::CSSStyleSheetHeader> InspectorStyleSheet::buildObje
         result->setHasSourceURL(true);
 
     if (styleSheet->ownerNode())
-        result->setOwnerNode(InspectorNodeIds::idForNode(styleSheet->ownerNode()));
+        result->setOwnerNode(DOMNodeIds::idForNode(styleSheet->ownerNode()));
 
     String sourceMapURLValue = sourceMapURL();
     if (!sourceMapURLValue.isEmpty())
@@ -1638,7 +1639,7 @@ String InspectorStyleSheet::sourceMapURL() const
             return commentValue;
         }
     }
-    return m_pageAgent->resourceSourceMapURL(finalURL());
+    return m_pageStyleSheet->contents()->sourceMapURL();
 }
 
 InspectorCSSId InspectorStyleSheet::styleId(CSSStyleDeclaration* style) const
@@ -1831,7 +1832,7 @@ bool InspectorStyleSheet::resourceStyleSheetText(String* result) const
         return false;
 
     KURL url(ParsedURLString, m_pageStyleSheet->href());
-    if (m_pageAgent->getEditedResourceContent(url, result))
+    if (m_cssAgent->getEditedStyleSheet(url, result))
         return true;
 
     bool base64Encoded;
@@ -1945,7 +1946,7 @@ bool InspectorStyleSheetForInlineStyle::ensureParsedDataReady()
 
     bool success = !!m_ruleSourceData;
     if (!success) {
-        m_ruleSourceData = CSSRuleSourceData::create(CSSRuleSourceData::STYLE_RULE);
+        m_ruleSourceData = CSSRuleSourceData::create(StyleRule::Style);
         return false;
     }
 
@@ -1974,7 +1975,7 @@ PassRefPtrWillBeRawPtr<CSSRuleSourceData> InspectorStyleSheetForInlineStyle::get
         return nullptr;
 
     if (m_styleText.isEmpty()) {
-        RefPtrWillBeRawPtr<CSSRuleSourceData> result = CSSRuleSourceData::create(CSSRuleSourceData::STYLE_RULE);
+        RefPtrWillBeRawPtr<CSSRuleSourceData> result = CSSRuleSourceData::create(StyleRule::Style);
         result->ruleBodyRange.start = 0;
         result->ruleBodyRange.end = 0;
         return result.release();
@@ -1983,11 +1984,11 @@ PassRefPtrWillBeRawPtr<CSSRuleSourceData> InspectorStyleSheetForInlineStyle::get
     RefPtrWillBeRawPtr<MutableStylePropertySet> tempDeclaration = MutableStylePropertySet::create();
     RuleSourceDataList ruleSourceDataResult;
     StyleSheetHandler handler(m_styleText, &m_element->document(), m_element->document().elementSheet().contents(), &ruleSourceDataResult);
-    CSSParser(parserContextForDocument(&m_element->document())).parseDeclaration(tempDeclaration.get(), m_styleText, &handler, m_element->document().elementSheet().contents());
+    CSSParser::parseDeclarationList(parserContextForDocument(&m_element->document()), tempDeclaration.get(), m_styleText, &handler, m_element->document().elementSheet().contents());
     return ruleSourceDataResult.first().release();
 }
 
-void InspectorStyleSheetForInlineStyle::trace(Visitor* visitor)
+DEFINE_TRACE(InspectorStyleSheetForInlineStyle)
 {
     visitor->trace(m_element);
     visitor->trace(m_ruleSourceData);

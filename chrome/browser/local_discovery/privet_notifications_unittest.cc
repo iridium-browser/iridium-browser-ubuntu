@@ -41,18 +41,20 @@ class MockPrivetHttpFactory : public PrivetHTTPAsynchronousFactory {
  public:
   class MockResolution : public PrivetHTTPResolution {
    public:
-    MockResolution(
-        const std::string& name,
-        net::URLRequestContextGetter* request_context,
-        const ResultCallback& callback)
-        : name_(name), request_context_(request_context), callback_(callback) {
-    }
+    MockResolution(const std::string& name,
+                   net::URLRequestContextGetter* request_context)
+        : name_(name), request_context_(request_context) {}
 
     ~MockResolution() override {}
 
-    void Start() override {
-      callback_.Run(scoped_ptr<PrivetHTTPClient>(new PrivetHTTPClientImpl(
+    void Start(const net::HostPortPair& address,
+               const ResultCallback& callback) override {
+      callback.Run(scoped_ptr<PrivetHTTPClient>(new PrivetHTTPClientImpl(
           name_, net::HostPortPair("1.2.3.4", 8080), request_context_.get())));
+    }
+
+    void Start(const ResultCallback& callback) override {
+      Start(net::HostPortPair(), callback);
     }
 
     const std::string& GetName() override { return name_; }
@@ -60,7 +62,6 @@ class MockPrivetHttpFactory : public PrivetHTTPAsynchronousFactory {
    private:
     std::string name_;
     scoped_refptr<net::URLRequestContextGetter> request_context_;
-    ResultCallback callback_;
   };
 
   explicit MockPrivetHttpFactory(net::URLRequestContextGetter* request_context)
@@ -68,11 +69,9 @@ class MockPrivetHttpFactory : public PrivetHTTPAsynchronousFactory {
   }
 
   scoped_ptr<PrivetHTTPResolution> CreatePrivetHTTP(
-      const std::string& name,
-      const net::HostPortPair& address,
-      const ResultCallback& callback) override {
+      const std::string& name) override {
     return scoped_ptr<PrivetHTTPResolution>(
-        new MockResolution(name, request_context_.get(), callback));
+        new MockResolution(name, request_context_.get()));
   }
 
  private:

@@ -30,6 +30,7 @@
 #include "libavutil/internal.h"
 #include "avcodec.h"
 #include "error_resilience.h"
+#include "me_cmp.h"
 #include "mpegutils.h"
 #include "mpegvideo.h"
 #include "rectangle.h"
@@ -697,9 +698,6 @@ static int is_intra_more_likely(ERContext *s)
             undamaged_count++;
     }
 
-    if (s->avctx->codec_id == AV_CODEC_ID_H264 && s->ref_count <= 0)
-        return 1;
-
     if (undamaged_count < 5)
         return 0; // almost all MBs damaged -> use temporal prediction
 
@@ -739,12 +737,12 @@ static int is_intra_more_likely(ERContext *s)
                 } else {
                     ff_thread_await_progress(s->last_pic.tf, mb_y, 0);
                 }
-                is_intra_likely += s->mecc->sad[0](NULL, last_mb_ptr, mb_ptr,
-                                                   linesize[0], 16);
+                is_intra_likely += s->mecc.sad[0](NULL, last_mb_ptr, mb_ptr,
+                                                  linesize[0], 16);
                 // FIXME need await_progress() here
-                is_intra_likely -= s->mecc->sad[0](NULL, last_mb_ptr,
-                                                   last_mb_ptr + linesize[0] * 16,
-                                                   linesize[0], 16);
+                is_intra_likely -= s->mecc.sad[0](NULL, last_mb_ptr,
+                                                  last_mb_ptr + linesize[0] * 16,
+                                                  linesize[0], 16);
             } else {
                 if (IS_INTRA(s->cur_pic.mb_type[mb_xy]))
                    is_intra_likely++;
@@ -761,6 +759,11 @@ void ff_er_frame_start(ERContext *s)
 {
     if (!s->avctx->error_concealment)
         return;
+
+    if (!s->mecc_inited) {
+        ff_me_cmp_init(&s->mecc, s->avctx);
+        s->mecc_inited = 1;
+    }
 
     memset(s->error_status_table, ER_MB_ERROR | VP_START | ER_MB_END,
            s->mb_stride * s->mb_height * sizeof(uint8_t));
@@ -1021,7 +1024,7 @@ void ff_er_frame_end(ERContext *s)
             const int mb_xy = s->mb_index2xy[i];
             int       error = s->error_status_table[mb_xy];
 
-            if (!s->mbskip_table[mb_xy]) // FIXME partition specific
+            if (!s->mbskip_table || !s->mbskip_table[mb_xy]) // FIXME partition specific
                 distance++;
             if (error & (1 << error_type))
                 distance = 0;
@@ -1294,11 +1297,12 @@ ec_clean:
         const int mb_xy = s->mb_index2xy[i];
         int       error = s->error_status_table[mb_xy];
 
-        if (s->cur_pic.f->pict_type != AV_PICTURE_TYPE_B &&
+        if (s->mbskip_table && s->cur_pic.f->pict_type != AV_PICTURE_TYPE_B &&
             (error & (ER_DC_ERROR | ER_MV_ERROR | ER_AC_ERROR))) {
             s->mbskip_table[mb_xy] = 0;
         }
-        s->mbintra_table[mb_xy] = 1;
+        if (s->mbintra_table)
+            s->mbintra_table[mb_xy] = 1;
     }
 
     for (i = 0; i < 2; i++) {

@@ -5,7 +5,7 @@
 
 """Client tool to trigger tasks or retrieve results from a Swarming server."""
 
-__version__ = '0.6'
+__version__ = '0.6.2'
 
 import collections
 import json
@@ -105,7 +105,7 @@ def isolated_get_run_commands(
   """
   run_cmd = [
     'python', 'run_isolated.zip',
-    '--hash', isolated_hash,
+    '--isolated', isolated_hash,
     '--isolate-server', isolate_server,
     '--namespace', namespace,
   ]
@@ -158,31 +158,44 @@ def isolated_to_hash(isolate_server, namespace, arg, algo, verbose):
 
 
 def isolated_handle_options(options, args):
-  """Handles isolated arguments.
+  """Handles '--isolated <isolated>', '<isolated>' and '-- <args...>' arguments.
 
   Returns:
     tuple(command, data).
   """
   isolated_cmd_args = []
-  if '--' in args:
-    index = args.index('--')
-    isolated_cmd_args = args[index+1:]
-    args = args[:index]
-  else:
-    # optparse eats '--' sometimes.
-    isolated_cmd_args = args[1:]
-    args = args[:1]
-  if len(args) != 1:
-    raise ValueError('Must pass one .isolated file or its hash (sha1).')
-
-  isolated_hash, is_file = isolated_to_hash(
-      options.isolate_server, options.namespace, args[0],
-      isolated_format.get_hash_algo(options.namespace), options.verbose)
-  if not isolated_hash:
-    raise ValueError('Invalid argument %s' % args[0])
+  if not options.isolated:
+    if '--' in args:
+      index = args.index('--')
+      isolated_cmd_args = args[index+1:]
+      args = args[:index]
+    else:
+      # optparse eats '--' sometimes.
+      isolated_cmd_args = args[1:]
+      args = args[:1]
+    if len(args) != 1:
+      raise ValueError(
+          'Use --isolated, --raw-cmd or \'--\' to pass arguments to the called '
+          'process.')
+    # Old code. To be removed eventually.
+    options.isolated, is_file = isolated_to_hash(
+        options.isolate_server, options.namespace, args[0],
+        isolated_format.get_hash_algo(options.namespace), options.verbose)
+    if not options.isolated:
+      raise ValueError('Invalid argument %s' % args[0])
+  elif args:
+    is_file = False
+    if '--' in args:
+      index = args.index('--')
+      isolated_cmd_args = args[index+1:]
+      if index != 0:
+        raise ValueError('Unexpected arguments.')
+    else:
+      # optparse eats '--' sometimes.
+      isolated_cmd_args = args
 
   command = isolated_get_run_commands(
-      options.isolate_server, options.namespace, isolated_hash,
+      options.isolate_server, options.namespace, options.isolated,
       isolated_cmd_args, options.verbose)
 
   # If a file name was passed, use its base name of the isolated hash.
@@ -192,12 +205,12 @@ def isolated_handle_options(options, args):
       key = os.path.splitext(os.path.basename(args[0]))[0]
     else:
       key = options.user
-    options.task_name = '%s/%s/%s' % (
+    options.task_name = u'%s/%s/%s' % (
         key,
         '_'.join(
             '%s=%s' % (k, v)
             for k, v in sorted(options.dimensions.iteritems())),
-        isolated_hash)
+        options.isolated)
 
   try:
     data = isolated_get_data(options.isolate_server)
@@ -237,6 +250,7 @@ def task_request_to_raw_request(task_request):
   """
   return {
     'name': task_request.name,
+    'parent_task_id': os.environ.get('SWARMING_TASK_ID', ''),
     'priority': task_request.priority,
     'properties': {
       'commands': [task_request.command],
@@ -806,6 +820,9 @@ def add_trigger_options(parser):
 
   parser.task_group = tools.optparse.OptionGroup(parser, 'Task properties')
   parser.task_group.add_option(
+      '-s', '--isolated',
+      help='Hash of the .isolated to grab from the isolate server')
+  parser.task_group.add_option(
       '-e', '--env', default=[], action='append', nargs=2, metavar='FOO bar',
       help='Environment variables to set')
   parser.task_group.add_option(
@@ -867,7 +884,7 @@ def process_trigger_options(parser, options, args):
 
     command = args
     if not options.task_name:
-      options.task_name = '%s/%s' % (
+      options.task_name = u'%s/%s' % (
           options.user,
           '_'.join(
             '%s=%s' % (k, v)
@@ -921,6 +938,34 @@ def add_collect_options(parser):
            'directory contains per-shard directory with output files produced '
            'by shards: <task-output-dir>/<zero-based-shard-index>/.')
   parser.add_option_group(parser.task_output_group)
+
+
+@subcommand.usage('bots...')
+def CMDbot_delete(parser, args):
+  """Forcibly deletes bots from the Swarming server."""
+  parser.add_option(
+      '-f', '--force', action='store_true',
+      help='Do not prompt for confirmation')
+  options, args = parser.parse_args(args)
+  if not args:
+    parser.error('Please specific bots to delete')
+
+  bots = sorted(args)
+  if not options.force:
+    print('Delete the following bots?')
+    for bot in bots:
+      print('  %s' % bot)
+    if raw_input('Continue? [y/N] ') not in ('y', 'Y'):
+      print('Goodbye.')
+      return 1
+
+  result = 0
+  for bot in bots:
+    url = '%s/swarming/api/v1/client/bot/%s' % (options.swarming, bot)
+    if net.url_read_json(url, method='DELETE') is None:
+      print('Deleting %s failed' % bot)
+      result = 1
+  return result
 
 
 def CMDbots(parser, args):
@@ -1007,10 +1052,13 @@ def CMDcollect(parser, args):
     parser.error('Only use one of task id or --json.')
 
   if options.json:
-    with open(options.json) as f:
-      tasks = sorted(
-          json.load(f)['tasks'].itervalues(), key=lambda x: x['shard_index'])
-      args = [t['task_id'] for t in tasks]
+    try:
+      with open(options.json) as f:
+        tasks = sorted(
+            json.load(f)['tasks'].itervalues(), key=lambda x: x['shard_index'])
+        args = [t['task_id'] for t in tasks]
+    except (KeyError, IOError, ValueError):
+      parser.error('Failed to parse %s' % options.json)
   else:
     valid = frozenset('0123456789abcdef')
     if any(not valid.issuperset(task_id) for task_id in args):
@@ -1049,6 +1097,8 @@ def CMDquery(parser, args):
       '-L', '--limit', type='int', default=200,
       help='Limit to enforce on limitless items (like number of tasks); '
            'default=%default')
+  parser.add_option(
+      '--json', help='Path to JSON output file (otherwise prints to stdout)')
   (options, args) = parser.parse_args(args)
   if len(args) != 1:
     parser.error('Must specify only one resource name.')
@@ -1069,7 +1119,8 @@ def CMDquery(parser, args):
   while (
       data.get('cursor') and
       (not options.limit or len(data['items']) < options.limit)):
-    url = base_url + '?cursor=%s' % urllib.quote(data['cursor'])
+    merge_char = '&' if '?' in base_url else '?'
+    url = base_url + '%scursor=%s' % (merge_char, urllib.quote(data['cursor']))
     if options.limit:
       url += '&limit=%d' % min(CHUNK_SIZE, options.limit - len(data['items']))
     new = net.url_read_json(url)
@@ -1083,8 +1134,15 @@ def CMDquery(parser, args):
     data['items'] = data['items'][:options.limit]
   data.pop('cursor', None)
 
-  json.dump(data, sys.stdout, indent=2, sort_keys=True)
-  sys.stdout.write('\n')
+  if options.json:
+    with open(options.json, 'w') as f:
+      json.dump(data, f)
+  else:
+    try:
+      json.dump(data, sys.stdout, indent=2, sort_keys=True)
+      sys.stdout.write('\n')
+    except IOError:
+      pass
   return 0
 
 

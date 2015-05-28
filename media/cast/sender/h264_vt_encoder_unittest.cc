@@ -24,6 +24,9 @@
 
 namespace {
 
+const int kVideoWidth = 1280;
+const int kVideoHeight = 720;
+
 class MediaTestSuite : public base::TestSuite {
  public:
   MediaTestSuite(int argc, char** argv) : TestSuite(argc, argv) {}
@@ -64,8 +67,8 @@ void SavePipelineStatus(PipelineStatus* out_status, PipelineStatus in_status) {
   *out_status = in_status;
 }
 
-void SaveInitializationStatus(CastInitializationStatus* out_status,
-                              CastInitializationStatus in_status) {
+void SaveOperationalStatus(OperationalStatus* out_status,
+                           OperationalStatus in_status) {
   *out_status = in_status;
 }
 
@@ -173,7 +176,9 @@ class EndToEndFrameChecker
 };
 
 void CreateFrameAndMemsetPlane(VideoFrameFactory* const video_frame_factory) {
-  auto video_frame = video_frame_factory->CreateFrame(base::TimeDelta());
+  const scoped_refptr<media::VideoFrame> video_frame =
+      video_frame_factory->MaybeCreateFrame(
+          gfx::Size(kVideoWidth, kVideoHeight), base::TimeDelta());
   ASSERT_TRUE(video_frame.get());
   auto cv_pixel_buffer = video_frame->cv_pixel_buffer();
   ASSERT_TRUE(cv_pixel_buffer);
@@ -187,8 +192,8 @@ void CreateFrameAndMemsetPlane(VideoFrameFactory* const video_frame_factory) {
 
 class H264VideoToolboxEncoderTest : public ::testing::Test {
  protected:
-  H264VideoToolboxEncoderTest() {
-    cast_initialization_status_ = STATUS_VIDEO_UNINITIALIZED;
+  H264VideoToolboxEncoderTest()
+      : operational_status_(STATUS_UNINITIALIZED) {
     frame_->set_timestamp(base::TimeDelta());
   }
 
@@ -201,10 +206,13 @@ class H264VideoToolboxEncoderTest : public ::testing::Test {
         message_loop_.message_loop_proxy(), message_loop_.message_loop_proxy(),
         message_loop_.message_loop_proxy());
     encoder_.reset(new H264VideoToolboxEncoder(
-        cast_environment_, video_sender_config_,
-        base::Bind(&SaveInitializationStatus, &cast_initialization_status_)));
+        cast_environment_,
+        video_sender_config_,
+        gfx::Size(kVideoWidth, kVideoHeight),
+        0u,
+        base::Bind(&SaveOperationalStatus, &operational_status_)));
     message_loop_.RunUntilIdle();
-    EXPECT_EQ(STATUS_VIDEO_INITIALIZED, cast_initialization_status_);
+    EXPECT_EQ(STATUS_INITIALIZED, operational_status_);
   }
 
   void TearDown() override {
@@ -222,7 +230,7 @@ class H264VideoToolboxEncoderTest : public ::testing::Test {
     // Reusable test data.
     video_sender_config_ = GetDefaultVideoSenderConfig();
     video_sender_config_.codec = CODEC_VIDEO_H264;
-    gfx::Size size(video_sender_config_.width, video_sender_config_.height);
+    const gfx::Size size(kVideoWidth, kVideoHeight);
     frame_ = media::VideoFrame::CreateFrame(
         VideoFrame::I420, size, gfx::Rect(size), size, base::TimeDelta());
     PopulateVideoFrame(frame_.get(), 123);
@@ -237,7 +245,7 @@ class H264VideoToolboxEncoderTest : public ::testing::Test {
   base::MessageLoop message_loop_;
   scoped_refptr<CastEnvironment> cast_environment_;
   scoped_ptr<VideoEncoder> encoder_;
-  CastInitializationStatus cast_initialization_status_;
+  OperationalStatus operational_status_;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(H264VideoToolboxEncoderTest);
@@ -299,6 +307,8 @@ TEST_F(H264VideoToolboxEncoderTest, CheckVideoFrameFactory) {
   auto video_frame_factory = encoder_->CreateVideoFrameFactory();
   ASSERT_TRUE(video_frame_factory.get());
   CreateFrameAndMemsetPlane(video_frame_factory.get());
+  // TODO(jfroy): Need to test that the encoder can encode VideoFrames provided
+  // by the VideoFrameFactory.
   encoder_.reset();
   message_loop_.RunUntilIdle();
   CreateFrameAndMemsetPlane(video_frame_factory.get());

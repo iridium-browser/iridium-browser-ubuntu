@@ -12,6 +12,7 @@
 #include "base/prefs/pref_registry_simple.h"
 #include "base/prefs/pref_service.h"
 #include "base/prefs/scoped_user_pref_update.h"
+#include "base/profiler/scoped_tracker.h"
 #include "base/rand_util.h"
 #include "base/stl_util.h"
 #include "base/strings/string_number_conversions.h"
@@ -19,7 +20,6 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/chrome_notification_types.h"
 #include "chrome/browser/profiles/profile_avatar_downloader.h"
 #include "chrome/browser/profiles/profile_avatar_icon_util.h"
 #include "chrome/browser/profiles/profiles_state.h"
@@ -27,7 +27,6 @@
 #include "chrome/grit/generated_resources.h"
 #include "components/signin/core/common/profile_management_switches.h"
 #include "content/public/browser/browser_thread.h"
-#include "content/public/browser/notification_service.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/resource/resource_bundle.h"
 #include "ui/gfx/image/image.h"
@@ -148,13 +147,6 @@ void DeleteBitmap(const base::FilePath& image_path) {
   base::DeleteFile(image_path, false);
 }
 
-// Used by SaveAvatarImageAtPath to post a task to delete the |downloader|
-// "soon". We can't just delete it directly there because
-// SaveAvatarImageAtPath is called from this very downloader.
-void DeleteDownloader(ProfileAvatarDownloader* downloader) {
-  delete downloader;
-}
-
 }  // namespace
 
 ProfileInfoCache::ProfileInfoCache(PrefService* prefs,
@@ -234,11 +226,6 @@ void ProfileInfoCache::AddProfileToCache(
   FOR_EACH_OBSERVER(ProfileInfoCacheObserver,
                     observer_list_,
                     OnProfileAdded(profile_path));
-
-  content::NotificationService::current()->Notify(
-      chrome::NOTIFICATION_PROFILE_CACHED_INFO_CHANGED,
-      content::NotificationService::AllSources(),
-      content::NotificationService::NoDetails());
 }
 
 void ProfileInfoCache::AddObserver(ProfileInfoCacheObserver* obs) {
@@ -271,11 +258,6 @@ void ProfileInfoCache::DeleteProfileFromCache(
   FOR_EACH_OBSERVER(ProfileInfoCacheObserver,
                     observer_list_,
                     OnProfileWasRemoved(profile_path, name));
-
-  content::NotificationService::current()->Notify(
-      chrome::NOTIFICATION_PROFILE_CACHED_INFO_CHANGED,
-      content::NotificationService::AllSources(),
-      content::NotificationService::NoDetails());
 }
 
 size_t ProfileInfoCache::GetNumberOfProfiles() const {
@@ -492,7 +474,7 @@ void ProfileInfoCache::SetProfileActiveTimeAtIndex(size_t index) {
       GetInfoForProfileAtIndex(index)->DeepCopy());
   info->SetDouble(kActiveTimeKey, base::Time::Now().ToDoubleT());
   // This takes ownership of |info|.
-  SetInfoQuietlyForProfileAtIndex(index, info.release());
+  SetInfoForProfileAtIndex(index, info.release());
 }
 
 void ProfileInfoCache::SetNameOfProfileAtIndex(size_t index,
@@ -544,6 +526,11 @@ void ProfileInfoCache::SetUserNameOfProfileAtIndex(
   info->SetString(kUserNameKey, user_name);
   // This takes ownership of |info|.
   SetInfoForProfileAtIndex(index, info.release());
+
+  base::FilePath profile_path = GetPathOfProfileAtIndex(index);
+  FOR_EACH_OBSERVER(ProfileInfoCacheObserver,
+                    observer_list_,
+                    OnProfileUserNameChanged(profile_path));
 }
 
 void ProfileInfoCache::SetAvatarIconOfProfileAtIndex(size_t index,
@@ -574,6 +561,11 @@ void ProfileInfoCache::SetIsOmittedProfileAtIndex(size_t index,
   info->SetBoolean(kIsOmittedFromProfileListKey, is_omitted);
   // This takes ownership of |info|.
   SetInfoForProfileAtIndex(index, info.release());
+
+  base::FilePath profile_path = GetPathOfProfileAtIndex(index);
+  FOR_EACH_OBSERVER(ProfileInfoCacheObserver,
+                    observer_list_,
+                    OnProfileIsOmittedChanged(profile_path));
 }
 
 void ProfileInfoCache::SetSupervisedUserIdOfProfileAtIndex(
@@ -752,11 +744,22 @@ void ProfileInfoCache::SetProfileIsUsingDefaultNameAtIndex(
   if (value == ProfileIsUsingDefaultNameAtIndex(index))
     return;
 
+  base::string16 old_display_name = GetNameOfProfileAtIndex(index);
+
   scoped_ptr<base::DictionaryValue> info(
       GetInfoForProfileAtIndex(index)->DeepCopy());
   info->SetBoolean(kIsUsingDefaultNameKey, value);
   // This takes ownership of |info|.
   SetInfoForProfileAtIndex(index, info.release());
+
+  base::string16 new_display_name = GetNameOfProfileAtIndex(index);
+  const base::FilePath profile_path = GetPathOfProfileAtIndex(index);
+
+  if (old_display_name != new_display_name) {
+    FOR_EACH_OBSERVER(ProfileInfoCacheObserver,
+                      observer_list_,
+                      OnProfileNameChanged(profile_path, old_display_name));
+  }
 }
 
 void ProfileInfoCache::SetProfileIsUsingDefaultAvatarAtIndex(
@@ -857,23 +860,6 @@ const base::FilePath& ProfileInfoCache::GetUserDataDir() const {
 }
 
 // static
-std::vector<base::string16> ProfileInfoCache::GetProfileNames() {
-  std::vector<base::string16> names;
-  PrefService* local_state = g_browser_process->local_state();
-  const base::DictionaryValue* cache = local_state->GetDictionary(
-      prefs::kProfileInfoCache);
-  base::string16 name;
-  for (base::DictionaryValue::Iterator it(*cache); !it.IsAtEnd();
-       it.Advance()) {
-    const base::DictionaryValue* info = NULL;
-    it.value().GetAsDictionary(&info);
-    info->GetString(kNameKey, &name);
-    names.push_back(name);
-  }
-  return names;
-}
-
-// static
 void ProfileInfoCache::RegisterPrefs(PrefRegistrySimple* registry) {
   registry->RegisterDictionaryPref(prefs::kProfileInfoCache);
 }
@@ -914,9 +900,8 @@ void ProfileInfoCache::SaveAvatarImageAtPath(
   if (downloader_iter != avatar_images_downloads_in_progress_.end()) {
     // We mustn't delete the avatar downloader right here, since we're being
     // called by it.
-    BrowserThread::PostTask(BrowserThread::UI, FROM_HERE,
-                            base::Bind(&DeleteDownloader,
-                                       downloader_iter->second));
+    BrowserThread::DeleteSoon(BrowserThread::UI, FROM_HERE,
+                              downloader_iter->second);
     avatar_images_downloads_in_progress_.erase(downloader_iter);
   }
 
@@ -940,22 +925,11 @@ const base::DictionaryValue* ProfileInfoCache::GetInfoForProfileAtIndex(
   return info;
 }
 
-void ProfileInfoCache::SetInfoQuietlyForProfileAtIndex(
-    size_t index, base::DictionaryValue* info) {
+void ProfileInfoCache::SetInfoForProfileAtIndex(size_t index,
+                                                base::DictionaryValue* info) {
   DictionaryPrefUpdate update(prefs_, prefs::kProfileInfoCache);
   base::DictionaryValue* cache = update.Get();
   cache->SetWithoutPathExpansion(sorted_keys_[index], info);
-}
-
-// TODO(noms): Switch to newer notification system.
-void ProfileInfoCache::SetInfoForProfileAtIndex(size_t index,
-                                                base::DictionaryValue* info) {
-  SetInfoQuietlyForProfileAtIndex(index, info);
-
-  content::NotificationService::current()->Notify(
-      chrome::NOTIFICATION_PROFILE_CACHED_INFO_CHANGED,
-      content::NotificationService::AllSources(),
-      content::NotificationService::NoDetails());
 }
 
 std::string ProfileInfoCache::CacheKeyFromProfilePath(
@@ -1025,11 +999,6 @@ void ProfileInfoCache::UpdateSortForProfileIndex(size_t index) {
   DCHECK(key_it != sorted_keys_.end());
   sorted_keys_.erase(key_it);
   sorted_keys_.insert(FindPositionForProfile(key, name), key);
-
-  content::NotificationService::current()->Notify(
-      chrome::NOTIFICATION_PROFILE_CACHED_INFO_CHANGED,
-      content::NotificationService::AllSources(),
-      content::NotificationService::NoDetails());
 }
 
 const gfx::Image* ProfileInfoCache::GetHighResAvatarOfProfileAtIndex(
@@ -1037,8 +1006,12 @@ const gfx::Image* ProfileInfoCache::GetHighResAvatarOfProfileAtIndex(
   int avatar_index = GetAvatarIconIndexOfProfileAtIndex(index);
   std::string key = profiles::GetDefaultAvatarIconFileNameAtIndex(avatar_index);
 
-  if (!strcmp(key.c_str(), profiles::GetNoHighResAvatarFileName()))
-      return NULL;
+  // If this is the placeholder avatar, it is already included in the
+  // resources, so it doesn't need to be downloaded.
+  if (!strcmp(key.c_str(), profiles::GetNoHighResAvatarFileName())) {
+    return &ui::ResourceBundle::GetSharedInstance().GetImageNamed(
+        profiles::GetPlaceholderAvatarIconResourceID());
+  }
 
   base::FilePath image_path =
       profiles::GetPathOfHighResAvatarAtIndex(avatar_index);
@@ -1053,12 +1026,22 @@ void ProfileInfoCache::DownloadHighResAvatar(
 #if defined(OS_ANDROID) || defined(OS_IOS) || defined(OS_CHROMEOS)
   return;
 #endif
+  // TODO(erikchen): Remove ScopedTracker below once http://crbug.com/461175
+  // is fixed.
+  tracked_objects::ScopedTracker tracking_profile1(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "461175 ProfileInfoCache::DownloadHighResAvatar::GetFileName"));
   const std::string file_name =
       profiles::GetDefaultAvatarIconFileNameAtIndex(icon_index);
   // If the file is already being downloaded, don't start another download.
   if (avatar_images_downloads_in_progress_.count(file_name))
     return;
 
+  // TODO(erikchen): Remove ScopedTracker below once http://crbug.com/461175
+  // is fixed.
+  tracked_objects::ScopedTracker tracking_profile2(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "461175 ProfileInfoCache::DownloadHighResAvatar::MakeDownloader"));
   // Start the download for this file. The cache takes ownership of the
   // |avatar_downloader|, which will be deleted when the download completes, or
   // if that never happens, when the ProfileInfoCache is destroyed.
@@ -1067,6 +1050,12 @@ void ProfileInfoCache::DownloadHighResAvatar(
       profile_path,
       this);
   avatar_images_downloads_in_progress_[file_name] = avatar_downloader;
+
+  // TODO(erikchen): Remove ScopedTracker below once http://crbug.com/461175
+  // is fixed.
+  tracked_objects::ScopedTracker tracking_profile3(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "461175 ProfileInfoCache::DownloadHighResAvatar::StartDownload"));
   avatar_downloader->Start();
 }
 
@@ -1099,22 +1088,37 @@ void ProfileInfoCache::OnAvatarPictureLoaded(const base::FilePath& profile_path,
                                              const std::string& key,
                                              gfx::Image** image) const {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  // TODO(erikchen): Remove ScopedTracker below once http://crbug.com/461175
+  // is fixed.
+  tracked_objects::ScopedTracker tracking_profile1(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "461175 ProfileInfoCache::OnAvatarPictureLoaded::Start"));
 
   cached_avatar_images_loading_[key] = false;
   delete cached_avatar_images_[key];
 
   if (*image) {
+    // TODO(erikchen): Remove ScopedTracker below once http://crbug.com/461175
+    // is fixed.
+    tracked_objects::ScopedTracker tracking_profile2(
+        FROM_HERE_WITH_EXPLICIT_FUNCTION(
+            "461175 ProfileInfoCache::OnAvatarPictureLoaded::SetImage"));
     cached_avatar_images_[key] = *image;
   } else {
+    // TODO(erikchen): Remove ScopedTracker below once http://crbug.com/461175
+    // is fixed.
+    tracked_objects::ScopedTracker tracking_profile3(
+        FROM_HERE_WITH_EXPLICIT_FUNCTION(
+            "461175 ProfileInfoCache::OnAvatarPictureLoaded::MakeEmptyImage"));
     // Place an empty image in the cache to avoid reloading it again.
     cached_avatar_images_[key] = new gfx::Image();
   }
+  // TODO(erikchen): Remove ScopedTracker below once http://crbug.com/461175
+  // is fixed.
+  tracked_objects::ScopedTracker tracking_profile4(
+      FROM_HERE_WITH_EXPLICIT_FUNCTION(
+          "461175 ProfileInfoCache::OnAvatarPictureLoaded::DeleteImage"));
   delete image;
-
-  content::NotificationService::current()->Notify(
-      chrome::NOTIFICATION_PROFILE_CACHED_INFO_CHANGED,
-      content::NotificationService::AllSources(),
-      content::NotificationService::NoDetails());
 
   FOR_EACH_OBSERVER(ProfileInfoCacheObserver,
                     observer_list_,
@@ -1125,11 +1129,6 @@ void ProfileInfoCache::OnAvatarPictureSaved(
       const std::string& file_name,
       const base::FilePath& profile_path) {
   DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-
-  content::NotificationService::current()->Notify(
-      chrome::NOTIFICATION_PROFILE_CACHE_PICTURE_SAVED,
-      content::NotificationService::AllSources(),
-      content::NotificationService::NoDetails());
 
   FOR_EACH_OBSERVER(ProfileInfoCacheObserver,
       observer_list_,

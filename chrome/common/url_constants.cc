@@ -45,6 +45,7 @@ const char kChromeUIEditSearchEngineDialogURL[] = "chrome://editsearchengine/";
 const char kChromeUIExtensionIconURL[] = "chrome://extension-icon/";
 const char kChromeUIExtensionsFrameURL[] = "chrome://extensions-frame/";
 const char kChromeUIExtensionsURL[] = "chrome://extensions/";
+const char kChromeUIFallbackIconURL[] = "chrome://fallback-icon/";
 const char kChromeUIFaviconURL[] = "chrome://favicon/";
 const char kChromeUIFeedbackURL[] = "chrome://feedback/";
 const char kChromeUIFlagsURL[] = "chrome://flags/";
@@ -58,6 +59,8 @@ const char kChromeUIInspectURL[] = "chrome://inspect/";
 const char kChromeUIInstantURL[] = "chrome://instant/";
 const char kChromeUIInterstitialURL[] = "chrome://interstitials/";
 const char kChromeUIInvalidationsURL[] = "chrome://invalidations/";
+const char kChromeUILargeIconURL[] = "chrome://large-icon/";
+const char kChromeUIMdSettingsURL[] = "chrome://md-settings/";
 const char kChromeUIMemoryRedirectURL[] = "chrome://memory-redirect/";
 const char kChromeUIMemoryURL[] = "chrome://memory/";
 const char kChromeUIMetroFlowURL[] = "chrome://make-metro/";
@@ -75,6 +78,7 @@ const char kChromeUIPrintURL[] = "chrome://print/";
 const char kChromeUIQuitURL[] = "chrome://quit/";
 const char kChromeUIRestartURL[] = "chrome://restart/";
 const char kChromeUISettingsURL[] = "chrome://settings/";
+const char kChromeUIContentSettingsURL[] = "chrome://settings/content";
 const char kChromeUISettingsFrameURL[] = "chrome://settings-frame/";
 const char kChromeUISSLClientCertificateSelectorURL[] = "chrome://select-cert/";
 const char kChromeUISuggestions[] = "chrome://suggestions/";
@@ -170,6 +174,7 @@ const char kChromeUICrashesHost[] = "crashes";
 const char kChromeUICrashHost[] = "crash";
 const char kChromeUICreditsHost[] = "credits";
 const char kChromeUIDefaultHost[] = "version";
+const char kChromeUIDeviceLogHost[] = "device-log";
 const char kChromeUIDevicesHost[] = "devices";
 const char kChromeUIDevToolsHost[] = "devtools";
 const char kChromeUIDevToolsBundledPath[] = "bundled";
@@ -183,6 +188,7 @@ const char kChromeUIEditSearchEngineDialogHost[] = "editsearchengine";
 const char kChromeUIExtensionIconHost[] = "extension-icon";
 const char kChromeUIExtensionsFrameHost[] = "extensions-frame";
 const char kChromeUIExtensionsHost[] = "extensions";
+const char kChromeUIFallbackIconHost[] = "fallback-icon";
 const char kChromeUIFaviconHost[] = "favicon";
 const char kChromeUIFeedbackHost[] = "feedback";
 const char kChromeUIFlagsHost[] = "flags";
@@ -199,7 +205,9 @@ const char kChromeUIInstantHost[] = "instant";
 const char kChromeUIInterstitialHost[] = "interstitials";
 const char kChromeUIInvalidationsHost[] = "invalidations";
 const char kChromeUIKillHost[] = "kill";
+const char kChromeUILargeIconHost[] = "large-icon";
 const char kChromeUILocalStateHost[] = "local-state";
+const char kChromeUIMdSettingsHost[] = "md-settings";
 const char kChromeUIMemoryHost[] = "memory";
 const char kChromeUIMemoryInternalsHost[] = "memory-internals";
 const char kChromeUIMemoryRedirectHost[] = "memory-redirect";
@@ -227,7 +235,6 @@ const char kChromeUISettingsFrameHost[] = "settings-frame";
 const char kChromeUIShorthangHost[] = "shorthang";
 const char kChromeUISignInInternalsHost[] = "signin-internals";
 const char kChromeUISSLClientCertificateSelectorHost[] = "select-cert";
-const char kChromeUIStatsHost[] = "stats";
 const char kChromeUISuggestionsHost[] = "suggestions";
 const char kChromeUISuggestionsInternalsHost[] = "suggestions-internals";
 const char kChromeUISupervisedUserPassphrasePageHost[] =
@@ -272,7 +279,6 @@ const char kChromeUIBluetoothPairingHost[] = "bluetooth-pairing";
 const char kChromeUICertificateManagerHost[] = "certificate-manager";
 const char kChromeUIChooseMobileNetworkHost[] = "choose-mobile-network";
 const char kChromeUICryptohomeHost[] = "cryptohome";
-const char kChromeUIDeviceLogHost[] = "device-log";
 const char kChromeUIDiscardsHost[] = "discards";
 const char kChromeUIFirstRunHost[] = "first-run";
 const char kChromeUIIdleLogoutDialogHost[] = "idle-logout";
@@ -286,6 +292,7 @@ const char kChromeUIMobileSetupHost[] = "mobilesetup";
 const char kChromeUINfcDebugHost[] = "nfc-debug";
 const char kChromeUINetworkHost[] = "network";
 const char kChromeUIOobeHost[] = "oobe";
+const char kChromeUIOobeMdHost[] = "oobe-md";
 const char kChromeUIOSCreditsHost[] = "os-credits";
 const char kChromeUIPowerHost[] = "power";
 const char kChromeUIProvidedFileSystemsHost[] = "provided-file-systems";
@@ -362,9 +369,6 @@ const char kExtensionResourceInvalidRequestURL[] =
 
 const char kSyncGoogleDashboardURL[] =
     "https://www.google.com/settings/chrome/sync/";
-
-const char kAutoPasswordGenerationLearnMoreURL[] =
-    "https://support.google.com/chrome/?p=ui_generate_password";
 
 const char kPasswordManagerLearnMoreURL[] =
 #if defined(OS_CHROMEOS)
@@ -580,6 +584,7 @@ const char* const kChromeHostURLs[] = {
   kChromeUIComponentsHost,
   kChromeUICrashesHost,
   kChromeUICreditsHost,
+  kChromeUIDeviceLogHost,
   kChromeUIDNSHost,
   kChromeUIFlagsHost,
   kChromeUIHistoryHost,
@@ -594,7 +599,6 @@ const char* const kChromeHostURLs[] = {
   kChromeUIPredictorsHost,
   kChromeUIProfilerHost,
   kChromeUISignInInternalsHost,
-  kChromeUIStatsHost,
   kChromeUISuggestionsHost,
   kChromeUISyncInternalsHost,
   kChromeUITermsHost,
@@ -637,7 +641,6 @@ const char* const kChromeHostURLs[] = {
   kChromeUICertificateManagerHost,
   kChromeUIChooseMobileNetworkHost,
   kChromeUICryptohomeHost,
-  kChromeUIDeviceLogHost,
   kChromeUIDiscardsHost,
   kChromeUIDriveInternalsHost,
   kChromeUIFirstRunHost,
@@ -646,6 +649,7 @@ const char* const kChromeHostURLs[] = {
   kChromeUILoginHost,
   kChromeUINetworkHost,
   kChromeUIOobeHost,
+  kChromeUIOobeMdHost,
   kChromeUIOSCreditsHost,
   kChromeUIPowerHost,
   kChromeUIProxySettingsHost,
@@ -730,6 +734,6 @@ const char kMac32BitDeprecationURL[] =
 #endif
 
 const char kEasyUnlockLearnMoreUrl[] =
-    "https://support.google.com/chromebook/?p=easy_unlock";
+    "https://support.google.com/chromebook/?p=smart_lock";
 
 }  // namespace chrome

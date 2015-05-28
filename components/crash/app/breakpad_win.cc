@@ -196,7 +196,9 @@ namespace {
 // process.
 bool DumpDoneCallbackWhenNoCrash(const wchar_t*, const wchar_t*, void*,
                                  EXCEPTION_POINTERS* ex_info,
-                                 MDRawAssertionInfo*, bool) {
+                                 MDRawAssertionInfo*, bool succeeded) {
+  GetCrashReporterClient()->RecordCrashDumpAttemptResult(
+      false /* is_real_crash */, succeeded);
   return true;
 }
 
@@ -208,7 +210,9 @@ bool DumpDoneCallbackWhenNoCrash(const wchar_t*, const wchar_t*, void*,
 // facilities such as the i18n helpers.
 bool DumpDoneCallback(const wchar_t*, const wchar_t*, void*,
                       EXCEPTION_POINTERS* ex_info,
-                      MDRawAssertionInfo*, bool) {
+                      MDRawAssertionInfo*, bool succeeded) {
+  GetCrashReporterClient()->RecordCrashDumpAttemptResult(
+      true /* is_real_crash */, succeeded);
   // Check if the exception is one of the kind which would not be solved
   // by simply restarting chrome. In this case we show a message box with
   // and exit silently. Remember that chrome is in a crashed state so we
@@ -279,6 +283,20 @@ long WINAPI ChromeExceptionFilter(EXCEPTION_POINTERS* info) {
 long WINAPI ServiceExceptionFilter(EXCEPTION_POINTERS* info) {
   DumpDoneCallback(NULL, NULL, NULL, info, NULL, false);
   return EXCEPTION_EXECUTE_HANDLER;
+}
+
+// Installed via base::debug::SetCrashKeyReportingFunctions.
+void SetCrashKeyValueForBaseDebug(const base::StringPiece& key,
+                                  const base::StringPiece& value) {
+  DCHECK(CrashKeysWin::keeper());
+  CrashKeysWin::keeper()->SetCrashKeyValue(base::UTF8ToUTF16(key),
+                                           base::UTF8ToUTF16(value));
+}
+
+// Installed via base::debug::SetCrashKeyReportingFunctions.
+void ClearCrashKeyForBaseDebug(const base::StringPiece& key) {
+  DCHECK(CrashKeysWin::keeper());
+  CrashKeysWin::keeper()->ClearCrashKeyValue(base::UTF8ToUTF16(key));
 }
 
 }  // namespace
@@ -527,6 +545,17 @@ void InitCrashReporter(const std::string& process_type_switch) {
                             base::CommandLine::ForCurrentProcess(),
                             GetCrashReporterClient());
 
+#if !defined(COMPONENT_BUILD)
+  // chrome/common/child_process_logging_win.cc registers crash keys for
+  // chrome.dll. In a component build, that is sufficient as chrome.dll and
+  // chrome.exe share a copy of base (in base.dll).
+  // In a static build, the EXE must separately initialize the crash keys
+  // configuration as it has its own statically linked copy of base.
+  base::debug::SetCrashKeyReportingFunctions(&SetCrashKeyValueForBaseDebug,
+                                             &ClearCrashKeyForBaseDebug);
+  GetCrashReporterClient()->RegisterCrashKeys();
+#endif
+
   google_breakpad::ExceptionHandler::MinidumpCallback callback = NULL;
   LPTOP_LEVEL_EXCEPTION_FILTER default_filter = NULL;
   // We install the post-dump callback only for the browser and service
@@ -613,6 +642,15 @@ void InitCrashReporter(const std::string& process_type_switch) {
       InitTerminateProcessHooks();
     }
 #endif
+  }
+}
+
+void ConsumeInvalidHandleExceptions() {
+  if (g_breakpad) {
+    g_breakpad->set_consume_invalid_handle_exceptions(true);
+  }
+  if (g_dumphandler_no_crash) {
+    g_dumphandler_no_crash->set_consume_invalid_handle_exceptions(true);
   }
 }
 

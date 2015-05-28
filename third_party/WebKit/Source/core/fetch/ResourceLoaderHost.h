@@ -62,13 +62,22 @@ public:
     virtual void willStartLoadingResource(Resource*, ResourceRequest&) = 0;
 
     virtual bool canAccessRedirect(Resource*, ResourceRequest&, const ResourceResponse&, ResourceLoaderOptions&) = 0;
-    virtual bool canAccessResource(Resource*, SecurityOrigin* sourceOrigin, const KURL&) const = 0;
+    enum AccessControlLoggingDecision {
+        ShouldLogAccessControlErrors,
+        ShouldNotLogAccessControlErrors
+    };
+    virtual bool canAccessResource(Resource*, SecurityOrigin* sourceOrigin, const KURL&, AccessControlLoggingDecision) const = 0;
     virtual bool isControlledByServiceWorker() const = 0;
     virtual bool defersLoading() const = 0;
     virtual bool isLoadedBy(ResourceLoaderHost*) const = 0;
 
-    virtual void trace(Visitor*) { }
+    DEFINE_INLINE_VIRTUAL_TRACE() { }
 
+    enum LoaderHostType {
+        ResourceFetcherType
+    };
+
+    virtual LoaderHostType objectType() const = 0;
 #if !ENABLE(OILPAN)
     virtual void refResourceLoaderHost() = 0;
     virtual void derefResourceLoaderHost() = 0;

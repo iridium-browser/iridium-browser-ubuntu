@@ -25,10 +25,10 @@
 #include "content/public/test/test_utils.h"
 #include "content/test/test_render_view_host.h"
 #include "content/test/test_web_contents.h"
+#include "media/base/video_capture_types.h"
 #include "media/base/video_frame.h"
 #include "media/base/video_util.h"
 #include "media/base/yuv_convert.h"
-#include "media/video/capture/video_capture_types.h"
 #include "skia/ext/platform_canvas.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/skia/include/core/SkColor.h"
@@ -315,6 +315,26 @@ class StubClient : public media::VideoCaptureDevice::Client {
   }
   ~StubClient() override {}
 
+  void OnIncomingCapturedData(const uint8* data,
+                              int length,
+                              const media::VideoCaptureFormat& frame_format,
+                              int rotation,
+                              const base::TimeTicks& timestamp) override {
+    FAIL();
+  }
+
+  void OnIncomingCapturedYuvData(const uint8* y_data,
+                                 const uint8* u_data,
+                                 const uint8* v_data,
+                                 size_t y_stride,
+                                 size_t u_stride,
+                                 size_t v_stride,
+                                 const media::VideoCaptureFormat& frame_format,
+                                 int clockwise_rotation,
+                                 const base::TimeTicks& timestamp) override {
+    FAIL();
+  }
+
   scoped_refptr<media::VideoCaptureDevice::Client::Buffer> ReserveOutputBuffer(
       media::VideoFrame::Format format,
       const gfx::Size& dimensions) override {
@@ -330,28 +350,23 @@ class StubClient : public media::VideoCaptureDevice::Client {
     size_t size;
     buffer_pool_->GetBufferInfo(buffer_id, &data, &size);
     return scoped_refptr<media::VideoCaptureDevice::Client::Buffer>(
-        new PoolBuffer(buffer_pool_, buffer_id, data, size));
-  }
-
-  void OnIncomingCapturedData(const uint8* data,
-                              int length,
-                              const media::VideoCaptureFormat& frame_format,
-                              int rotation,
-                              base::TimeTicks timestamp) override {
-    FAIL();
+        new AutoReleaseBuffer(buffer_pool_, buffer_id, data, size));
   }
 
   void OnIncomingCapturedVideoFrame(
       const scoped_refptr<Buffer>& buffer,
-      const media::VideoCaptureFormat& buffer_format,
       const scoped_refptr<media::VideoFrame>& frame,
-      base::TimeTicks timestamp) override {
-    EXPECT_EQ(gfx::Size(kTestWidth, kTestHeight), buffer_format.frame_size);
-    EXPECT_EQ(media::PIXEL_FORMAT_I420, buffer_format.pixel_format);
+      const base::TimeTicks& timestamp) override {
+    EXPECT_EQ(gfx::Size(kTestWidth, kTestHeight), frame->visible_rect().size());
     EXPECT_EQ(media::VideoFrame::I420, frame->format());
+    double frame_rate = 0;
+    EXPECT_TRUE(
+        frame->metadata()->GetDouble(media::VideoFrameMetadata::FRAME_RATE,
+                                     &frame_rate));
+    EXPECT_EQ(kTestFramesPerSecond, frame_rate);
     uint8 yuv[3];
     for (int plane = 0; plane < 3; ++plane)
-      yuv[plane] = frame->data(plane)[0];
+      yuv[plane] = frame->visible_data(plane)[0];
     // TODO(nick): We just look at the first pixel presently, because if
     // the analysis is too slow, the backlog of frames will grow without bound
     // and trouble erupts. http://crbug.com/174519
@@ -361,17 +376,29 @@ class StubClient : public media::VideoCaptureDevice::Client {
   void OnError(const std::string& reason) override { error_callback_.Run(); }
 
  private:
-  class PoolBuffer : public media::VideoCaptureDevice::Client::Buffer {
+  class AutoReleaseBuffer : public media::VideoCaptureDevice::Client::Buffer {
    public:
-    PoolBuffer(const scoped_refptr<VideoCaptureBufferPool>& pool,
+    AutoReleaseBuffer(const scoped_refptr<VideoCaptureBufferPool>& pool,
                int buffer_id,
                void* data,
                size_t size)
-        : Buffer(buffer_id, data, size), pool_(pool) {}
+        : pool_(pool),
+          id_(buffer_id),
+          data_(data),
+          size_(size) {
+      DCHECK(pool_.get());
+    }
+    int id() const override { return id_; }
+    void* data() const override { return data_; }
+    size_t size() const override { return size_; }
 
    private:
-    ~PoolBuffer() override { pool_->RelinquishProducerReservation(id()); }
+    ~AutoReleaseBuffer() override { pool_->RelinquishProducerReservation(id_); }
+
     const scoped_refptr<VideoCaptureBufferPool> pool_;
+    const int id_;
+    void* const data_;
+    const size_t size_;
   };
 
   scoped_refptr<VideoCaptureBufferPool> buffer_pool_;

@@ -9,10 +9,10 @@
 #endif
 
 #include "base/command_line.h"
-#include "base/debug/trace_event.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
 #include "base/message_loop/message_loop.h"
+#include "base/trace_event/trace_event.h"
 #include "build/build_config.h"
 #include "ui/gfx/geometry/rect.h"
 #include "ui/gl/egl_util.h"
@@ -37,20 +37,32 @@ extern "C" {
 #define EGL_FIXED_SIZE_ANGLE 0x3201
 #endif
 
+#if !defined(EGL_OPENGL_ES3_BIT)
+#define EGL_OPENGL_ES3_BIT 0x00000040
+#endif
+
 #if defined(OS_WIN)
 // From ANGLE's egl/eglext.h.
-#if !defined(EGL_PLATFORM_ANGLE_ANGLE)
-#define EGL_PLATFORM_ANGLE_ANGLE 0x3201
-#endif
-#if !defined(EGL_PLATFORM_ANGLE_TYPE_ANGLE)
-#define EGL_PLATFORM_ANGLE_TYPE_ANGLE 0x3202
-#endif
-#if !defined(EGL_PLATFORM_ANGLE_TYPE_D3D11_ANGLE)
-#define EGL_PLATFORM_ANGLE_TYPE_D3D11_ANGLE 0x3207
-#endif
-#if !defined(EGL_PLATFORM_ANGLE_USE_WARP_ANGLE)
-#define EGL_PLATFORM_ANGLE_USE_WARP_ANGLE 0x3208
-#endif
+
+#ifndef EGL_ANGLE_platform_angle
+#define EGL_ANGLE_platform_angle 1
+#define EGL_PLATFORM_ANGLE_ANGLE 0x3202
+#define EGL_PLATFORM_ANGLE_TYPE_ANGLE 0x3203
+#define EGL_PLATFORM_ANGLE_MAX_VERSION_MAJOR_ANGLE 0x3204
+#define EGL_PLATFORM_ANGLE_MAX_VERSION_MINOR_ANGLE 0x3205
+#define EGL_PLATFORM_ANGLE_TYPE_DEFAULT_ANGLE 0x3206
+#endif /* EGL_ANGLE_platform_angle */
+
+#ifndef EGL_ANGLE_platform_angle_d3d
+#define EGL_ANGLE_platform_angle_d3d 1
+#define EGL_PLATFORM_ANGLE_TYPE_D3D9_ANGLE 0x3207
+#define EGL_PLATFORM_ANGLE_TYPE_D3D11_ANGLE 0x3208
+#define EGL_PLATFORM_ANGLE_DEVICE_TYPE_ANGLE 0x3209
+#define EGL_PLATFORM_ANGLE_DEVICE_TYPE_HARDWARE_ANGLE 0x320A
+#define EGL_PLATFORM_ANGLE_DEVICE_TYPE_WARP_ANGLE 0x320B
+#define EGL_PLATFORM_ANGLE_DEVICE_TYPE_REFERENCE_ANGLE 0x320C
+#endif /* EGL_ANGLE_platform_angle_d3d */
+
 #endif  // defined(OS_WIN)
 
 using ui::GetLastEGLErrorString;
@@ -164,13 +176,18 @@ bool GLSurfaceEGL::InitializeOneOff() {
 
   // Choose an EGL configuration.
   // On X this is only used for PBuffer surfaces.
-  static const EGLint kConfigAttribs[] = {
+  EGLint renderable_type = EGL_OPENGL_ES2_BIT;
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kEnableUnsafeES3APIs)) {
+    renderable_type = EGL_OPENGL_ES3_BIT;
+  }
+  const EGLint kConfigAttribs[] = {
     EGL_BUFFER_SIZE, 32,
     EGL_ALPHA_SIZE, 8,
     EGL_BLUE_SIZE, 8,
     EGL_GREEN_SIZE, 8,
     EGL_RED_SIZE, 8,
-    EGL_RENDERABLE_TYPE, EGL_OPENGL_ES2_BIT,
+    EGL_RENDERABLE_TYPE, renderable_type,
     EGL_SURFACE_TYPE, EGL_WINDOW_BIT | EGL_PBUFFER_BIT,
     EGL_NONE
   };
@@ -313,8 +330,12 @@ GLSurfaceEGL::~GLSurfaceEGL() {
 
 #if defined(OS_WIN)
 static const EGLint kDisplayAttribsWarp[] {
-  EGL_PLATFORM_ANGLE_TYPE_ANGLE, EGL_PLATFORM_ANGLE_TYPE_D3D11_ANGLE,
-  EGL_PLATFORM_ANGLE_USE_WARP_ANGLE, EGL_TRUE,
+  EGL_PLATFORM_ANGLE_TYPE_ANGLE,
+  EGL_PLATFORM_ANGLE_TYPE_D3D11_ANGLE,
+
+  EGL_PLATFORM_ANGLE_DEVICE_TYPE_ANGLE,
+  EGL_PLATFORM_ANGLE_DEVICE_TYPE_WARP_ANGLE,
+
   EGL_NONE
 };
 
@@ -366,7 +387,7 @@ NativeViewGLSurfaceEGL::NativeViewGLSurfaceEGL(EGLNativeWindowType window)
 }
 
 bool NativeViewGLSurfaceEGL::Initialize() {
-  return Initialize(scoped_ptr<VSyncProvider>());
+  return Initialize(nullptr);
 }
 
 bool NativeViewGLSurfaceEGL::Initialize(

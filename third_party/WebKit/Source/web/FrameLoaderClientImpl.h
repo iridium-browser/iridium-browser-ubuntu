@@ -75,6 +75,7 @@ public:
     virtual Frame* nextSibling() const override;
     virtual Frame* firstChild() const override;
     virtual Frame* lastChild() const override;
+    virtual void willBeDetached() override;
     virtual void detached() override;
     virtual void dispatchWillSendRequest(DocumentLoader*, unsigned long identifier, ResourceRequest&, const ResourceResponse& redirectResponse) override;
     virtual void dispatchDidReceiveResponse(DocumentLoader*, unsigned long identifier, const ResourceResponse&) override;
@@ -88,9 +89,9 @@ public:
     virtual void dispatchDidStartProvisionalLoad(bool isTransitionNavigation, double triggeringEventTime) override;
     virtual void dispatchDidReceiveTitle(const String&) override;
     virtual void dispatchDidChangeIcons(IconType) override;
-    virtual void dispatchDidCommitLoad(LocalFrame*, HistoryItem*, HistoryCommitType) override;
-    virtual void dispatchDidFailProvisionalLoad(const ResourceError&) override;
-    virtual void dispatchDidFailLoad(const ResourceError&) override;
+    virtual void dispatchDidCommitLoad(HistoryItem*, HistoryCommitType) override;
+    virtual void dispatchDidFailProvisionalLoad(const ResourceError&, HistoryCommitType) override;
+    virtual void dispatchDidFailLoad(const ResourceError&, HistoryCommitType) override;
     virtual void dispatchDidFinishDocumentLoad() override;
     virtual void dispatchDidFinishLoad() override;
     virtual void dispatchDidFirstVisuallyNonEmptyLayout() override;
@@ -116,7 +117,7 @@ public:
     virtual WTF::String userAgent(const KURL&) override;
     virtual WTF::String doNotTrackValue() override;
     virtual void transitionToCommittedForNewPage() override;
-    virtual PassRefPtrWillBeRawPtr<LocalFrame> createFrame(const KURL&, const WTF::AtomicString& name, HTMLFrameOwnerElement*, ContentSecurityPolicyDisposition) override;
+    virtual PassRefPtrWillBeRawPtr<LocalFrame> createFrame(const FrameLoadRequest&, const WTF::AtomicString& name, HTMLFrameOwnerElement*) override;
     virtual bool canCreatePluginWithoutRenderer(const String& mimeType) const;
     virtual PassOwnPtrWillBeRawPtr<PluginPlaceholder> createPluginPlaceholder(
         Document&, const KURL&,
@@ -149,6 +150,7 @@ public:
     virtual WebCookieJar* cookieJar() const override;
     virtual bool willCheckAndDispatchMessageEvent(SecurityOrigin* target, MessageEvent*, LocalFrame* sourceFrame) const override;
     virtual void didChangeName(const String&) override;
+    virtual void didChangeSandboxFlags(Frame* childFrame, SandboxFlags) override;
 
     virtual void dispatchWillOpenWebSocket(WebSocketHandle*) override;
 
@@ -172,8 +174,11 @@ public:
 
     virtual void dispatchDidChangeManifest() override;
 
+    virtual void dispatchDidChangeDefaultPresentation() override;
+
     virtual unsigned backForwardLength() override;
 
+    virtual void suddenTerminationDisablerChanged(bool present, SuddenTerminationDisablerType) override;
 private:
     virtual bool isFrameLoaderClientImpl() const override { return true; }
 

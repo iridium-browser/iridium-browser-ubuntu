@@ -5,19 +5,18 @@
 #include "config.h"
 #include "core/paint/SVGImagePainter.h"
 
+#include "core/layout/ImageQualityController.h"
+#include "core/layout/LayoutImageResource.h"
+#include "core/layout/PaintInfo.h"
+#include "core/layout/svg/LayoutSVGImage.h"
+#include "core/layout/svg/SVGLayoutSupport.h"
 #include "core/paint/GraphicsContextAnnotator.h"
+#include "core/paint/LayoutObjectDrawingRecorder.h"
 #include "core/paint/ObjectPainter.h"
-#include "core/paint/RenderDrawingRecorder.h"
+#include "core/paint/SVGPaintContext.h"
 #include "core/paint/TransformRecorder.h"
-#include "core/rendering/ImageQualityController.h"
-#include "core/rendering/PaintInfo.h"
-#include "core/rendering/RenderImageResource.h"
-#include "core/rendering/svg/RenderSVGImage.h"
-#include "core/rendering/svg/SVGRenderSupport.h"
-#include "core/rendering/svg/SVGRenderingContext.h"
 #include "core/svg/SVGImageElement.h"
 #include "platform/graphics/GraphicsContext.h"
-#include "platform/graphics/GraphicsContextStateSaver.h"
 #include "third_party/skia/include/core/SkPicture.h"
 
 namespace blink {
@@ -33,30 +32,33 @@ void SVGImagePainter::paint(const PaintInfo& paintInfo)
 
     FloatRect boundingBox = m_renderSVGImage.paintInvalidationRectInLocalCoordinates();
 
-    PaintInfo childPaintInfo(paintInfo);
-    GraphicsContextStateSaver stateSaver(*childPaintInfo.context);
-    TransformRecorder transformRecorder(*childPaintInfo.context, m_renderSVGImage.displayItemClient(), m_renderSVGImage.localToParentTransform());
-    SVGRenderingContext renderingContext(&m_renderSVGImage, childPaintInfo);
-    if (renderingContext.isRenderingPrepared()) {
-        RenderDrawingRecorder recorder(childPaintInfo.context, m_renderSVGImage, childPaintInfo.phase, boundingBox);
-        if (!recorder.canUseCachedDrawing()) {
-            if (m_renderSVGImage.style()->svgStyle().bufferedRendering() != BR_STATIC) {
-                paintForeground(childPaintInfo);
-            } else {
-                RefPtr<const SkPicture>& bufferedForeground = m_renderSVGImage.bufferedForeground();
-                if (!bufferedForeground) {
-                    childPaintInfo.context->beginRecording(m_renderSVGImage.objectBoundingBox());
-                    paintForeground(childPaintInfo);
-                    bufferedForeground = childPaintInfo.context->endRecording();
-                }
+    PaintInfo paintInfoBeforeFiltering(paintInfo);
+    TransformRecorder transformRecorder(*paintInfoBeforeFiltering.context, m_renderSVGImage, m_renderSVGImage.localToParentTransform());
+    {
+        SVGPaintContext paintContext(m_renderSVGImage, paintInfoBeforeFiltering);
+        if (paintContext.applyClipMaskAndFilterIfNecessary()) {
+            LayoutObjectDrawingRecorder recorder(*paintContext.paintInfo().context, m_renderSVGImage, paintContext.paintInfo().phase, boundingBox);
+            if (!recorder.canUseCachedDrawing()) {
+                if (m_renderSVGImage.style()->svgStyle().bufferedRendering() != BR_STATIC) {
+                    paintForeground(paintContext.paintInfo());
+                } else {
+                    RefPtr<const SkPicture>& bufferedForeground = m_renderSVGImage.bufferedForeground();
+                    if (!bufferedForeground) {
+                        paintContext.paintInfo().context->beginRecording(m_renderSVGImage.objectBoundingBox());
+                        paintForeground(paintContext.paintInfo());
+                        bufferedForeground = paintContext.paintInfo().context->endRecording();
+                    }
 
-                childPaintInfo.context->drawPicture(bufferedForeground.get());
+                    paintContext.paintInfo().context->drawPicture(bufferedForeground.get());
+                }
             }
         }
     }
 
-    if (m_renderSVGImage.style()->outlineWidth())
-        ObjectPainter(m_renderSVGImage).paintOutline(childPaintInfo, IntRect(boundingBox));
+    if (m_renderSVGImage.style()->outlineWidth()) {
+        LayoutRect layoutBoundingBox(boundingBox);
+        ObjectPainter(m_renderSVGImage).paintOutline(paintInfoBeforeFiltering, layoutBoundingBox, layoutBoundingBox);
+    }
 }
 
 void SVGImagePainter::paintForeground(const PaintInfo& paintInfo)
@@ -74,7 +76,7 @@ void SVGImagePainter::paintForeground(const PaintInfo& paintInfo)
 
     InterpolationQuality previousInterpolationQuality = paintInfo.context->imageInterpolationQuality();
     paintInfo.context->setImageInterpolationQuality(interpolationQuality);
-    paintInfo.context->drawImage(image.get(), destRect, srcRect, CompositeSourceOver);
+    paintInfo.context->drawImage(image.get(), destRect, srcRect, SkXfermode::kSrcOver_Mode);
     paintInfo.context->setImageInterpolationQuality(previousInterpolationQuality);
 }
 

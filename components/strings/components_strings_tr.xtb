@@ -1,9 +1,11 @@
 <?xml version="1.0" ?><!DOCTYPE translationbundle><translationbundle lang="tr">
+<translation id="2774256287122201187">Devam edebilirsiniz. Söz konusu sayfaya devam ederseniz bu uyarı beş dakika boyunca bir daha görünmez.</translation>
 <translation id="7485870689360869515">Hiçbir veri bulunamadı.</translation>
 <translation id="3884278016824448484">Çakışan cihaz tanımlayıcısı</translation>
 <translation id="6779575937362063477">Bu tür kart Google Cüzdan tarafından desteklenmemektedir. Lütfen farklı bir kart seçin.</translation>
 <translation id="5172758083709347301">Makine</translation>
 <translation id="7180611975245234373">Yenile</translation>
+<translation id="8208216423136871611">Kaydetme</translation>
 <translation id="777702478322588152">İdari bölge</translation>
 <translation id="7600965453749440009"><ph name="LANGUAGE"/> dilini asla çevirme</translation>
 <translation id="2262243747453050782">HTTP hatası</translation>
@@ -11,6 +13,7 @@
 <translation id="7298195798382681320">Önerilenler</translation>
 <translation id="4058922952496707368">&quot;<ph name="SUBKEY"/>&quot; anahtarı: <ph name="ERROR"/></translation>
 <translation id="6980028882292583085">JavaScript Uyarısı</translation>
+<translation id="4081383687659939437">Bilgileri kaydet</translation>
 <translation id="5299298092464848405">Politika ayrıştırma hatası</translation>
 <translation id="6628463337424475685"><ph name="ENGINE"/> Arama</translation>
 <translation id="2498091847651709837">Yeni kart tara</translation>
@@ -37,6 +40,7 @@
 <translation id="2704283930420550640">Değer, biçimle eşleşmiyor.</translation>
 <translation id="4850886885716139402">Görüntüle</translation>
 <translation id="8091372947890762290">Etkinleştirme sunucuda bekliyor</translation>
+<translation id="4607653538520819196">Veri Tasarrufu bu sayfaya proxy uygulayamıyor.</translation>
 <translation id="719464814642662924">Visa</translation>
 <translation id="6839929833149231406">Bölge</translation>
 <translation id="1871208020102129563">Proxy, bir .pac komut dosyası URL'sini değil, sabit proxy sunucuları kullanacak şekilde ayarlanır.</translation>
@@ -48,6 +52,7 @@
 <translation id="7441627299479586546">Politika konusu yanlış</translation>
 <translation id="3885155851504623709">Bucak</translation>
 <translation id="6973656660372572881">Hem sabit proxy sunucular hem de bir .pac komut dosyası URL'si belirtildi.</translation>
+<translation id="1426410128494586442">Evet</translation>
 <translation id="4506176782989081258">Doğrulama hatası: <ph name="VALIDATION_ERROR"/></translation>
 <translation id="7108649287766967076"><ph name="TARGET_LANGUAGE"/> diline çeviri başarısız oldu.</translation>
 <translation id="4103249731201008433">Cihazın seri numarası geçersiz</translation>
@@ -66,11 +71,15 @@
 <translation id="1132774398110320017">Chrome Otomatik Doldurma ayarları...</translation>
 <translation id="6458467102616083041">Varsayılan arama politika tarafından devre dışı bırakıldığı için yoksayıldı.</translation>
 <translation id="1227224963052638717">Bilinmeyen politika.</translation>
+<translation id="4250680216510889253">Hayır</translation>
 <translation id="9207861905230894330">Makale eklenemedi.</translation>
+<translation id="5872918882028971132">Ebeveyn Önerileri</translation>
 <translation id="337363190475750230">Temel hazırlık iptal edildi</translation>
 <translation id="2367567093518048410">Düzey</translation>
 <translation id="7977590112176369853">&lt;sorgu girin&gt;</translation>
+<translation id="552553974213252141">Metin doğru bir şekilde çıkarıldı mı?</translation>
 <translation id="7610193165460212391">Değer aralık dışında: <ph name="VALUE"/>.</translation>
+<translation id="3739623965217189342">Kopyaladığınız bağlantı</translation>
 <translation id="8311778656528046050">Bu sayfayı yeniden yüklemek istediğinizden emin misiniz?</translation>
 <translation id="370665806235115550">Yükleniyor...</translation>
 <translation id="2096368010154057602">Bölüm</translation>
@@ -78,7 +87,6 @@
 <translation id="3024663005179499861">Yanlış politika türü</translation>
 <translation id="2030481566774242610">Şunu mu demek istediniz?: <ph name="LINK"/></translation>
 <translation id="3450660100078934250">MasterCard</translation>
-<translation id="2107287771748948380"><ph name="OBFUSCATED_CC_NUMBER"/>, Son Kullanma Tarihi: <ph name="CC_EXPIRATION_DATE"/></translation>
 <translation id="4148925816941278100">American Express</translation>
 <translation id="225207911366869382">Bu değer bu politika için kullanımdan kaldırıldı.</translation>
 <translation id="3145945101586104090">Yanıtın kodu çözülemedi</translation>
@@ -107,6 +115,7 @@
 <translation id="5455374756549232013">Politika zaman damgası yanlış</translation>
 <translation id="2025623846716345241">Yeniden Yüklemeyi Onayla</translation>
 <translation id="1962204205936693436"><ph name="DOMAIN"/> Yer İşaretleri</translation>
+<translation id="4300246636397505754">Ebeveyn önerileri</translation>
 <translation id="111844081046043029">Bu sayfadan ayrılmak istediğinizden emin misiniz?</translation>
 <translation id="1973335181906896915">Serileştirme hatası</translation>
 <translation id="5989320800837274978">Sabit proxy sunucular veya bir .pac komut dosyası URL'si belirtilmedi.</translation>
@@ -126,6 +135,7 @@
 <translation id="3228969707346345236">Sayfa zaten <ph name="LANGUAGE"/> dilinde olduğundan çeviri işlemi başarısız oldu.</translation>
 <translation id="7521387064766892559">JavaScript</translation>
 <translation id="8034522405403831421">Bu sayfa <ph name="SOURCE_LANGUAGE"/> dilinde. <ph name="TARGET_LANGUAGE"/> diline çevrilsin mi?</translation>
+<translation id="1734864079702812349">Amex</translation>
 <translation id="8891727572606052622">Geçersiz proxy modu.</translation>
 <translation id="6008256403891681546">JCB</translation>
 <translation id="7752995774971033316">Yönetimden kaldırıldı</translation>
@@ -142,6 +152,7 @@
 <translation id="5629630648637658800">Politika ayarları yüklenemedi</translation>
 <translation id="2354001756790975382">Diğer yer işaretleri</translation>
 <translation id="3650584904733503804">Doğrulama başarılı</translation>
+<translation id="2359808026110333948">Devam Et</translation>
 <translation id="6915804003454593391">Kullanıcı:</translation>
 <translation id="3377188786107721145">Politika ayrıştırma hatası</translation>
 <translation id="2270192940992995399">Makale bulunamadı.</translation>
@@ -174,6 +185,7 @@
 <translation id="2479410451996844060">Geçersiz arama URL'si.</translation>
 <translation id="5509780412636533143">Yönetilen yer işaretleri</translation>
 <translation id="8866481888320382733">Politika ayarlarını ayrıştırma hatası</translation>
+<translation id="4120075327926916474">Chrome'un, web formlarını doldurmak için bu kredi kartı bilgilerini kaydetmesini ister misiniz?</translation>
 <translation id="6644283850729428850">Bu politika uygun bulunmadı.</translation>
 <translation id="1693754753824026215"><ph name="SITE"/> web sitesindeki sayfanın mesajı:</translation>
 <translation id="4269787794583293679">(Kullanıcı adı yok)</translation>
@@ -197,12 +209,15 @@
 <translation id="8713130696108419660">Başlangıç anahtarlı imza bozuk</translation>
 <translation id="20817612488360358">Sistem proxy ayarları kullanılmak üzere ayarlandı, ancak açık bir proxy yapılandırması da belirtildi.</translation>
 <translation id="2639739919103226564">Durum:</translation>
+<translation id="4968547170521245791">Proxy uygulayamıyor</translation>
+<translation id="385051799172605136">Geri</translation>
 <translation id="5095208057601539847">Bölge</translation>
 <translation id="2581221116934462656"><ph name="PRODUCT_NAME"/> ürününün bir dahaki sefere <ph name="LANGUAGE_NAME"/> sayfaları çevirmeyi teklif etmesini ister misiniz?</translation>
 <translation id="3934680773876859118">PDF dokümanı yüklenemedi</translation>
 <translation id="6965382102122355670">Tamam</translation>
 <translation id="2721148159707890343">İstek başarılı oldu</translation>
 <translation id="2455981314101692989">Bu web sayfası bu form için otomatik doldurmayı devre dışı bıraktı.</translation>
+<translation id="6597614308054261376"><ph name="BEGIN_BOLD"/><ph name="SITE"/><ph name="END_BOLD"/> sitesine ulaşmaya çalışıyorsunuz. Şu anda bu sayfaya Veri Tasarrufu tarafından proxy uygulanamıyor.</translation>
 <translation id="8308427013383895095">Ağ bağlantısıyla ilgili bir sorun nedeniyle çeviri başarısız oldu.</translation>
 <translation id="5720705177508910913">Geçerli kullanıcı</translation>
 <translation id="3380864720620200369">İstemci Kimliği:</translation>

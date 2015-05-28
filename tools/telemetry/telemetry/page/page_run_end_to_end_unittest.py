@@ -3,29 +3,30 @@
 # found in the LICENSE file.
 
 import os
-import tempfile
-import unittest
+import re
 import shutil
 import sys
+import StringIO
 import tempfile
+import unittest
 
 from telemetry import benchmark
-from telemetry import decorators
 from telemetry.core import browser_finder
 from telemetry.core import exceptions
 from telemetry.core import user_agent
 from telemetry.core import util
+from telemetry import decorators
 from telemetry.page import page as page_module
 from telemetry.page import page_set
 from telemetry.page import page_test
+from telemetry.page import shared_page_state
 from telemetry.page import test_expectations
 from telemetry.results import results_options
 from telemetry.unittest_util import options_for_unittests
 from telemetry.unittest_util import system_stub
 from telemetry.user_story import user_story_runner
-from telemetry.util import exception_formatter as exception_formatter_module
-from telemetry.value import scalar
-from telemetry.value import string
+from telemetry.util import exception_formatter
+from unittest_data.page_sets import example_domain
 
 
 # pylint: disable=bad-super-call
@@ -75,11 +76,14 @@ def GetSuccessfulPageRuns(results):
   return [run for run in results.all_page_runs if run.ok or run.skipped]
 
 
-class FakeExceptionFormatterModule(object):
-  @staticmethod
-  def PrintFormattedException(
-      exception_class=None, exception=None, tb=None, msg=None):
-    pass
+def CaptureStderr(func, output_buffer):
+  def wrapper(*args, **kwargs):
+    original_stderr, sys.stderr = sys.stderr, output_buffer
+    try:
+      return func(*args, **kwargs)
+    finally:
+      sys.stderr = original_stderr
+  return wrapper
 
 
 # TODO: remove test cases that use real browsers and replace with a
@@ -90,23 +94,47 @@ class PageRunEndToEndTests(unittest.TestCase):
 
   def setUp(self):
     self._user_story_runner_logging_stub = None
-
-  def SuppressExceptionFormatting(self):
-    user_story_runner.exception_formatter = FakeExceptionFormatterModule
-    self._user_story_runner_logging_stub = system_stub.Override(
-      user_story_runner, ['logging'])
-
-  def RestoreExceptionFormatter(self):
-    user_story_runner.exception_formatter = exception_formatter_module
-    if self._user_story_runner_logging_stub:
-      self._user_story_runner_logging_stub.Restore()
-      self._user_story_runner_logging_stub = None
+    self._formatted_exception_buffer = StringIO.StringIO()
+    self._original_formatter = exception_formatter.PrintFormattedException
 
   def tearDown(self):
     self.RestoreExceptionFormatter()
 
+  def CaptureFormattedException(self):
+    exception_formatter.PrintFormattedException = CaptureStderr(
+        exception_formatter.PrintFormattedException,
+        self._formatted_exception_buffer)
+    self._user_story_runner_logging_stub = system_stub.Override(
+        user_story_runner, ['logging'])
+
+  @property
+  def formatted_exception(self):
+    return self._formatted_exception_buffer.getvalue()
+
+  def RestoreExceptionFormatter(self):
+    exception_formatter.PrintFormattedException = self._original_formatter
+    if self._user_story_runner_logging_stub:
+      self._user_story_runner_logging_stub.Restore()
+      self._user_story_runner_logging_stub = None
+
+  def assertFormattedExceptionIsEmpty(self):
+    self.longMessage = False
+    self.assertEquals(
+        '', self.formatted_exception,
+        msg='Expected empty formatted exception: actual=%s' % '\n   > '.join(
+            self.formatted_exception.split('\n')))
+
+  def assertFormattedExceptionOnlyHas(self, expected_exception_name):
+    self.longMessage = True
+    actual_exception_names = re.findall(r'^Traceback.*?^(\w+)',
+                                        self.formatted_exception,
+                                        re.DOTALL | re.MULTILINE)
+    self.assertEquals([expected_exception_name], actual_exception_names,
+                      msg='Full formatted exception: %s' % '\n   > '.join(
+                          self.formatted_exception.split('\n')))
+
   def testRaiseBrowserGoneExceptionFromRestartBrowserBeforeEachPage(self):
-    self.SuppressExceptionFormatting()
+    self.CaptureFormattedException()
     ps = page_set.PageSet()
     expectations = test_expectations.TestExpectations()
     ps.pages.append(page_module.Page(
@@ -116,7 +144,8 @@ class PageRunEndToEndTests(unittest.TestCase):
 
     class Test(page_test.PageTest):
       def __init__(self, *args):
-        super(Test, self).__init__(*args)
+        super(Test, self).__init__(
+            *args, needs_browser_restart_after_each_page=True)
         self.run_count = 0
 
       def RestartBrowserBeforeEachPage(self):
@@ -139,9 +168,43 @@ class PageRunEndToEndTests(unittest.TestCase):
     self.assertEquals(2, test.run_count)
     self.assertEquals(1, len(GetSuccessfulPageRuns(results)))
     self.assertEquals(1, len(results.failures))
+    self.assertFormattedExceptionIsEmpty()
 
+  def testNeedsBrowserRestartAfterEachPage(self):
+    self.CaptureFormattedException()
+    ps = page_set.PageSet()
+    expectations = test_expectations.TestExpectations()
+    ps.pages.append(page_module.Page(
+        'file://blank.html', ps, base_dir=util.GetUnittestDataDir()))
+    ps.pages.append(page_module.Page(
+        'file://blank.html', ps, base_dir=util.GetUnittestDataDir()))
+
+    class Test(page_test.PageTest):
+      def __init__(self, *args, **kwargs):
+        super(Test, self).__init__(*args, **kwargs)
+        self.browser_starts = 0
+
+      def DidStartBrowser(self, *args):
+        super(Test, self).DidStartBrowser(*args)
+        self.browser_starts += 1
+
+      def ValidateAndMeasurePage(self, page, tab, results):
+        pass
+
+    options = options_for_unittests.GetCopy()
+    options.output_formats = ['none']
+    options.suppress_gtest_report = True
+    test = Test(needs_browser_restart_after_each_page=True)
+    SetUpUserStoryRunnerArguments(options)
+    results = results_options.CreateResults(EmptyMetadataForTest(), options)
+    user_story_runner.Run(test, ps, expectations, options, results)
+    self.assertEquals(2, len(GetSuccessfulPageRuns(results)))
+    self.assertEquals(2, test.browser_starts)
+    self.assertFormattedExceptionIsEmpty()
+
+  @decorators.Disabled('android') # https://crbug.com/444240
   def testHandlingOfCrashedTabWithExpectedFailure(self):
-    self.SuppressExceptionFormatting()
+    self.CaptureFormattedException()
     ps = page_set.PageSet()
     expectations = test_expectations.TestExpectations()
     expectations.Fail('chrome://crash')
@@ -156,14 +219,16 @@ class PageRunEndToEndTests(unittest.TestCase):
     user_story_runner.Run(DummyTest(), ps, expectations, options, results)
     self.assertEquals(1, len(GetSuccessfulPageRuns(results)))
     self.assertEquals(0, len(results.failures))
+    self.assertFormattedExceptionOnlyHas('DevtoolsTargetCrashException')
 
   def testCredentialsWhenLoginFails(self):
-    self.SuppressExceptionFormatting()
+    self.CaptureFormattedException()
     credentials_backend = StubCredentialsBackend(login_return_value=False)
     did_run = self.runCredentialsTest(credentials_backend)
     assert credentials_backend.did_get_login == True
     assert credentials_backend.did_get_login_no_longer_needed == False
     assert did_run == False
+    self.assertFormattedExceptionIsEmpty()
 
   def testCredentialsWhenLoginSucceeds(self):
     credentials_backend = StubCredentialsBackend(login_return_value=True)
@@ -214,9 +279,9 @@ class PageRunEndToEndTests(unittest.TestCase):
     ps = page_set.PageSet()
     expectations = test_expectations.TestExpectations()
     page = page_module.Page(
-        'file://blank.html', ps, base_dir=util.GetUnittestDataDir())
+        'file://blank.html', ps, base_dir=util.GetUnittestDataDir(),
+        shared_page_state_class=shared_page_state.SharedTabletPageState)
     ps.pages.append(page)
-    ps.user_agent_type = 'tablet'
 
     class TestUserAgent(page_test.PageTest):
       def ValidateAndMeasurePage(self, _1, tab, _2):
@@ -384,31 +449,29 @@ class PageRunEndToEndTests(unittest.TestCase):
     user_story_runner.Run(test, ps, expectations, options, results)
     assert test.did_call_clean_up
 
-  # Ensure skipping the test if page cannot be run on the browser
-  def testPageCannotRunOnBrowser(self):
+  # Ensure skipping the test if shared state cannot be run on the browser.
+  def testSharedPageStateCannotRunOnBrowser(self):
     ps = page_set.PageSet()
-    expectations = test_expectations.TestExpectations()
 
-    class PageThatCannotRunOnBrowser(page_module.Page):
-
-      def __init__(self):
-        super(PageThatCannotRunOnBrowser, self).__init__(
-            url='file://blank.html', page_set=ps,
-            base_dir=util.GetUnittestDataDir())
-
+    class UnrunnableSharedState(shared_page_state.SharedPageState):
       def CanRunOnBrowser(self, _):
         return False
-
       def ValidateAndMeasurePage(self, _):
         pass
+
+    ps.AddUserStory(page_module.Page(
+        url='file://blank.html', page_set=ps,
+        base_dir=util.GetUnittestDataDir(),
+        shared_page_state_class=UnrunnableSharedState))
+    expectations = test_expectations.TestExpectations()
 
     class Test(page_test.PageTest):
       def __init__(self, *args, **kwargs):
         super(Test, self).__init__(*args, **kwargs)
         self.will_navigate_to_page_called = False
 
-      def ValidateAndMeasurePage(self, *args):
-        pass
+      def ValidateAndMeasurePage(self, *_args):
+        raise Exception('Exception should not be thrown')
 
       def WillNavigateToPage(self, _1, _2):
         self.will_navigate_to_page_called = True
@@ -421,7 +484,8 @@ class PageRunEndToEndTests(unittest.TestCase):
     results = results_options.CreateResults(EmptyMetadataForTest(), options)
     user_story_runner.Run(test, ps, expectations, options, results)
     self.assertFalse(test.will_navigate_to_page_called)
-    self.assertEquals(0, len(GetSuccessfulPageRuns(results)))
+    self.assertEquals(1, len(GetSuccessfulPageRuns(results)))
+    self.assertEquals(1, len(results.skipped_values))
     self.assertEquals(0, len(results.failures))
 
   def testRunPageWithProfilingFlag(self):
@@ -455,7 +519,6 @@ class PageRunEndToEndTests(unittest.TestCase):
       shutil.rmtree(options.output_dir)
 
   def _RunPageTestThatRaisesAppCrashException(self, test, max_failures):
-    self.SuppressExceptionFormatting()
     class TestPage(page_module.Page):
       def RunNavigateSteps(self, _):
         raise exceptions.AppCrashException
@@ -475,6 +538,7 @@ class PageRunEndToEndTests(unittest.TestCase):
     return results
 
   def testSingleTabMeansCrashWillCauseFailureValue(self):
+    self.CaptureFormattedException()
     class SingleTabTest(page_test.PageTest):
       # Test is not multi-tab because it does not override TabForPage.
       def ValidateAndMeasurePage(self, *_):
@@ -484,9 +548,11 @@ class PageRunEndToEndTests(unittest.TestCase):
     results = self._RunPageTestThatRaisesAppCrashException(test, max_failures=1)
     self.assertEquals([], GetSuccessfulPageRuns(results))
     self.assertEquals(2, len(results.failures))  # max_failures + 1
+    self.assertFormattedExceptionIsEmpty()
 
   @decorators.Enabled('has tabs')
   def testMultipleTabsMeansCrashRaises(self):
+    self.CaptureFormattedException()
     class MultipleTabsTest(page_test.PageTest):
       # Test *is* multi-tab because it overrides TabForPage.
       def TabForPage(self, page, browser):
@@ -497,4 +563,28 @@ class PageRunEndToEndTests(unittest.TestCase):
     test = MultipleTabsTest()
     with self.assertRaises(page_test.MultiTabTestAppCrashError):
       self._RunPageTestThatRaisesAppCrashException(test, max_failures=1)
+    self.assertFormattedExceptionOnlyHas('AppCrashException')
+
+  def testWebPageReplay(self):
+    ps = example_domain.ExampleDomainPageSet()
+    expectations = test_expectations.TestExpectations()
+    body = []
+    class TestWpr(page_test.PageTest):
+      def ValidateAndMeasurePage(self, _, tab, __):
+        body.append(tab.EvaluateJavaScript('document.body.innerText'))
+    test = TestWpr()
+    options = options_for_unittests.GetCopy()
+    options.output_formats = ['none']
+    options.suppress_gtest_report = True
+    SetUpUserStoryRunnerArguments(options)
+    results = results_options.CreateResults(EmptyMetadataForTest(), options)
+
+    user_story_runner.Run(test, ps, expectations, options, results)
+
+    self.longMessage = True
+    self.assertIn('Example Domain', body[0], msg='URL: %s' % ps.pages[0].url)
+    self.assertIn('Example Domain', body[1], msg='URL: %s' % ps.pages[1].url)
+
+    self.assertEquals(2, len(GetSuccessfulPageRuns(results)))
+    self.assertEquals(0, len(results.failures))
 

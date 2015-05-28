@@ -17,6 +17,9 @@ const char kEnablePixelOutputInTests[] = "enable-pixel-output-in-tests";
 
 const char kUIDisableThreadedCompositing[] = "ui-disable-threaded-compositing";
 
+const char kUIEnableCompositorAnimationTimelines[] =
+    "ui-enable-compositor-animation-timelines";
+
 const char kUIEnableImplSidePainting[] = "ui-enable-impl-side-painting";
 
 const char kUIEnableZeroCopy[] = "ui-enable-zero-copy";
@@ -39,6 +42,11 @@ bool IsUIZeroCopyEnabled() {
       *base::CommandLine::ForCurrentProcess();
 
   return command_line.HasSwitch(switches::kUIEnableZeroCopy);
+}
+
+bool IsUIOneCopyEnabled() {
+  // One-copy is on by default unless zero copy is enabled.
+  return !IsUIZeroCopyEnabled();
 }
 
 }  // namespace ui

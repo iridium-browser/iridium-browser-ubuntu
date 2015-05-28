@@ -22,6 +22,7 @@
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/debug_daemon_client.h"
 #include "chromeos/dbus/power_manager_client.h"
+#include "components/login/localized_values_builder.h"
 #include "ui/base/l10n/l10n_util.h"
 
 namespace {
@@ -84,7 +85,7 @@ void EnableDebuggingScreenHandler::SetDelegate(Delegate* delegate) {
 }
 
 void EnableDebuggingScreenHandler::DeclareLocalizedValues(
-    LocalizedValuesBuilder* builder) {
+    ::login::LocalizedValuesBuilder* builder) {
   builder->Add("enableDebuggingScreenTitle",
                IDS_ENABLE_DEBUGGING_SCREEN_TITLE);
   builder->Add("enableDebuggingScreenAccessibleTitle",
@@ -243,13 +244,14 @@ void EnableDebuggingScreenHandler::OnQueryDebuggingFeatures(bool success,
   DVLOG(1) << "Enable-debugging-screen: OnQueryDebuggingFeatures"
            << ", success=" << success
            << ", features=" << features_flag;
-  if (!success || features_flag == DebugDaemonClient::DEV_FEATURES_DISABLED) {
+  if (!success ||
+      features_flag == debugd::DevFeatureFlag::DEV_FEATURES_DISABLED) {
     UpdateUIState(UI_STATE_ERROR);
     return;
   }
 
   if ((features_flag &
-       DebugDaemonClient::DEV_FEATURE_ROOTFS_VERIFICATION_REMOVED) == 0) {
+       debugd::DevFeatureFlag::DEV_FEATURE_ROOTFS_VERIFICATION_REMOVED) == 0) {
     UpdateUIState(UI_STATE_REMOVE_PROTECTION);
     return;
   }

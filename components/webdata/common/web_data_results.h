@@ -81,14 +81,13 @@ template <class T> class WDResult : public WDTypedResult {
   DISALLOW_COPY_AND_ASSIGN(WDResult);
 };
 
-template <class T> class WDDestroyableResult : public WDTypedResult {
+template <class T> class WDDestroyableResult : public WDResult<T> {
  public:
   WDDestroyableResult(
       WDResultType type,
       const T& v,
       const DestroyCallback& callback)
-      : WDTypedResult(type),
-        value_(v),
+      : WDResult<T>(type, v),
         callback_(callback) {
   }
 
@@ -102,32 +101,10 @@ template <class T> class WDDestroyableResult : public WDTypedResult {
     }
   }
 
-  // Return a single value result.
-  T GetValue() const {
-    return value_;
-  }
-
  private:
-  T value_;
   DestroyCallback callback_;
 
   DISALLOW_COPY_AND_ASSIGN(WDDestroyableResult);
-};
-
-template <class T> class WDObjectResult : public WDTypedResult {
- public:
-  explicit WDObjectResult(WDResultType type)
-    : WDTypedResult(type) {
-  }
-
-  T* GetValue() const {
-    return &value_;
-  }
-
- private:
-  // mutable to keep GetValue() const.
-  mutable T value_;
-  DISALLOW_COPY_AND_ASSIGN(WDObjectResult);
 };
 
 #endif  // COMPONENTS_WEBDATA_COMMON_WEB_DATA_RESULTS_H_

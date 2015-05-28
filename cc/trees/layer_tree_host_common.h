@@ -125,10 +125,9 @@ class CC_EXPORT LayerTreeHostCommon {
   static bool RenderSurfaceContributesToTarget(LayerType*,
                                                int target_surface_layer_id);
 
-  template <typename LayerType>
-  static void CallFunctionForSubtree(
-      LayerType* root_layer,
-      const base::Callback<void(LayerType* layer)>& function);
+  template <typename LayerType, typename Function>
+  static void CallFunctionForSubtree(LayerType* layer,
+                                     const Function& function);
 
   // Returns a layer with the given id if one exists in the subtree starting
   // from the given root layer (including mask and replica layers).
@@ -151,7 +150,7 @@ class CC_EXPORT LayerTreeHostCommon {
 
   struct ScrollUpdateInfo {
     int layer_id;
-    // TODO(miletus) : Use ScrollOffset once LayerTreeHost/Blink fully supports
+    // TODO(miletus): Use ScrollOffset once LayerTreeHost/Blink fully supports
     // franctional scroll offset.
     gfx::Vector2d scroll_delta;
   };
@@ -175,12 +174,14 @@ bool LayerTreeHostCommon::RenderSurfaceContributesToTarget(
   // A layer will either contribute its own content, or its render surface's
   // content, to the target surface. The layer contributes its surface's content
   // when both the following are true:
-  //  (1) The layer actually has a render surface, and
+  //  (1) The layer actually has a render surface and rendering into that
+  //      surface, and
   //  (2) The layer's render surface is not the same as the target surface.
   //
   // Otherwise, the layer just contributes itself to the target surface.
 
-  return layer->render_surface() && layer->id() != target_surface_layer_id;
+  return layer->render_target() == layer &&
+         layer->id() != target_surface_layer_id;
 }
 
 template <typename LayerType>
@@ -207,22 +208,21 @@ LayerType* LayerTreeHostCommon::FindLayerInSubtree(LayerType* root_layer,
   return NULL;
 }
 
-template <typename LayerType>
-void LayerTreeHostCommon::CallFunctionForSubtree(
-    LayerType* root_layer,
-    const base::Callback<void(LayerType* layer)>& function) {
-  function.Run(root_layer);
+template <typename LayerType, typename Function>
+void LayerTreeHostCommon::CallFunctionForSubtree(LayerType* layer,
+                                                 const Function& function) {
+  function(layer);
 
-  if (LayerType* mask_layer = root_layer->mask_layer())
-    function.Run(mask_layer);
-  if (LayerType* replica_layer = root_layer->replica_layer()) {
-    function.Run(replica_layer);
+  if (LayerType* mask_layer = layer->mask_layer())
+    function(mask_layer);
+  if (LayerType* replica_layer = layer->replica_layer()) {
+    function(replica_layer);
     if (LayerType* mask_layer = replica_layer->mask_layer())
-      function.Run(mask_layer);
+      function(mask_layer);
   }
 
-  for (size_t i = 0; i < root_layer->children().size(); ++i) {
-    CallFunctionForSubtree(get_layer_as_raw_ptr(root_layer->children(), i),
+  for (size_t i = 0; i < layer->children().size(); ++i) {
+    CallFunctionForSubtree(get_layer_as_raw_ptr(layer->children(), i),
                            function);
   }
 }

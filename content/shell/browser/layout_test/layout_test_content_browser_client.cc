@@ -6,10 +6,12 @@
 
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
+#include "content/public/browser/navigator_connect_context.h"
 #include "content/public/browser/render_process_host.h"
 #include "content/public/browser/storage_partition.h"
 #include "content/shell/browser/layout_test/layout_test_browser_context.h"
 #include "content/shell/browser/layout_test/layout_test_message_filter.h"
+#include "content/shell/browser/layout_test/layout_test_navigator_connect_service_factory.h"
 #include "content/shell/browser/layout_test/layout_test_notification_manager.h"
 #include "content/shell/browser/shell_browser_context.h"
 #include "content/shell/common/shell_messages.h"
@@ -19,21 +21,6 @@ namespace content {
 namespace {
 
 LayoutTestContentBrowserClient* g_layout_test_browser_client;
-
-void RequestDesktopNotificationPermissionOnIO(
-    const GURL& source_origin,
-    const base::Callback<void(bool)>& callback) {
-  LayoutTestNotificationManager* manager =
-      LayoutTestContentBrowserClient::Get()->GetLayoutTestNotificationManager();
-  bool allowed = manager ? manager->RequestPermission(source_origin)
-                         : true;
-
-  // The callback came from the UI thread, we need to run it from there again.
-  BrowserThread::PostTask(
-      BrowserThread::UI,
-      FROM_HERE,
-      base::Bind(callback, allowed));
-}
 
 }  // namespace
 
@@ -78,34 +65,15 @@ void LayoutTestContentBrowserClient::RenderProcessWillLaunch(
   host->Send(new ShellViewMsg_SetWebKitSourceDir(GetWebKitRootDirFilePath()));
 }
 
-void LayoutTestContentBrowserClient::RequestPermission(
-    PermissionType permission,
-    WebContents* web_contents,
-    int bridge_id,
-    const GURL& requesting_frame,
-    bool user_gesture,
-    const base::Callback<void(bool)>& result_callback) {
-  DCHECK_CURRENTLY_ON(BrowserThread::UI);
-  if (permission == content::PERMISSION_NOTIFICATIONS) {
-    BrowserThread::PostTask(
-        BrowserThread::IO,
-        FROM_HERE,
-        base::Bind(&RequestDesktopNotificationPermissionOnIO,
-                   requesting_frame,
-                   result_callback));
-    return;
-  }
-  ShellContentBrowserClient::RequestPermission(permission,
-                                               web_contents,
-                                               bridge_id,
-                                               requesting_frame,
-                                               user_gesture,
-                                               result_callback);
-}
-
 PlatformNotificationService*
 LayoutTestContentBrowserClient::GetPlatformNotificationService() {
   return layout_test_notification_manager_.get();
+}
+
+void LayoutTestContentBrowserClient::GetAdditionalNavigatorConnectServices(
+    const scoped_refptr<NavigatorConnectContext>& context) {
+  context->AddFactory(
+      make_scoped_ptr(new LayoutTestNavigatorConnectServiceFactory));
 }
 
 }  // namespace content

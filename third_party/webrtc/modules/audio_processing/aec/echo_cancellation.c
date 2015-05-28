@@ -20,11 +20,11 @@
 #include <stdlib.h>
 #include <string.h>
 
+#include "webrtc/common_audio/ring_buffer.h"
 #include "webrtc/common_audio/signal_processing/include/signal_processing_library.h"
 #include "webrtc/modules/audio_processing/aec/aec_core.h"
 #include "webrtc/modules/audio_processing/aec/aec_resampler.h"
 #include "webrtc/modules/audio_processing/aec/echo_cancellation_internal.h"
-#include "webrtc/modules/audio_processing/utility/ring_buffer.h"
 #include "webrtc/typedefs.h"
 
 // Measured delays [ms]
@@ -104,18 +104,16 @@ int webrtc_aec_instance_count = 0;
 static void EstBufDelayNormal(Aec* aecInst);
 static void EstBufDelayExtended(Aec* aecInst);
 static int ProcessNormal(Aec* self,
-                         const float* near,
-                         const float* near_high,
-                         float* out,
-                         float* out_high,
+                         const float* const* near,
+                         int num_bands,
+                         float* const* out,
                          int16_t num_samples,
                          int16_t reported_delay_ms,
                          int32_t skew);
 static void ProcessExtended(Aec* self,
-                            const float* near,
-                            const float* near_high,
-                            float* out,
-                            float* out_high,
+                            const float* const* near,
+                            int num_bands,
+                            float* const* out,
                             int16_t num_samples,
                             int16_t reported_delay_ms,
                             int32_t skew);
@@ -199,7 +197,10 @@ int32_t WebRtcAec_Init(void* aecInst, int32_t sampFreq, int32_t scSampFreq) {
   Aec* aecpc = aecInst;
   AecConfig aecConfig;
 
-  if (sampFreq != 8000 && sampFreq != 16000 && sampFreq != 32000) {
+  if (sampFreq != 8000 &&
+      sampFreq != 16000 &&
+      sampFreq != 32000 &&
+      sampFreq != 48000) {
     aecpc->lastError = AEC_BAD_PARAMETER_ERROR;
     return -1;
   }
@@ -222,15 +223,12 @@ int32_t WebRtcAec_Init(void* aecInst, int32_t sampFreq, int32_t scSampFreq) {
     return -1;
   }
 
-  if (WebRtc_InitBuffer(aecpc->far_pre_buf) == -1) {
-    aecpc->lastError = AEC_UNSPECIFIED_ERROR;
-    return -1;
-  }
+  WebRtc_InitBuffer(aecpc->far_pre_buf);
   WebRtc_MoveReadPtr(aecpc->far_pre_buf, -PART_LEN);  // Start overlap.
 
   aecpc->initFlag = initCheck;  // indicates that initialization has been done
 
-  if (aecpc->sampFreq == 32000) {
+  if (aecpc->sampFreq == 32000 || aecpc->sampFreq == 48000) {
     aecpc->splitSampFreq = 16000;
   } else {
     aecpc->splitSampFreq = sampFreq;
@@ -323,7 +321,7 @@ int32_t WebRtcAec_BufferFarend(void* aecInst,
   while (WebRtc_available_read(aecpc->far_pre_buf) >= PART_LEN2) {
     // We have enough data to pass to the FFT, hence read PART_LEN2 samples.
     {
-      float* ptmp;
+      float* ptmp = NULL;
       float tmp[PART_LEN2];
       WebRtc_ReadBuffer(aecpc->far_pre_buf, (void**)&ptmp, tmp, PART_LEN2);
       WebRtcAec_BufferFarendPartition(aecpc->aec, ptmp);
@@ -341,19 +339,14 @@ int32_t WebRtcAec_BufferFarend(void* aecInst,
 }
 
 int32_t WebRtcAec_Process(void* aecInst,
-                          const float* nearend,
-                          const float* nearendH,
-                          float* out,
-                          float* outH,
+                          const float* const* nearend,
+                          int num_bands,
+                          float* const* out,
                           int16_t nrOfSamples,
                           int16_t msInSndCardBuf,
                           int32_t skew) {
   Aec* aecpc = aecInst;
   int32_t retVal = 0;
-  if (nearend == NULL) {
-    aecpc->lastError = AEC_NULL_POINTER_ERROR;
-    return -1;
-  }
 
   if (out == NULL) {
     aecpc->lastError = AEC_NULL_POINTER_ERROR;
@@ -371,12 +364,6 @@ int32_t WebRtcAec_Process(void* aecInst,
     return -1;
   }
 
-  // Check for valid pointers based on sampling rate
-  if (aecpc->sampFreq == 32000 && nearendH == NULL) {
-    aecpc->lastError = AEC_NULL_POINTER_ERROR;
-    return -1;
-  }
-
   if (msInSndCardBuf < 0) {
     msInSndCardBuf = 0;
     aecpc->lastError = AEC_BAD_PARAMETER_WARNING;
@@ -389,14 +376,18 @@ int32_t WebRtcAec_Process(void* aecInst,
 
   // This returns the value of aec->extended_filter_enabled.
   if (WebRtcAec_delay_correction_enabled(aecpc->aec)) {
-    ProcessExtended(
-        aecpc, nearend, nearendH, out, outH, nrOfSamples, msInSndCardBuf, skew);
+    ProcessExtended(aecpc,
+                    nearend,
+                    num_bands,
+                    out,
+                    nrOfSamples,
+                    msInSndCardBuf,
+                    skew);
   } else {
     if (ProcessNormal(aecpc,
                       nearend,
-                      nearendH,
+                      num_bands,
                       out,
-                      outH,
                       nrOfSamples,
                       msInSndCardBuf,
                       skew) != 0) {
@@ -565,7 +556,10 @@ int WebRtcAec_GetMetrics(void* handle, AecMetrics* metrics) {
   return 0;
 }
 
-int WebRtcAec_GetDelayMetrics(void* handle, int* median, int* std) {
+int WebRtcAec_GetDelayMetrics(void* handle,
+                              int* median,
+                              int* std,
+                              float* fraction_poor_delays) {
   Aec* self = handle;
   if (median == NULL) {
     self->lastError = AEC_NULL_POINTER_ERROR;
@@ -579,7 +573,9 @@ int WebRtcAec_GetDelayMetrics(void* handle, int* median, int* std) {
     self->lastError = AEC_UNINITIALIZED_ERROR;
     return -1;
   }
-  if (WebRtcAec_GetDelayMetricsCore(self->aec, median, std) == -1) {
+  if (WebRtcAec_GetDelayMetricsCore(self->aec, median, std,
+                                    fraction_poor_delays) ==
+      -1) {
     // Logging disabled.
     self->lastError = AEC_UNSUPPORTED_FUNCTION_ERROR;
     return -1;
@@ -601,17 +597,15 @@ AecCore* WebRtcAec_aec_core(void* handle) {
 }
 
 static int ProcessNormal(Aec* aecpc,
-                         const float* nearend,
-                         const float* nearendH,
-                         float* out,
-                         float* outH,
+                         const float* const* nearend,
+                         int num_bands,
+                         float* const* out,
                          int16_t nrOfSamples,
                          int16_t msInSndCardBuf,
                          int32_t skew) {
   int retVal = 0;
   short i;
   short nBlocks10ms;
-  short nFrames;
   // Limit resampling to doubling/halving of signal
   const float minSkewEst = -0.5f;
   const float maxSkewEst = 1.0f;
@@ -652,16 +646,14 @@ static int ProcessNormal(Aec* aecpc,
     }
   }
 
-  nFrames = nrOfSamples / FRAME_LEN;
-  nBlocks10ms = nFrames / aecpc->rate_factor;
+  nBlocks10ms = nrOfSamples / (FRAME_LEN * aecpc->rate_factor);
 
   if (aecpc->startup_phase) {
-    // Only needed if they don't already point to the same place.
-    if (nearend != out) {
-      memcpy(out, nearend, sizeof(*out) * nrOfSamples);
-    }
-    if (nearendH != outH) {
-      memcpy(outH, nearendH, sizeof(*outH) * nrOfSamples);
+    for (i = 0; i < num_bands; ++i) {
+      // Only needed if they don't already point to the same place.
+      if (nearend[i] != out[i]) {
+        memcpy(out[i], nearend[i], sizeof(nearend[i][0]) * nrOfSamples);
+      }
     }
 
     // The AEC is in the start up mode
@@ -739,34 +731,29 @@ static int ProcessNormal(Aec* aecpc,
       EstBufDelayNormal(aecpc);
     }
 
-    // Note that 1 frame is supported for NB and 2 frames for WB.
-    for (i = 0; i < nFrames; i++) {
-      // Call the AEC.
-      WebRtcAec_ProcessFrame(aecpc->aec,
-                             &nearend[FRAME_LEN * i],
-                             &nearendH[FRAME_LEN * i],
-                             aecpc->knownDelay,
-                             &out[FRAME_LEN * i],
-                             &outH[FRAME_LEN * i]);
-      // TODO(bjornv): Re-structure such that we don't have to pass
-      // |aecpc->knownDelay| as input. Change name to something like
-      // |system_buffer_diff|.
-    }
+    // Call the AEC.
+    // TODO(bjornv): Re-structure such that we don't have to pass
+    // |aecpc->knownDelay| as input. Change name to something like
+    // |system_buffer_diff|.
+    WebRtcAec_ProcessFrames(aecpc->aec,
+                            nearend,
+                            num_bands,
+                            nrOfSamples,
+                            aecpc->knownDelay,
+                            out);
   }
 
   return retVal;
 }
 
 static void ProcessExtended(Aec* self,
-                            const float* near,
-                            const float* near_high,
-                            float* out,
-                            float* out_high,
+                            const float* const* near,
+                            int num_bands,
+                            float* const* out,
                             int16_t num_samples,
                             int16_t reported_delay_ms,
                             int32_t skew) {
   int i;
-  const int num_frames = num_samples / FRAME_LEN;
   const int delay_diff_offset = kDelayDiffOffsetSamples;
 #if defined(WEBRTC_UNTRUSTED_DELAY)
   reported_delay_ms = kFixedDelayMs;
@@ -789,12 +776,11 @@ static void ProcessExtended(Aec* self,
   self->msInSndCardBuf = reported_delay_ms;
 
   if (!self->farend_started) {
-    // Only needed if they don't already point to the same place.
-    if (near != out) {
-      memcpy(out, near, sizeof(*out) * num_samples);
-    }
-    if (near_high != out_high) {
-      memcpy(out_high, near_high, sizeof(*out_high) * num_samples);
+    for (i = 0; i < num_bands; ++i) {
+      // Only needed if they don't already point to the same place.
+      if (near[i] != out[i]) {
+        memcpy(out[i], near[i], sizeof(near[i][0]) * num_samples);
+      }
     }
     return;
   }
@@ -823,14 +809,12 @@ static void ProcessExtended(Aec* self,
     const int adjusted_known_delay =
         WEBRTC_SPL_MAX(0, self->knownDelay + delay_diff_offset);
 
-    for (i = 0; i < num_frames; ++i) {
-      WebRtcAec_ProcessFrame(self->aec,
-                             &near[FRAME_LEN * i],
-                             &near_high[FRAME_LEN * i],
-                             adjusted_known_delay,
-                             &out[FRAME_LEN * i],
-                             &out_high[FRAME_LEN * i]);
-    }
+    WebRtcAec_ProcessFrames(self->aec,
+                            near,
+                            num_bands,
+                            num_samples,
+                            adjusted_known_delay,
+                            out);
   }
 }
 

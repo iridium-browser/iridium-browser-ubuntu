@@ -29,7 +29,7 @@ V8TestCallbackInterface::~V8TestCallbackInterface()
 {
 }
 
-void V8TestCallbackInterface::trace(Visitor* visitor)
+DEFINE_TRACE(V8TestCallbackInterface)
 {
     TestCallbackInterface::trace(visitor);
     ActiveDOMCallback::trace(visitor);
@@ -86,7 +86,7 @@ void V8TestCallbackInterface::voidMethodBooleanArg(bool boolArg)
     ScriptController::callFunction(m_scriptState->executionContext(), m_callback.newLocal(m_scriptState->isolate()), m_scriptState->context()->Global(), 1, argv, m_scriptState->isolate());
 }
 
-void V8TestCallbackInterface::voidMethodSequenceArg(const Vector<RefPtr<TestInterfaceEmpty> >& sequenceArg)
+void V8TestCallbackInterface::voidMethodSequenceArg(const Vector<RefPtr<TestInterfaceEmpty>>& sequenceArg)
 {
     if (!canInvokeCallback())
         return;
@@ -198,7 +198,7 @@ void V8TestCallbackInterface::callbackWithThisValueVoidMethodStringArg(ScriptVal
     ScriptController::callFunction(m_scriptState->executionContext(), m_callback.newLocal(m_scriptState->isolate()), thisHandle, 1, argv, m_scriptState->isolate());
 }
 
-void V8TestCallbackInterface::voidMethodWillBeGarbageCollectedSequenceArg(const WillBeHeapVector<RefPtrWillBeMember<TestInterfaceWillBeGarbageCollected> >& sequenceArg)
+void V8TestCallbackInterface::voidMethodWillBeGarbageCollectedSequenceArg(const WillBeHeapVector<RefPtrWillBeMember<TestInterfaceWillBeGarbageCollected>>& sequenceArg)
 {
     if (!canInvokeCallback())
         return;
@@ -218,7 +218,7 @@ void V8TestCallbackInterface::voidMethodWillBeGarbageCollectedSequenceArg(const 
     ScriptController::callFunction(m_scriptState->executionContext(), m_callback.newLocal(m_scriptState->isolate()), m_scriptState->context()->Global(), 1, argv, m_scriptState->isolate());
 }
 
-void V8TestCallbackInterface::voidMethodWillBeGarbageCollectedArrayArg(const WillBeHeapVector<RefPtrWillBeMember<TestInterfaceWillBeGarbageCollected> >& arrayArg)
+void V8TestCallbackInterface::voidMethodWillBeGarbageCollectedArrayArg(const WillBeHeapVector<RefPtrWillBeMember<TestInterfaceWillBeGarbageCollected>>& arrayArg)
 {
     if (!canInvokeCallback())
         return;

@@ -4,8 +4,10 @@
 
 #include "chrome/renderer/searchbox/searchbox_extension.h"
 
+#include "base/command_line.h"
 #include "base/i18n/rtl.h"
 #include "base/json/string_escape.h"
+#include "base/metrics/field_trial.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
@@ -23,6 +25,7 @@
 #include "third_party/WebKit/public/web/WebScriptSource.h"
 #include "third_party/WebKit/public/web/WebView.h"
 #include "ui/base/resource/resource_bundle.h"
+#include "ui/base/ui_base_switches.h"
 #include "ui/base/window_open_disposition.h"
 #include "ui/events/keycodes/keyboard_codes.h"
 #include "url/gurl.h"
@@ -61,6 +64,21 @@ base::string16 V8ValueToUTF16(v8::Handle<v8::Value> v) {
   return base::string16(reinterpret_cast<const base::char16*>(*s), s.length());
 }
 
+// Returns whether icon NTP is enabled by experiment.
+// TODO(huangs): Remove all 3 copies of this routine once Icon NTP launches.
+bool IsIconNTPEnabled() {
+  // Note: It's important to query the field trial state first, to ensure that
+  // UMA reports the correct group.
+  const std::string group_name = base::FieldTrialList::FindFullName("IconNTP");
+  using base::CommandLine;
+  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kDisableIconNtp))
+    return false;
+  if (CommandLine::ForCurrentProcess()->HasSwitch(switches::kEnableIconNtp))
+    return true;
+
+  return StartsWithASCII(group_name, "Enabled", true);
+}
+
 // Converts string16 to V8 String.
 v8::Handle<v8::String> UTF16ToV8String(v8::Isolate* isolate,
                                        const base::string16& s) {
@@ -77,6 +95,13 @@ v8::Handle<v8::String> UTF8ToV8String(v8::Isolate* isolate,
       isolate, s.data(), v8::String::kNormalString, s.size());
 }
 
+// Throws a TypeError on the current V8 context if the args are invalid.
+void ThrowInvalidParameters(const v8::FunctionCallbackInfo<v8::Value>& args) {
+  v8::Isolate* isolate = args.GetIsolate();
+  isolate->ThrowException(v8::Exception::TypeError(
+      v8::String::NewFromUtf8(isolate, "Invalid parameters")));
+}
+
 void Dispatch(blink::WebFrame* frame, const blink::WebString& script) {
   if (!frame) return;
   frame->executeScript(blink::WebScriptSource(script));
@@ -90,6 +115,27 @@ v8::Handle<v8::String> GenerateThumbnailURL(
       isolate,
       base::StringPrintf(
           "chrome-search://thumb/%d/%d", render_view_id, most_visited_item_id));
+}
+
+v8::Handle<v8::String> GenerateLargeIconURL(
+    v8::Isolate* isolate,
+    int render_view_id,
+    InstantRestrictedID most_visited_item_id) {
+  const int kIconSize = 96;  // To support high DPI; on screen it's 48 dp.
+  return UTF8ToV8String(
+      isolate,
+      base::StringPrintf("chrome-search://large-icon/%d/%d/%d",
+                         kIconSize, render_view_id, most_visited_item_id));
+}
+
+v8::Handle<v8::String> GenerateFallbackIconURL(
+    v8::Isolate* isolate,
+    int render_view_id,
+    InstantRestrictedID most_visited_item_id) {
+  return UTF8ToV8String(
+      isolate,
+      base::StringPrintf("chrome-search://fallback-icon/,,,,1/%d/%d",
+                         render_view_id, most_visited_item_id));
 }
 
 // Populates a Javascript MostVisitedItem object from |mv_item|.
@@ -129,6 +175,14 @@ v8::Handle<v8::Object> GenerateMostVisitedItem(
            v8::Int32::New(isolate, restricted_id));
   obj->Set(v8::String::NewFromUtf8(isolate, "thumbnailUrl"),
            GenerateThumbnailURL(isolate, render_view_id, restricted_id));
+  if (IsIconNTPEnabled()) {
+    // Update website http://www.chromium.org/embeddedsearch when we make this
+    // permanent.
+    obj->Set(v8::String::NewFromUtf8(isolate, "largeIconUrl"),
+             GenerateLargeIconURL(isolate, render_view_id, restricted_id));
+    obj->Set(v8::String::NewFromUtf8(isolate, "fallbackIconUrl"),
+             GenerateFallbackIconURL(isolate, render_view_id, restricted_id));
+  }
   obj->Set(v8::String::NewFromUtf8(isolate, "title"),
            UTF16ToV8String(isolate, title));
   obj->Set(v8::String::NewFromUtf8(isolate, "domain"),
@@ -654,7 +708,12 @@ content::RenderView* SearchBoxExtensionWrapper::GetRenderView() {
 void SearchBoxExtensionWrapper::CheckIsUserSignedInToChromeAs(
     const v8::FunctionCallbackInfo<v8::Value>& args) {
   content::RenderView* render_view = GetRenderView();
-  if (!render_view || args.Length() == 0 || args[0]->IsUndefined()) return;
+  if (!render_view) return;
+
+  if (!args.Length() || args[0]->IsUndefined()) {
+    ThrowInvalidParameters(args);
+    return;
+  }
 
   DVLOG(1) << render_view << " CheckIsUserSignedInToChromeAs";
 
@@ -676,10 +735,17 @@ void SearchBoxExtensionWrapper::CheckIsUserSyncingHistory(
 void SearchBoxExtensionWrapper::DeleteMostVisitedItem(
     const v8::FunctionCallbackInfo<v8::Value>& args) {
   content::RenderView* render_view = GetRenderView();
-  if (!render_view || !args.Length()) return;
+  if (!render_view) return;
 
-  DVLOG(1) << render_view << " DeleteMostVisitedItem";
-  SearchBox::Get(render_view)->DeleteMostVisitedItem(args[0]->IntegerValue());
+  if (!args.Length()) {
+    ThrowInvalidParameters(args);
+    return;
+  }
+
+  DVLOG(1) << render_view
+           << " DeleteMostVisitedItem: " << args[0]->ToInteger()->Value();
+  SearchBox::Get(render_view)->
+      DeleteMostVisitedItem(args[0]->ToInteger()->Value());
 }
 
 // static
@@ -706,7 +772,12 @@ void SearchBoxExtensionWrapper::GetAppLauncherEnabled(
 void SearchBoxExtensionWrapper::GetDispositionFromClick(
     const v8::FunctionCallbackInfo<v8::Value>& args) {
   content::RenderView* render_view = GetRenderView();
-  if (!render_view || args.Length() != 5) return;
+  if (!render_view) return;
+
+  if (args.Length() != 5) {
+    ThrowInvalidParameters(args);
+    return;
+  }
 
   bool middle_button = args[0]->BooleanValue();
   bool alt_key = args[1]->BooleanValue();
@@ -756,8 +827,10 @@ void SearchBoxExtensionWrapper::GetMostVisitedItemData(
   if (!render_view) return;
 
   // Need an rid argument.
-  if (args.Length() < 1 || !args[0]->IsNumber())
+  if (!args.Length() || !args[0]->IsNumber()) {
+    ThrowInvalidParameters(args);
     return;
+  }
 
   DVLOG(1) << render_view << " GetMostVisitedItem";
   InstantRestrictedID restricted_id = args[0]->IntegerValue();
@@ -1042,8 +1115,10 @@ void SearchBoxExtensionWrapper::LogEvent(
       GURL(chrome::kChromeSearchMostVisitedUrl));
   if (!render_view) return;
 
-  if (args.Length() < 1 || !args[0]->IsNumber())
+  if (!args.Length() || !args[0]->IsNumber()) {
+    ThrowInvalidParameters(args);
     return;
+  }
 
   DVLOG(1) << render_view << " LogEvent";
 
@@ -1061,8 +1136,10 @@ void SearchBoxExtensionWrapper::LogMostVisitedImpression(
       GURL(chrome::kChromeSearchMostVisitedUrl));
   if (!render_view) return;
 
-  if (args.Length() < 2 || !args[0]->IsNumber() || args[1]->IsUndefined())
+  if (args.Length() < 2 || !args[0]->IsNumber() || args[1]->IsUndefined()) {
+    ThrowInvalidParameters(args);
     return;
+  }
 
   DVLOG(1) << render_view << " LogMostVisitedImpression";
 
@@ -1077,8 +1154,10 @@ void SearchBoxExtensionWrapper::LogMostVisitedNavigation(
       GURL(chrome::kChromeSearchMostVisitedUrl));
   if (!render_view) return;
 
-  if (args.Length() < 2 || !args[0]->IsNumber() || args[1]->IsUndefined())
+  if (args.Length() < 2 || !args[0]->IsNumber() || args[1]->IsUndefined()) {
+    ThrowInvalidParameters(args);
     return;
+  }
 
   DVLOG(1) << render_view << " LogMostVisitedNavigation";
 
@@ -1090,7 +1169,12 @@ void SearchBoxExtensionWrapper::LogMostVisitedNavigation(
 void SearchBoxExtensionWrapper::NavigateContentWindow(
     const v8::FunctionCallbackInfo<v8::Value>& args) {
   content::RenderView* render_view = GetRenderView();
-  if (!render_view || !args.Length()) return;
+  if (!render_view) return;
+
+  if (!args.Length()) {
+    ThrowInvalidParameters(args);
+    return;
+  }
 
   GURL destination_url;
   bool is_most_visited_item_url = false;
@@ -1161,7 +1245,13 @@ void SearchBoxExtensionWrapper::StopCapturingKeyStrokes(
 void SearchBoxExtensionWrapper::SetVoiceSearchSupported(
     const v8::FunctionCallbackInfo<v8::Value>& args) {
   content::RenderView* render_view = GetRenderView();
-  if (!render_view || args.Length() < 1) return;
+  if (!render_view) {
+    return;
+  }
+  if (!args.Length()) {
+    ThrowInvalidParameters(args);
+    return;
+  }
 
   DVLOG(1) << render_view << " SetVoiceSearchSupported";
   SearchBox::Get(render_view)->SetVoiceSearchSupported(args[0]->BooleanValue());
@@ -1181,10 +1271,17 @@ void SearchBoxExtensionWrapper::UndoAllMostVisitedDeletions(
 void SearchBoxExtensionWrapper::UndoMostVisitedDeletion(
     const v8::FunctionCallbackInfo<v8::Value>& args) {
   content::RenderView* render_view = GetRenderView();
-  if (!render_view || !args.Length()) return;
+  if (!render_view) {
+    return;
+  }
+  if (!args.Length()) {
+    ThrowInvalidParameters(args);
+    return;
+  }
 
   DVLOG(1) << render_view << " UndoMostVisitedDeletion";
-  SearchBox::Get(render_view)->UndoMostVisitedDeletion(args[0]->IntegerValue());
+  SearchBox::Get(render_view)
+      ->UndoMostVisitedDeletion(args[0]->ToInteger()->Value());
 }
 
 // static

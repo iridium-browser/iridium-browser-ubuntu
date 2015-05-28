@@ -13,12 +13,12 @@
 
 #include "base/bind.h"
 #include "base/callback_helpers.h"
+#include "base/command_line.h"
 #include "base/logging.h"
 #include "base/metrics/histogram.h"
 #include "base/prefs/pref_registry_simple.h"
 #include "base/prefs/pref_service.h"
 #include "base/strings/utf_string_conversions.h"
-#include "base/threading/thread_restrictions.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/browser_process_platform_part.h"
 #include "chrome/browser/chrome_notification_types.h"
@@ -30,20 +30,21 @@
 #include "chrome/browser/chromeos/login/existing_user_controller.h"
 #include "chrome/browser/chromeos/login/helper.h"
 #include "chrome/browser/chromeos/login/hwid_checker.h"
-#include "chrome/browser/chromeos/login/login_utils.h"
 #include "chrome/browser/chromeos/login/screens/device_disabled_screen.h"
 #include "chrome/browser/chromeos/login/screens/enable_debugging_screen.h"
 #include "chrome/browser/chromeos/login/screens/error_screen.h"
 #include "chrome/browser/chromeos/login/screens/eula_screen.h"
-#include "chrome/browser/chromeos/login/screens/hid_detection_screen.h"
+#include "chrome/browser/chromeos/login/screens/hid_detection_view.h"
 #include "chrome/browser/chromeos/login/screens/kiosk_autolaunch_screen.h"
 #include "chrome/browser/chromeos/login/screens/kiosk_enable_screen.h"
+#include "chrome/browser/chromeos/login/screens/network_error.h"
 #include "chrome/browser/chromeos/login/screens/network_view.h"
 #include "chrome/browser/chromeos/login/screens/reset_screen.h"
 #include "chrome/browser/chromeos/login/screens/terms_of_service_screen.h"
 #include "chrome/browser/chromeos/login/screens/update_screen.h"
 #include "chrome/browser/chromeos/login/screens/user_image_screen.h"
 #include "chrome/browser/chromeos/login/screens/wrong_hwid_screen.h"
+#include "chrome/browser/chromeos/login/session/user_session_manager.h"
 #include "chrome/browser/chromeos/login/startup_utils.h"
 #include "chrome/browser/chromeos/login/supervised/supervised_user_creation_screen.h"
 #include "chrome/browser/chromeos/login/ui/login_display_host.h"
@@ -57,6 +58,7 @@
 #include "chrome/browser/metrics/metrics_reporting_state.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_manager.h"
+#include "chrome/browser/ui/webui/chromeos/login/oobe_ui.h"
 #include "chrome/browser/ui/webui/chromeos/login/signin_screen_handler.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/pref_names.h"
@@ -85,9 +87,6 @@
 using content::BrowserThread;
 
 namespace {
-// If reboot didn't happen, ask user to reboot device manually.
-const int kWaitForRebootTimeSec = 3;
-
 // Interval in ms which is used for smooth screen showing.
 static int kShowDelayMs = 400;
 
@@ -140,6 +139,14 @@ bool IsRemoraRequisition() {
       ->GetDeviceCloudPolicyManager()
       ->IsRemoraRequisition();
 }
+
+#if defined(GOOGLE_CHROME_BUILD)
+void InitializeCrashReporter() {
+  // The crash reporter initialization needs IO to complete.
+  DCHECK(BrowserThread::GetBlockingPool()->RunsTasksOnCurrentThread());
+  breakpad::InitCrashReporter(std::string());
+}
+#endif
 
 }  // namespace
 
@@ -194,8 +201,8 @@ bool WizardController::zero_delay_enabled_ = false;
 
 PrefService* WizardController::local_state_for_testing_ = NULL;
 
-WizardController::WizardController(chromeos::LoginDisplayHost* host,
-                                   chromeos::OobeDisplay* oobe_display)
+WizardController::WizardController(LoginDisplayHost* host,
+                                   OobeDisplay* oobe_display)
     : current_screen_(NULL),
       previous_screen_(NULL),
 #if defined(GOOGLE_CHROME_BUILD)
@@ -213,6 +220,7 @@ WizardController::WizardController(chromeos::LoginDisplayHost* host,
       user_image_screen_return_to_previous_hack_(false),
       timezone_resolved_(false),
       shark_controller_detected_(false),
+      hid_screen_(nullptr),
       weak_factory_(this) {
   DCHECK(default_controller_ == NULL);
   default_controller_ = this;
@@ -241,15 +249,12 @@ void WizardController::Init(const std::string& first_screen_name) {
 
   // This is a hacky way to check for local state corruption, because
   // it depends on the fact that the local state is loaded
-  // synchroniously and at the first demand. IsEnterpriseManaged()
+  // synchronously and at the first demand. IsEnterpriseManaged()
   // check is required because currently powerwash is disabled for
-  // enterprise-entrolled devices.
+  // enterprise-enrolled devices.
   //
   // TODO (ygorshenin@): implement handling of the local state
   // corruption in the case of asynchronious loading.
-  //
-  // TODO (ygorshenin@): remove IsEnterpriseManaged() check once
-  // crbug.com/241313 will be fixed.
   policy::BrowserPolicyConnectorChromeOS* connector =
       g_browser_process->platform_part()->browser_policy_connector_chromeos();
   if (!connector->IsEnterpriseManaged()) {
@@ -280,61 +285,61 @@ void WizardController::Init(const std::string& first_screen_name) {
     ShowWrongHWIDScreen();
 }
 
-chromeos::ErrorScreen* WizardController::GetErrorScreen() {
-  return static_cast<chromeos::ErrorScreen*>(GetScreen(kErrorScreenName));
+ErrorScreen* WizardController::GetErrorScreen() {
+  return oobe_display_->GetErrorScreen();
+}
+
+BaseScreen* WizardController::GetScreen(const std::string& screen_name) {
+  if (screen_name == kErrorScreenName)
+    return GetErrorScreen();
+  return ScreenManager::GetScreen(screen_name);
 }
 
 BaseScreen* WizardController::CreateScreen(const std::string& screen_name) {
   if (screen_name == kNetworkScreenName) {
-    scoped_ptr<NetworkScreen> screen(new chromeos::NetworkScreen(
-        this, this, oobe_display_->GetNetworkView()));
+    scoped_ptr<NetworkScreen> screen(
+        new NetworkScreen(this, this, oobe_display_->GetNetworkView()));
     screen->Initialize(nullptr /* context */);
     return screen.release();
-  } else if (screen_name == kErrorScreenName) {
-    return new chromeos::ErrorScreen(this,
-                                     oobe_display_->GetErrorScreenActor());
   } else if (screen_name == kUpdateScreenName) {
-    chromeos::UpdateScreen* result =
-        new chromeos::UpdateScreen(this,
-                                   oobe_display_->GetUpdateScreenActor(),
-                                   remora_controller_.get());
-    result->SetRebootCheckDelay(kWaitForRebootTimeSec);
-    return result;
+    scoped_ptr<UpdateScreen> screen(new UpdateScreen(
+        this, oobe_display_->GetUpdateView(), remora_controller_.get()));
+    screen->Initialize(nullptr /* context */);
+    return screen.release();
   } else if (screen_name == kUserImageScreenName) {
-    return new chromeos::UserImageScreen(
-        this, oobe_display_->GetUserImageScreenActor());
+    return new UserImageScreen(this, oobe_display_->GetUserImageView());
   } else if (screen_name == kEulaScreenName) {
-    return new chromeos::EulaScreen(this, this, oobe_display_->GetEulaView());
+    return new EulaScreen(this, this, oobe_display_->GetEulaView());
   } else if (screen_name == kEnrollmentScreenName) {
-    return new chromeos::EnrollmentScreen(
-        this, oobe_display_->GetEnrollmentScreenActor());
+    return new EnrollmentScreen(this,
+                                oobe_display_->GetEnrollmentScreenActor());
   } else if (screen_name == kResetScreenName) {
     return new chromeos::ResetScreen(this,
-                                     oobe_display_->GetResetScreenActor());
+                                     oobe_display_->GetResetView());
   } else if (screen_name == kEnableDebuggingScreenName) {
-    return new chromeos::EnableDebuggingScreen(
-        this,
-        oobe_display_->GetEnableDebuggingScreenActor());
+    return new EnableDebuggingScreen(
+        this, oobe_display_->GetEnableDebuggingScreenActor());
   } else if (screen_name == kKioskEnableScreenName) {
-    return new chromeos::KioskEnableScreen(
-        this, oobe_display_->GetKioskEnableScreenActor());
+    return new KioskEnableScreen(this,
+                                 oobe_display_->GetKioskEnableScreenActor());
   } else if (screen_name == kKioskAutolaunchScreenName) {
-    return new chromeos::KioskAutolaunchScreen(
+    return new KioskAutolaunchScreen(
         this, oobe_display_->GetKioskAutolaunchScreenActor());
   } else if (screen_name == kTermsOfServiceScreenName) {
-    return new chromeos::TermsOfServiceScreen(
+    return new TermsOfServiceScreen(
         this, oobe_display_->GetTermsOfServiceScreenActor());
   } else if (screen_name == kWrongHWIDScreenName) {
-    return new chromeos::WrongHWIDScreen(
-        this, oobe_display_->GetWrongHWIDScreenActor());
+    return new WrongHWIDScreen(this, oobe_display_->GetWrongHWIDScreenActor());
   } else if (screen_name == kSupervisedUserCreationScreenName) {
-    return new chromeos::SupervisedUserCreationScreen(
+    return new SupervisedUserCreationScreen(
         this, oobe_display_->GetSupervisedUserCreationScreenActor());
   } else if (screen_name == kHIDDetectionScreenName) {
-    return new chromeos::HIDDetectionScreen(
-        this, oobe_display_->GetHIDDetectionScreenActor());
+    scoped_ptr<HIDDetectionScreen> screen(new chromeos::HIDDetectionScreen(
+        this, oobe_display_->GetHIDDetectionView()));
+    screen->Initialize(nullptr /* context */);
+    return screen.release();
   } else if (screen_name == kAutoEnrollmentCheckScreenName) {
-    return new chromeos::AutoEnrollmentCheckScreen(
+    return new AutoEnrollmentCheckScreen(
         this, oobe_display_->GetAutoEnrollmentCheckScreenActor());
   } else if (screen_name == kControllerPairingScreenName) {
     if (!shark_controller_) {
@@ -357,7 +362,7 @@ BaseScreen* WizardController::CreateScreen(const std::string& screen_name) {
                                  oobe_display_->GetHostPairingScreenActor(),
                                  remora_controller_.get());
   } else if (screen_name == kDeviceDisabledScreenName) {
-    return new chromeos::DeviceDisabledScreen(
+    return new DeviceDisabledScreen(
         this, oobe_display_->GetDeviceDisabledScreenActor());
   }
 
@@ -605,11 +610,11 @@ void WizardController::InitiateMetricsReportingChangeCallback(bool enabled) {
   if (!enabled)
     return;
 #if defined(GOOGLE_CHROME_BUILD)
-  // The crash reporter initialization needs IO to complete.
-  base::ThreadRestrictions::ScopedAllowIO allow_io;
-  breakpad::InitCrashReporter(std::string());
+  if (!content::BrowserThread::PostBlockingPoolTask(
+          FROM_HERE, base::Bind(&InitializeCrashReporter))) {
+    LOG(ERROR) << "Failed to start crash reporter initialization.";
+  }
 #endif
-
 }
 
 void WizardController::OnUpdateErrorCheckingForUpdate() {
@@ -656,10 +661,9 @@ void WizardController::OnUserImageSelected() {
 
   // Launch browser and delete login host controller.
   BrowserThread::PostTask(
-      BrowserThread::UI,
-      FROM_HERE,
-      base::Bind(&chromeos::LoginUtils::DoBrowserLaunch,
-                 base::Unretained(chromeos::LoginUtils::Get()),
+      BrowserThread::UI, FROM_HERE,
+      base::Bind(&UserSessionManager::DoBrowserLaunch,
+                 base::Unretained(UserSessionManager::GetInstance()),
                  ProfileManager::GetActiveUserProfile(), host_));
   host_ = NULL;
 }
@@ -774,13 +778,13 @@ void WizardController::StartTimezoneResolve() {
 
 void WizardController::PerformPostEulaActions() {
   DelayNetworkCall(
+      base::TimeDelta::FromMilliseconds(kDefaultNetworkRetryDelayMS),
       base::Bind(&WizardController::StartTimezoneResolve,
-                 weak_factory_.GetWeakPtr()),
-      base::TimeDelta::FromMilliseconds(kDefaultNetworkRetryDelayMS));
+                 weak_factory_.GetWeakPtr()));
   DelayNetworkCall(
+      base::TimeDelta::FromMilliseconds(kDefaultNetworkRetryDelayMS),
       ServicesCustomizationDocument::GetInstance()
-          ->EnsureCustomizationAppliedClosure(),
-      base::TimeDelta::FromMilliseconds(kDefaultNetworkRetryDelayMS));
+          ->EnsureCustomizationAppliedClosure());
 
   // Now that EULA has been accepted (for official builds), enable portal check.
   // ChromiumOS builds would go though this code path too.
@@ -917,11 +921,11 @@ void WizardController::AdvanceToScreen(const std::string& screen_name) {
       if (IsHostPairingOobe()) {
         ShowHostPairingScreen();
       } else if (CanShowHIDDetectionScreen()) {
+        hid_screen_ = GetScreen(kHIDDetectionScreenName);
         base::Callback<void(bool)> on_check = base::Bind(
             &WizardController::OnHIDScreenNecessityCheck,
             weak_factory_.GetWeakPtr());
-        oobe_display_->GetHIDDetectionScreenActor()->CheckIsScreenRequired(
-            on_check);
+        oobe_display_->GetHIDDetectionView()->CheckIsScreenRequired(on_check);
       } else {
         ShowNetworkScreen();
       }
@@ -932,7 +936,7 @@ void WizardController::AdvanceToScreen(const std::string& screen_name) {
 }
 
 ///////////////////////////////////////////////////////////////////////////////
-// WizardController, chromeos::BaseScreenDelegate overrides:
+// WizardController, BaseScreenDelegate overrides:
 void WizardController::OnExit(BaseScreen& /* screen */,
                               ExitCodes exit_code,
                               const ::login::ScreenContext* /* context */) {
@@ -1107,7 +1111,7 @@ void WizardController::AutoLaunchKioskApp() {
   if (status == CrosSettingsProvider::PERMANENTLY_UNTRUSTED) {
     // If the |cros_settings_| are permanently untrusted, show an error message
     // and refuse to auto-launch the kiosk app.
-    GetErrorScreen()->SetUIState(ErrorScreen::UI_STATE_LOCAL_STATE_ERROR);
+    GetErrorScreen()->SetUIState(NetworkError::UI_STATE_LOCAL_STATE_ERROR);
     SetStatusAreaVisible(false);
     ShowErrorScreen();
     return;
@@ -1122,7 +1126,9 @@ void WizardController::AutoLaunchKioskApp() {
     return;
   }
 
-  host_->StartAppLaunch(app_id, false /* diagnostic_mode */);
+  const bool diagnostic_mode = false;
+  const bool auto_launch = true;
+  host_->StartAppLaunch(app_id, diagnostic_mode, auto_launch);
 }
 
 // static
@@ -1157,7 +1163,7 @@ void WizardController::OnLocalStateInitialized(bool /* succeeded */) {
       PrefService::INITIALIZATION_STATUS_ERROR) {
     return;
   }
-  GetErrorScreen()->SetUIState(ErrorScreen::UI_STATE_LOCAL_STATE_ERROR);
+  GetErrorScreen()->SetUIState(NetworkError::UI_STATE_LOCAL_STATE_ERROR);
   SetStatusAreaVisible(false);
   ShowErrorScreen();
 }
@@ -1171,7 +1177,7 @@ PrefService* WizardController::GetLocalState() {
 void WizardController::OnTimezoneResolved(
     scoped_ptr<TimeZoneResponseData> timezone,
     bool server_error) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(timezone.get());
   // To check that "this" is not destroyed try to access some member
   // (timezone_provider_) in this case. Expect crash here.
@@ -1193,8 +1199,8 @@ void WizardController::OnTimezoneResolved(
       g_browser_process->platform_part()->browser_policy_connector_chromeos();
   if (connector->IsEnterpriseManaged()) {
     std::string policy_timezone;
-    if (chromeos::CrosSettings::Get()->GetString(
-            chromeos::kSystemTimezonePolicy, &policy_timezone) &&
+    if (CrosSettings::Get()->GetString(kSystemTimezonePolicy,
+                                       &policy_timezone) &&
         !policy_timezone.empty()) {
       VLOG(1) << "Resolve TimeZone: TimeZone settings are overridden"
               << " by DevicePolicy.";
@@ -1206,7 +1212,7 @@ void WizardController::OnTimezoneResolved(
     VLOG(1) << "Resolve TimeZone: setting timezone to '" << timezone->timeZoneId
             << "'";
 
-    chromeos::system::TimezoneSettings::GetInstance()->SetTimezoneFromID(
+    system::TimezoneSettings::GetInstance()->SetTimezoneFromID(
         base::UTF8ToUTF16(timezone->timeZoneId));
   }
 }
@@ -1223,7 +1229,7 @@ TimeZoneProvider* WizardController::GetTimezoneProvider() {
 void WizardController::OnLocationResolved(const Geoposition& position,
                                           bool server_error,
                                           const base::TimeDelta elapsed) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   const base::TimeDelta timeout =
       base::TimeDelta::FromSeconds(kResolveTimeZoneTimeoutSeconds);

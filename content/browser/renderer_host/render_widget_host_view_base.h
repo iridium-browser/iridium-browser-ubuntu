@@ -68,6 +68,8 @@ class CONTENT_EXPORT RenderWidgetHostViewBase : public RenderWidgetHostView,
   void SetBackgroundColorToDefault() final;
   bool GetBackgroundOpaque() override;
   ui::TextInputClient* GetTextInputClient() override;
+  void WasUnOccluded() override {}
+  void WasOccluded() override {}
   bool IsShowingContextMenu() const override;
   void SetShowingContextMenu(bool showing_menu) override;
   base::string16 GetSelectedText() const override;
@@ -80,9 +82,6 @@ class CONTENT_EXPORT RenderWidgetHostViewBase : public RenderWidgetHostView,
 
   // IPC::Listener implementation:
   bool OnMessageReceived(const IPC::Message& msg) override;
-
-  // Called by the host when the input flush has completed.
-  void OnDidFlushInput();
 
   void SetPopupType(blink::WebPopupType popup_type);
 
@@ -191,19 +190,13 @@ class CONTENT_EXPORT RenderWidgetHostViewBase : public RenderWidgetHostView,
   // Perform all the initialization steps necessary for this object to represent
   // a popup (such as a <select> dropdown), then shows the popup at |pos|.
   virtual void InitAsPopup(RenderWidgetHostView* parent_host_view,
-                           const gfx::Rect& pos) = 0;
+                           const gfx::Rect& bounds) = 0;
 
   // Perform all the initialization steps necessary for this object to represent
   // a full screen window.
   // |reference_host_view| is the view associated with the creating page that
   // helps to position the full screen widget on the correct monitor.
   virtual void InitAsFullscreen(RenderWidgetHostView* reference_host_view) = 0;
-
-  // Notifies the View that it has become visible.
-  virtual void WasShown() = 0;
-
-  // Notifies the View that it has been hidden.
-  virtual void WasHidden() = 0;
 
   // Moves all plugin windows as described in the given list.
   // |scroll_offset| is the scroll offset of the render view.
@@ -322,6 +315,10 @@ class CONTENT_EXPORT RenderWidgetHostViewBase : public RenderWidgetHostView,
   // show the disambiguation popup bubble.
   virtual void ShowDisambiguationPopup(const gfx::Rect& rect_pixels,
                                        const SkBitmap& zoomed_bitmap);
+
+  // Called by the WebContentsImpl when a user tries to navigate a new page on
+  // main frame.
+  virtual void OnDidNavigateMainFrameToNewPage();
 
 #if defined(OS_ANDROID)
   // Instructs the view to not drop the surface even when the view is hidden.

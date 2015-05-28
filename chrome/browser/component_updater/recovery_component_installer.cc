@@ -16,6 +16,7 @@
 #include "base/json/json_file_value_serializer.h"
 #include "base/logging.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/metrics/histogram.h"
 #include "base/path_service.h"
 #include "base/prefs/pref_registry_simple.h"
 #include "base/prefs/pref_service.h"
@@ -28,6 +29,7 @@
 #include "components/component_updater/component_updater_paths.h"
 #include "components/component_updater/component_updater_service.h"
 #include "components/component_updater/pref_names.h"
+#include "components/update_client/update_client.h"
 #include "content/public/browser/browser_thread.h"
 
 using content::BrowserThread;
@@ -59,6 +61,24 @@ enum ChromeRecoveryExitCode {
   EXIT_CODE_ELEVATION_NEEDED = 2,
 };
 
+enum RecoveryComponentEvent {
+  RCE_RUNNING_NON_ELEVATED = 0,
+  RCE_ELEVATION_NEEDED = 1,
+  RCE_FAILED = 2,
+  RCE_SUCCEEDED = 3,
+  RCE_SKIPPED = 4,
+  RCE_RUNNING_ELEVATED = 5,
+  RCE_ELEVATED_FAILED = 6,
+  RCE_ELEVATED_SUCCEEDED = 7,
+  RCE_ELEVATED_SKIPPED = 8,
+  RCE_COMPONENT_DOWNLOAD_ERROR = 9,
+  RCE_COUNT
+};
+
+void RecordRecoveryComponentUMAEvent(RecoveryComponentEvent event) {
+  UMA_HISTOGRAM_ENUMERATION("RecoveryComponent.Event", event, RCE_COUNT);
+}
+
 #if !defined(OS_CHROMEOS)
 // Checks if elevated recovery simulation switch was present on the command
 // line. This is for testing purpose.
@@ -66,18 +86,32 @@ bool SimulatingElevatedRecovery() {
   return base::CommandLine::ForCurrentProcess()->HasSwitch(
       switches::kSimulateElevatedRecovery);
 }
-#endif
+#endif  // !defined(OS_CHROMEOS)
 
 #if defined(OS_WIN)
 scoped_ptr<base::DictionaryValue> ReadManifest(const base::FilePath& manifest) {
-  JSONFileValueSerializer serializer(manifest);
+  JSONFileValueDeserializer deserializer(manifest);
   std::string error;
-  scoped_ptr<base::Value> root(serializer.Deserialize(NULL, &error));
+  scoped_ptr<base::Value> root(deserializer.Deserialize(NULL, &error));
   if (root.get() && root->IsType(base::Value::TYPE_DICTIONARY)) {
     return scoped_ptr<base::DictionaryValue>(
         static_cast<base::DictionaryValue*>(root.release()));
   }
   return scoped_ptr<base::DictionaryValue>();
+}
+
+void WaitForElevatedInstallToComplete(base::Process process) {
+  int installer_exit_code = 0;
+  const base::TimeDelta kMaxWaitTime = base::TimeDelta::FromSeconds(600);
+  if (process.WaitForExitWithTimeout(kMaxWaitTime, &installer_exit_code)) {
+    if (installer_exit_code == EXIT_CODE_RECOVERY_SUCCEEDED) {
+      RecordRecoveryComponentUMAEvent(RCE_ELEVATED_SUCCEEDED);
+    } else {
+      RecordRecoveryComponentUMAEvent(RCE_ELEVATED_SKIPPED);
+    }
+  } else {
+    RecordRecoveryComponentUMAEvent(RCE_ELEVATED_FAILED);
+  }
 }
 
 void DoElevatedInstallRecoveryComponent(const base::FilePath& path) {
@@ -108,9 +142,16 @@ void DoElevatedInstallRecoveryComponent(const base::FilePath& path) {
     cmdline.AppendSwitchASCII("version", version.GetString());
   }
 
+  RecordRecoveryComponentUMAEvent(RCE_RUNNING_ELEVATED);
+
   base::LaunchOptions options;
   options.start_hidden = true;
-  base::LaunchElevatedProcess(cmdline, options);
+  base::Process process = base::LaunchElevatedProcess(cmdline, options);
+
+  base::WorkerPool::PostTask(
+      FROM_HERE,
+      base::Bind(&WaitForElevatedInstallToComplete, base::Passed(&process)),
+      true);
 }
 
 void ElevatedInstallRecoveryComponent(const base::FilePath& installer_path) {
@@ -119,7 +160,7 @@ void ElevatedInstallRecoveryComponent(const base::FilePath& installer_path) {
       base::Bind(&DoElevatedInstallRecoveryComponent, installer_path),
       true);
 }
-#endif
+#endif  // defined(OS_WIN)
 
 }  // namespace
 
@@ -132,11 +173,11 @@ void ElevatedInstallRecoveryComponent(const base::FilePath& installer_path) {
 // There is a global error service monitors this flag and will pop up
 // bubble if the flag is set to true.
 // See chrome/browser/recovery/recovery_install_global_error.cc for details.
-class RecoveryComponentInstaller : public ComponentInstaller {
+class RecoveryComponentInstaller : public update_client::ComponentInstaller {
  public:
   RecoveryComponentInstaller(const Version& version, PrefService* prefs);
-  ~RecoveryComponentInstaller() override {}
 
+  // ComponentInstaller implementation:
   void OnUpdateError(int error) override;
 
   bool Install(const base::DictionaryValue& manifest,
@@ -145,7 +186,11 @@ class RecoveryComponentInstaller : public ComponentInstaller {
   bool GetInstalledFile(const std::string& file,
                         base::FilePath* installed_file) override;
 
+  bool Uninstall() override;
+
  private:
+  ~RecoveryComponentInstaller() override {}
+
   bool RunInstallCommand(const base::CommandLine& cmdline,
                          const base::FilePath& installer_folder) const;
 
@@ -165,7 +210,7 @@ void RecoveryRegisterHelper(ComponentUpdateService* cus, PrefService* prefs) {
     return;
   }
 
-  CrxComponent recovery;
+  update_client::CrxComponent recovery;
   recovery.name = "recovery";
   recovery.installer = new RecoveryComponentInstaller(version, prefs);
   recovery.version = version;
@@ -194,6 +239,7 @@ RecoveryComponentInstaller::RecoveryComponentInstaller(const Version& version,
 }
 
 void RecoveryComponentInstaller::OnUpdateError(int error) {
+  RecordRecoveryComponentUMAEvent(RCE_COMPONENT_DOWNLOAD_ERROR);
   NOTREACHED() << "Recovery component update error: " << error;
 }
 
@@ -203,20 +249,31 @@ void WaitForInstallToComplete(base::Process process,
                               PrefService* prefs) {
   int installer_exit_code = 0;
   const base::TimeDelta kMaxWaitTime = base::TimeDelta::FromSeconds(600);
-  if (process.WaitForExitWithTimeout(kMaxWaitTime, &installer_exit_code) &&
-      installer_exit_code == EXIT_CODE_ELEVATION_NEEDED) {
-    BrowserThread::PostTask(
-        BrowserThread::UI,
-        FROM_HERE,
-        base::Bind(&SetPrefsForElevatedRecoveryInstall,
-                   installer_folder,
-                   prefs));
+  if (process.WaitForExitWithTimeout(kMaxWaitTime, &installer_exit_code)) {
+    if (installer_exit_code == EXIT_CODE_ELEVATION_NEEDED) {
+      RecordRecoveryComponentUMAEvent(RCE_ELEVATION_NEEDED);
+
+      BrowserThread::PostTask(
+          BrowserThread::UI,
+          FROM_HERE,
+          base::Bind(&SetPrefsForElevatedRecoveryInstall,
+                     installer_folder,
+                     prefs));
+    } else if (installer_exit_code == EXIT_CODE_RECOVERY_SUCCEEDED) {
+      RecordRecoveryComponentUMAEvent(RCE_SUCCEEDED);
+    } else if (installer_exit_code == EXIT_CODE_RECOVERY_SKIPPED) {
+      RecordRecoveryComponentUMAEvent(RCE_SKIPPED);
+    }
+  } else {
+    RecordRecoveryComponentUMAEvent(RCE_FAILED);
   }
 }
 
 bool RecoveryComponentInstaller::RunInstallCommand(
     const base::CommandLine& cmdline,
     const base::FilePath& installer_folder) const {
+  RecordRecoveryComponentUMAEvent(RCE_RUNNING_NON_ELEVATED);
+
   base::LaunchOptions options;
   options.start_hidden = true;
   base::Process process = base::LaunchProcess(cmdline, options);
@@ -241,7 +298,7 @@ bool RecoveryComponentInstaller::RunInstallCommand(
     const base::FilePath&) const {
   return base::LaunchProcess(cmdline, base::LaunchOptions()).IsValid();
 }
-#endif
+#endif  // defined(OS_WIN)
 
 bool RecoveryComponentInstaller::Install(const base::DictionaryValue& manifest,
                                          const base::FilePath& unpack_path) {
@@ -305,6 +362,10 @@ bool RecoveryComponentInstaller::GetInstalledFile(
   return false;
 }
 
+bool RecoveryComponentInstaller::Uninstall() {
+  return false;
+}
+
 void RegisterRecoveryComponent(ComponentUpdateService* cus,
                                PrefService* prefs) {
 #if !defined(OS_CHROMEOS)
@@ -322,7 +383,7 @@ void RegisterRecoveryComponent(ComponentUpdateService* cus,
       FROM_HERE,
       base::Bind(&RecoveryRegisterHelper, cus, prefs),
       base::TimeDelta::FromSeconds(6));
-#endif
+#endif  // !defined(OS_CHROMEOS)
 }
 
 void RegisterPrefsForRecoveryComponent(PrefRegistrySimple* registry) {
@@ -338,7 +399,7 @@ void AcceptedElevatedRecoveryInstall(PrefService* prefs) {
 #if defined(OS_WIN)
   ElevatedInstallRecoveryComponent(
       prefs->GetFilePath(prefs::kRecoveryComponentUnpackPath));
-#endif
+#endif  // OS_WIN
   prefs->SetBoolean(prefs::kRecoveryComponentNeedsElevation, false);
 }
 

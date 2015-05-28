@@ -32,7 +32,6 @@
 #include "core/html/imports/LinkImport.h"
 
 #include "core/dom/Document.h"
-#include "core/fetch/CrossOriginAccessControl.h"
 #include "core/html/HTMLLinkElement.h"
 #include "core/html/imports/HTMLImportChild.h"
 #include "core/html/imports/HTMLImportLoader.h"
@@ -131,7 +130,7 @@ bool LinkImport::hasLoaded() const
 {
     // Should never be called after importChildWasDestroyed was called.
     ASSERT(m_owner);
-    return m_child && m_child->isDone() && !m_child->loader()->hasError();
+    return m_child && m_child->hasFinishedLoading() && !m_child->loader()->hasError();
 }
 
 void LinkImport::ownerInserted()
@@ -140,7 +139,7 @@ void LinkImport::ownerInserted()
         m_child->ownerInserted();
 }
 
-void LinkImport::trace(Visitor* visitor)
+DEFINE_TRACE(LinkImport)
 {
     visitor->trace(m_child);
     HTMLImportChildClient::trace(visitor);

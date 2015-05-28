@@ -132,7 +132,7 @@ int vp9_compute_rd_mult(const struct VP9_COMP *cpi, int qindex);
 
 void vp9_initialize_rd_consts(struct VP9_COMP *cpi);
 
-void vp9_initialize_me_consts(struct VP9_COMP *cpi, int qindex);
+void vp9_initialize_me_consts(struct VP9_COMP *cpi, MACROBLOCK *x, int qindex);
 
 void vp9_model_rd_from_var_lapndz(unsigned int var, unsigned int n,
                                   unsigned int qstep, int *rate,
@@ -141,8 +141,14 @@ void vp9_model_rd_from_var_lapndz(unsigned int var, unsigned int n,
 int vp9_get_switchable_rate(const struct VP9_COMP *cpi,
                             const MACROBLOCKD *const xd);
 
-const YV12_BUFFER_CONFIG *vp9_get_scaled_ref_frame(const struct VP9_COMP *cpi,
-                                                   int ref_frame);
+int vp9_raster_block_offset(BLOCK_SIZE plane_bsize,
+                            int raster_block, int stride);
+
+int16_t* vp9_raster_block_offset_int16(BLOCK_SIZE plane_bsize,
+                                       int raster_block, int16_t *base);
+
+YV12_BUFFER_CONFIG *vp9_get_scaled_ref_frame(const struct VP9_COMP *cpi,
+                                             int ref_frame);
 
 void vp9_init_me_luts();
 

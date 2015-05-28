@@ -4,11 +4,9 @@
 
 // See https://slightlyoff.github.io/ServiceWorker/spec/service_worker/index.html#cache
 
-typedef (Request or USVString) RequestInfo;
-
 [
     GarbageCollected,
-    Exposed=ServiceWorker,
+    Exposed=(Window,Worker),
     RuntimeEnabled=ServiceWorkerCache,
     TypeChecking=Interface,
 ] interface Cache {

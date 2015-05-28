@@ -42,36 +42,27 @@ class QuicCryptoServerConfigPeer {
   QuicCryptoServerConfig* server_config_;
 };
 
-// Run tests with combinations of
-// {FLAGS_use_early_return_when_verifying_chlo,
-//  FLAGS_send_quic_crypto_reject_reason}.
+// Run tests with both parities of
+// FLAGS_use_early_return_when_verifying_chlo.
 struct TestParams {
-  TestParams(bool use_early_return_when_verifying_chlo,
-             bool send_quic_crypto_reject_reason)
+  explicit TestParams(bool use_early_return_when_verifying_chlo)
       : use_early_return_when_verifying_chlo(
-            use_early_return_when_verifying_chlo),
-        send_quic_crypto_reject_reason(send_quic_crypto_reject_reason) {
-  }
+            use_early_return_when_verifying_chlo) {}
 
   friend ostream& operator<<(ostream& os, const TestParams& p) {
     os << "{ use_early_return_when_verifying_chlo: "
-       << p.use_early_return_when_verifying_chlo
-       << " send_quic_crypto_reject_reason: "
-       << p.send_quic_crypto_reject_reason << " }";
+       << p.use_early_return_when_verifying_chlo << " }";
     return os;
   }
 
   bool use_early_return_when_verifying_chlo;
-  bool send_quic_crypto_reject_reason;
 };
 
 // Constructs various test permutations.
 vector<TestParams> GetTestParams() {
   vector<TestParams> params;
-  params.push_back(TestParams(false, false));
-  params.push_back(TestParams(false, true));
-  params.push_back(TestParams(true, false));
-  params.push_back(TestParams(true, true));
+  params.push_back(TestParams(false));
+  params.push_back(TestParams(true));
   return params;
 }
 
@@ -88,8 +79,6 @@ class CryptoServerTest : public ::testing::TestWithParam<TestParams> {
 
     FLAGS_use_early_return_when_verifying_chlo =
         GetParam().use_early_return_when_verifying_chlo;
-    FLAGS_send_quic_crypto_reject_reason =
-        GetParam().send_quic_crypto_reject_reason;
   }
 
   void SetUp() override {
@@ -205,7 +194,8 @@ class CryptoServerTest : public ::testing::TestWithParam<TestParams> {
   void RunValidate(
       const CryptoHandshakeMessage& message,
       ValidateClientHelloResultCallback* cb) {
-    config_.ValidateClientHello(message, client_address_, &clock_, cb);
+    config_.ValidateClientHello(message, client_address_.address(), &clock_,
+                                cb);
   }
 
   void ShouldFailMentioning(const char* error_substr,
@@ -219,7 +209,7 @@ class CryptoServerTest : public ::testing::TestWithParam<TestParams> {
                             const CryptoHandshakeMessage& message,
                             bool* called) {
     config_.ValidateClientHello(
-        message, client_address_, &clock_,
+        message, client_address_.address(), &clock_,
         new ValidateCallback(this, false, error_substr, called));
   }
 
@@ -227,7 +217,7 @@ class CryptoServerTest : public ::testing::TestWithParam<TestParams> {
                                const ValidateCallback::Result& result,
                                bool should_succeed,
                                const char* error_substr) {
-    IPEndPoint server_ip;
+    IPAddressNumber server_ip;
     string error_details;
     QuicErrorCode error = config_.ProcessClientHello(
         result, 1 /* ConnectionId */, server_ip, client_address_,
@@ -276,10 +266,6 @@ class CryptoServerTest : public ::testing::TestWithParam<TestParams> {
     COMPILE_ASSERT(sizeof(QuicTag) == sizeof(uint32), header_out_of_sync);
     QuicErrorCode error_code = out_.GetTaglist(kRREJ, &reject_reasons,
                                                &num_reject_reasons);
-    if (!FLAGS_send_quic_crypto_reject_reason) {
-      ASSERT_EQ(QUIC_CRYPTO_MESSAGE_PARAMETER_NOT_FOUND, error_code);
-      return;
-    }
     ASSERT_EQ(QUIC_NO_ERROR, error_code);
 
     if (FLAGS_use_early_return_when_verifying_chlo) {
@@ -310,15 +296,14 @@ class CryptoServerTest : public ::testing::TestWithParam<TestParams> {
   scoped_ptr<CryptoHandshakeMessage> server_config_;
 };
 
-// Run all CryptoServerTest with all combinations of
-// FLAGS_use_early_return_when_verifying_chlo and
-// FLAGS_send_quic_crypto_reject_reason.
+// Run all CryptoServerTest with both values of
+// FLAGS_use_early_return_when_verifying_chlo
 INSTANTIATE_TEST_CASE_P(CryptoServerTests,
                         CryptoServerTest,
                         ::testing::ValuesIn(GetTestParams()));
 
 TEST_P(CryptoServerTest, BadSNI) {
-  static const char* kBadSNIs[] = {
+  static const char* const kBadSNIs[] = {
     "",
     "foo",
     "#00",
@@ -384,7 +369,7 @@ TEST_P(CryptoServerTest, TooSmall) {
 
 TEST_P(CryptoServerTest, BadSourceAddressToken) {
   // Invalid source-address tokens should be ignored.
-  static const char* kBadSourceAddressTokens[] = {
+  static const char* const kBadSourceAddressTokens[] = {
     "",
     "foo",
     "#0000",
@@ -406,7 +391,7 @@ TEST_P(CryptoServerTest, BadSourceAddressToken) {
 
 TEST_P(CryptoServerTest, BadClientNonce) {
   // Invalid nonces should be ignored.
-  static const char* kBadNonces[] = {
+  static const char* const kBadNonces[] = {
     "",
     "#0000",
     "#0000000000000000000000000000000000000000",

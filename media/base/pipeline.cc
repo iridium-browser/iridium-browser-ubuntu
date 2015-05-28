@@ -39,7 +39,6 @@ Pipeline::Pipeline(
       volume_(1.0f),
       playback_rate_(0.0f),
       status_(PIPELINE_OK),
-      is_initialized_(false),
       state_(kCreated),
       renderer_ended_(false),
       text_renderer_ended_(false),
@@ -71,7 +70,8 @@ void Pipeline::Start(Demuxer* demuxer,
                      const BufferingStateCB& buffering_state_cb,
                      const PaintCB& paint_cb,
                      const base::Closure& duration_change_cb,
-                     const AddTextTrackCB& add_text_track_cb) {
+                     const AddTextTrackCB& add_text_track_cb,
+                     const base::Closure& waiting_for_decryption_key_cb) {
   DCHECK(!ended_cb.is_null());
   DCHECK(!error_cb.is_null());
   DCHECK(!seek_cb.is_null());
@@ -93,6 +93,7 @@ void Pipeline::Start(Demuxer* demuxer,
   paint_cb_ = paint_cb;
   duration_change_cb_ = duration_change_cb;
   add_text_track_cb_ = add_text_track_cb;
+  waiting_for_decryption_key_cb_ = waiting_for_decryption_key_cb;
 
   task_runner_->PostTask(
       FROM_HERE, base::Bind(&Pipeline::StartTask, weak_factory_.GetWeakPtr()));
@@ -303,15 +304,6 @@ void Pipeline::SetDuration(TimeDelta duration) {
     duration_change_cb_.Run();
 }
 
-void Pipeline::OnStateTransition(PipelineStatus status) {
-  DCHECK(task_runner_->BelongsToCurrentThread());
-  // Force post to process state transitions after current execution frame.
-  task_runner_->PostTask(
-      FROM_HERE,
-      base::Bind(
-          &Pipeline::StateTransitionTask, weak_factory_.GetWeakPtr(), status));
-}
-
 void Pipeline::StateTransitionTask(PipelineStatus status) {
   DCHECK(task_runner_->BelongsToCurrentThread());
 
@@ -335,7 +327,7 @@ void Pipeline::StateTransitionTask(PipelineStatus status) {
   pending_callbacks_.reset();
 
   PipelineStatusCB done_cb =
-      base::Bind(&Pipeline::OnStateTransition, weak_factory_.GetWeakPtr());
+      base::Bind(&Pipeline::StateTransitionTask, weak_factory_.GetWeakPtr());
 
   // Switch states, performing any entrance actions for the new state as well.
   SetState(GetNextState());
@@ -344,16 +336,17 @@ void Pipeline::StateTransitionTask(PipelineStatus status) {
       return InitializeDemuxer(done_cb);
 
     case kInitRenderer:
-      return InitializeRenderer(base::Bind(done_cb, PIPELINE_OK));
+      // When the state_ transfers to kInitRenderer, it means the demuxer has
+      // finished parsing the init info. It should call ReportMetadata in case
+      // meeting 'decode' error when passing media segment but WebMediaPlayer's
+      // ready_state_ is still ReadyStateHaveNothing. In that case, it will
+      // treat it as NetworkStateFormatError not NetworkStateDecodeError.
+      ReportMetadata();
+      start_timestamp_ = demuxer_->GetStartTime();
+
+      return InitializeRenderer(done_cb);
 
     case kPlaying:
-      // Report metadata the first time we enter the playing state.
-      if (!is_initialized_) {
-        is_initialized_ = true;
-        ReportMetadata();
-        start_timestamp_ = demuxer_->GetStartTime();
-      }
-
       DCHECK(start_timestamp_ >= base::TimeDelta());
       renderer_->StartPlayingFrom(start_timestamp_);
 
@@ -609,12 +602,13 @@ void Pipeline::SeekTask(TimeDelta time, const PipelineStatusCB& seek_cb) {
   text_renderer_ended_ = false;
   start_timestamp_ = seek_timestamp;
 
-  DoSeek(seek_timestamp,
-         base::Bind(&Pipeline::OnStateTransition, weak_factory_.GetWeakPtr()));
+  DoSeek(seek_timestamp, base::Bind(&Pipeline::StateTransitionTask,
+                                    weak_factory_.GetWeakPtr()));
 }
 
 void Pipeline::SetCdmTask(CdmContext* cdm_context,
                           const CdmAttachedCB& cdm_attached_cb) {
+  base::AutoLock auto_lock(lock_);
   if (!renderer_) {
     pending_cdm_context_ = cdm_context;
     cdm_attached_cb.Run(true);
@@ -711,7 +705,7 @@ void Pipeline::InitializeDemuxer(const PipelineStatusCB& done_cb) {
   demuxer_->Initialize(this, done_cb, text_renderer_);
 }
 
-void Pipeline::InitializeRenderer(const base::Closure& done_cb) {
+void Pipeline::InitializeRenderer(const PipelineStatusCB& done_cb) {
   DCHECK(task_runner_->BelongsToCurrentThread());
 
   if (!demuxer_->GetStream(DemuxerStream::AUDIO) &&
@@ -732,19 +726,22 @@ void Pipeline::InitializeRenderer(const base::Closure& done_cb) {
       base::Bind(&Pipeline::BufferingStateChanged, weak_this),
       base::ResetAndReturn(&paint_cb_),
       base::Bind(&Pipeline::OnRendererEnded, weak_this),
-      base::Bind(&Pipeline::OnError, weak_this));
+      base::Bind(&Pipeline::OnError, weak_this),
+      waiting_for_decryption_key_cb_);
 }
 
 void Pipeline::ReportMetadata() {
   DCHECK(task_runner_->BelongsToCurrentThread());
   PipelineMetadata metadata;
-  metadata.has_audio = renderer_->HasAudio();
-  metadata.has_video = renderer_->HasVideo();
   metadata.timeline_offset = demuxer_->GetTimelineOffset();
   DemuxerStream* stream = demuxer_->GetStream(DemuxerStream::VIDEO);
   if (stream) {
+    metadata.has_video = true;
     metadata.natural_size = stream->video_decoder_config().natural_size();
     metadata.video_rotation = stream->video_rotation();
+  }
+  if (demuxer_->GetStream(DemuxerStream::AUDIO)) {
+    metadata.has_audio = true;
   }
   metadata_cb_.Run(metadata);
 }

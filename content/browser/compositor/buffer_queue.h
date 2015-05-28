@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef CONTENT_BROWSER_COMPOSITOR_BUFFERED_OUTPUT_SURFACE_H_
-#define CONTENT_BROWSER_COMPOSITOR_BUFFERED_OUTPUT_SURFACE_H_
+#ifndef CONTENT_BROWSER_COMPOSITOR_BUFFER_QUEUE_H_
+#define CONTENT_BROWSER_COMPOSITOR_BUFFER_QUEUE_H_
 
 #include <queue>
 #include <vector>
@@ -36,7 +36,7 @@ class CONTENT_EXPORT BufferQueue {
               int surface_id);
   virtual ~BufferQueue();
 
-  bool Initialize();
+  void Initialize();
 
   void BindFramebuffer();
   void SwapBuffers(const gfx::Rect& damage);
@@ -82,6 +82,7 @@ class CONTENT_EXPORT BufferQueue {
   size_t allocated_count_;
   unsigned int internalformat_;
   AllocatedSurface current_surface_;  // This surface is currently bound.
+  AllocatedSurface displayed_surface_;  // The surface currently on the screen.
   std::vector<AllocatedSurface> available_surfaces_;  // These are free for use.
   std::deque<AllocatedSurface> in_flight_surfaces_;
   GLHelper* gl_helper_;
@@ -93,4 +94,4 @@ class CONTENT_EXPORT BufferQueue {
 
 }  // namespace content
 
-#endif  // CONTENT_BROWSER_COMPOSITOR_BUFFERED_OUTPUT_SURFACE_H_
+#endif  // CONTENT_BROWSER_COMPOSITOR_BUFFER_QUEUE_H_

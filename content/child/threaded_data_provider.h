@@ -2,8 +2,8 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#ifndef CONTENT_CHILD_THREADEDDATAPROVIDER_IMPL_H_
-#define CONTENT_CHILD_THREADEDDATAPROVIDER_IMPL_H_
+#ifndef CONTENT_CHILD_THREADED_DATA_PROVIDER_H_
+#define CONTENT_CHILD_THREADED_DATA_PROVIDER_H_
 
 #include "base/compiler_specific.h"
 #include "base/memory/linked_ptr.h"
@@ -14,6 +14,8 @@
 #include "ipc/ipc_channel.h"
 #include "ipc/message_filter.h"
 
+struct ResourceMsg_RequestCompleteData;
+
 namespace blink {
 class WebThreadedDataReceiver;
 }
@@ -23,6 +25,7 @@ class SyncChannel;
 }
 
 namespace content {
+class ResourceDispatcher;
 class WebThreadImpl;
 
 class ThreadedDataProvider {
@@ -33,8 +36,9 @@ class ThreadedDataProvider {
       linked_ptr<base::SharedMemory> shm_buffer,
       int shm_size,
       scoped_refptr<base::SingleThreadTaskRunner> main_thread_task_runner_);
-  virtual ~ThreadedDataProvider();
 
+  // Any destruction of this class has to bounce via the background thread to
+  // ensure all data is flushed; call Stop() to start this process.
   void Stop();
   void OnReceivedDataOnBackgroundThread(int data_offset,
                                         int data_length,
@@ -45,11 +49,28 @@ class ThreadedDataProvider {
                                         int encoded_data_length);
 
   void OnResourceMessageFilterAddedMainThread();
+  void OnRequestCompleteForegroundThread(
+      base::WeakPtr<ResourceDispatcher> resource_dispatcher,
+      const ResourceMsg_RequestCompleteData& request_complete_data,
+      const base::TimeTicks& renderer_completion_time);
 
  private:
+  ~ThreadedDataProvider();
+  void DestructOnMainThread();
+
   void StopOnBackgroundThread();
   void OnResourceMessageFilterAddedBackgroundThread();
-  void ForwardAndACKData(const char* data, int data_length);
+  void OnRequestCompleteBackgroundThread(
+      base::WeakPtr<ResourceDispatcher> resource_dispatcher,
+      const ResourceMsg_RequestCompleteData& request_complete_data,
+      const base::TimeTicks& renderer_completion_time);
+  void ForwardAndACKData(const char* data,
+                         int data_length,
+                         int encoded_data_length);
+  void DataNotifyForegroundThread(
+      scoped_ptr<std::vector<char> > data_copy,
+      int data_length,
+      int encoded_data_length);
 
   scoped_refptr<IPC::MessageFilter> filter_;
   int request_id_;
@@ -66,6 +87,7 @@ class ThreadedDataProvider {
   struct QueuedSharedMemoryData {
     const char* data;
     int length;
+    int encoded_length;
   };
   std::vector<QueuedSharedMemoryData> queued_data_;
 
@@ -77,4 +99,4 @@ class ThreadedDataProvider {
 
 }  // namespace content
 
-#endif  // CONTENT_CHILD_THREADEDDATAPROVIDER_IMPL_H_
+#endif  // CONTENT_CHILD_THREADED_DATA_PROVIDER_H_

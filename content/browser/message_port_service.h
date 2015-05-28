@@ -12,14 +12,17 @@
 #include "base/basictypes.h"
 #include "base/memory/singleton.h"
 #include "base/strings/string16.h"
+#include "content/common/content_export.h"
+#include "content/public/common/message_port_types.h"
 #include "ipc/ipc_message.h"
 
 namespace content {
 class MessagePortDelegate;
 
-class MessagePortService {
+class CONTENT_EXPORT MessagePortService {
  public:
-  typedef std::vector<std::pair<base::string16, std::vector<int> > >
+  typedef std::vector<std::pair<content::MessagePortMessage,
+                                std::vector<TransferredMessagePort>>>
       QueuedMessages;
 
   // Returns the MessagePortService singleton.
@@ -31,9 +34,10 @@ class MessagePortService {
               int* message_port_id);
   void Destroy(int message_port_id);
   void Entangle(int local_message_port_id, int remote_message_port_id);
-  void PostMessage(int sender_message_port_id,
-                   const base::string16& message,
-                   const std::vector<int>& sent_message_port_ids);
+  void PostMessage(
+      int sender_message_port_id,
+      const MessagePortMessage& message,
+      const std::vector<TransferredMessagePort>& sent_message_ports);
   void QueueMessages(int message_port_id);
   void SendQueuedMessages(int message_port_id,
                           const QueuedMessages& queued_messages);
@@ -70,9 +74,10 @@ class MessagePortService {
   MessagePortService();
   ~MessagePortService();
 
-  void PostMessageTo(int message_port_id,
-                     const base::string16& message,
-                     const std::vector<int>& sent_message_port_ids);
+  void PostMessageTo(
+      int message_port_id,
+      const MessagePortMessage& message,
+      const std::vector<TransferredMessagePort>& sent_message_ports);
 
   // Handles the details of removing a message port id. Before calling this,
   // verify that the message port id exists.

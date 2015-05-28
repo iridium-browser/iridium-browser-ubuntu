@@ -39,9 +39,6 @@ public:
     static Request* create(ExecutionContext*, Request*, const Dictionary&, ExceptionState&);
     static Request* create(ExecutionContext*, FetchRequestData*);
     static Request* create(ExecutionContext*, const WebServiceWorkerRequest&);
-    // The 'FetchRequestData' object is shared between requests, as it is
-    // immutable to the user after Request creation. Headers are copied.
-    static Request* create(const Request&);
 
     const FetchRequestData* request() { return m_request; }
 
@@ -56,24 +53,26 @@ public:
     // From Request.idl:
     Request* clone(ExceptionState&) const;
 
+    FetchRequestData* passRequestData();
+
     void populateWebServiceWorkerRequest(WebServiceWorkerRequest&) const;
 
     void setBodyBlobHandle(PassRefPtr<BlobDataHandle>);
     bool hasBody() const { return m_request->blobDataHandle(); }
 
-    void trace(Visitor*) override;
+    DECLARE_VIRTUAL_TRACE();
 
 private:
-    explicit Request(const Request&);
     Request(ExecutionContext*, FetchRequestData*);
     Request(ExecutionContext*, const WebServiceWorkerRequest&);
+    Request(ExecutionContext*, FetchRequestData*, Headers*);
 
     static Request* createRequestWithRequestOrString(ExecutionContext*, Request*, const String&, const RequestInit&, ExceptionState&);
     void clearHeaderList();
 
     PassRefPtr<BlobDataHandle> blobDataHandle() const override;
     BodyStreamBuffer* buffer() const override;
-    String contentTypeForBuffer() const override;
+    String mimeType() const override;
 
     const Member<FetchRequestData> m_request;
     const Member<Headers> m_headers;

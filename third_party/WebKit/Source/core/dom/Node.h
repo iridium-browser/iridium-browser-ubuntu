@@ -26,6 +26,7 @@
 #define Node_h
 
 #include "bindings/core/v8/ExceptionStatePlaceholder.h"
+#include "core/CoreExport.h"
 #include "core/dom/MutationObserver.h"
 #include "core/dom/SimulatedClickOptions.h"
 #include "core/dom/StyleChangeReason.h"
@@ -34,7 +35,7 @@
 #include "core/editing/EditingBoundary.h"
 #include "core/events/EventTarget.h"
 #include "core/inspector/InspectorCounters.h"
-#include "core/rendering/style/RenderStyleConstants.h"
+#include "core/style/ComputedStyleConstants.h"
 #include "platform/geometry/LayoutRect.h"
 #include "platform/heap/Handle.h"
 #include "platform/weborigin/KURLHash.h"
@@ -75,10 +76,10 @@ class PlatformWheelEvent;
 class QualifiedName;
 class RadioNodeList;
 class RegisteredEventListener;
-class RenderBox;
-class RenderBoxModelObject;
-class RenderObject;
-class RenderStyle;
+class LayoutBox;
+class LayoutBoxModelObject;
+class LayoutObject;
+class ComputedStyle;
 class SVGQualifiedName;
 class ShadowRoot;
 template <typename NodeType> class StaticNodeTypeList;
@@ -99,23 +100,21 @@ enum StyleChangeType {
 
 class NodeRareDataBase {
 public:
-    RenderObject* renderer() const { return m_renderer; }
-    void setRenderer(RenderObject* renderer) { m_renderer = renderer; }
+    LayoutObject* layoutObject() const { return m_layoutObject; }
+    void setLayoutObject(LayoutObject* layoutObject) { m_layoutObject = layoutObject; }
 
 protected:
-    NodeRareDataBase(RenderObject* renderer)
-        : m_renderer(renderer)
+    NodeRareDataBase(LayoutObject* layoutObject)
+        : m_layoutObject(layoutObject)
     { }
 
 protected:
-    // Oilpan: This member is traced in NodeRareData.
-    // FIXME: Can we add traceAfterDispatch and finalizeGarbageCollectedObject
-    // to NodeRareDataBase, and make m_renderer Member<>?
-    RenderObject* m_renderer;
+    LayoutObject* m_layoutObject;
 };
 
 class Node;
 WILL_NOT_BE_EAGERLY_TRACED_CLASS(Node);
+WILL_HAVE_ALL_INSTANCES_ON_SAME_GC_HEAP(Node);
 
 #if ENABLE(OILPAN)
 #define NODE_BASE_CLASSES public EventTarget
@@ -125,7 +124,7 @@ WILL_NOT_BE_EAGERLY_TRACED_CLASS(Node);
 #define NODE_BASE_CLASSES public EventTarget, public TreeShared<Node>
 #endif
 
-class GC_PLUGIN_IGNORE("crbug.com/443854") Node : NODE_BASE_CLASSES {
+class CORE_EXPORT Node : NODE_BASE_CLASSES {
     DEFINE_EVENT_TARGET_REFCOUNTING_WILL_BE_REMOVED(TreeShared<Node>);
     DEFINE_WRAPPERTYPEINFO();
     friend class TreeScope;
@@ -169,6 +168,8 @@ public:
     // static type dispatching of typed heap for Nodes. We override GarbageCollected<>'s operator new here, to put
     // Node descendants into typed heap for Nodes. <http://crbug.com/443854>
     using GarbageCollectedBase = EventTarget;
+
+    GC_PLUGIN_IGNORE("crbug.com/443854")
     void* operator new(size_t size) { return Heap::allocate<Node>(size); }
 #else // !ENABLE(OILPAN)
     // All Nodes are placed in their own heap partition for security.
@@ -208,8 +209,6 @@ public:
 
     virtual KURL baseURI() const;
 
-    // These should all actually return a node, but this is only important for language bindings,
-    // which will already know and hold a ref on the right node to return.
     PassRefPtrWillBeRawPtr<Node> insertBefore(PassRefPtrWillBeRawPtr<Node> newChild, Node* refChild, ExceptionState& = ASSERT_NO_EXCEPTION);
     PassRefPtrWillBeRawPtr<Node> replaceChild(PassRefPtrWillBeRawPtr<Node> newChild, PassRefPtrWillBeRawPtr<Node> oldChild, ExceptionState& = ASSERT_NO_EXCEPTION);
     PassRefPtrWillBeRawPtr<Node> removeChild(PassRefPtrWillBeRawPtr<Node> child, ExceptionState& = ASSERT_NO_EXCEPTION);
@@ -229,6 +228,8 @@ public:
 
     String textContent(bool convertBRsToNewlines = false) const;
     void setTextContent(const String&);
+
+    bool supportsAltText();
 
     // Other methods (not part of DOM)
 
@@ -260,6 +261,7 @@ public:
 
     virtual bool isMediaControlElement() const { return false; }
     virtual bool isMediaControls() const { return false; }
+    virtual bool isTextTrackContainer() const { return false; }
     virtual bool isVTTElement() const { return false; }
     virtual bool isAttributeNode() const { return false; }
     virtual bool isCharacterDataNode() const { return false; }
@@ -307,9 +309,6 @@ public:
     // Returns the parent node, but nullptr if the parent node is a ShadowRoot.
     ContainerNode* nonShadowBoundaryParentNode() const;
 
-    bool selfOrAncestorHasDirAutoAttribute() const { return getFlag(SelfOrAncestorHasDirAutoFlag); }
-    void setSelfOrAncestorHasDirAutoAttribute(bool flag) { setFlag(flag, SelfOrAncestorHasDirAutoFlag); }
-
     // Returns the enclosing event parent Element (or self) that, when clicked, would trigger a navigation.
     Element* enclosingLinkEventParentOrSelf();
 
@@ -341,7 +340,11 @@ public:
 
     // For <link> and <style> elements.
     virtual bool sheetLoaded() { return true; }
-    virtual void notifyLoadedSheetAndAllCriticalSubresources(bool /* error loading subresource */) { }
+    enum LoadedSheetErrorStatus {
+        NoErrorLoadingSubresource,
+        ErrorOccurredLoadingSubresource
+    };
+    virtual void notifyLoadedSheetAndAllCriticalSubresources(LoadedSheetErrorStatus) { }
     virtual void startLoadingDynamicSheet() { ASSERT_NOT_REACHED(); }
 
     bool hasName() const { ASSERT(!isTextNode()); return getFlag(HasNameOrIsEditingTextFlag); }
@@ -381,6 +384,7 @@ public:
     void clearNeedsStyleInvalidation() { clearFlag(NeedsStyleInvalidationFlag); }
     void setNeedsStyleInvalidation();
 
+    void updateDistribution();
     void recalcDistribution();
 
     bool svgFilterNeedsLayerUpdate() const { return getFlag(SVGFilterNeedsLayerUpdateFlag); }
@@ -429,7 +433,7 @@ public:
         return false;
     }
 
-    bool rendererIsRichlyEditable(EditableType editableType = ContentIsEditable) const
+    bool layoutObjectIsRichlyEditable(EditableType editableType = ContentIsEditable) const
     {
         switch (editableType) {
         case ContentIsEditable:
@@ -486,7 +490,7 @@ public:
     bool contains(const Node*) const;
     bool containsIncludingShadowDOM(const Node*) const;
     bool containsIncludingHostElements(const Node&) const;
-    Node* commonAncestor(const Node&, Node* (*parent)(const Node&));
+    Node* commonAncestor(const Node&, ContainerNode* (*parent)(const Node&)) const;
 
     // Used to determine whether range offsets use characters or node indices.
     bool offsetInCharacters() const;
@@ -500,30 +504,30 @@ public:
     // -----------------------------------------------------------------------------
     // Integration with rendering tree
 
-    // As renderer() includes a branch you should avoid calling it repeatedly in hot code paths.
+    // As layoutObject() includes a branch you should avoid calling it repeatedly in hot code paths.
     // Note that if a Node has a renderer, it's parentNode is guaranteed to have one as well.
-    RenderObject* renderer() const { return hasRareData() ? m_data.m_rareData->renderer() : m_data.m_renderer; };
-    void setRenderer(RenderObject* renderer)
+    LayoutObject* layoutObject() const { return hasRareData() ? m_data.m_rareData->layoutObject() : m_data.m_layoutObject; };
+    void setLayoutObject(LayoutObject* layoutObject)
     {
         if (hasRareData())
-            m_data.m_rareData->setRenderer(renderer);
+            m_data.m_rareData->setLayoutObject(layoutObject);
         else
-            m_data.m_renderer = renderer;
+            m_data.m_layoutObject = layoutObject;
     }
 
     // Use these two methods with caution.
-    RenderBox* renderBox() const;
-    RenderBoxModelObject* renderBoxModelObject() const;
+    LayoutBox* layoutBox() const;
+    LayoutBoxModelObject* layoutBoxModelObject() const;
 
     struct AttachContext {
-        RenderStyle* resolvedStyle;
+        ComputedStyle* resolvedStyle;
         bool performingReattach;
 
         AttachContext() : resolvedStyle(nullptr), performingReattach(false) { }
     };
 
     // Attaches this node to the rendering tree. This calculates the style to be applied to the node and creates an
-    // appropriate RenderObject which will be inserted into the tree (except when the style has display: none). This
+    // appropriate LayoutObject which will be inserted into the tree (except when the style has display: none). This
     // makes the node visible in the FrameView.
     virtual void attach(const AttachContext& = AttachContext());
 
@@ -542,10 +546,13 @@ public:
     bool shouldCallRecalcStyle(StyleRecalcChange);
 
     // Wrapper for nodes that don't have a renderer, but still cache the style (like HTMLOptionElement).
-    RenderStyle* renderStyle() const;
-    RenderStyle* parentRenderStyle() const;
+    ComputedStyle* mutableComputedStyle() const;
+    const ComputedStyle* computedStyle() const;
+    const ComputedStyle* parentComputedStyle() const;
 
-    RenderStyle* computedStyle(PseudoId pseudoElementSpecifier = NOPSEUDO) { return virtualComputedStyle(pseudoElementSpecifier); }
+    const ComputedStyle& computedStyleRef() const;
+
+    const ComputedStyle* ensureComputedStyle(PseudoId pseudoElementSpecifier = NOPSEUDO) { return virtualEnsureComputedStyle(pseudoElementSpecifier); }
 
     // -----------------------------------------------------------------------------
     // Notification of document structure changes (see ContainerNode.h for more notification methods)
@@ -585,8 +592,10 @@ public:
 
     void showNode(const char* prefix = "") const;
     void showTreeForThis() const;
+    void showTreeForThisInComposedTree() const;
     void showNodePathForThis() const;
-    void showTreeAndMark(const Node* markedNode1, const char* markedLabel1, const Node* markedNode2 = 0, const char* markedLabel2 = 0) const;
+    void showTreeAndMark(const Node* markedNode1, const char* markedLabel1, const Node* markedNode2 = nullptr, const char* markedLabel2 = nullptr) const;
+    void showTreeAndMarkInComposedTree(const Node* markedNode1, const char* markedLabel1, const Node* markedNode2 = nullptr, const char* markedLabel2 = nullptr) const;
     void showTreeForThisAcrossFrame() const;
 #endif
 
@@ -657,7 +666,6 @@ public:
     unsigned connectedSubframeCount() const;
     void incrementConnectedSubframeCount(unsigned amount = 1);
     void decrementConnectedSubframeCount(unsigned amount = 1);
-    void updateAncestorConnectedSubframeCountForRemoval() const;
     void updateAncestorConnectedSubframeCountForInsertion() const;
 
     PassRefPtrWillBeRawPtr<StaticNodeList> getDestinationInsertionPoints();
@@ -667,7 +675,7 @@ public:
 
     bool isFinishedParsingChildren() const { return getFlag(IsFinishedParsingChildrenFlag); }
 
-    virtual void trace(Visitor*) override;
+    DECLARE_VIRTUAL_TRACE();
 
     unsigned lengthOfContents() const;
 
@@ -720,9 +728,6 @@ private:
         HasSyntheticAttrChildNodesFlag = 1 << 26,
         HasEventTargetDataFlag = 1 << 27,
         AlreadySpellCheckedFlag = 1 << 28,
-
-        // HTML dir=auto.
-        SelfOrAncestorHasDirAutoFlag = 1 << 29,
 
         DefaultNodeFlags = IsFinishedParsingChildrenFlag | ChildNeedsStyleRecalcFlag | NeedsReattachStyleChange
     };
@@ -802,14 +807,14 @@ private:
 
     void setStyleChange(StyleChangeType);
 
-    virtual RenderStyle* nonRendererStyle() const { return nullptr; }
+    virtual ComputedStyle* nonLayoutObjectComputedStyle() const { return nullptr; }
 
-    virtual RenderStyle* virtualComputedStyle(PseudoId = NOPSEUDO);
+    virtual const ComputedStyle* virtualEnsureComputedStyle(PseudoId = NOPSEUDO);
 
     void trackForDebugging();
 
-    WillBeHeapVector<OwnPtrWillBeMember<MutationObserverRegistration> >* mutationObserverRegistry();
-    WillBeHeapHashSet<RawPtrWillBeMember<MutationObserverRegistration> >* transientMutationObserverRegistry();
+    WillBeHeapVector<OwnPtrWillBeMember<MutationObserverRegistration>>* mutationObserverRegistry();
+    WillBeHeapHashSet<RawPtrWillBeMember<MutationObserverRegistration>>* transientMutationObserverRegistry();
 
     uint32_t m_nodeFlags;
     RawPtrWillBeMember<ContainerNode> m_parentOrShadowHostNode;
@@ -818,8 +823,8 @@ private:
     RawPtrWillBeMember<Node> m_next;
     // When a node has rare data we move the renderer into the rare data.
     union DataUnion {
-        DataUnion() : m_renderer(nullptr) { }
-        RenderObject* m_renderer;
+        DataUnion() : m_layoutObject(nullptr) { }
+        LayoutObject* m_layoutObject;
         NodeRareDataBase* m_rareData;
     } m_data;
 };

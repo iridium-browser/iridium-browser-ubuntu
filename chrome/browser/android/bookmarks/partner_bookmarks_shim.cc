@@ -14,6 +14,7 @@
 #include "content/public/browser/browser_context.h"
 #include "content/public/browser/browser_thread.h"
 
+using bookmarks::BookmarkNode;
 using content::BrowserThread;
 
 namespace {
@@ -50,7 +51,7 @@ static bool g_disable_partner_bookmarks_editing = false;
 // static
 PartnerBookmarksShim* PartnerBookmarksShim::BuildForBrowserContext(
     content::BrowserContext* browser_context) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   PartnerBookmarksShim* data =
       static_cast<PartnerBookmarksShim*>(
@@ -175,7 +176,7 @@ const BookmarkNode* PartnerBookmarksShim::GetPartnerBookmarksRoot() const {
 }
 
 void PartnerBookmarksShim::SetPartnerBookmarksRoot(BookmarkNode* root_node) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   g_partner_model_keeper.Get().partner_bookmarks_root.reset(root_node);
   g_partner_model_keeper.Get().loaded = true;
   FOR_EACH_OBSERVER(PartnerBookmarksShim::Observer, observers_,
@@ -197,7 +198,7 @@ bool operator<(const PartnerBookmarksShim::NodeRenamingMapKey& a,
 // static
 void PartnerBookmarksShim::ClearInBrowserContextForTesting(
     content::BrowserContext* browser_context) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   browser_context->SetUserData(kPartnerBookmarksShimUserDataKey, 0);
 }
 
@@ -236,7 +237,7 @@ const BookmarkNode* PartnerBookmarksShim::GetNodeByID(
 }
 
 void PartnerBookmarksShim::ReloadNodeMapping() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   node_rename_remove_map_.clear();
   if (!prefs_)
@@ -271,7 +272,7 @@ void PartnerBookmarksShim::ReloadNodeMapping() {
 }
 
 void PartnerBookmarksShim::SaveNodeMapping() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   if (!prefs_)
     return;
 

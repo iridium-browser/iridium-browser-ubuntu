@@ -4,13 +4,14 @@
 
 #include "base/command_line.h"
 #include "base/logging.h"
+#include "base/strings/utf_string_conversions.h"
 #include "media/mojo/services/mojo_renderer_service.h"
 #include "mojo/application/application_runner_chromium.h"
-#include "mojo/public/c/system/main.h"
-#include "mojo/public/cpp/application/application_connection.h"
-#include "mojo/public/cpp/application/application_delegate.h"
-#include "mojo/public/cpp/application/application_impl.h"
-#include "mojo/public/cpp/application/interface_factory_impl.h"
+#include "third_party/mojo/src/mojo/public/c/system/main.h"
+#include "third_party/mojo/src/mojo/public/cpp/application/application_connection.h"
+#include "third_party/mojo/src/mojo/public/cpp/application/application_delegate.h"
+#include "third_party/mojo/src/mojo/public/cpp/application/application_impl.h"
+#include "third_party/mojo/src/mojo/public/cpp/application/interface_factory_impl.h"
 
 namespace media {
 
@@ -54,6 +55,6 @@ class MojoMediaApplication
 }  // namespace media
 
 MojoResult MojoMain(MojoHandle mojo_handle) {
-  mojo::ApplicationRunnerChromium runner(new media::MojoMediaApplication);
+  mojo::ApplicationRunnerChromium runner(new media::MojoMediaApplication());
   return runner.Run(mojo_handle);
 }

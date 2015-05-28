@@ -6,9 +6,11 @@
 
 #include "base/logging.h"
 #include "base/strings/string_util.h"
+#include "content/common/content_switches_internal.h"
 #include "content/public/common/content_client.h"
 #include "content/public/renderer/content_renderer_client.h"
 #include "content/renderer/pepper/pepper_audio_input_host.h"
+#include "content/renderer/pepper/pepper_camera_device_host.h"
 #include "content/renderer/pepper/pepper_compositor_host.h"
 #include "content/renderer/pepper/pepper_file_chooser_host.h"
 #include "content/renderer/pepper/pepper_file_ref_renderer_host.h"
@@ -20,6 +22,7 @@
 #include "content/renderer/pepper/pepper_video_capture_host.h"
 #include "content/renderer/pepper/pepper_video_decoder_host.h"
 #include "content/renderer/pepper/pepper_video_destination_host.h"
+#include "content/renderer/pepper/pepper_video_encoder_host.h"
 #include "content/renderer/pepper/pepper_video_source_host.h"
 #include "content/renderer/pepper/pepper_websocket_host.h"
 #include "content/renderer/pepper/ppb_image_data_impl.h"
@@ -35,9 +38,7 @@
 #include "third_party/WebKit/public/web/WebPluginContainer.h"
 
 #if defined(OS_WIN)
-#include "base/command_line.h"
 #include "base/win/windows_version.h"
-#include "content/public/common/content_switches.h"
 #endif
 
 using ppapi::host::ResourceHost;
@@ -60,6 +61,20 @@ bool CanUseMediaStreamAPI(const RendererPpapiHost* host, PP_Instance instance) {
   return content_renderer_client->AllowPepperMediaStreamAPI(document_url);
 }
 #endif  // defined(ENABLE_WEBRTC)
+
+static bool CanUseCameraDeviceAPI(const RendererPpapiHost* host,
+                                  PP_Instance instance) {
+  blink::WebPluginContainer* container =
+      host->GetContainerForInstance(instance);
+  if (!container)
+    return false;
+
+  GURL document_url = container->element().document().url();
+  ContentRendererClient* content_renderer_client =
+      GetContentClient()->renderer();
+  return content_renderer_client->IsPluginAllowedToUseCameraDeviceAPI(
+      document_url);
+}
 
 bool CanUseCompositorAPI(const RendererPpapiHost* host, PP_Instance instance) {
   blink::WebPluginContainer* container =
@@ -145,10 +160,8 @@ scoped_ptr<ResourceHost> ContentRendererPepperHostFactory::CreateResourceHost(
       // TODO(ananta)
       // Look into whether this causes a loss of functionality. From cursory
       // testing things seem to work well.
-      if (switches::IsWin32kRendererLockdownEnabled() &&
-          base::win::GetVersion() >= base::win::VERSION_WIN8) {
+      if (IsWin32kRendererLockdownEnabled())
         image_type = ppapi::PPB_ImageData_Shared::SIMPLE;
-      }
 #endif
       scoped_refptr<PPB_ImageData_Impl> image_data(new PPB_ImageData_Impl(
           instance, image_type));
@@ -161,6 +174,9 @@ scoped_ptr<ResourceHost> ContentRendererPepperHostFactory::CreateResourceHost(
     case PpapiHostMsg_VideoDecoder_Create::ID:
       return scoped_ptr<ResourceHost>(
           new PepperVideoDecoderHost(host_, instance, resource));
+    case PpapiHostMsg_VideoEncoder_Create::ID:
+      return scoped_ptr<ResourceHost>(
+          new PepperVideoEncoderHost(host_, instance, resource));
     case PpapiHostMsg_WebSocket_Create::ID:
       return scoped_ptr<ResourceHost>(
           new PepperWebSocketHost(host_, instance, resource));
@@ -201,6 +217,17 @@ scoped_ptr<ResourceHost> ContentRendererPepperHostFactory::CreateResourceHost(
         return scoped_ptr<ResourceHost>(host);
       }
     }
+  }
+
+  // Permissions of the following interfaces are available for whitelisted apps
+  // which may not have access to the other private interfaces.
+  if (message.type() == PpapiHostMsg_CameraDevice_Create::ID) {
+    if (!GetPermissions().HasPermission(ppapi::PERMISSION_PRIVATE) &&
+        !CanUseCameraDeviceAPI(host_, instance))
+      return nullptr;
+    scoped_ptr<PepperCameraDeviceHost> host(
+        new PepperCameraDeviceHost(host_, instance, resource));
+    return host->Init() ? host.Pass() : nullptr;
   }
 
   return scoped_ptr<ResourceHost>();

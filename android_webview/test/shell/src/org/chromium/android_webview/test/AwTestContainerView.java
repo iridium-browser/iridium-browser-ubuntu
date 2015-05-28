@@ -207,7 +207,7 @@ public class AwTestContainerView extends FrameLayout {
             if (process) {
                 DrawGL.drawGL(mDrawGL, mViewContext, width, height, 0, 0, MODE_PROCESS);
             }
-            if (draw) {
+            if (process || draw) {
                 DrawGL.drawGL(mDrawGL, mViewContext, width, height,
                         mCommittedScrollX, mCommittedScrollY, MODE_DRAW);
             }
@@ -381,6 +381,18 @@ public class AwTestContainerView extends FrameLayout {
     public boolean onTouchEvent(MotionEvent ev) {
         super.onTouchEvent(ev);
         return mAwContents.onTouchEvent(ev);
+    }
+
+    @Override
+    public boolean onGenericMotionEvent(MotionEvent ev) {
+        super.onGenericMotionEvent(ev);
+        return mAwContents.onGenericMotionEvent(ev);
+    }
+
+    @Override
+    public boolean onHoverEvent(MotionEvent ev) {
+        super.onHoverEvent(ev);
+        return mAwContents.onHoverEvent(ev);
     }
 
     @Override

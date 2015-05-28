@@ -62,7 +62,7 @@ class StorageFake(object):
 class RunIsolatedTestBase(auto_stub.TestCase):
   def setUp(self):
     super(RunIsolatedTestBase, self).setUp()
-    self.tempdir = tempfile.mkdtemp(prefix='run_isolated_test')
+    self.tempdir = tempfile.mkdtemp(prefix=u'run_isolated_test')
     logging.debug(self.tempdir)
     self.mock(run_isolated, 'make_temp_dir', self.fake_make_temp_dir)
     self.mock(run_isolated.auth, 'ensure_logged_in', lambda _: None)
@@ -128,7 +128,7 @@ class RunIsolatedTest(RunIsolatedTestBase):
 
     cmd = [
         '--no-log',
-        '--hash', isolated_hash,
+        '--isolated', isolated_hash,
         '--cache', self.tempdir,
         '--isolate-server', 'https://localhost',
     ]
@@ -148,7 +148,7 @@ class RunIsolatedTest(RunIsolatedTestBase):
 
     cmd = [
         '--no-log',
-        '--hash', isolated_hash,
+        '--isolated', isolated_hash,
         '--cache', self.tempdir,
         '--isolate-server', 'https://localhost',
         '--',
@@ -265,7 +265,7 @@ class RunIsolatedTest(RunIsolatedTestBase):
 
     cmd = [
         '--no-log',
-        '--hash', isolated_hash,
+        '--isolated', isolated_hash,
         '--cache', self.tempdir,
         '--isolate-server', 'https://localhost',
     ]

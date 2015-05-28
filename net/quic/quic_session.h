@@ -28,7 +28,6 @@ namespace net {
 class QuicCryptoStream;
 class QuicFlowController;
 class ReliableQuicStream;
-class SSLInfo;
 class VisitorShim;
 
 namespace test {
@@ -68,7 +67,7 @@ class NET_EXPORT_PRIVATE QuicSession : public QuicConnectionVisitorInterface {
   void OnBlockedFrames(const std::vector<QuicBlockedFrame>& frames) override;
   void OnConnectionClosed(QuicErrorCode error, bool from_peer) override;
   void OnWriteBlocked() override {}
-  void OnSuccessfulVersionNegotiation(const QuicVersion& version) override {}
+  void OnSuccessfulVersionNegotiation(const QuicVersion& version) override;
   void OnCanWrite() override;
   void OnCongestionWindowChange(QuicTime now) override {}
   bool WillingAndAbleToWrite() const override;
@@ -116,6 +115,7 @@ class NET_EXPORT_PRIVATE QuicSession : public QuicConnectionVisitorInterface {
       QuicStreamId id,
       const SpdyHeaderBlock& headers,
       bool fin,
+      QuicPriority priority,
       QuicAckNotifier::DelegateInterface* ack_notifier_delegate);
 
   // Called by streams when they want to close the stream in both directions.
@@ -196,12 +196,9 @@ class NET_EXPORT_PRIVATE QuicSession : public QuicConnectionVisitorInterface {
     return goaway_sent_;
   }
 
-  // Gets the SSL connection information.
-  virtual bool GetSSLInfo(SSLInfo* ssl_info) const;
-
   QuicErrorCode error() const { return error_; }
 
-  bool is_server() const { return connection_->is_server(); }
+  Perspective perspective() const { return connection_->perspective(); }
 
   QuicFlowController* flow_controller() { return flow_controller_.get(); }
 
@@ -217,6 +214,9 @@ class NET_EXPORT_PRIVATE QuicSession : public QuicConnectionVisitorInterface {
   }
 
   size_t get_max_open_streams() const { return max_open_streams_; }
+
+  // Used in Chrome.
+  const QuicHeadersStream* headers_stream() { return headers_stream_.get(); }
 
  protected:
   typedef base::hash_map<QuicStreamId, QuicDataStream*> DataStreamMap;

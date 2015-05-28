@@ -57,7 +57,7 @@ class SyncUIDataTypeControllerTest : public testing::Test,
   }
 
   scoped_ptr<syncer::AttachmentService> CreateAttachmentService(
-      const scoped_refptr<syncer::AttachmentStore>& attachment_store,
+      scoped_ptr<syncer::AttachmentStoreForSync> attachment_store,
       const syncer::UserShare& user_share,
       const std::string& store_birthday,
       syncer::ModelType model_type,
@@ -83,6 +83,7 @@ class SyncUIDataTypeControllerTest : public testing::Test,
     preference_dtc_->StartAssociating(
         base::Bind(&StartCallbackMock::Run,
                    base::Unretained(&start_callback_)));
+    PumpLoop();
   }
 
   void PumpLoop() {
@@ -122,6 +123,19 @@ TEST_F(SyncUIDataTypeControllerTest, StartStop) {
   EXPECT_EQ(DataTypeController::RUNNING, preference_dtc_->state());
   EXPECT_TRUE(syncable_service_.syncing());
   preference_dtc_->Stop();
+  EXPECT_EQ(DataTypeController::NOT_RUNNING, preference_dtc_->state());
+  EXPECT_FALSE(syncable_service_.syncing());
+}
+
+// Start and then stop the DTC before the Start had a chance to perform
+// association. Verify that the service never started and is NOT_RUNNING.
+TEST_F(SyncUIDataTypeControllerTest, StartStopBeforeAssociation) {
+  EXPECT_EQ(DataTypeController::NOT_RUNNING, preference_dtc_->state());
+  EXPECT_FALSE(syncable_service_.syncing());
+  message_loop_.PostTask(FROM_HERE,
+                         base::Bind(&UIDataTypeController::Stop,
+                                    preference_dtc_));
+  Start();
   EXPECT_EQ(DataTypeController::NOT_RUNNING, preference_dtc_->state());
   EXPECT_FALSE(syncable_service_.syncing());
 }

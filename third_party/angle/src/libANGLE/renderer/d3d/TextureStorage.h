@@ -26,11 +26,11 @@ struct PixelUnpackState;
 
 namespace rx
 {
-class SwapChain;
-class RenderTarget;
-class Image;
+class SwapChainD3D;
+class RenderTargetD3D;
+class ImageD3D;
 
-class TextureStorage
+class TextureStorage : angle::NonCopyable
 {
   public:
     TextureStorage();
@@ -41,22 +41,23 @@ class TextureStorage
     virtual bool isManaged() const = 0;
     virtual int getLevelCount() const = 0;
 
-    virtual gl::Error getRenderTarget(const gl::ImageIndex &index, RenderTarget **outRT) = 0;
+    virtual gl::Error getRenderTarget(const gl::ImageIndex &index, RenderTargetD3D **outRT) = 0;
     virtual gl::Error generateMipmap(const gl::ImageIndex &sourceIndex, const gl::ImageIndex &destIndex) = 0;
 
     virtual gl::Error copyToStorage(TextureStorage *destStorage) = 0;
-    virtual gl::Error setData(const gl::ImageIndex &index, Image *image, const gl::Box *destBox, GLenum type,
+    virtual gl::Error setData(const gl::ImageIndex &index, ImageD3D *image, const gl::Box *destBox, GLenum type,
                               const gl::PixelUnpackState &unpack, const uint8_t *pixelData) = 0;
 
     unsigned int getRenderTargetSerial(const gl::ImageIndex &index) const;
     unsigned int getTextureSerial() const;
 
+    // This is a no-op for most implementations of TextureStorage. Some (e.g. TextureStorage11_2D) might override it.
+    virtual gl::Error useLevelZeroWorkaroundTexture(bool useLevelZeroTexture) { return gl::Error(GL_NO_ERROR); }
+
   protected:
     void initializeSerials(unsigned int rtSerialsToReserve, unsigned int rtSerialsLayerStride);
 
   private:
-    DISALLOW_COPY_AND_ASSIGN(TextureStorage);
-
     unsigned int mFirstRenderTargetSerial;
     unsigned int mRenderTargetSerialsLayerStride;
 };

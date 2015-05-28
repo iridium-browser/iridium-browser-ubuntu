@@ -19,6 +19,8 @@
 #include "ui/base/l10n/l10n_util.h"
 
 using base::ASCIIToUTF16;
+using bookmarks::BookmarkModel;
+using bookmarks::BookmarkNode;
 
 class TestBookmarkMenuBridge : public BookmarkMenuBridge {
  public:

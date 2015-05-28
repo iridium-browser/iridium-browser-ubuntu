@@ -39,7 +39,8 @@ class ScopedResource;
 class StreamVideoDrawQuad;
 class TextureDrawQuad;
 class TextureMailboxDeleter;
-class GeometryBinding;
+class StaticGeometryBinding;
+class DynamicGeometryBinding;
 class ScopedEnsureFramebufferAllocation;
 
 // Class that handles drawing of composited render layers using GL.
@@ -85,7 +86,7 @@ class CC_EXPORT GLRenderer : public DirectRenderer {
   bool IsBackbufferDiscarded() const { return is_backbuffer_discarded_; }
 
   const gfx::QuadF& SharedGeometryQuad() const { return shared_geometry_quad_; }
-  const GeometryBinding* SharedGeometry() const {
+  const StaticGeometryBinding* SharedGeometry() const {
     return shared_geometry_.get();
   }
 
@@ -96,7 +97,8 @@ class CC_EXPORT GLRenderer : public DirectRenderer {
                              ResourceFormat texture_format,
                              const gfx::Rect& device_rect);
   void ReleaseRenderPassTextures();
-
+  enum BoundGeometry { NO_BINDING, SHARED_BINDING, CLIPPED_BINDING };
+  void PrepareGeometry(BoundGeometry geometry_to_bind);
   void SetStencilEnabled(bool enabled);
   bool stencil_enabled() const { return stencil_shadow_; }
   void SetBlendEnabled(bool enabled);
@@ -106,13 +108,13 @@ class CC_EXPORT GLRenderer : public DirectRenderer {
   bool BindFramebufferToTexture(DrawingFrame* frame,
                                 const ScopedResource* resource,
                                 const gfx::Rect& target_rect) override;
-  void SetDrawViewport(const gfx::Rect& window_space_viewport) override;
   void SetScissorTestRect(const gfx::Rect& scissor_rect) override;
-  void DiscardPixels(bool has_external_stencil_test,
-                     bool draw_rect_covers_full_surface) override;
-  void ClearFramebuffer(DrawingFrame* frame,
-                        bool has_external_stencil_test) override;
-  void DoDrawQuad(DrawingFrame* frame, const class DrawQuad*) override;
+  void PrepareSurfaceForPass(DrawingFrame* frame,
+                             SurfaceInitializationMode initialization_mode,
+                             const gfx::Rect& render_pass_scissor) override;
+  void DoDrawQuad(DrawingFrame* frame,
+                  const class DrawQuad*,
+                  const gfx::QuadF* draw_region) override;
   void BeginDrawingFrame(DrawingFrame* frame) override;
   void FinishDrawingFrame(DrawingFrame* frame) override;
   bool FlippedFramebuffer(const DrawingFrame* frame) const override;
@@ -132,10 +134,13 @@ class CC_EXPORT GLRenderer : public DirectRenderer {
   // Inflate the quad and fill edge array for fragment shader.
   // |local_quad| is set to inflated quad. |edge| array is filled with
   // inflated quad's edge data.
-  static void SetupQuadForAntialiasing(const gfx::Transform& device_transform,
-                                       const DrawQuad* quad,
-                                       gfx::QuadF* local_quad,
-                                       float edge[24]);
+  static void SetupQuadForClippingAndAntialiasing(
+      const gfx::Transform& device_transform,
+      const DrawQuad* quad,
+      bool use_aa,
+      const gfx::QuadF* clip_region,
+      gfx::QuadF* local_quad,
+      float edge[24]);
 
  private:
   friend class GLRendererShaderPixelTest;
@@ -143,8 +148,13 @@ class CC_EXPORT GLRenderer : public DirectRenderer {
 
   static void ToGLMatrix(float* gl_matrix, const gfx::Transform& transform);
 
+  void DiscardPixels();
+  void ClearFramebuffer(DrawingFrame* frame);
+  void SetViewport();
+
   void DrawCheckerboardQuad(const DrawingFrame* frame,
-                            const CheckerboardDrawQuad* quad);
+                            const CheckerboardDrawQuad* quad,
+                            const gfx::QuadF* clip_region);
   void DrawDebugBorderQuad(const DrawingFrame* frame,
                            const DebugBorderDrawQuad* quad);
   static bool IsDefaultBlendMode(SkXfermode::Mode blend_mode) {
@@ -158,6 +168,7 @@ class CC_EXPORT GLRenderer : public DirectRenderer {
       DrawingFrame* frame,
       const RenderPassDrawQuad* quad,
       const gfx::Transform& contents_device_transform,
+      const gfx::QuadF* clip_region,
       bool use_aa);
   scoped_ptr<ScopedResource> GetBackdropTexture(const gfx::Rect& bounding_rect);
 
@@ -168,34 +179,56 @@ class CC_EXPORT GLRenderer : public DirectRenderer {
       const RenderPassDrawQuad* quad,
       ScopedResource* background_texture);
 
-  void DrawRenderPassQuad(DrawingFrame* frame, const RenderPassDrawQuad* quad);
+  void DrawRenderPassQuad(DrawingFrame* frame,
+                          const RenderPassDrawQuad* quadi,
+                          const gfx::QuadF* clip_region);
   void DrawSolidColorQuad(const DrawingFrame* frame,
-                          const SolidColorDrawQuad* quad);
+                          const SolidColorDrawQuad* quad,
+                          const gfx::QuadF* clip_region);
   void DrawStreamVideoQuad(const DrawingFrame* frame,
-                           const StreamVideoDrawQuad* quad);
+                           const StreamVideoDrawQuad* quad,
+                           const gfx::QuadF* clip_region);
+  void DrawTextureQuad(const DrawingFrame* frame,
+                       const TextureDrawQuad* quad,
+                       const gfx::QuadF* clip_region);
   void EnqueueTextureQuad(const DrawingFrame* frame,
-                          const TextureDrawQuad* quad);
-  void FlushTextureQuadCache();
+                          const TextureDrawQuad* quad,
+                          const gfx::QuadF* clip_region);
+  void FlushTextureQuadCache(BoundGeometry flush_binding);
   void DrawIOSurfaceQuad(const DrawingFrame* frame,
-                         const IOSurfaceDrawQuad* quad);
-  void DrawTileQuad(const DrawingFrame* frame, const TileDrawQuad* quad);
+                         const IOSurfaceDrawQuad* quad,
+                         const gfx::QuadF* clip_region);
+  void DrawTileQuad(const DrawingFrame* frame,
+                    const TileDrawQuad* quad,
+                    const gfx::QuadF* clip_region);
   void DrawContentQuad(const DrawingFrame* frame,
                        const ContentDrawQuadBase* quad,
-                       ResourceProvider::ResourceId resource_id);
+                       ResourceProvider::ResourceId resource_id,
+                       const gfx::QuadF* clip_region);
   void DrawContentQuadAA(const DrawingFrame* frame,
                          const ContentDrawQuadBase* quad,
                          ResourceProvider::ResourceId resource_id,
-                         const gfx::Transform& device_transform);
+                         const gfx::Transform& device_transform,
+                         const gfx::QuadF* clip_region);
   void DrawContentQuadNoAA(const DrawingFrame* frame,
                            const ContentDrawQuadBase* quad,
-                           ResourceProvider::ResourceId resource_id);
+                           ResourceProvider::ResourceId resource_id,
+                           const gfx::QuadF* clip_region);
   void DrawYUVVideoQuad(const DrawingFrame* frame,
-                        const YUVVideoDrawQuad* quad);
+                        const YUVVideoDrawQuad* quad,
+                        const gfx::QuadF* clip_region);
   void DrawPictureQuad(const DrawingFrame* frame,
-                       const PictureDrawQuad* quad);
+                       const PictureDrawQuad* quad,
+                       const gfx::QuadF* clip_region);
 
   void SetShaderOpacity(float opacity, int alpha_location);
   void SetShaderQuadF(const gfx::QuadF& quad, int quad_location);
+  void DrawQuadGeometryClippedByQuadF(const DrawingFrame* frame,
+                                      const gfx::Transform& draw_transform,
+                                      const gfx::RectF& quad_rect,
+                                      const gfx::QuadF& clipping_region_quad,
+                                      int matrix_location,
+                                      const float uv[8]);
   void DrawQuadGeometry(const DrawingFrame* frame,
                         const gfx::Transform& draw_transform,
                         const gfx::RectF& quad_rect,
@@ -237,7 +270,8 @@ class CC_EXPORT GLRenderer : public DirectRenderer {
 
   unsigned offscreen_framebuffer_id_;
 
-  scoped_ptr<GeometryBinding> shared_geometry_;
+  scoped_ptr<StaticGeometryBinding> shared_geometry_;
+  scoped_ptr<DynamicGeometryBinding> clipped_geometry_;
   gfx::QuadF shared_geometry_quad_;
 
   // This block of bindings defines all of the programs used by the compositor
@@ -334,11 +368,13 @@ class CC_EXPORT GLRenderer : public DirectRenderer {
   const RenderPassMaskProgram* GetRenderPassMaskProgram(
       TexCoordPrecision precision,
       SamplerType sampler,
-      BlendMode blend_mode);
+      BlendMode blend_mode,
+      bool mask_for_background);
   const RenderPassMaskProgramAA* GetRenderPassMaskProgramAA(
       TexCoordPrecision precision,
       SamplerType sampler,
-      BlendMode blend_mode);
+      BlendMode blend_mode,
+      bool mask_for_background);
   const RenderPassColorMatrixProgram* GetRenderPassColorMatrixProgram(
       TexCoordPrecision precision,
       BlendMode blend_mode);
@@ -348,11 +384,13 @@ class CC_EXPORT GLRenderer : public DirectRenderer {
   const RenderPassMaskColorMatrixProgram* GetRenderPassMaskColorMatrixProgram(
       TexCoordPrecision precision,
       SamplerType sampler,
-      BlendMode blend_mode);
+      BlendMode blend_mode,
+      bool mask_for_background);
   const RenderPassMaskColorMatrixProgramAA*
   GetRenderPassMaskColorMatrixProgramAA(TexCoordPrecision precision,
                                         SamplerType sampler,
-                                        BlendMode blend_mode);
+                                        BlendMode blend_mode,
+                                        bool mask_for_background);
 
   const TextureProgram* GetTextureProgram(
       TexCoordPrecision precision);
@@ -376,47 +414,67 @@ class CC_EXPORT GLRenderer : public DirectRenderer {
   const SolidColorProgram* GetSolidColorProgram();
   const SolidColorProgramAA* GetSolidColorProgramAA();
 
-  TileProgram tile_program_[NumTexCoordPrecisions][NumSamplerTypes];
+  TileProgram
+      tile_program_[LAST_TEX_COORD_PRECISION + 1][LAST_SAMPLER_TYPE + 1];
   TileProgramOpaque
-      tile_program_opaque_[NumTexCoordPrecisions][NumSamplerTypes];
-  TileProgramAA tile_program_aa_[NumTexCoordPrecisions][NumSamplerTypes];
-  TileProgramSwizzle
-      tile_program_swizzle_[NumTexCoordPrecisions][NumSamplerTypes];
+      tile_program_opaque_[LAST_TEX_COORD_PRECISION + 1][LAST_SAMPLER_TYPE + 1];
+  TileProgramAA
+      tile_program_aa_[LAST_TEX_COORD_PRECISION + 1][LAST_SAMPLER_TYPE + 1];
+  TileProgramSwizzle tile_program_swizzle_[LAST_TEX_COORD_PRECISION +
+                                           1][LAST_SAMPLER_TYPE + 1];
   TileProgramSwizzleOpaque
-      tile_program_swizzle_opaque_[NumTexCoordPrecisions][NumSamplerTypes];
-  TileProgramSwizzleAA
-      tile_program_swizzle_aa_[NumTexCoordPrecisions][NumSamplerTypes];
+      tile_program_swizzle_opaque_[LAST_TEX_COORD_PRECISION +
+                                   1][LAST_SAMPLER_TYPE + 1];
+  TileProgramSwizzleAA tile_program_swizzle_aa_[LAST_TEX_COORD_PRECISION +
+                                                1][LAST_SAMPLER_TYPE + 1];
 
   TileCheckerboardProgram tile_checkerboard_program_;
 
-  TextureProgram texture_program_[NumTexCoordPrecisions];
+  TextureProgram texture_program_[LAST_TEX_COORD_PRECISION + 1];
   NonPremultipliedTextureProgram
-      nonpremultiplied_texture_program_[NumTexCoordPrecisions];
-  TextureBackgroundProgram texture_background_program_[NumTexCoordPrecisions];
+      nonpremultiplied_texture_program_[LAST_TEX_COORD_PRECISION + 1];
+  TextureBackgroundProgram
+      texture_background_program_[LAST_TEX_COORD_PRECISION + 1];
   NonPremultipliedTextureBackgroundProgram
-      nonpremultiplied_texture_background_program_[NumTexCoordPrecisions];
-  TextureProgram texture_io_surface_program_[NumTexCoordPrecisions];
+      nonpremultiplied_texture_background_program_[LAST_TEX_COORD_PRECISION +
+                                                   1];
+  TextureProgram texture_io_surface_program_[LAST_TEX_COORD_PRECISION + 1];
 
-  RenderPassProgram render_pass_program_[NumTexCoordPrecisions][NumBlendModes];
-  RenderPassProgramAA
-      render_pass_program_aa_[NumTexCoordPrecisions][NumBlendModes];
-  RenderPassMaskProgram render_pass_mask_program_
-      [NumTexCoordPrecisions][NumSamplerTypes][NumBlendModes];
-  RenderPassMaskProgramAA render_pass_mask_program_aa_
-      [NumTexCoordPrecisions][NumSamplerTypes][NumBlendModes];
+  RenderPassProgram
+      render_pass_program_[LAST_TEX_COORD_PRECISION + 1][LAST_BLEND_MODE + 1];
+  RenderPassProgramAA render_pass_program_aa_[LAST_TEX_COORD_PRECISION +
+                                              1][LAST_BLEND_MODE + 1];
+  RenderPassMaskProgram
+      render_pass_mask_program_[LAST_TEX_COORD_PRECISION + 1]
+                               [LAST_SAMPLER_TYPE + 1]
+                               [LAST_BLEND_MODE + 1]
+                               [LAST_MASK_VALUE + 1];
+  RenderPassMaskProgramAA
+      render_pass_mask_program_aa_[LAST_TEX_COORD_PRECISION + 1]
+                                  [LAST_SAMPLER_TYPE + 1]
+                                  [LAST_BLEND_MODE + 1]
+                                  [LAST_MASK_VALUE + 1];
   RenderPassColorMatrixProgram
-      render_pass_color_matrix_program_[NumTexCoordPrecisions][NumBlendModes];
-  RenderPassColorMatrixProgramAA render_pass_color_matrix_program_aa_
-      [NumTexCoordPrecisions][NumBlendModes];
-  RenderPassMaskColorMatrixProgram render_pass_mask_color_matrix_program_
-      [NumTexCoordPrecisions][NumSamplerTypes][NumBlendModes];
-  RenderPassMaskColorMatrixProgramAA render_pass_mask_color_matrix_program_aa_
-      [NumTexCoordPrecisions][NumSamplerTypes][NumBlendModes];
+      render_pass_color_matrix_program_[LAST_TEX_COORD_PRECISION +
+                                        1][LAST_BLEND_MODE + 1];
+  RenderPassColorMatrixProgramAA
+      render_pass_color_matrix_program_aa_[LAST_TEX_COORD_PRECISION +
+                                           1][LAST_BLEND_MODE + 1];
+  RenderPassMaskColorMatrixProgram
+      render_pass_mask_color_matrix_program_[LAST_TEX_COORD_PRECISION + 1]
+                                            [LAST_SAMPLER_TYPE + 1]
+                                            [LAST_BLEND_MODE + 1]
+                                            [LAST_MASK_VALUE + 1];
+  RenderPassMaskColorMatrixProgramAA
+      render_pass_mask_color_matrix_program_aa_[LAST_TEX_COORD_PRECISION + 1]
+                                               [LAST_SAMPLER_TYPE + 1]
+                                               [LAST_BLEND_MODE + 1]
+                                               [LAST_MASK_VALUE + 1];
 
-  VideoYUVProgram video_yuv_program_[NumTexCoordPrecisions];
-  VideoYUVAProgram video_yuva_program_[NumTexCoordPrecisions];
+  VideoYUVProgram video_yuv_program_[LAST_TEX_COORD_PRECISION + 1];
+  VideoYUVAProgram video_yuva_program_[LAST_TEX_COORD_PRECISION + 1];
   VideoStreamTextureProgram
-      video_stream_texture_program_[NumTexCoordPrecisions];
+      video_stream_texture_program_[LAST_TEX_COORD_PRECISION + 1];
 
   DebugBorderProgram debug_border_program_;
   SolidColorProgram solid_color_program_;
@@ -429,7 +487,6 @@ class CC_EXPORT GLRenderer : public DirectRenderer {
 
   gfx::Rect swap_buffer_rect_;
   gfx::Rect scissor_rect_;
-  gfx::Rect viewport_;
   bool is_backbuffer_discarded_;
   bool is_using_bind_uniform_;
   bool is_scissor_enabled_;
@@ -456,7 +513,7 @@ class CC_EXPORT GLRenderer : public DirectRenderer {
 
   SkBitmap on_demand_tile_raster_bitmap_;
   ResourceProvider::ResourceId on_demand_tile_raster_resource_id_;
-
+  BoundGeometry bound_geometry_;
   DISALLOW_COPY_AND_ASSIGN(GLRenderer);
 };
 

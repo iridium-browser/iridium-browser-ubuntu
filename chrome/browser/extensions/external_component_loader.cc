@@ -4,7 +4,6 @@
 
 #include "chrome/browser/extensions/external_component_loader.h"
 
-#include "base/sha1.h"
 #include "base/strings/string_number_conversions.h"
 #include "chrome/browser/bookmarks/enhanced_bookmarks_features.h"
 #include "chrome/browser/browser_process.h"
@@ -15,10 +14,15 @@
 #include "components/signin/core/browser/signin_manager.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/extension_urls.h"
+#include "extensions/common/features/simple_feature.h"
 
 #if defined(OS_CHROMEOS)
 #include "base/command_line.h"
 #include "chromeos/chromeos_switches.h"
+#endif
+
+#if defined(ENABLE_APP_LIST) && defined(OS_CHROMEOS)
+#include "chrome/browser/ui/app_list/google_now_extension.h"
 #endif
 
 namespace extensions {
@@ -32,16 +36,13 @@ ExternalComponentLoader::~ExternalComponentLoader() {}
 // static
 bool ExternalComponentLoader::IsModifiable(const Extension* extension) {
   if (extension->location() == Manifest::EXTERNAL_COMPONENT) {
-    static const char* const enhanced_extension_hashes[] = {
+    static const char* const kEnhancedExtensions[] = {
         "D5736E4B5CF695CB93A2FB57E4FDC6E5AFAB6FE2",  // http://crbug.com/312900
         "D57DE394F36DC1C3220E7604C575D29C51A6C495",  // http://crbug.com/319444
         "3F65507A3B39259B38C8173C6FFA3D12DF64CCE9"   // http://crbug.com/371562
     };
-    std::string hash = base::SHA1HashString(extension->id());
-    hash = base::HexEncode(hash.c_str(), hash.length());
-    for (size_t i = 0; i < arraysize(enhanced_extension_hashes); i++)
-      if (hash == enhanced_extension_hashes[i])
-        return true;
+    return SimpleFeature::IsIdInArray(
+        extension->id(), kEnhancedExtensions, arraysize(kEnhancedExtensions));
   }
   return false;
 }
@@ -53,21 +54,14 @@ void ExternalComponentLoader::StartLoading() {
                     extension_urls::GetWebstoreUpdateUrl().spec());
 
   if (HotwordServiceFactory::IsHotwordAllowed(profile_)) {
-    std::string hotword_id = extension_misc::kHotwordExtensionId;
-    if (HotwordService::IsExperimentalHotwordingEnabled()) {
-      hotword_id = extension_misc::kHotwordSharedModuleId;
-    }
+    std::string hotword_id = extension_misc::kHotwordSharedModuleId;
     prefs_->SetString(hotword_id + ".external_update_url",
                       extension_urls::GetWebstoreUpdateUrl().spec());
   }
 
-  InitBookmarksExperimentState(profile_);
-
   {
     std::string extension_id;
-    if (GetBookmarksExperimentExtensionID(profile_->GetPrefs(),
-                                          &extension_id) &&
-        !extension_id.empty()) {
+    if (IsEnhancedBookmarksEnabled(&extension_id)) {
       prefs_->SetString(extension_id + ".external_update_url",
                         extension_urls::GetWebstoreUpdateUrl().spec());
     }
@@ -82,6 +76,14 @@ void ExternalComponentLoader::StartLoading() {
       prefs_->SetString(extension_id + ".external_update_url",
                         extension_urls::GetWebstoreUpdateUrl().spec());
     }
+  }
+#endif
+
+#if defined(ENABLE_APP_LIST) && defined(OS_CHROMEOS)
+  std::string google_now_extension_id;
+  if (GetGoogleNowExtensionId(&google_now_extension_id)) {
+    prefs_->SetString(google_now_extension_id + ".external_update_url",
+                      extension_urls::GetWebstoreUpdateUrl().spec());
   }
 #endif
 

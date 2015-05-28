@@ -6,6 +6,7 @@
 
 #include "base/logging.h"
 #include "content/browser/renderer_host/input/web_input_event_util.h"
+#include "ui/gfx/win/dpi.h"
 
 using blink::WebInputEvent;
 using blink::WebKeyboardEvent;
@@ -203,7 +204,9 @@ WebMouseEvent WebMouseEventBuilder::Build(HWND hwnd,
       result.button = WebMouseEvent::ButtonNone;
     break;
   case WM_MOUSELEAVE:
-    result.type = WebInputEvent::MouseLeave;
+    // TODO(rbyers): This should be MouseLeave but is disabled temporarily.
+    // See http://crbug.com/450631
+    result.type = WebInputEvent::MouseMove;
     result.button = WebMouseEvent::ButtonNone;
     // set the current mouse position (relative to the client area of the
     // current window) since none is specified for this event
@@ -253,8 +256,12 @@ WebMouseEvent WebMouseEventBuilder::Build(HWND hwnd,
   POINT global_point = { result.x, result.y };
   ClientToScreen(hwnd, &global_point);
 
-  result.globalX = global_point.x;
-  result.globalY = global_point.y;
+  // We need to convert the global point back to DIP before using it.
+  gfx::Point dip_global_point = gfx::win::ScreenToDIPPoint(
+      gfx::Point(global_point.x, global_point.y));
+
+  result.globalX = dip_global_point.x();
+  result.globalY = dip_global_point.y();
 
   // calculate number of clicks:
 

@@ -251,22 +251,6 @@ struct ParamTraits<std::string> {
 };
 
 template <>
-struct ParamTraits<std::wstring> {
-  typedef std::wstring param_type;
-  static void Write(Message* m, const param_type& p) {
-    m->WriteWString(p);
-  }
-  static bool Read(const Message* m, PickleIterator* iter,
-                   param_type* r) {
-    return iter->ReadWString(r);
-  }
-  IPC_EXPORT static void Log(const param_type& p, std::string* l);
-};
-
-// If WCHAR_T_IS_UTF16 is defined, then string16 is a std::wstring so we don't
-// need this trait.
-#if !defined(WCHAR_T_IS_UTF16)
-template <>
 struct ParamTraits<base::string16> {
   typedef base::string16 param_type;
   static void Write(Message* m, const param_type& p) {
@@ -278,7 +262,6 @@ struct ParamTraits<base::string16> {
   }
   IPC_EXPORT static void Log(const param_type& p, std::string* l);
 };
-#endif
 
 template <>
 struct IPC_EXPORT ParamTraits<std::vector<char> > {
@@ -923,33 +906,9 @@ class SyncMessageSchema {
     return ok;
   }
 
-  template<typename TA>
-  static void WriteReplyParams(Message* reply, TA a) {
-    ReplyParam p(a);
-    WriteParam(reply, p);
-  }
-
-  template<typename TA, typename TB>
-  static void WriteReplyParams(Message* reply, TA a, TB b) {
-    ReplyParam p(a, b);
-    WriteParam(reply, p);
-  }
-
-  template<typename TA, typename TB, typename TC>
-  static void WriteReplyParams(Message* reply, TA a, TB b, TC c) {
-    ReplyParam p(a, b, c);
-    WriteParam(reply, p);
-  }
-
-  template<typename TA, typename TB, typename TC, typename TD>
-  static void WriteReplyParams(Message* reply, TA a, TB b, TC c, TD d) {
-    ReplyParam p(a, b, c, d);
-    WriteParam(reply, p);
-  }
-
-  template<typename TA, typename TB, typename TC, typename TD, typename TE>
-  static void WriteReplyParams(Message* reply, TA a, TB b, TC c, TD d, TE e) {
-    ReplyParam p(a, b, c, d, e);
+  template <typename... Ts>
+  static void WriteReplyParams(Message* reply, Ts... args) {
+    ReplyParam p(args...);
     WriteParam(reply, p);
   }
 };

@@ -22,7 +22,7 @@
 #ifndef ElementRareData_h
 #define ElementRareData_h
 
-#include "core/animation/ActiveAnimations.h"
+#include "core/animation/ElementAnimations.h"
 #include "core/dom/Attr.h"
 #include "core/dom/DatasetDOMStringMap.h"
 #include "core/dom/NamedNodeMap.h"
@@ -32,7 +32,7 @@
 #include "core/dom/shadow/ElementShadow.h"
 #include "core/html/ClassList.h"
 #include "core/html/ime/InputMethodContext.h"
-#include "core/rendering/style/StyleInheritedData.h"
+#include "core/style/StyleInheritedData.h"
 #include "platform/heap/Handle.h"
 #include "wtf/OwnPtr.h"
 
@@ -42,7 +42,7 @@ class HTMLElement;
 
 class ElementRareData : public NodeRareData {
 public:
-    static ElementRareData* create(RenderObject* renderer)
+    static ElementRareData* create(LayoutObject* renderer)
     {
         return new ElementRareData(renderer);
     }
@@ -66,6 +66,10 @@ public:
         clearElementFlag(TabIndexWasSetExplicitly);
     }
 
+    bool tabStop() const { return m_tabStop; }
+
+    void setTabStop(bool flag) { m_tabStop = flag; }
+
     CSSStyleDeclaration& ensureInlineCSSStyleDeclaration(Element* ownerElement);
 
     void clearShadow() { m_shadow = nullptr; }
@@ -80,8 +84,8 @@ public:
     NamedNodeMap* attributeMap() const { return m_attributeMap.get(); }
     void setAttributeMap(PassOwnPtrWillBeRawPtr<NamedNodeMap> attributeMap) { m_attributeMap = attributeMap; }
 
-    RenderStyle* computedStyle() const { return m_computedStyle.get(); }
-    void setComputedStyle(PassRefPtr<RenderStyle> computedStyle) { m_computedStyle = computedStyle; }
+    ComputedStyle* ensureComputedStyle() const { return m_computedStyle.get(); }
+    void setComputedStyle(PassRefPtr<ComputedStyle> computedStyle) { m_computedStyle = computedStyle; }
     void clearComputedStyle() { m_computedStyle = nullptr; }
 
     ClassList* classList() const { return m_classList.get(); }
@@ -102,10 +106,10 @@ public:
     IntSize savedLayerScrollOffset() const { return m_savedLayerScrollOffset; }
     void setSavedLayerScrollOffset(IntSize size) { m_savedLayerScrollOffset = size; }
 
-    ActiveAnimations* activeAnimations() { return m_activeAnimations.get(); }
-    void setActiveAnimations(PassOwnPtrWillBeRawPtr<ActiveAnimations> activeAnimations)
+    ElementAnimations* elementAnimations() { return m_elementAnimations.get(); }
+    void setElementAnimations(PassOwnPtrWillBeRawPtr<ElementAnimations> elementAnimations)
     {
-        m_activeAnimations = activeAnimations;
+        m_elementAnimations = elementAnimations;
     }
 
     bool hasInputMethodContext() const { return m_inputMethodContext; }
@@ -122,14 +126,15 @@ public:
     void setCustomElementDefinition(PassRefPtrWillBeRawPtr<CustomElementDefinition> definition) { m_customElementDefinition = definition; }
     CustomElementDefinition* customElementDefinition() const { return m_customElementDefinition.get(); }
 
-    WillBeHeapVector<RefPtrWillBeMember<Attr> >& ensureAttrNodeList();
-    WillBeHeapVector<RefPtrWillBeMember<Attr> >* attrNodeList() { return m_attrNodeList.get(); }
+    WillBeHeapVector<RefPtrWillBeMember<Attr>>& ensureAttrNodeList();
+    WillBeHeapVector<RefPtrWillBeMember<Attr>>* attrNodeList() { return m_attrNodeList.get(); }
     void removeAttrNodeList() { m_attrNodeList.clear(); }
 
-    void traceAfterDispatch(Visitor*);
+    DECLARE_TRACE_AFTER_DISPATCH();
 
 private:
     short m_tabindex;
+    bool m_tabStop;
 
     LayoutSize m_minimumSizeForResizing;
     IntSize m_savedLayerScrollOffset;
@@ -138,12 +143,12 @@ private:
     OwnPtrWillBeMember<ClassList> m_classList;
     OwnPtrWillBeMember<ElementShadow> m_shadow;
     OwnPtrWillBeMember<NamedNodeMap> m_attributeMap;
-    OwnPtrWillBeMember<WillBeHeapVector<RefPtrWillBeMember<Attr> > > m_attrNodeList;
+    OwnPtrWillBeMember<WillBeHeapVector<RefPtrWillBeMember<Attr>>> m_attrNodeList;
     OwnPtrWillBeMember<InputMethodContext> m_inputMethodContext;
-    OwnPtrWillBeMember<ActiveAnimations> m_activeAnimations;
+    OwnPtrWillBeMember<ElementAnimations> m_elementAnimations;
     OwnPtrWillBeMember<InlineCSSStyleDeclaration> m_cssomWrapper;
 
-    RefPtr<RenderStyle> m_computedStyle;
+    RefPtr<ComputedStyle> m_computedStyle;
     RefPtrWillBeMember<CustomElementDefinition> m_customElementDefinition;
 
     RefPtrWillBeMember<PseudoElement> m_generatedBefore;
@@ -151,7 +156,7 @@ private:
     RefPtrWillBeMember<PseudoElement> m_generatedFirstLetter;
     RefPtrWillBeMember<PseudoElement> m_backdrop;
 
-    explicit ElementRareData(RenderObject*);
+    explicit ElementRareData(LayoutObject*);
 };
 
 inline LayoutSize defaultMinimumSizeForResizing()
@@ -159,9 +164,10 @@ inline LayoutSize defaultMinimumSizeForResizing()
     return LayoutSize(LayoutUnit::max(), LayoutUnit::max());
 }
 
-inline ElementRareData::ElementRareData(RenderObject* renderer)
+inline ElementRareData::ElementRareData(LayoutObject* renderer)
     : NodeRareData(renderer)
     , m_tabindex(0)
+    , m_tabStop(true)
     , m_minimumSizeForResizing(defaultMinimumSizeForResizing())
 {
     m_isElementRareData = true;

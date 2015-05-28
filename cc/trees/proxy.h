@@ -17,7 +17,7 @@
 #include "cc/base/cc_export.h"
 
 namespace base {
-namespace debug {
+namespace trace_event {
 class TracedValue;
 }
 class SingleThreadTaskRunner;
@@ -56,6 +56,7 @@ class CC_EXPORT Proxy {
   virtual void FinishAllRendering() = 0;
 
   virtual bool IsStarted() const = 0;
+  virtual bool CommitToActiveTree() const = 0;
 
   // Will call LayerTreeHost::OnCreateAndInitializeOutputSurfaceAttempted
   // with the result of this function.
@@ -79,9 +80,8 @@ class CC_EXPORT Proxy {
 
   virtual void NotifyInputThrottledUntilCommit() = 0;
 
-  // Defers commits until it is reset. It is only supported when in threaded
-  // mode. It's an error to make a sync call like CompositeAndReadback while
-  // commits are deferred.
+  // Defers commits until it is reset. It is only supported when using a
+  // scheduler.
   virtual void SetDeferCommits(bool defer_commits) = 0;
 
   virtual void MainThreadHasStoppedFlinging() = 0;
@@ -102,11 +102,12 @@ class CC_EXPORT Proxy {
 
   virtual bool SupportsImplScrolling() const = 0;
 
-  virtual void AsValueInto(base::debug::TracedValue* value) const = 0;
-
   virtual void SetDebugState(const LayerTreeDebugState& debug_state) = 0;
 
   virtual void SetChildrenNeedBeginFrames(bool children_need_begin_frames) = 0;
+
+  virtual void SetAuthoritativeVSyncInterval(
+      const base::TimeDelta& interval) = 0;
 
   // Testing hooks
   virtual bool MainFrameWillHappenForTesting() = 0;

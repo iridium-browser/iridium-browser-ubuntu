@@ -57,6 +57,11 @@
 namespace rtc {
 namespace {
 
+// Turning on IPv6 could make many IPv6 interfaces available for connectivity
+// check and delay the call setup time. kMaxIPv6Networks is the default upper
+// limit of IPv6 networks but could be changed by set_max_ipv6_networks().
+const int kMaxIPv6Networks = 5;
+
 const uint32 kUpdateNetworksMessage = 1;
 const uint32 kSignalNetworksMessage = 2;
 
@@ -115,10 +120,32 @@ std::string AdapterTypeToString(AdapterType type) {
       return "Cellular";
     case ADAPTER_TYPE_VPN:
       return "VPN";
+    case ADAPTER_TYPE_LOOPBACK:
+      return "Loopback";
     default:
-      ASSERT(false);
+      DCHECK(false) << "Invalid type " << type;
       return std::string();
   }
+}
+
+bool IsIgnoredIPv6(const IPAddress& ip) {
+  if (ip.family() != AF_INET6) {
+    return false;
+  }
+
+  // Link-local addresses require scope id to be bound successfully.
+  // However, our IPAddress structure doesn't carry that so the
+  // information is lost and causes binding failure.
+  if (IPIsLinkLocal(ip)) {
+    return true;
+  }
+
+  // Any MAC based IPv6 should be avoided to prevent the MAC tracking.
+  if (IPIsMacBased(ip)) {
+    return true;
+  }
+
+  return false;
 }
 
 }  // namespace
@@ -136,7 +163,8 @@ NetworkManager::NetworkManager() {
 NetworkManager::~NetworkManager() {
 }
 
-NetworkManagerBase::NetworkManagerBase() : ipv6_enabled_(true) {
+NetworkManagerBase::NetworkManagerBase()
+    : max_ipv6_networks_(kMaxIPv6Networks), ipv6_enabled_(true) {
 }
 
 NetworkManagerBase::~NetworkManagerBase() {
@@ -145,12 +173,50 @@ NetworkManagerBase::~NetworkManagerBase() {
   }
 }
 
+void NetworkManagerBase::GetAnyAddressNetworks(NetworkList* networks) {
+  if (!ipv4_any_address_network_) {
+    const rtc::IPAddress ipv4_any_address(INADDR_ANY);
+    ipv4_any_address_network_.reset(
+        new rtc::Network("any", "any", ipv4_any_address, 0));
+    ipv4_any_address_network_->AddIP(ipv4_any_address);
+  }
+  networks->push_back(ipv4_any_address_network_.get());
+
+  if (ipv6_enabled()) {
+    if (!ipv6_any_address_network_) {
+      const rtc::IPAddress ipv6_any_address(in6addr_any);
+      ipv6_any_address_network_.reset(
+          new rtc::Network("any", "any", ipv6_any_address, 0));
+      ipv6_any_address_network_->AddIP(ipv6_any_address);
+    }
+    networks->push_back(ipv6_any_address_network_.get());
+  }
+}
+
 void NetworkManagerBase::GetNetworks(NetworkList* result) const {
-  *result = networks_;
+  int ipv6_networks = 0;
+  result->clear();
+  for (Network* network : networks_) {
+    // Keep the number of IPv6 networks under |max_ipv6_networks_|.
+    if (network->prefix().family() == AF_INET6) {
+      if (ipv6_networks >= max_ipv6_networks_) {
+        continue;
+      }
+      ++ipv6_networks;
+    }
+    result->push_back(network);
+  }
 }
 
 void NetworkManagerBase::MergeNetworkList(const NetworkList& new_networks,
                                           bool* changed) {
+  NetworkManager::Stats stats;
+  MergeNetworkList(new_networks, changed, &stats);
+}
+
+void NetworkManagerBase::MergeNetworkList(const NetworkList& new_networks,
+                                          bool* changed,
+                                          NetworkManager::Stats* stats) {
   // AddressList in this map will track IP addresses for all Networks
   // with the same key.
   std::map<std::string, AddressList> consolidated_address_list;
@@ -185,6 +251,13 @@ void NetworkManagerBase::MergeNetworkList(const NetworkList& new_networks,
     }
     if (!might_add_to_merged_list) {
       delete network;
+    } else {
+      if (current_list.ips[0].family() == AF_INET) {
+        stats->ipv4_network_count++;
+      } else {
+        ASSERT(current_list.ips[0].family() == AF_INET6);
+        stats->ipv6_network_count++;
+      }
     }
   }
 
@@ -213,7 +286,7 @@ void NetworkManagerBase::MergeNetworkList(const NetworkList& new_networks,
   networks_ = merged_list;
 
   // If the network lists changes, we resort it.
-  if (changed) {
+  if (*changed) {
     std::sort(networks_.begin(), networks_.end(), SortNetworks);
     // Now network interfaces are sorted, we should set the preference value
     // for each of the interfaces we are planning to use.
@@ -237,6 +310,7 @@ void NetworkManagerBase::MergeNetworkList(const NetworkList& new_networks,
 
 BasicNetworkManager::BasicNetworkManager()
     : thread_(NULL), sent_first_update_(false), start_count_(0),
+      network_ignore_mask_(kDefaultNetworkIgnoreMask),
       ignore_non_default_routes_(false) {
 }
 
@@ -280,6 +354,11 @@ void BasicNetworkManager::ConvertIfAddrs(struct ifaddrs* interfaces,
         if (ipv6_enabled()) {
           ip = IPAddress(
               reinterpret_cast<sockaddr_in6*>(cursor->ifa_addr)->sin6_addr);
+
+          if (IsIgnoredIPv6(ip)) {
+            continue;
+          }
+
           mask = IPAddress(
               reinterpret_cast<sockaddr_in6*>(cursor->ifa_netmask)->sin6_addr);
           scope_id =
@@ -300,15 +379,19 @@ void BasicNetworkManager::ConvertIfAddrs(struct ifaddrs* interfaces,
                                      prefix, prefix_length);
     auto existing_network = current_networks.find(key);
     if (existing_network == current_networks.end()) {
+      AdapterType adapter_type = ADAPTER_TYPE_UNKNOWN;
+      if (cursor->ifa_flags & IFF_LOOPBACK) {
+        // TODO(phoglund): Need to recognize other types as well.
+        adapter_type = ADAPTER_TYPE_LOOPBACK;
+      }
       scoped_ptr<Network> network(new Network(cursor->ifa_name,
                                               cursor->ifa_name,
                                               prefix,
-                                              prefix_length));
+                                              prefix_length,
+                                              adapter_type));
       network->set_scope_id(scope_id);
       network->AddIP(ip);
-      bool ignored = ((cursor->ifa_flags & IFF_LOOPBACK) ||
-                      IsIgnoredNetwork(*network));
-      network->set_ignored(ignored);
+      network->set_ignored(IsIgnoredNetwork(*network));
       if (include_ignored || !network->ignored()) {
         networks->push_back(network.release());
       }
@@ -431,6 +514,11 @@ bool BasicNetworkManager::CreateNetworks(bool include_ignored,
                   reinterpret_cast<sockaddr_in6*>(address->Address.lpSockaddr);
               scope_id = v6_addr->sin6_scope_id;
               ip = IPAddress(v6_addr->sin6_addr);
+
+              if (IsIgnoredIPv6(ip)) {
+                continue;
+              }
+
               break;
             } else {
               continue;
@@ -446,15 +534,20 @@ bool BasicNetworkManager::CreateNetworks(bool include_ignored,
         std::string key = MakeNetworkKey(name, prefix, prefix_length);
         auto existing_network = current_networks.find(key);
         if (existing_network == current_networks.end()) {
+          AdapterType adapter_type = ADAPTER_TYPE_UNKNOWN;
+          if (adapter_addrs->IfType == IF_TYPE_SOFTWARE_LOOPBACK) {
+            // TODO(phoglund): Need to recognize other types as well.
+            adapter_type = ADAPTER_TYPE_LOOPBACK;
+          }
           scoped_ptr<Network> network(new Network(name,
                                                   description,
                                                   prefix,
-                                                  prefix_length));
+                                                  prefix_length,
+                                                  adapter_type));
           network->set_scope_id(scope_id);
           network->AddIP(ip);
-          bool ignore = ((adapter_addrs->IfType == IF_TYPE_SOFTWARE_LOOPBACK) ||
-                         IsIgnoredNetwork(*network));
-          network->set_ignored(ignore);
+          bool ignored = IsIgnoredNetwork(*network);
+          network->set_ignored(ignored);
           if (include_ignored || !network->ignored()) {
             networks->push_back(network.release());
           }
@@ -506,6 +599,10 @@ bool BasicNetworkManager::IsIgnoredNetwork(const Network& network) const {
       return true;
     }
   }
+
+  if (network_ignore_mask_ & network.type()) {
+    return true;
+  }
 #if defined(WEBRTC_POSIX)
   // Filter out VMware/VirtualBox interfaces, typically named vmnet1,
   // vmnet8, or vboxnet0.
@@ -534,6 +631,7 @@ bool BasicNetworkManager::IsIgnoredNetwork(const Network& network) const {
   if (network.prefix().family() == AF_INET) {
     return (network.prefix().v4AddressAsHostOrderInteger() < 0x01000000);
   }
+
   return false;
 }
 
@@ -632,6 +730,8 @@ Network::Network(const std::string& name, const std::string& desc,
       key_(MakeNetworkKey(name, prefix, prefix_length)), scope_id_(0),
       ignored_(false), type_(type), preference_(0) {
 }
+
+Network::~Network() = default;
 
 // Sets the addresses of this network. Returns true if the address set changed.
 // Change detection is short circuited if the changed argument is true.

@@ -98,38 +98,31 @@ class MediaResourceGetter {
 
         @Override
         public boolean equals(Object obj) {
-            if (this == obj)
-                return true;
-            if (obj == null)
-                return false;
-            if (getClass() != obj.getClass())
-                return false;
+            if (this == obj) return true;
+            if (obj == null) return false;
+            if (getClass() != obj.getClass()) return false;
             MediaMetadata other = (MediaMetadata) obj;
-            if (mDurationInMilliseconds != other.mDurationInMilliseconds)
-                return false;
-            if (mHeight != other.mHeight)
-                return false;
-            if (mSuccess != other.mSuccess)
-                return false;
-            if (mWidth != other.mWidth)
-                return false;
+            if (mDurationInMilliseconds != other.mDurationInMilliseconds) return false;
+            if (mHeight != other.mHeight) return false;
+            if (mSuccess != other.mSuccess) return false;
+            if (mWidth != other.mWidth) return false;
             return true;
         }
     }
 
     @CalledByNative
     private static MediaMetadata extractMediaMetadata(final Context context,
-                                                      final String url,
-                                                      final String cookies,
-                                                      final String userAgent) {
+            final String url,
+            final String cookies,
+            final String userAgent) {
         return new MediaResourceGetter().extract(
                 context, url, cookies, userAgent);
     }
 
     @CalledByNative
     private static MediaMetadata extractMediaMetadataFromFd(int fd,
-                                                            long offset,
-                                                            long length) {
+            long offset,
+            long length) {
         return new MediaResourceGetter().extract(fd, offset, length);
     }
 
@@ -210,7 +203,7 @@ class MediaResourceGetter {
             Log.d(TAG, "extracted valid metadata: " + result.toString());
             return result;
         } catch (RuntimeException e) {
-            Log.e(TAG, "Unable to extract medata", e);
+            Log.e(TAG, "Unable to extract metadata: " + e.getMessage());
             return EMPTY_METADATA;
         }
     }
@@ -221,7 +214,7 @@ class MediaResourceGetter {
         try {
             uri = URI.create(url);
         } catch (IllegalArgumentException  e) {
-            Log.e(TAG, "Cannot parse uri.", e);
+            Log.e(TAG, "Cannot parse uri: " + e.getMessage());
             return false;
         }
         String scheme = uri.getScheme();
@@ -239,7 +232,7 @@ class MediaResourceGetter {
                 configure(file.getAbsolutePath());
                 return true;
             } catch (RuntimeException e) {
-                Log.e(TAG, "Error configuring data source", e);
+                Log.e(TAG, "Error configuring data source: " + e.getMessage());
                 return false;
             }
         }
@@ -263,7 +256,7 @@ class MediaResourceGetter {
             configure(url, headersMap);
             return true;
         } catch (RuntimeException e) {
-            Log.e(TAG, "Error configuring data source", e);
+            Log.e(TAG, "Error configuring data source: " + e.getMessage());
             return false;
         }
     }

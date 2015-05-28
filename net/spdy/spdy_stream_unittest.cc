@@ -11,8 +11,8 @@
 #include "base/stl_util.h"
 #include "base/strings/string_piece.h"
 #include "net/base/completion_callback.h"
-#include "net/base/net_log_unittest.h"
 #include "net/base/request_priority.h"
+#include "net/log/net_log_unittest.h"
 #include "net/socket/next_proto.h"
 #include "net/socket/socket_test_util.h"
 #include "net/spdy/buffered_spdy_framer.h"
@@ -107,10 +107,11 @@ class SpdyStreamTest : public ::testing::Test,
   int offset_;
 };
 
-INSTANTIATE_TEST_CASE_P(
-    NextProto,
-    SpdyStreamTest,
-    testing::Values(kProtoSPDY31, kProtoSPDY4_14, kProtoSPDY4_15));
+INSTANTIATE_TEST_CASE_P(NextProto,
+                        SpdyStreamTest,
+                        testing::Values(kProtoSPDY31,
+                                        kProtoSPDY4_14,
+                                        kProtoSPDY4));
 
 TEST_P(SpdyStreamTest, SendDataAfterOpen) {
   GURL url(kStreamUrl);
@@ -294,8 +295,7 @@ TEST_P(SpdyStreamTest, StreamError) {
 
   // Check that we logged SPDY_STREAM_ERROR correctly.
   int pos = net::ExpectLogContainsSomewhere(
-      entries, 0,
-      net::NetLog::TYPE_SPDY_STREAM_ERROR,
+      entries, 0, net::NetLog::TYPE_HTTP2_STREAM_ERROR,
       net::NetLog::PHASE_NONE);
 
   int stream_id2;

@@ -13,7 +13,6 @@ import os
 import re
 import sys
 import time
-import traceback
 
 # We import mox so that we can identify mox exceptions and pass them through
 # in our exception handling code.
@@ -135,6 +134,10 @@ class BuilderStage(object):
   def GetStageNames(self):
     """Get a list of the places where this stage has recorded results."""
     return [self.name]
+
+  def GetBuildStageIDs(self):
+    """Get a list of build stage ids in cidb corresponding to this stage."""
+    return [self._build_stage_id] if self._build_stage_id is not None else []
 
   def UpdateSuffix(self, tag, child_suffix):
     """Update the suffix arg for the init call.
@@ -339,7 +342,7 @@ class BuilderStage(object):
     if issubclass(exc_type, failures_lib.StepFailure):
       return str(exc_value)
     else:
-      return ''.join(traceback.format_exception(*exc_info))
+      return cros_build_lib.FormatDetailedTraceback(exc_info=exc_info)
 
   @classmethod
   def _HandleExceptionAsWarning(cls, exc_info, retrying=False):
@@ -476,6 +479,12 @@ class BuilderStage(object):
       self._RecordResult(self.name, result, description, prefix=self._prefix,
                          time=elapsed_time)
       self._FinishBuildStageInCIDB(self._TranslateResultToCIDBStatus(result))
+      if isinstance(result, BaseException) and self._build_stage_id is not None:
+        _, db = self._run.GetCIDBHandle()
+        if db:
+          failures_lib.ReportStageFailureToCIDB(db,
+                                                self._build_stage_id,
+                                                result)
       self._Finish()
       sys.stdout.flush()
       sys.stderr.flush()
@@ -519,11 +528,16 @@ class RetryStage(object):
     self.args = (builder_run,) + args
     self.kwargs = kwargs
     self.names = []
+    self._build_stage_ids = []
     self.attempt = None
 
   def GetStageNames(self):
     """Get a list of the places where this stage has recorded results."""
     return self.names[:]
+
+  def GetBuildStageIDs(self):
+    """Get a list of build stage ids in cidb corresponding to this stage."""
+    return self._build_stage_ids[:]
 
   def _PerformStage(self):
     """Run the stage once, incrementing the attempt number as needed."""
@@ -532,6 +546,7 @@ class RetryStage(object):
         *self.args, attempt=self.attempt, max_retry=self.max_retry,
         suffix=suffix, **self.kwargs)
     self.names.extend(stage_obj.GetStageNames())
+    self._build_stage_ids.extend(stage_obj.GetBuildStageIDs())
     self.attempt += 1
     stage_obj.Run()
 
@@ -561,11 +576,16 @@ class RepeatStage(object):
     self.args = (builder_run,) + args
     self.kwargs = kwargs
     self.names = []
+    self._build_stage_ids = []
     self.attempt = None
 
   def GetStageNames(self):
     """Get a list of the places where this stage has recorded results."""
     return self.names[:]
+
+  def GetBuildStageIDs(self):
+    """Get a list of build stage ids in cidb corresponding to this stage."""
+    return self._build_stage_ids[:]
 
   def _PerformStage(self):
     """Run the stage once."""
@@ -573,6 +593,7 @@ class RepeatStage(object):
     stage_obj = self.stage(
         *self.args, attempt=self.attempt, suffix=suffix, **self.kwargs)
     self.names.extend(stage_obj.GetStageNames())
+    self._build_stage_ids.extend(stage_obj.GetBuildStageIDs())
     stage_obj.Run()
 
   def Run(self):
@@ -702,11 +723,6 @@ class ArchivingStageMixin(object):
   def upload_url(self):
     """The GS location where artifacts should be uploaded for this run."""
     return self.archive.upload_url
-
-  @property
-  def base_upload_url(self):
-    """The GS path one level up from self.upload_url."""
-    return os.path.dirname(self.upload_url)
 
   @property
   def download_url(self):

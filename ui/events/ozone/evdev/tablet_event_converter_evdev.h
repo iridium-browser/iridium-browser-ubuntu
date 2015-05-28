@@ -18,6 +18,8 @@ struct input_event;
 
 namespace ui {
 
+class DeviceEventDispatcherEvdev;
+
 class EVENTS_OZONE_EVDEV_EXPORT TabletEventConverterEvdev
     : public EventConverterEvdev {
  public:
@@ -25,10 +27,9 @@ class EVENTS_OZONE_EVDEV_EXPORT TabletEventConverterEvdev
                             base::FilePath path,
                             int id,
                             InputDeviceType type,
-                            EventModifiersEvdev* modifiers,
                             CursorDelegateEvdev* cursor,
                             const EventDeviceInfo& info,
-                            const EventDispatchCallback& callback);
+                            DeviceEventDispatcherEvdev* dispatcher);
   ~TabletEventConverterEvdev() override;
 
   // EventConverterEvdev:
@@ -45,7 +46,7 @@ class EVENTS_OZONE_EVDEV_EXPORT TabletEventConverterEvdev
 
   // Flush events delimited by EV_SYN. This is useful for handling
   // non-axis-aligned movement properly.
-  void FlushEvents();
+  void FlushEvents(const input_event& input);
 
   // Controller for watching the input fd.
   base::MessagePumpLibevent::FileDescriptorWatcher controller_;
@@ -53,11 +54,8 @@ class EVENTS_OZONE_EVDEV_EXPORT TabletEventConverterEvdev
   // Shared cursor state.
   CursorDelegateEvdev* cursor_;
 
-  // Modifier key state (shift, ctrl, etc).
-  EventModifiersEvdev* modifiers_;
-
-  // Callback for dispatching events.
-  EventDispatchCallback callback_;
+  // Dispatcher for events.
+  DeviceEventDispatcherEvdev* dispatcher_;
 
   int y_abs_location_;
   int x_abs_location_;

@@ -14,11 +14,7 @@ namespace blink {
 
 PassRefPtrWillBeRawPtr<MediaQuerySet> MediaQueryParser::parseMediaQuerySet(const String& queryString)
 {
-    // FIXME: Replace the CSSTokenizer with a generic CSSTokenizer, once there is one,
-    // or better yet, replace the MediaQueryParser with a generic thread-safe CSS parser.
-    Vector<CSSParserToken> tokens;
-    CSSTokenizer::tokenize(queryString, tokens);
-    return parseMediaQuerySet(tokens);
+    return parseMediaQuerySet(CSSTokenizer::Scope(queryString).tokenRange());
 }
 
 PassRefPtrWillBeRawPtr<MediaQuerySet> MediaQueryParser::parseMediaQuerySet(CSSParserTokenRange range)
@@ -76,15 +72,30 @@ void MediaQueryParser::readMediaNot(CSSParserTokenType type, const CSSParserToke
         readFeatureStart(type, token);
 }
 
+static bool isRestrictorOrLogicalOperator(const String& tokenValue)
+{
+    // FIXME: it would be more efficient to use lower-case always for tokenValue.
+    return equalIgnoringCase(tokenValue, "not")
+        || equalIgnoringCase(tokenValue, "and")
+        || equalIgnoringCase(tokenValue, "or")
+        || equalIgnoringCase(tokenValue, "only");
+}
+
 void MediaQueryParser::readMediaType(CSSParserTokenType type, const CSSParserToken& token)
 {
     if (type == LeftParenthesisToken) {
-        m_state = ReadFeature;
+        if (m_mediaQueryData.restrictor() != MediaQuery::None)
+            m_state = SkipUntilComma;
+        else
+            m_state = ReadFeature;
     } else if (type == IdentToken) {
         if (m_state == ReadRestrictor && equalIgnoringCase(token.value(), "not")) {
             setStateAndRestrict(ReadMediaType, MediaQuery::Not);
         } else if (m_state == ReadRestrictor && equalIgnoringCase(token.value(), "only")) {
             setStateAndRestrict(ReadMediaType, MediaQuery::Only);
+        } else if (m_mediaQueryData.restrictor() != MediaQuery::None
+            && isRestrictorOrLogicalOperator(token.value())) {
+            m_state = SkipUntilComma;
         } else {
             m_mediaQueryData.setMediaType(token.value());
             m_state = ReadAnd;
@@ -199,7 +210,7 @@ void MediaQueryParser::processToken(const CSSParserToken& token)
     m_blockWatcher.handleToken(token);
 
     // Call the function that handles current state
-    if (type != WhitespaceToken && type != CommentToken)
+    if (type != WhitespaceToken)
         ((this)->*(m_state))(type, token);
 }
 
@@ -267,11 +278,9 @@ bool MediaQueryData::tryAddParserValue(CSSParserTokenType type, const CSSParserT
         value.id = CSSValueInvalid;
         value.isInt = false;
     } else if (type == IdentToken) {
-        CSSParserString tokenValue;
-        tokenValue.init(token.value());
         value.unit = CSSPrimitiveValue::CSS_IDENT;
-        value.string = tokenValue;
-        value.id = cssValueKeywordID(tokenValue);
+        value.string = token.value();
+        value.id = cssValueKeywordID(token.value());
         value.isInt = false;
     } else {
         return false;

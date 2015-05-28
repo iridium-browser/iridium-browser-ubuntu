@@ -12,6 +12,7 @@
 #include <map>
 
 #include "webrtc/base/constructormagic.h"
+#include "webrtc/base/scoped_ptr.h"
 #include "webrtc/base/thread_annotations.h"
 #include "webrtc/modules/remote_bitrate_estimator/include/remote_bitrate_estimator.h"
 #include "webrtc/modules/remote_bitrate_estimator/inter_arrival.h"
@@ -22,7 +23,6 @@
 #include "webrtc/system_wrappers/interface/clock.h"
 #include "webrtc/system_wrappers/interface/critical_section_wrapper.h"
 #include "webrtc/system_wrappers/interface/logging.h"
-#include "webrtc/system_wrappers/interface/scoped_ptr.h"
 #include "webrtc/typedefs.h"
 
 namespace webrtc {
@@ -67,6 +67,42 @@ std::vector<K> Keys(const std::map<K, V>& map) {
   return keys;
 }
 
+struct Probe {
+  Probe(int64_t send_time_ms, int64_t recv_time_ms, size_t payload_size)
+      : send_time_ms(send_time_ms),
+        recv_time_ms(recv_time_ms),
+        payload_size(payload_size) {}
+  int64_t send_time_ms;
+  int64_t recv_time_ms;
+  size_t payload_size;
+};
+
+struct Cluster {
+  Cluster()
+      : send_mean_ms(0.0f),
+        recv_mean_ms(0.0f),
+        mean_size(0),
+        count(0),
+        num_above_min_delta(0) {}
+
+  int GetSendBitrateBps() const {
+    assert(send_mean_ms > 0);
+    return mean_size * 8 * 1000 / send_mean_ms;
+  }
+
+  int GetRecvBitrateBps() const {
+    assert(recv_mean_ms > 0);
+    return mean_size * 8 * 1000 / recv_mean_ms;
+  }
+
+  float send_mean_ms;
+  float recv_mean_ms;
+  // TODO(holmer): Add some variance metric as well?
+  size_t mean_size;
+  int count;
+  int num_above_min_delta;
+};
+
 class RemoteBitrateEstimatorAbsSendTimeImpl : public RemoteBitrateEstimator {
  public:
   RemoteBitrateEstimatorAbsSendTimeImpl(RemoteBitrateObserver* observer,
@@ -75,49 +111,26 @@ class RemoteBitrateEstimatorAbsSendTimeImpl : public RemoteBitrateEstimator {
                                         uint32_t min_bitrate_bps);
   virtual ~RemoteBitrateEstimatorAbsSendTimeImpl() {}
 
-  virtual void IncomingPacket(int64_t arrival_time_ms,
-                              size_t payload_size,
-                              const RTPHeader& header) OVERRIDE;
+  void IncomingPacketFeedbackVector(
+      const std::vector<PacketInfo>& packet_feedback_vector) override;
+
+  void IncomingPacket(int64_t arrival_time_ms,
+                      size_t payload_size,
+                      const RTPHeader& header) override;
   // This class relies on Process() being called periodically (at least once
   // every other second) for streams to be timed out properly. Therefore it
   // shouldn't be detached from the ProcessThread except if it's about to be
   // deleted.
-  virtual int32_t Process() OVERRIDE;
-  virtual int64_t TimeUntilNextProcess() OVERRIDE;
-  virtual void OnRttUpdate(uint32_t rtt) OVERRIDE;
-  virtual void RemoveStream(unsigned int ssrc) OVERRIDE;
-  virtual bool LatestEstimate(std::vector<unsigned int>* ssrcs,
-                              unsigned int* bitrate_bps) const OVERRIDE;
-  virtual bool GetStats(ReceiveBandwidthEstimatorStats* output) const OVERRIDE;
+  int32_t Process() override;
+  int64_t TimeUntilNextProcess() override;
+  void OnRttUpdate(int64_t rtt) override;
+  void RemoveStream(unsigned int ssrc) override;
+  bool LatestEstimate(std::vector<unsigned int>* ssrcs,
+                      unsigned int* bitrate_bps) const override;
+  bool GetStats(ReceiveBandwidthEstimatorStats* output) const override;
 
  private:
   typedef std::map<unsigned int, int64_t> Ssrcs;
-
-  struct Probe {
-    Probe(int64_t send_time_ms, int64_t recv_time_ms, size_t payload_size)
-        : send_time_ms(send_time_ms),
-          recv_time_ms(recv_time_ms),
-          payload_size(payload_size) {}
-    int64_t send_time_ms;
-    int64_t recv_time_ms;
-    size_t payload_size;
-  };
-
-  struct Cluster {
-    Cluster()
-        : send_mean_ms(0.0f),
-          recv_mean_ms(0.0f),
-          mean_size(0),
-          count(0),
-          num_above_min_delta(0) {}
-
-    float send_mean_ms;
-    float recv_mean_ms;
-    // TODO(holmer): Add some variance metric as well?
-    size_t mean_size;
-    int count;
-    int num_above_min_delta;
-  };
 
   static bool IsWithinClusterBounds(int send_delta_ms,
                                     const Cluster& cluster_aggregate) {
@@ -139,6 +152,11 @@ class RemoteBitrateEstimatorAbsSendTimeImpl : public RemoteBitrateEstimator {
     return static_cast<int>(reinterpret_cast<uint64_t>(this));
   }
 
+  void IncomingPacketInfo(int64_t arrival_time_ms,
+                          uint32_t send_time_24bits,
+                          size_t payload_size,
+                          uint32_t ssrc);
+
   bool IsProbe(int64_t send_time_ms, int payload_size) const
       EXCLUSIVE_LOCKS_REQUIRED(crit_sect_.get());
 
@@ -151,20 +169,25 @@ class RemoteBitrateEstimatorAbsSendTimeImpl : public RemoteBitrateEstimator {
 
   void ComputeClusters(std::list<Cluster>* clusters) const;
 
-  int FindBestProbeBitrate(const std::list<Cluster>& clusters) const;
+  std::list<Cluster>::const_iterator FindBestProbe(
+      const std::list<Cluster>& clusters) const
+      EXCLUSIVE_LOCKS_REQUIRED(crit_sect_.get());
 
   void ProcessClusters(int64_t now_ms)
       EXCLUSIVE_LOCKS_REQUIRED(crit_sect_.get());
 
-  scoped_ptr<CriticalSectionWrapper> crit_sect_;
+  bool IsBitrateImproving(int probe_bitrate_bps) const
+      EXCLUSIVE_LOCKS_REQUIRED(crit_sect_.get());
+
+  rtc::scoped_ptr<CriticalSectionWrapper> crit_sect_;
   RemoteBitrateObserver* observer_ GUARDED_BY(crit_sect_.get());
   Clock* clock_;
   Ssrcs ssrcs_ GUARDED_BY(crit_sect_.get());
-  scoped_ptr<InterArrival> inter_arrival_ GUARDED_BY(crit_sect_.get());
+  rtc::scoped_ptr<InterArrival> inter_arrival_ GUARDED_BY(crit_sect_.get());
   OveruseEstimator estimator_ GUARDED_BY(crit_sect_.get());
   OveruseDetector detector_ GUARDED_BY(crit_sect_.get());
   RateStatistics incoming_bitrate_ GUARDED_BY(crit_sect_.get());
-  scoped_ptr<RemoteRateControl> remote_rate_ GUARDED_BY(crit_sect_.get());
+  rtc::scoped_ptr<RemoteRateControl> remote_rate_ GUARDED_BY(crit_sect_.get());
   int64_t last_process_time_;
   std::vector<int> recent_propagation_delta_ms_ GUARDED_BY(crit_sect_.get());
   std::vector<int64_t> recent_update_time_ms_ GUARDED_BY(crit_sect_.get());
@@ -172,6 +195,7 @@ class RemoteBitrateEstimatorAbsSendTimeImpl : public RemoteBitrateEstimator {
   int total_propagation_delta_ms_ GUARDED_BY(crit_sect_.get());
 
   std::list<Probe> probes_;
+  size_t total_probes_received_;
   int64_t first_packet_time_ms_;
 
   DISALLOW_IMPLICIT_CONSTRUCTORS(RemoteBitrateEstimatorAbsSendTimeImpl);
@@ -194,6 +218,7 @@ RemoteBitrateEstimatorAbsSendTimeImpl::RemoteBitrateEstimatorAbsSendTimeImpl(
       last_process_time_(-1),
       process_interval_ms_(kProcessIntervalMs),
       total_propagation_delta_ms_(0),
+      total_probes_received_(0),
       first_packet_time_ms_(-1) {
   assert(observer_);
   assert(clock_);
@@ -210,7 +235,7 @@ void RemoteBitrateEstimatorAbsSendTimeImpl::ComputeClusters(
     if (prev_send_time >= 0) {
       int send_delta_ms = it->send_time_ms - prev_send_time;
       int recv_delta_ms = it->recv_time_ms - prev_recv_time;
-      if (send_delta_ms > 1 && recv_delta_ms > 1) {
+      if (send_delta_ms >= 1 && recv_delta_ms >= 1) {
         ++current.num_above_min_delta;
       }
       if (!IsWithinClusterBounds(send_delta_ms, current)) {
@@ -230,9 +255,11 @@ void RemoteBitrateEstimatorAbsSendTimeImpl::ComputeClusters(
     AddCluster(clusters, &current);
 }
 
-int RemoteBitrateEstimatorAbsSendTimeImpl::FindBestProbeBitrate(
+std::list<Cluster>::const_iterator
+RemoteBitrateEstimatorAbsSendTimeImpl::FindBestProbe(
     const std::list<Cluster>& clusters) const {
   int highest_probe_bitrate_bps = 0;
+  std::list<Cluster>::const_iterator best_it = clusters.end();
   for (std::list<Cluster>::const_iterator it = clusters.begin();
        it != clusters.end();
        ++it) {
@@ -241,16 +268,14 @@ int RemoteBitrateEstimatorAbsSendTimeImpl::FindBestProbeBitrate(
     int send_bitrate_bps = it->mean_size * 8 * 1000 / it->send_mean_ms;
     int recv_bitrate_bps = it->mean_size * 8 * 1000 / it->recv_mean_ms;
     if (it->num_above_min_delta > it->count / 2 &&
-        (it->recv_mean_ms - it->send_mean_ms <= 1.5f ||
-         it->send_mean_ms - it->recv_mean_ms >= 3.0f)) {
-      int probe_bitrate_bps = std::min(send_bitrate_bps, recv_bitrate_bps);
-      if (probe_bitrate_bps > highest_probe_bitrate_bps)
+        (it->recv_mean_ms - it->send_mean_ms <= 2.0f &&
+         it->send_mean_ms - it->recv_mean_ms <= 5.0f)) {
+      int probe_bitrate_bps =
+          std::min(it->GetSendBitrateBps(), it->GetRecvBitrateBps());
+      if (probe_bitrate_bps > highest_probe_bitrate_bps) {
         highest_probe_bitrate_bps = probe_bitrate_bps;
-      LOG(LS_INFO) << "Probe successful, sent at " << send_bitrate_bps
-                   << " bps, received at " << recv_bitrate_bps
-                   << " bps. Mean send delta: " << it->send_mean_ms
-                   << " ms, mean recv delta: " << it->recv_mean_ms
-                   << " ms, num probes: " << it->count;
+        best_it = it;
+      }
     } else {
       LOG(LS_INFO) << "Probe failed, sent at " << send_bitrate_bps
                    << " bps, received at " << recv_bitrate_bps
@@ -260,7 +285,7 @@ int RemoteBitrateEstimatorAbsSendTimeImpl::FindBestProbeBitrate(
       break;
     }
   }
-  return highest_probe_bitrate_bps;
+  return best_it;
 }
 
 void RemoteBitrateEstimatorAbsSendTimeImpl::ProcessClusters(int64_t now_ms) {
@@ -273,22 +298,48 @@ void RemoteBitrateEstimatorAbsSendTimeImpl::ProcessClusters(int64_t now_ms) {
       probes_.pop_front();
     return;
   }
-  int highest_probe_bitrate_bps = FindBestProbeBitrate(clusters);
-  bool initial_probe =
-      !remote_rate_->ValidEstimate() && highest_probe_bitrate_bps > 0;
-  bool probe_above_estimate =
-      remote_rate_->ValidEstimate() &&
-      highest_probe_bitrate_bps >
-          static_cast<int>(remote_rate_->LatestEstimate());
-  if (initial_probe || probe_above_estimate) {
-    LOG(LS_INFO) << "Set new bitrate based on probe: "
-                 << highest_probe_bitrate_bps << " bps.";
-    remote_rate_->SetEstimate(highest_probe_bitrate_bps, now_ms);
+
+  std::list<Cluster>::const_iterator best_it = FindBestProbe(clusters);
+  if (best_it != clusters.end()) {
+    int probe_bitrate_bps =
+        std::min(best_it->GetSendBitrateBps(), best_it->GetRecvBitrateBps());
+    if (IsBitrateImproving(probe_bitrate_bps)) {
+      LOG(LS_INFO) << "Probe successful, sent at "
+                   << best_it->GetSendBitrateBps() << " bps, received at "
+                   << best_it->GetRecvBitrateBps()
+                   << " bps. Mean send delta: " << best_it->send_mean_ms
+                   << " ms, mean recv delta: " << best_it->recv_mean_ms
+                   << " ms, num probes: " << best_it->count;
+      remote_rate_->SetEstimate(probe_bitrate_bps, now_ms);
+    }
   }
+
   // Not probing and received non-probe packet, or finished with current set
   // of probes.
   if (clusters.size() >= kExpectedNumberOfProbes)
     probes_.clear();
+}
+
+bool RemoteBitrateEstimatorAbsSendTimeImpl::IsBitrateImproving(
+    int new_bitrate_bps) const {
+  bool initial_probe = !remote_rate_->ValidEstimate() && new_bitrate_bps > 0;
+  bool bitrate_above_estimate =
+      remote_rate_->ValidEstimate() &&
+      new_bitrate_bps > static_cast<int>(remote_rate_->LatestEstimate());
+  return initial_probe || bitrate_above_estimate;
+}
+
+void RemoteBitrateEstimatorAbsSendTimeImpl::IncomingPacketFeedbackVector(
+    const std::vector<PacketInfo>& packet_feedback_vector) {
+  for (const auto& packet_info : packet_feedback_vector) {
+    // TODO(holmer): We should get rid of this conversion if possible as we may
+    // lose precision.
+    uint32_t send_time_32bits = (packet_info.send_time_ms) / kTimestampToMs;
+    uint32_t send_time_24bits =
+        send_time_32bits >> kAbsSendTimeInterArrivalUpshift;
+    IncomingPacketInfo(packet_info.arrival_time_ms, send_time_24bits,
+                       packet_info.payload_size, 0);
+  }
 }
 
 void RemoteBitrateEstimatorAbsSendTimeImpl::IncomingPacket(
@@ -299,53 +350,62 @@ void RemoteBitrateEstimatorAbsSendTimeImpl::IncomingPacket(
     LOG(LS_WARNING) << "RemoteBitrateEstimatorAbsSendTimeImpl: Incoming packet "
                        "is missing absolute send time extension!";
   }
-  uint32_t absolute_send_time = header.extension.absoluteSendTime;
-  assert(absolute_send_time < (1ul << 24));
-  int64_t now_ms = clock_->TimeInMilliseconds();
+  IncomingPacketInfo(arrival_time_ms, header.extension.absoluteSendTime,
+                     payload_size, header.ssrc);
+}
+
+void RemoteBitrateEstimatorAbsSendTimeImpl::IncomingPacketInfo(
+    int64_t arrival_time_ms,
+    uint32_t send_time_24bits,
+    size_t payload_size,
+    uint32_t ssrc) {
+  assert(send_time_24bits < (1ul << 24));
+  // Shift up send time to use the full 32 bits that inter_arrival works with,
+  // so wrapping works properly.
+  uint32_t timestamp = send_time_24bits << kAbsSendTimeInterArrivalUpshift;
+  int64_t send_time_ms = static_cast<int64_t>(timestamp) * kTimestampToMs;
+
   CriticalSectionScoped cs(crit_sect_.get());
-  ssrcs_[header.ssrc] = now_ms;
+  int64_t now_ms = clock_->TimeInMilliseconds();
+  // TODO(holmer): SSRCs are only needed for REMB, should be broken out from
+  // here.
+  ssrcs_[ssrc] = now_ms;
   incoming_bitrate_.Update(payload_size, now_ms);
   const BandwidthUsage prior_state = detector_.State();
 
   if (first_packet_time_ms_ == -1)
     first_packet_time_ms_ = clock_->TimeInMilliseconds();
 
-  // Shift up send time to use the full 32 bits that inter_arrival works with,
-  // so wrapping works properly.
-  uint32_t timestamp = absolute_send_time << kAbsSendTimeInterArrivalUpshift;
   uint32_t ts_delta = 0;
   int64_t t_delta = 0;
   int size_delta = 0;
   // For now only try to detect probes while we don't have a valid estimate.
   if (!remote_rate_->ValidEstimate() ||
       now_ms - first_packet_time_ms_ < kInitialProbingIntervalMs) {
-    int64_t send_time_ms = static_cast<int64_t>(timestamp) * kTimestampToMs;
     // TODO(holmer): Use a map instead to get correct order?
-    if (probes_.empty()) {
-      LOG(LS_INFO) << "Probe packet received: send time=" << send_time_ms
-                   << " ms, recv time=" << arrival_time_ms << " ms";
-    } else {
-      int send_delta_ms = send_time_ms - probes_.back().send_time_ms;
-      int recv_delta_ms = arrival_time_ms - probes_.back().recv_time_ms;
+    if (total_probes_received_ < kMaxProbePackets) {
+      int send_delta_ms = -1;
+      int recv_delta_ms = -1;
+      if (!probes_.empty()) {
+        send_delta_ms = send_time_ms - probes_.back().send_time_ms;
+        recv_delta_ms = arrival_time_ms - probes_.back().recv_time_ms;
+      }
       LOG(LS_INFO) << "Probe packet received: send time=" << send_time_ms
                    << " ms, recv time=" << arrival_time_ms
                    << " ms, send delta=" << send_delta_ms
                    << " ms, recv delta=" << recv_delta_ms << " ms.";
     }
     probes_.push_back(Probe(send_time_ms, arrival_time_ms, payload_size));
+    ++total_probes_received_;
     ProcessClusters(now_ms);
   }
   if (!inter_arrival_.get()) {
     inter_arrival_.reset(new InterArrival(
-        (kTimestampGroupLengthMs << kInterArrivalShift) / 1000,
-        kTimestampToMs, remote_rate_->GetControlType() == kAimdControl));
+        (kTimestampGroupLengthMs << kInterArrivalShift) / 1000, kTimestampToMs,
+        remote_rate_->GetControlType() == kAimdControl));
   }
-  if (inter_arrival_->ComputeDeltas(timestamp,
-                                    arrival_time_ms,
-                                    payload_size,
-                                    &ts_delta,
-                                    &t_delta,
-                                    &size_delta)) {
+  if (inter_arrival_->ComputeDeltas(timestamp, arrival_time_ms, payload_size,
+                                    &ts_delta, &t_delta, &size_delta)) {
     double ts_delta_ms = (1000.0 * ts_delta) / (1 << kInterArrivalShift);
     estimator_.Update(t_delta, ts_delta_ms, size_delta, detector_.State());
     detector_.Detect(estimator_.offset(), ts_delta_ms,
@@ -419,7 +479,7 @@ void RemoteBitrateEstimatorAbsSendTimeImpl::UpdateEstimate(int64_t now_ms) {
   detector_.SetRateControlRegion(region);
 }
 
-void RemoteBitrateEstimatorAbsSendTimeImpl::OnRttUpdate(uint32_t rtt) {
+void RemoteBitrateEstimatorAbsSendTimeImpl::OnRttUpdate(int64_t rtt) {
   CriticalSectionScoped cs(crit_sect_.get());
   remote_rate_->SetRtt(rtt);
 }

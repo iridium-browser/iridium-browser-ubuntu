@@ -4,8 +4,9 @@
 
 #include "components/password_manager/content/renderer/credential_manager_client.h"
 
+#include "components/password_manager/content/common/credential_manager_content_utils.h"
 #include "components/password_manager/content/common/credential_manager_messages.h"
-#include "components/password_manager/content/common/credential_manager_types.h"
+#include "components/password_manager/core/common/credential_manager_types.h"
 #include "content/public/renderer/render_view.h"
 #include "third_party/WebKit/public/platform/WebCredential.h"
 #include "third_party/WebKit/public/platform/WebCredentialManagerError.h"
@@ -82,17 +83,17 @@ void CredentialManagerClient::OnSendCredential(int request_id,
   DCHECK(callbacks);
   scoped_ptr<blink::WebCredential> credential = nullptr;
   switch (info.type) {
-  case CREDENTIAL_TYPE_FEDERATED:
-    credential.reset(new blink::WebFederatedCredential(
-        info.id, info.name, info.avatar, info.federation));
-    break;
-  case CREDENTIAL_TYPE_LOCAL:
-    credential.reset(new blink::WebLocalCredential(info.id, info.name,
-                                                   info.avatar, info.password));
-    break;
-  case CREDENTIAL_TYPE_EMPTY:
-    // Intentionally empty; we'll send nullptr to the onSuccess call below.
-    break;
+    case CredentialType::CREDENTIAL_TYPE_FEDERATED:
+      credential.reset(new blink::WebFederatedCredential(
+          info.id, info.name, info.avatar, info.federation));
+      break;
+    case CredentialType::CREDENTIAL_TYPE_LOCAL:
+      credential.reset(new blink::WebLocalCredential(
+          info.id, info.name, info.avatar, info.password));
+      break;
+    case CredentialType::CREDENTIAL_TYPE_EMPTY:
+      // Intentionally empty; we'll send nullptr to the onSuccess call below.
+      break;
   }
   callbacks->onSuccess(credential.get());
   request_callbacks_.Remove(request_id);
@@ -116,7 +117,7 @@ void CredentialManagerClient::dispatchFailedSignIn(
     const blink::WebCredential& credential,
     blink::WebCredentialManagerClient::NotificationCallbacks* callbacks) {
   int request_id = failed_sign_in_callbacks_.Add(callbacks);
-  CredentialInfo info(credential);
+  CredentialInfo info(WebCredentialToCredentialInfo(credential));
   Send(new CredentialManagerHostMsg_NotifyFailedSignIn(
       routing_id(), request_id, info));
 }
@@ -125,7 +126,7 @@ void CredentialManagerClient::dispatchSignedIn(
     const blink::WebCredential& credential,
     blink::WebCredentialManagerClient::NotificationCallbacks* callbacks) {
   int request_id = signed_in_callbacks_.Add(callbacks);
-  CredentialInfo info(credential);
+  CredentialInfo info(WebCredentialToCredentialInfo(credential));
   Send(new CredentialManagerHostMsg_NotifySignedIn(
       routing_id(), request_id, info));
 }

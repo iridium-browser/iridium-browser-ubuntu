@@ -50,7 +50,7 @@ int g_next_install_id = 0;
 } // anonymous namespace
 
 WebstoreBindings::WebstoreBindings(ScriptContext* context)
-    : ObjectBackedNativeHandler(context), ChromeV8ExtensionHandler(context) {
+    : ObjectBackedNativeHandler(context) {
   RouteFunction("Install",
                 base::Bind(&WebstoreBindings::Install, base::Unretained(this)));
 }
@@ -102,8 +102,10 @@ void WebstoreBindings::Install(
 
 // static
 bool WebstoreBindings::GetWebstoreItemIdFromFrame(
-      WebFrame* frame, const std::string& preferred_store_link_url,
-      std::string* webstore_item_id, std::string* error) {
+    WebFrame* frame,
+    const std::string& preferred_store_link_url,
+    std::string* webstore_item_id,
+    std::string* error) {
   if (frame != frame->top()) {
     *error = kNotInTopFrameError;
     return false;

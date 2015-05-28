@@ -40,8 +40,6 @@
 #include "chrome/browser/extensions/extension_install_prompt.h"
 #include "chrome/browser/extensions/extension_install_prompt_show_params.h"
 #include "chrome/browser/extensions/extension_service.h"
-#include "chrome/browser/history/download_row.h"
-#include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/infobars/infobar_service.h"
 #include "chrome/browser/net/url_request_mock_util.h"
@@ -57,7 +55,10 @@
 #include "chrome/browser/ui/chrome_pages.h"
 #include "chrome/browser/ui/host_desktop.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
+#include "chrome/browser/ui/website_settings/mock_permission_bubble_view.h"
+#include "chrome/browser/ui/website_settings/permission_bubble_manager.h"
 #include "chrome/common/chrome_paths.h"
+#include "chrome/common/chrome_switches.h"
 #include "chrome/common/pref_names.h"
 #include "chrome/common/safe_browsing/csd.pb.h"
 #include "chrome/common/url_constants.h"
@@ -65,6 +66,10 @@
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/test_switches.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "components/history/content/browser/download_constants_utils.h"
+#include "components/history/core/browser/download_constants.h"
+#include "components/history/core/browser/download_row.h"
+#include "components/history/core/browser/history_service.h"
 #include "components/infobars/core/confirm_infobar_delegate.h"
 #include "components/infobars/core/infobar.h"
 #include "content/public/browser/download_interrupt_reasons.h"
@@ -83,12 +88,12 @@
 #include "content/public/test/download_test_observer.h"
 #include "content/public/test/test_file_error_injector.h"
 #include "content/public/test/test_navigation_observer.h"
-#include "content/test/net/url_request_slow_download_job.h"
 #include "extensions/browser/extension_system.h"
 #include "extensions/common/feature_switch.h"
 #include "net/base/filename_util.h"
 #include "net/test/spawned_test_server/spawned_test_server.h"
 #include "net/test/url_request/url_request_mock_http_job.h"
+#include "net/test/url_request/url_request_slow_download_job.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/base/page_transition_types.h"
@@ -105,7 +110,6 @@ using content::BrowserThread;
 using content::DownloadItem;
 using content::DownloadManager;
 using content::DownloadUrlParameters;
-using content::URLRequestSlowDownloadJob;
 using content::WebContents;
 using extensions::Extension;
 using extensions::FeatureSwitch;
@@ -250,8 +254,8 @@ class DownloadsHistoryDataCollector {
 
   bool WaitForDownloadInfo(
       scoped_ptr<std::vector<history::DownloadRow> >* results) {
-    HistoryService* hs = HistoryServiceFactory::GetForProfile(
-        profile_, Profile::EXPLICIT_ACCESS);
+    history::HistoryService* hs = HistoryServiceFactory::GetForProfile(
+        profile_, ServiceAccessType::EXPLICIT_ACCESS);
     DCHECK(hs);
     hs->QueryDownloads(
         base::Bind(&DownloadsHistoryDataCollector::OnQueryDownloadsComplete,
@@ -297,7 +301,7 @@ class MockAbortExtensionInstallPrompt : public ExtensionInstallPrompt {
   }
 
   void OnInstallSuccess(const Extension* extension, SkBitmap* icon) override {}
-  void OnInstallFailure(const extensions::CrxInstallerError& error) override {}
+  void OnInstallFailure(const extensions::CrxInstallError& error) override {}
 };
 
 // Mock that simulates a permissions dialog where the user allows
@@ -316,7 +320,7 @@ class MockAutoConfirmExtensionInstallPrompt : public ExtensionInstallPrompt {
   }
 
   void OnInstallSuccess(const Extension* extension, SkBitmap* icon) override {}
-  void OnInstallFailure(const extensions::CrxInstallerError& error) override {}
+  void OnInstallFailure(const extensions::CrxInstallError& error) override {}
 };
 
 static DownloadManager* DownloadManagerForBrowser(Browser* browser) {
@@ -678,7 +682,7 @@ class DownloadTest : public InProcessBrowserTest {
   DownloadItem* CreateSlowTestDownload() {
     scoped_ptr<content::DownloadTestObserver> observer(
         CreateInProgressDownloadObserver(1));
-    GURL slow_download_url(URLRequestSlowDownloadJob::kUnknownSizeUrl);
+    GURL slow_download_url(net::URLRequestSlowDownloadJob::kUnknownSizeUrl);
     DownloadManager* manager = DownloadManagerForBrowser(browser());
 
     EXPECT_EQ(0, manager->NonMaliciousInProgressCount());
@@ -714,8 +718,8 @@ class DownloadTest : public InProcessBrowserTest {
     if (type != SIZE_TEST_TYPE_KNOWN && type != SIZE_TEST_TYPE_UNKNOWN)
       return false;
     GURL url(type == SIZE_TEST_TYPE_KNOWN ?
-             URLRequestSlowDownloadJob::kKnownSizeUrl :
-             URLRequestSlowDownloadJob::kUnknownSizeUrl);
+             net::URLRequestSlowDownloadJob::kKnownSizeUrl :
+             net::URLRequestSlowDownloadJob::kUnknownSizeUrl);
 
     // TODO(ahendrickson) -- |expected_title_in_progress| and
     // |expected_title_finished| need to be checked.
@@ -744,7 +748,7 @@ class DownloadTest : public InProcessBrowserTest {
 
     // Allow the request to finish.  We do this by loading a second URL in a
     // separate tab.
-    GURL finish_url(URLRequestSlowDownloadJob::kFinishDownloadUrl);
+    GURL finish_url(net::URLRequestSlowDownloadJob::kFinishDownloadUrl);
     ui_test_utils::NavigateToURLWithDisposition(
         browser,
         finish_url,
@@ -770,8 +774,8 @@ class DownloadTest : public InProcessBrowserTest {
       return false;
 
     // Check the file contents.
-    size_t file_size = URLRequestSlowDownloadJob::kFirstDownloadSize +
-                       URLRequestSlowDownloadJob::kSecondDownloadSize;
+    size_t file_size = net::URLRequestSlowDownloadJob::kFirstDownloadSize +
+                       net::URLRequestSlowDownloadJob::kSecondDownloadSize;
     std::string expected_contents(file_size, '*');
     EXPECT_TRUE(VerifyFile(download_path, expected_contents, file_size));
 
@@ -1089,9 +1093,15 @@ class DownloadTest : public InProcessBrowserTest {
     return download;
   }
 
+  void WaitForBubble(MockPermissionBubbleView* mock_bubble) {
+    if (mock_bubble->IsVisible())
+      return;
+    content::RunMessageLoop();
+  }
+
  private:
   static void EnsureNoPendingDownloadJobsOnIO(bool* result) {
-    if (URLRequestSlowDownloadJob::NumberOutstandingRequests())
+    if (net::URLRequestSlowDownloadJob::NumberOutstandingRequests())
       *result = false;
     BrowserThread::PostTask(
         BrowserThread::UI, FROM_HERE, base::MessageLoop::QuitClosure());
@@ -1737,7 +1747,7 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, NewWindow) {
 }
 
 IN_PROC_BROWSER_TEST_F(DownloadTest, DownloadHistoryCheck) {
-  GURL download_url(URLRequestSlowDownloadJob::kKnownSizeUrl);
+  GURL download_url(net::URLRequestSlowDownloadJob::kKnownSizeUrl);
   base::FilePath file(net::GenerateFileName(download_url,
                                             std::string(),
                                             std::string(),
@@ -1774,12 +1784,14 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, DownloadHistoryCheck) {
   ASSERT_EQ(2u, row.url_chain.size());
   EXPECT_EQ(redirect_url.spec(), row.url_chain[0].spec());
   EXPECT_EQ(download_url.spec(), row.url_chain[1].spec());
-  EXPECT_EQ(content::DOWNLOAD_DANGER_TYPE_NOT_DANGEROUS, row.danger_type);
+  EXPECT_EQ(history::DownloadDangerType::NOT_DANGEROUS, row.danger_type);
   EXPECT_LE(start, row.start_time);
-  EXPECT_EQ(URLRequestSlowDownloadJob::kFirstDownloadSize, row.received_bytes);
-  EXPECT_EQ(URLRequestSlowDownloadJob::kFirstDownloadSize
-            + URLRequestSlowDownloadJob::kSecondDownloadSize, row.total_bytes);
-  EXPECT_EQ(content::DownloadItem::IN_PROGRESS, row.state);
+  EXPECT_EQ(net::URLRequestSlowDownloadJob::kFirstDownloadSize,
+            row.received_bytes);
+  EXPECT_EQ(net::URLRequestSlowDownloadJob::kFirstDownloadSize
+            + net::URLRequestSlowDownloadJob::kSecondDownloadSize,
+            row.total_bytes);
+  EXPECT_EQ(history::DownloadState::IN_PROGRESS, row.state);
   EXPECT_FALSE(row.opened);
 
   // Finish the download.  We're ok relying on the history to be flushed
@@ -1788,7 +1800,7 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, DownloadHistoryCheck) {
   scoped_ptr<content::DownloadTestObserver> download_observer(
       CreateWaiter(browser(), 1));
   ui_test_utils::NavigateToURL(browser(),
-      GURL(URLRequestSlowDownloadJob::kErrorDownloadUrl));
+      GURL(net::URLRequestSlowDownloadJob::kErrorDownloadUrl));
   download_observer->WaitForFinished();
   EXPECT_EQ(1u, download_observer->NumDownloadsSeenInState(
       DownloadItem::INTERRUPTED));
@@ -1807,15 +1819,17 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, DownloadHistoryCheck) {
   ASSERT_EQ(2u, row1.url_chain.size());
   EXPECT_EQ(redirect_url.spec(), row1.url_chain[0].spec());
   EXPECT_EQ(download_url.spec(), row1.url_chain[1].spec());
-  EXPECT_EQ(content::DOWNLOAD_DANGER_TYPE_NOT_DANGEROUS, row1.danger_type);
+  EXPECT_EQ(history::DownloadDangerType::NOT_DANGEROUS, row1.danger_type);
   EXPECT_LE(start, row1.start_time);
   EXPECT_GE(end, row1.end_time);
-  EXPECT_EQ(URLRequestSlowDownloadJob::kFirstDownloadSize,
+  EXPECT_EQ(net::URLRequestSlowDownloadJob::kFirstDownloadSize,
             row1.received_bytes);
-  EXPECT_EQ(URLRequestSlowDownloadJob::kFirstDownloadSize
-            + URLRequestSlowDownloadJob::kSecondDownloadSize, row1.total_bytes);
-  EXPECT_EQ(content::DownloadItem::INTERRUPTED, row1.state);
-  EXPECT_EQ(content::DOWNLOAD_INTERRUPT_REASON_NETWORK_FAILED,
+  EXPECT_EQ(net::URLRequestSlowDownloadJob::kFirstDownloadSize
+            + net::URLRequestSlowDownloadJob::kSecondDownloadSize,
+            row1.total_bytes);
+  EXPECT_EQ(history::DownloadState::INTERRUPTED, row1.state);
+  EXPECT_EQ(history::ToHistoryDownloadInterruptReason(
+                content::DOWNLOAD_INTERRUPT_REASON_NETWORK_FAILED),
             row1.interrupt_reason);
   EXPECT_FALSE(row1.opened);
 }
@@ -1857,9 +1871,9 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, DownloadHistoryDangerCheck) {
   EXPECT_NE(DownloadTargetDeterminer::GetCrDownloadPath(
                 DestinationFile(browser(), file)),
             row.current_path);
-  EXPECT_EQ(content::DOWNLOAD_DANGER_TYPE_DANGEROUS_FILE, row.danger_type);
+  EXPECT_EQ(history::DownloadDangerType::DANGEROUS_FILE, row.danger_type);
   EXPECT_LE(start, row.start_time);
-  EXPECT_EQ(content::DownloadItem::IN_PROGRESS, row.state);
+  EXPECT_EQ(history::DownloadState::IN_PROGRESS, row.state);
   EXPECT_FALSE(row.opened);
 
   // Validate the download and wait for it to finish.
@@ -1877,9 +1891,9 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, DownloadHistoryDangerCheck) {
   history::DownloadRow& row1(downloads_in_database->at(0));
   EXPECT_EQ(DestinationFile(browser(), file), row1.target_path);
   EXPECT_EQ(DestinationFile(browser(), file), row1.current_path);
-  EXPECT_EQ(content::DOWNLOAD_DANGER_TYPE_USER_VALIDATED, row1.danger_type);
+  EXPECT_EQ(history::DownloadDangerType::USER_VALIDATED, row1.danger_type);
   EXPECT_LE(start, row1.start_time);
-  EXPECT_EQ(content::DownloadItem::COMPLETE, row1.state);
+  EXPECT_EQ(history::DownloadState::COMPLETE, row1.state);
   EXPECT_FALSE(row1.opened);
   // Not checking file size--not relevant to the point of the test, and
   // the file size is actually different on Windows and other platforms,
@@ -1894,10 +1908,11 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, PRE_DownloadTest_History) {
   HistoryObserver observer(browser()->profile());
   DownloadAndWait(browser(), download_url);
   observer.WaitForStored();
-  HistoryServiceFactory::GetForProfile(
-      browser()->profile(), Profile::IMPLICIT_ACCESS)->FlushForTest(
-      base::Bind(&base::MessageLoop::Quit,
-                 base::Unretained(base::MessageLoop::current()->current())));
+  HistoryServiceFactory::GetForProfile(browser()->profile(),
+                                       ServiceAccessType::IMPLICIT_ACCESS)
+      ->FlushForTest(base::Bind(
+          &base::MessageLoop::Quit,
+          base::Unretained(base::MessageLoop::current()->current())));
   content::RunMessageLoop();
 }
 
@@ -2886,6 +2901,10 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, TestMultipleDownloadsInfobar) {
 
   ASSERT_TRUE(test_server()->Start());
 
+  // Ensure that infobars are being used instead of bubbles.
+  base::CommandLine::ForCurrentProcess()->AppendSwitch(
+      switches::kDisablePermissionsBubbles);
+
   // Create a downloads observer.
   scoped_ptr<content::DownloadTestObserver> downloads_observer(
         CreateWaiter(browser(), 2));
@@ -2924,6 +2943,53 @@ IN_PROC_BROWSER_TEST_F(DownloadTest, TestMultipleDownloadsInfobar) {
   downloads_observer->WaitForFinished();
   EXPECT_EQ(2u, downloads_observer->NumDownloadsSeenInState(
       DownloadItem::COMPLETE));
+}
+
+IN_PROC_BROWSER_TEST_F(DownloadTest, TestMultipleDownloadsBubble) {
+#if defined(OS_WIN) && defined(USE_ASH)
+  // Disable this test in Metro+Ash for now (http://crbug.com/262796).
+  if (base::CommandLine::ForCurrentProcess()->HasSwitch(
+          switches::kAshBrowserTests))
+    return;
+#endif
+
+#if defined(OS_ANDROID) || defined(OS_IOS)
+  // Permission bubbles are not supported on mobile.
+  return;
+#endif
+
+  ASSERT_TRUE(test_server()->Start());
+
+  // Enable permision bubbles.
+  base::CommandLine::ForCurrentProcess()->AppendSwitch(
+      switches::kEnablePermissionsBubbles);
+
+  // Create a downloads observer.
+  scoped_ptr<content::DownloadTestObserver> downloads_observer(
+        CreateWaiter(browser(), 2));
+
+  MockPermissionBubbleView* mock_bubble_view = new MockPermissionBubbleView();
+  PermissionBubbleManager::FromWebContents(
+      browser()->tab_strip_model()->GetActiveWebContents())->
+          SetView(mock_bubble_view);
+  mock_bubble_view->SetBrowserTest(true);
+  ui_test_utils::NavigateToURLBlockUntilNavigationsComplete(
+      browser(),
+      test_server()->GetURL("files/downloads/download-a_zip_file.html"), 1);
+
+  WaitForBubble(mock_bubble_view);
+
+  ASSERT_TRUE(mock_bubble_view->IsVisible());
+  mock_bubble_view->Accept();
+  ASSERT_FALSE(mock_bubble_view->IsVisible());
+
+  // Waits for the download to complete.
+  downloads_observer->WaitForFinished();
+  EXPECT_EQ(2u, downloads_observer->NumDownloadsSeenInState(
+      DownloadItem::COMPLETE));
+
+  browser()->tab_strip_model()->GetActiveWebContents()->Close();
+  delete mock_bubble_view;
 }
 
 IN_PROC_BROWSER_TEST_F(DownloadTest, DownloadTest_Renaming) {

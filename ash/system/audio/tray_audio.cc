@@ -97,7 +97,8 @@ bool TrayAudio::ShouldShowShelf() const {
   return TrayAudio::ShowAudioDeviceMenu() && !pop_up_volume_view_;
 }
 
-void TrayAudio::OnOutputVolumeChanged() {
+void TrayAudio::OnOutputNodeVolumeChanged(uint64_t /* node_id */,
+                                          double /* volume */) {
   float percent =
       static_cast<float>(audio_delegate_->GetOutputVolumeLevel()) / 100.0f;
   if (tray_view())
@@ -112,7 +113,7 @@ void TrayAudio::OnOutputVolumeChanged() {
   PopupDetailedView(kTrayPopupAutoCloseDelayInSeconds, false);
 }
 
-void TrayAudio::OnOutputMuteChanged() {
+void TrayAudio::OnOutputMuteChanged(bool /* mute_on */) {
   if (tray_view())
       tray_view()->SetVisible(GetInitialVisibility());
 
@@ -166,7 +167,7 @@ void TrayAudio::ChangeInternalSpeakerChannelMode() {
     const DisplayInfo& display_info =
         Shell::GetInstance()->display_manager()->GetDisplayInfo(
             gfx::Display::InternalDisplayId());
-    if (display_info.rotation() == gfx::Display::ROTATE_180)
+    if (display_info.GetActiveRotation() == gfx::Display::ROTATE_180)
       channel_mode = system::TrayAudioDelegate::LEFT_RIGHT_SWAPPED;
   }
 

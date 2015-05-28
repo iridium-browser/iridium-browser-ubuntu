@@ -310,9 +310,39 @@ fileOperationUtil.findEntriesRecursively = function(entry, onResultCallback) {
                 reader.readEntries(processSubEntries, maybeSettlePromise);
               },
               maybeSettlePromise);
-        }
+        };
 
         processEntry(entry);
+      });
+};
+
+/**
+ * Calls {@code callback} for each child entry of {@code directory}.
+ *
+ * @param {!DirectoryEntry} directory
+ * @param {function(!Entry)} callback
+ * @return {!Promise} Resolves when listing is complete.
+ */
+fileOperationUtil.listEntries = function(directory, callback) {
+  return new Promise(
+      function(resolve, reject) {
+        var reader = directory.createReader();
+
+        var readEntries = function() {
+          reader.readEntries (
+              /** @param {!Array<!Entry>} entries */
+              function(entries) {
+                if (entries.length === 0) {
+                  resolve(undefined);
+                  return;
+                }
+                entries.forEach(callback);
+                readEntries();
+              },
+              reject);
+        };
+
+        readEntries();
       });
 };
 
@@ -578,8 +608,9 @@ fileOperationUtil.Task.prototype.initialize = function(callback) {
 fileOperationUtil.Task.prototype.requestCancel = function() {
   this.cancelRequested_ = true;
   if (this.cancelCallback_) {
-    this.cancelCallback_();
+    var callback = this.cancelCallback_;
     this.cancelCallback_ = null;
+    callback();
   }
 };
 

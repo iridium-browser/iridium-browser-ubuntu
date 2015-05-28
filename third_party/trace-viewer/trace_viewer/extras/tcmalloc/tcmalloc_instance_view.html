@@ -13,8 +13,6 @@ found in the LICENSE file.
 'use strict';
 
 tv.exportTo('tv.e.tcmalloc', function() {
-  var tsRound = tv.c.analysis.tsRound;
-
   /**
    * Displays tcmalloc heap memory information over time. A tcmalloc instance
    * has multiple snapshots.
@@ -79,8 +77,8 @@ tv.exportTo('tv.e.tcmalloc', function() {
       var row = document.createElement('tr');
       var td = document.createElement('td');
       if (snapshot) {
-        var snapshotLink = new tv.c.analysis.ObjectSnapshotLink();
-        snapshotLink.objectSnapshot = snapshot;
+        var snapshotLink = document.createElement('tv-c-analysis-link');
+        snapshotLink.selection = new tv.c.Selection(snapshot);
         td.appendChild(snapshotLink);
       }
       row.appendChild(td);

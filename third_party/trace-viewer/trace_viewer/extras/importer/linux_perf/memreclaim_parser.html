@@ -56,7 +56,9 @@ tv.exportTo('tv.e.importer.linux_perf', function() {
       var kthread = this.importer.getOrCreateKernelThread(
           category + ':' + threadName, pid);
       var slice = new tv.c.trace_model.AsyncSlice(
-          category, name, tv.c.getStringColorId(name), ts);
+          category, name,
+          tv.c.getColorIdForGeneralPurposeString(name),
+          ts);
       slice.startThread = kthread.thread;
 
       if (!kthread.openAsyncSlices) {
@@ -92,10 +94,11 @@ tv.exportTo('tv.e.importer.linux_perf', function() {
       if (!event)
         return false;
 
-      var nid = parseInt(event[1])
-      var order = parseInt(event[2])
+      var nid = parseInt(event[1]);
+      var order = parseInt(event[2]);
 
-      var kthread = this.importer.getOrCreateKernelThread("kswapd: " + eventBase.threadName,
+      var kthread = this.importer.getOrCreateKernelThread(
+          'kswapd: ' + eventBase.threadName,
           pid, pid);
       if (kthread.openSliceTS) {
         if (order > kthread.order) {
@@ -109,14 +112,15 @@ tv.exportTo('tv.e.importer.linux_perf', function() {
     },
 
     kswapdSleep: function(eventName, cpuNumber, pid, ts, eventBase) {
-      var kthread = this.importer.getOrCreateKernelThread("kswapd: " + eventBase.threadName,
+      var kthread = this.importer.getOrCreateKernelThread(
+          'kswapd: ' + eventBase.threadName,
           pid, pid);
       if (kthread.openSliceTS) {
         var slice = new tv.c.trace_model.Slice('', eventBase.threadName,
-            tv.b.ui.getStringColorId(eventBase.threadName),
+            tv.b.ui.getColorIdForGeneralPurposeString(eventBase.threadName),
             kthread.openSliceTS,
             {
-                order: kthread.order,
+                order: kthread.order
             },
             ts - kthread.openSliceTS);
 
@@ -133,9 +137,10 @@ tv.exportTo('tv.e.importer.linux_perf', function() {
         return false;
 
       var order = parseInt(event[1]);
-      var gfp = event[2]
+      var gfp = event[2];
 
-      var kthread = this.importer.getOrCreateKernelThread("direct reclaim: " + eventBase.threadName,
+      var kthread = this.importer.getOrCreateKernelThread(
+          'direct reclaim: ' + eventBase.threadName,
           pid, pid);
       kthread.openSliceTS = ts;
       kthread.order = order;
@@ -150,17 +155,18 @@ tv.exportTo('tv.e.importer.linux_perf', function() {
 
       var nr_reclaimed = parseInt(event[1]);
 
-      var kthread = this.importer.getOrCreateKernelThread("direct reclaim: " + eventBase.threadName,
+      var kthread = this.importer.getOrCreateKernelThread(
+          'direct reclaim: ' + eventBase.threadName,
           pid, pid);
       if (kthread.openSliceTS !== undefined) {
         var slice = new tv.c.trace_model.Slice(
-            "", "direct reclaim",
-            tv.b.ui.getStringColorId(eventBase.threadName),
+            '', 'direct reclaim',
+            tv.b.ui.getColorIdForGeneralPurposeString(eventBase.threadName),
             kthread.openSliceTS,
             {
                 order: kthread.order,
                 gfp: kthread.gfp,
-                nr_reclaimed: nr_reclaimed,
+                nr_reclaimed: nr_reclaimed
             },
             ts - kthread.openSliceTS);
         kthread.thread.sliceGroup.pushSlice(slice);
@@ -180,4 +186,3 @@ tv.exportTo('tv.e.importer.linux_perf', function() {
   };
 });
 </script>
-

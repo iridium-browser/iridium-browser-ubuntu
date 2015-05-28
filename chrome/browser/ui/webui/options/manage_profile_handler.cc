@@ -64,6 +64,11 @@ bool GetProfilePathFromArgs(const base::ListValue* args,
   return base::GetValueAsFilePath(*file_path_value, profile_file_path);
 }
 
+void HandleLogDeleteUserDialogShown(const base::ListValue* args) {
+  ProfileMetrics::LogProfileDeleteUser(
+      ProfileMetrics::DELETE_PROFILE_SETTINGS_SHOW_WARNING);
+}
+
 }  // namespace
 
 ManageProfileHandler::ManageProfileHandler()
@@ -128,8 +133,7 @@ void ManageProfileHandler::GetLocalizedValues(
 }
 
 void ManageProfileHandler::InitializeHandler() {
-  registrar_.Add(this, chrome::NOTIFICATION_PROFILE_CACHED_INFO_CHANGED,
-                 content::NotificationService::AllSources());
+  g_browser_process->profile_manager()->GetProfileInfoCache().AddObserver(this);
 
   Profile* profile = Profile::FromWebUI(web_ui());
   pref_change_registrar_.Init(profile->GetPrefs());
@@ -186,21 +190,36 @@ void ManageProfileHandler::RegisterMessages() {
       "showDisconnectManagedProfileDialog",
       base::Bind(&ManageProfileHandler::ShowDisconnectManagedProfileDialog,
                  base::Unretained(this)));
+  web_ui()->RegisterMessageCallback("logDeleteUserDialogShown",
+      base::Bind(&HandleLogDeleteUserDialogShown));
 }
 
 void ManageProfileHandler::Uninitialize() {
-  registrar_.RemoveAll();
+  g_browser_process->profile_manager()->
+      GetProfileInfoCache().RemoveObserver(this);
 }
 
-void ManageProfileHandler::Observe(
-    int type,
-    const content::NotificationSource& source,
-    const content::NotificationDetails& details) {
-  if (type == chrome::NOTIFICATION_PROFILE_CACHED_INFO_CHANGED) {
-    SendExistingProfileNames();
-    base::StringValue value(kManageProfileIdentifier);
-    SendProfileIconsAndNames(value);
-  }
+void ManageProfileHandler::OnProfileAdded(const base::FilePath& profile_path) {
+  SendExistingProfileNames();
+}
+
+void ManageProfileHandler::OnProfileWasRemoved(
+    const base::FilePath& profile_path,
+    const base::string16& profile_name) {
+  SendExistingProfileNames();
+}
+
+void ManageProfileHandler::OnProfileNameChanged(
+    const base::FilePath& profile_path,
+    const base::string16& old_profile_name) {
+  base::StringValue value(kManageProfileIdentifier);
+  SendProfileIconsAndNames(value);
+}
+
+void ManageProfileHandler::OnProfileAvatarChanged(
+    const base::FilePath& profile_path) {
+  base::StringValue value(kManageProfileIdentifier);
+  SendProfileIconsAndNames(value);
 }
 
 void ManageProfileHandler::OnStateChanged() {
@@ -473,8 +492,14 @@ void ManageProfileHandler::RequestCreateProfileUpdate(
       base::UTF8ToUTF16(manager->GetAuthenticatedUsername());
   ProfileSyncService* service =
      ProfileSyncServiceFactory::GetForProfile(profile);
-  GoogleServiceAuthError::State state = service->GetAuthError().state();
-  bool has_error = (state == GoogleServiceAuthError::INVALID_GAIA_CREDENTIALS ||
+  GoogleServiceAuthError::State state = GoogleServiceAuthError::NONE;
+
+  // |service| might be null if Sync is disabled from the command line.
+  if (service)
+    state = service->GetAuthError().state();
+
+  bool has_error = (!service ||
+                    state == GoogleServiceAuthError::INVALID_GAIA_CREDENTIALS ||
                     state == GoogleServiceAuthError::USER_NOT_SIGNED_UP ||
                     state == GoogleServiceAuthError::ACCOUNT_DELETED ||
                     state == GoogleServiceAuthError::ACCOUNT_DISABLED);

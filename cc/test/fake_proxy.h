@@ -23,6 +23,7 @@ class FakeProxy : public Proxy {
 
   void FinishAllRendering() override {}
   bool IsStarted() const override;
+  bool CommitToActiveTree() const override;
   void SetOutputSurface(scoped_ptr<OutputSurface>) override {}
   void SetLayerTreeHostClientReady() override {}
   void SetVisible(bool visible) override {}
@@ -45,8 +46,9 @@ class FakeProxy : public Proxy {
   bool SupportsImplScrolling() const override;
   void SetDebugState(const LayerTreeDebugState& debug_state) override {}
   bool MainFrameWillHappenForTesting() override;
-  void AsValueInto(base::debug::TracedValue* state) const override;
   void SetChildrenNeedBeginFrames(bool children_need_begin_frames) override {}
+  void SetAuthoritativeVSyncInterval(const base::TimeDelta& interval) override {
+  }
 
   virtual RendererCapabilities& GetRendererCapabilities();
   void SetMaxPartialTextureUpdates(size_t max);

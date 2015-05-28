@@ -22,12 +22,12 @@ public:
                      const SkSurfaceProps*);
     SkSurface_Raster(SkPixelRef*, const SkSurfaceProps*);
 
-    virtual SkCanvas* onNewCanvas() SK_OVERRIDE;
-    virtual SkSurface* onNewSurface(const SkImageInfo&) SK_OVERRIDE;
-    virtual SkImage* onNewImageSnapshot() SK_OVERRIDE;
+    SkCanvas* onNewCanvas() override;
+    SkSurface* onNewSurface(const SkImageInfo&) override;
+    SkImage* onNewImageSnapshot(Budgeted) override;
     virtual void onDraw(SkCanvas*, SkScalar x, SkScalar y,
-                        const SkPaint*) SK_OVERRIDE;
-    virtual void onCopyOnWrite(ContentChangeMode) SK_OVERRIDE;
+                        const SkPaint*) override;
+    void onCopyOnWrite(ContentChangeMode) override;
 
 private:
     SkBitmap    fBitmap;
@@ -118,14 +118,14 @@ void SkSurface_Raster::onDraw(SkCanvas* canvas, SkScalar x, SkScalar y,
     canvas->drawBitmap(fBitmap, x, y, paint);
 }
 
-SkImage* SkSurface_Raster::onNewImageSnapshot() {
+SkImage* SkSurface_Raster::onNewImageSnapshot(Budgeted) {
     return SkNewImageFromBitmap(fBitmap, fWeOwnThePixels, &this->props());
 }
 
 void SkSurface_Raster::onCopyOnWrite(ContentChangeMode mode) {
     // are we sharing pixelrefs with the image?
-    SkASSERT(this->getCachedImage());
-    if (SkBitmapImageGetPixelRef(this->getCachedImage()) == fBitmap.pixelRef()) {
+    SkASSERT(this->getCachedImage(kNo_Budgeted));
+    if (SkBitmapImageGetPixelRef(this->getCachedImage(kNo_Budgeted)) == fBitmap.pixelRef()) {
         SkASSERT(fWeOwnThePixels);
         if (kDiscard_ContentChangeMode == mode) {
             fBitmap.setPixelRef(NULL);

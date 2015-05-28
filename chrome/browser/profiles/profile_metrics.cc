@@ -12,6 +12,7 @@
 #include "chrome/browser/profiles/profile_info_cache.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/signin/signin_header_helper.h"
+#include "chrome/browser/ui/browser_finder.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/installer/util/google_update_settings.h"
 #include "content/public/browser/browser_thread.h"
@@ -19,8 +20,39 @@
 
 namespace {
 
+#if defined(OS_WIN) || defined(OS_MACOSX)
 const int kMaximumReportedProfileCount = 5;
+#endif
+
 const int kMaximumDaysOfDisuse = 4 * 7;  // Should be integral number of weeks.
+
+size_t number_of_profile_switches_ = 0;
+
+// Enum for tracking the state of profiles being switched to.
+enum ProfileOpenState {
+  // Profile being switched to is already opened and has browsers opened.
+  PROFILE_OPENED = 0,
+  // Profile being switched to is already opened but has no browsers opened.
+  PROFILE_OPENED_NO_BROWSER,
+  // Profile being switched to is not opened.
+  PROFILE_UNOPENED
+};
+
+ProfileOpenState GetProfileOpenState(
+    ProfileManager* manager,
+    const base::FilePath& path) {
+  Profile* profile_switched_to = manager->GetProfileByPath(path);
+
+  if (!profile_switched_to) {
+    return PROFILE_UNOPENED;
+  }
+
+  if (chrome::GetTotalBrowserCountForProfile(profile_switched_to) > 0) {
+    return PROFILE_OPENED;
+  }
+
+  return PROFILE_OPENED_NO_BROWSER;
+}
 
 ProfileMetrics::ProfileType GetProfileType(
     const base::FilePath& profile_path) {
@@ -36,12 +68,6 @@ ProfileMetrics::ProfileType GetProfileType(
     metric = ProfileMetrics::ORIGINAL;
   }
   return metric;
-}
-
-void UpdateReportedOSProfileStatistics(int active, int signedin) {
-#if defined(OS_WIN)
-  GoogleUpdateSettings::UpdateProfileCounts(active, signedin);
-#endif
 }
 
 void LogLockedProfileInformation(ProfileManager* manager) {
@@ -147,12 +173,12 @@ bool ProfileMetrics::CountProfileInformation(ProfileManager* manager,
   return true;
 }
 
-
 void ProfileMetrics::UpdateReportedProfilesStatistics(ProfileManager* manager) {
+#if defined(OS_WIN) || defined(OS_MACOSX)
   ProfileCounts counts;
   if (CountProfileInformation(manager, &counts)) {
-    int limited_total = counts.total;
-    int limited_signedin = counts.signedin;
+    size_t limited_total = counts.total;
+    size_t limited_signedin = counts.signedin;
     if (limited_total > kMaximumReportedProfileCount) {
       limited_total = kMaximumReportedProfileCount + 1;
       limited_signedin =
@@ -161,7 +187,21 @@ void ProfileMetrics::UpdateReportedProfilesStatistics(ProfileManager* manager) {
     }
     UpdateReportedOSProfileStatistics(limited_total, limited_signedin);
   }
+#endif
 }
+
+void ProfileMetrics::LogNumberOfProfileSwitches() {
+  UMA_HISTOGRAM_COUNTS_100("Profile.NumberOfSwitches",
+                           number_of_profile_switches_);
+}
+
+// The OS_MACOSX implementation of this function is in profile_metrics_mac.mm.
+#if defined(OS_WIN)
+void ProfileMetrics::UpdateReportedOSProfileStatistics(
+    size_t active, size_t signedin) {
+  GoogleUpdateSettings::UpdateProfileCounts(active, signedin);
+}
+#endif
 
 void ProfileMetrics::LogNumberOfProfiles(ProfileManager* manager) {
   ProfileCounts counts;
@@ -184,7 +224,10 @@ void ProfileMetrics::LogNumberOfProfiles(ProfileManager* manager) {
                              counts.auth_errors);
 
     LogLockedProfileInformation(manager);
+
+#if defined(OS_WIN) || defined(OS_MACOSX)
     UpdateReportedOSProfileStatistics(counts.total, counts.signedin);
+#endif
   }
 }
 
@@ -296,8 +339,12 @@ void ProfileMetrics::LogProfileDeleteUser(ProfileDelete metric) {
   DCHECK(metric < NUM_DELETE_PROFILE_METRICS);
   UMA_HISTOGRAM_ENUMERATION("Profile.DeleteProfileAction", metric,
                             NUM_DELETE_PROFILE_METRICS);
-  UMA_HISTOGRAM_ENUMERATION("Profile.NetUserCount", PROFILE_DELETED,
-                            NUM_PROFILE_NET_METRICS);
+  if (metric != DELETE_PROFILE_USER_MANAGER_SHOW_WARNING &&
+      metric != DELETE_PROFILE_SETTINGS_SHOW_WARNING) {
+    // If a user was actually deleted, update the net user count.
+    UMA_HISTOGRAM_ENUMERATION("Profile.NetUserCount", PROFILE_DELETED,
+                              NUM_PROFILE_NET_METRICS);
+  }
 }
 
 void ProfileMetrics::LogProfileOpenMethod(ProfileOpen metric) {
@@ -306,18 +353,49 @@ void ProfileMetrics::LogProfileOpenMethod(ProfileOpen metric) {
                             NUM_PROFILE_OPEN_METRICS);
 }
 
+void ProfileMetrics::LogProfileSwitch(
+    ProfileOpen metric,
+    ProfileManager* manager,
+    const base::FilePath& profile_path) {
+  DCHECK(metric < NUM_PROFILE_OPEN_METRICS);
+  ProfileOpenState open_state = GetProfileOpenState(manager, profile_path);
+  switch (open_state) {
+    case PROFILE_OPENED:
+      UMA_HISTOGRAM_ENUMERATION(
+        "Profile.OpenMethod.ToOpenedProfile",
+        metric,
+        NUM_PROFILE_OPEN_METRICS);
+      break;
+    case PROFILE_OPENED_NO_BROWSER:
+      UMA_HISTOGRAM_ENUMERATION(
+        "Profile.OpenMethod.ToOpenedProfileWithoutBrowser",
+        metric,
+        NUM_PROFILE_OPEN_METRICS);
+      break;
+    case PROFILE_UNOPENED:
+      UMA_HISTOGRAM_ENUMERATION(
+        "Profile.OpenMethod.ToUnopenedProfile",
+        metric,
+        NUM_PROFILE_OPEN_METRICS);
+      break;
+    default:
+      // There are no other possible values.
+      NOTREACHED();
+      break;
+  }
+
+  ++number_of_profile_switches_;
+  // The LogOpenMethod histogram aggregates data from profile switches as well
+  // as opening of profile related UI elements.
+  LogProfileOpenMethod(metric);
+}
+
 void ProfileMetrics::LogProfileSwitchGaia(ProfileGaia metric) {
   if (metric == GAIA_OPT_IN)
     LogProfileAvatarSelection(AVATAR_GAIA);
   UMA_HISTOGRAM_ENUMERATION("Profile.SwitchGaiaPhotoSettings",
                             metric,
                             NUM_PROFILE_GAIA_METRICS);
-}
-
-void ProfileMetrics::LogProfileSwitchUser(ProfileOpen metric) {
-  DCHECK(metric < NUM_PROFILE_OPEN_METRICS);
-  UMA_HISTOGRAM_ENUMERATION("Profile.OpenMethod", metric,
-                            NUM_PROFILE_OPEN_METRICS);
 }
 
 void ProfileMetrics::LogProfileSyncInfo(ProfileSync metric) {
@@ -392,6 +470,11 @@ void ProfileMetrics::LogProfileNewAvatarMenuUpgrade(
   DCHECK_LT(metric, NUM_PROFILE_AVATAR_MENU_UPGRADE_METRICS);
   UMA_HISTOGRAM_ENUMERATION("Profile.NewAvatarMenu.Upgrade", metric,
                             NUM_PROFILE_AVATAR_MENU_UPGRADE_METRICS);
+}
+
+void ProfileMetrics::LogTimeToOpenUserManager(
+    const base::TimeDelta& time_to_open) {
+  UMA_HISTOGRAM_TIMES("Profile.TimeToOpenUserManager", time_to_open);
 }
 
 #if defined(OS_ANDROID)

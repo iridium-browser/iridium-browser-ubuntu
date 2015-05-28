@@ -17,7 +17,7 @@ class VariationsServiceDevicePolicyTest : public DevicePolicyCrosBrowserTest {
  protected:
   VariationsServiceDevicePolicyTest() {}
 
-  virtual void SetUpInProcessBrowserTestFixture() override {
+  void SetUpInProcessBrowserTestFixture() override {
     DevicePolicyCrosBrowserTest::SetUpInProcessBrowserTestFixture();
 
     InstallOwnerKey();
@@ -42,9 +42,8 @@ IN_PROC_BROWSER_TEST_F(VariationsServiceDevicePolicyTest, VariationsURLValid) {
           GetDefaultVariationsServerURLForTesting();
 
   // Device policy has updated the cros settings.
-  const GURL url =
-      chrome_variations::VariationsService::GetVariationsServerURL(
-          g_browser_process->local_state());
+  const GURL url = chrome_variations::VariationsService::GetVariationsServerURL(
+      g_browser_process->local_state(), std::string());
   EXPECT_TRUE(StartsWithASCII(url.spec(), default_variations_url, true));
   std::string value;
   EXPECT_TRUE(net::GetValueForKeyInQuery(url, "restrict", &value));

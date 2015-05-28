@@ -8,11 +8,11 @@
 #include "base/message_loop/message_loop.h"
 #include "base/run_loop.h"
 #include "base/time/time.h"
-#include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/predictors/resource_prefetch_predictor.h"
 #include "chrome/browser/predictors/resource_prefetch_predictor_tables.h"
 #include "chrome/test/base/testing_profile.h"
+#include "components/history/core/browser/history_service.h"
 #include "components/history/core/browser/history_types.h"
 #include "content/public/test/test_browser_thread.h"
 #include "testing/gmock/include/gmock/gmock.h"
@@ -79,7 +79,7 @@ class ResourcePrefetchPredictorTest : public testing::Test {
  protected:
   void AddUrlToHistory(const std::string& url, int visit_count) {
     HistoryServiceFactory::GetForProfile(profile_.get(),
-                                         Profile::EXPLICIT_ACCESS)->
+                                         ServiceAccessType::EXPLICIT_ACCESS)->
         AddPageWithDetails(
             GURL(url),
             base::string16(),
@@ -186,8 +186,8 @@ void ResourcePrefetchPredictorTest::SetUp() {
 
   ASSERT_TRUE(profile_->CreateHistoryService(true, false));
   profile_->BlockUntilHistoryProcessesPendingRequests();
-  EXPECT_TRUE(HistoryServiceFactory::GetForProfile(profile_.get(),
-                                                   Profile::EXPLICIT_ACCESS));
+  EXPECT_TRUE(HistoryServiceFactory::GetForProfile(
+      profile_.get(), ServiceAccessType::EXPLICIT_ACCESS));
   // Initialize the predictor with empty data.
   ResetPredictor();
   EXPECT_EQ(predictor_->initialization_state_,

@@ -17,7 +17,8 @@ static void find_mv_refs_idx(const VP9_COMMON *cm, const MACROBLOCKD *xd,
                              const TileInfo *const tile,
                              MODE_INFO *mi, MV_REFERENCE_FRAME ref_frame,
                              int_mv *mv_ref_list,
-                             int block, int mi_row, int mi_col) {
+                             int block, int mi_row, int mi_col,
+                             find_mv_refs_sync sync, void *const data) {
   const int *ref_sign_bias = cm->ref_frame_sign_bias;
   int i, refmv_count = 0;
   const POSITION *const mv_ref_search = mv_ref_blocks[mi->mbmi.sb_type];
@@ -68,8 +69,23 @@ static void find_mv_refs_idx(const VP9_COMMON *cm, const MACROBLOCKD *xd,
     }
   }
 
+  // TODO(hkuang): Remove this sync after fixing pthread_cond_broadcast
+  // on windows platform. The sync here is unncessary if use_perv_frame_mvs
+  // is 0. But after removing it, there will be hang in the unit test on windows
+  // due to several threads waiting for a thread's signal.
+#if defined(_WIN32) && !HAVE_PTHREAD_H
+    if (cm->frame_parallel_decode && sync != NULL) {
+      sync(data, mi_row);
+    }
+#endif
+
   // Check the last frame's mode and mv info.
   if (cm->use_prev_frame_mvs) {
+    // Synchronize here for frame parallel decode if sync function is provided.
+    if (cm->frame_parallel_decode && sync != NULL) {
+      sync(data, mi_row);
+    }
+
     if (prev_frame_mvs->ref_frame[0] == ref_frame) {
       ADD_MV_REF_LIST(prev_frame_mvs->mv[0], refmv_count, mv_ref_list, Done);
     } else if (prev_frame_mvs->ref_frame[1] == ref_frame) {
@@ -133,9 +149,10 @@ void vp9_find_mv_refs(const VP9_COMMON *cm, const MACROBLOCKD *xd,
                       const TileInfo *const tile,
                       MODE_INFO *mi, MV_REFERENCE_FRAME ref_frame,
                       int_mv *mv_ref_list,
-                      int mi_row, int mi_col) {
+                      int mi_row, int mi_col,
+                      find_mv_refs_sync sync, void *const data) {
   find_mv_refs_idx(cm, xd, tile, mi, ref_frame, mv_ref_list, -1,
-                   mi_row, mi_col);
+                   mi_row, mi_col, sync, data);
 }
 
 static void lower_mv_precision(MV *mv, int allow_hp) {
@@ -149,21 +166,22 @@ static void lower_mv_precision(MV *mv, int allow_hp) {
 }
 
 void vp9_find_best_ref_mvs(MACROBLOCKD *xd, int allow_hp,
-                           int_mv *mvlist, int_mv *nearest, int_mv *near) {
+                           int_mv *mvlist, int_mv *nearest_mv,
+                           int_mv *near_mv) {
   int i;
   // Make sure all the candidates are properly clamped etc
   for (i = 0; i < MAX_MV_REF_CANDIDATES; ++i) {
     lower_mv_precision(&mvlist[i].as_mv, allow_hp);
     clamp_mv2(&mvlist[i].as_mv, xd);
   }
-  *nearest = mvlist[0];
-  *near = mvlist[1];
+  *nearest_mv = mvlist[0];
+  *near_mv = mvlist[1];
 }
 
 void vp9_append_sub8x8_mvs_for_idx(VP9_COMMON *cm, MACROBLOCKD *xd,
                                    const TileInfo *const tile,
                                    int block, int ref, int mi_row, int mi_col,
-                                   int_mv *nearest, int_mv *near) {
+                                   int_mv *nearest_mv, int_mv *near_mv) {
   int_mv mv_list[MAX_MV_REF_CANDIDATES];
   MODE_INFO *const mi = xd->mi[0].src_mi;
   b_mode_info *bmi = mi->bmi;
@@ -172,20 +190,20 @@ void vp9_append_sub8x8_mvs_for_idx(VP9_COMMON *cm, MACROBLOCKD *xd,
   assert(MAX_MV_REF_CANDIDATES == 2);
 
   find_mv_refs_idx(cm, xd, tile, mi, mi->mbmi.ref_frame[ref], mv_list, block,
-                   mi_row, mi_col);
+                   mi_row, mi_col, NULL, NULL);
 
-  near->as_int = 0;
+  near_mv->as_int = 0;
   switch (block) {
     case 0:
-      nearest->as_int = mv_list[0].as_int;
-      near->as_int = mv_list[1].as_int;
+      nearest_mv->as_int = mv_list[0].as_int;
+      near_mv->as_int = mv_list[1].as_int;
       break;
     case 1:
     case 2:
-      nearest->as_int = bmi[0].as_mv[ref].as_int;
+      nearest_mv->as_int = bmi[0].as_mv[ref].as_int;
       for (n = 0; n < MAX_MV_REF_CANDIDATES; ++n)
-        if (nearest->as_int != mv_list[n].as_int) {
-          near->as_int = mv_list[n].as_int;
+        if (nearest_mv->as_int != mv_list[n].as_int) {
+          near_mv->as_int = mv_list[n].as_int;
           break;
         }
       break;
@@ -196,10 +214,10 @@ void vp9_append_sub8x8_mvs_for_idx(VP9_COMMON *cm, MACROBLOCKD *xd,
       candidates[2] = mv_list[0];
       candidates[3] = mv_list[1];
 
-      nearest->as_int = bmi[2].as_mv[ref].as_int;
+      nearest_mv->as_int = bmi[2].as_mv[ref].as_int;
       for (n = 0; n < 2 + MAX_MV_REF_CANDIDATES; ++n)
-        if (nearest->as_int != candidates[n].as_int) {
-          near->as_int = candidates[n].as_int;
+        if (nearest_mv->as_int != candidates[n].as_int) {
+          near_mv->as_int = candidates[n].as_int;
           break;
         }
       break;

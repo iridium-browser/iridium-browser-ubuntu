@@ -1,5 +1,4 @@
 {
-  'TOOLS': ['newlib', 'glibc',  'bionic', 'pnacl', 'win', 'linux'],
   'SEARCH': [
       '../../../../ppapi/cpp',
       '../../../../ppapi/cpp/dev',
@@ -58,6 +57,7 @@
         'var.cc',
         'var_dictionary.cc',
         'video_decoder.cc',
+        'video_encoder.cc',
         'video_frame.cc',
         'view.cc',
         'websocket.cc',
@@ -143,6 +143,7 @@
         'var_dictionary.h',
         'var.h',
         'video_decoder.h',
+        'video_encoder.h',
         'video_frame.h',
         'view.h',
         'websocket.h',

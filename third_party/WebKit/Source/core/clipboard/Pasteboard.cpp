@@ -34,7 +34,6 @@
 #include "core/clipboard/DataObject.h"
 #include "platform/clipboard/ClipboardUtilities.h"
 #include "platform/graphics/Image.h"
-#include "platform/graphics/skia/NativeImageSkia.h"
 #include "platform/weborigin/KURL.h"
 #include "public/platform/Platform.h"
 #include "public/platform/WebDragData.h"
@@ -82,17 +81,17 @@ void Pasteboard::writeImage(Image* image, const KURL& url, const String& title)
 {
     ASSERT(image);
 
-    RefPtr<NativeImageSkia> bitmap = image->nativeImageForCurrentFrame();
-    if (!bitmap)
+    SkBitmap bitmap;
+    if (!image->bitmapForCurrentFrame(&bitmap))
         return;
 
-    blink::WebImage webImage = bitmap->bitmap();
+    blink::WebImage webImage = bitmap;
     blink::Platform::current()->clipboard()->writeImage(webImage, blink::WebURL(url), blink::WebString(title));
 }
 
 void Pasteboard::writeDataObject(PassRefPtrWillBeRawPtr<DataObject> dataObject)
 {
-    blink::Platform::current()->clipboard()->writeDataObject(blink::WebDragData(dataObject));
+    blink::Platform::current()->clipboard()->writeDataObject(dataObject->toWebDragData());
 }
 
 bool Pasteboard::canSmartReplace()

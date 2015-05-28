@@ -32,7 +32,7 @@ def task_to_name(name, dimensions, isolated_hash):
 
 
 def capture(cmd):
-  assert all(isinstance(i, str) for i in cmd), cmd
+  assert all(isinstance(i, basestring) for i in cmd), cmd
   start = time.time()
   p = subprocess.Popen(
       [sys.executable] + cmd, cwd=ROOT_DIR, stdout=subprocess.PIPE)
@@ -42,7 +42,7 @@ def capture(cmd):
 
 def trigger(swarming_server, isolate_server, task_name, isolated_hash, args):
   """Triggers a specified .isolated file."""
-  fd, jsonfile = tempfile.mkstemp(prefix='swarming')
+  fd, jsonfile = tempfile.mkstemp(prefix=u'swarming')
   os.close(fd)
   try:
     cmd = [

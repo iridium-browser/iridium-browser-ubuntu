@@ -13,7 +13,7 @@ import unittest
 SCRIPT_DIR = os.path.dirname(os.path.abspath(__file__))
 BUILD_TOOLS_DIR = os.path.dirname(SCRIPT_DIR)
 CHROME_SRC = os.path.dirname(os.path.dirname(os.path.dirname(BUILD_TOOLS_DIR)))
-MOCK_DIR = os.path.join(CHROME_SRC, "third_party", "pymock")
+MOCK_DIR = os.path.join(CHROME_SRC, 'third_party', 'pymock')
 
 # For the mock library
 sys.path.append(MOCK_DIR)
@@ -118,6 +118,7 @@ class GypNinjaPosixTestCase(BasePosixTestCase):
     self.options_mock = patch('build_artifacts.options').start()
     self.options_mock.mac_sdk = False
     self.options_mock.no_arm_trusted = False
+    self.gyp_defines_base = ['nacl_allow_thin_archives=0']
 
   def testSimple(self):
     build_artifacts.GypNinjaBuild(
@@ -126,7 +127,8 @@ class GypNinjaPosixTestCase(BasePosixTestCase):
         call(['python', 'gyp.py', 'foo.gyp', '--depth=.', '-G',
               'output_dir=out_dir'],
              cwd='src_dir',
-             env={'GYP_GENERATORS': 'ninja', 'GYP_DEFINES': ''}),
+             env={'GYP_GENERATORS': 'ninja',
+                  'GYP_DEFINES': ' '.join(self.gyp_defines_base)}),
         call(['ninja', '-C', 'out_dir/Release', 'target'], cwd='src_dir')
     ])
 
@@ -139,7 +141,8 @@ class GypNinjaPosixTestCase(BasePosixTestCase):
              cwd='src_dir',
              env={
                  'GYP_GENERATORS': 'ninja',
-                 'GYP_DEFINES': 'target_arch=x64'
+                 'GYP_DEFINES': ' '.join(self.gyp_defines_base +
+                                         ['target_arch=x64']),
              }),
         call(['ninja', '-C', 'out_dir/Release', 'target'], cwd='src_dir')
     ])
@@ -151,7 +154,8 @@ class GypNinjaPosixTestCase(BasePosixTestCase):
         call(['python', 'gyp.py', 'foo.gyp', '--depth=.', '-G',
               'output_dir=out_dir'],
              cwd='src_dir',
-             env={'GYP_GENERATORS': 'ninja', 'GYP_DEFINES': ''}),
+             env={'GYP_GENERATORS': 'ninja',
+                  'GYP_DEFINES': ' '.join(self.gyp_defines_base)}),
         call(['ninja', '-C', 'out_dir/Release', 'target1', 'target2'],
              cwd='src_dir')
     ])
@@ -167,7 +171,8 @@ class GypNinjaPosixTestCase(BasePosixTestCase):
              cwd='src_dir',
              env={
                'GYP_GENERATORS': 'ninja',
-               'GYP_DEFINES': 'mac_sdk=10.6 clang=1'
+               'GYP_DEFINES': ' '.join(self.gyp_defines_base +
+                                       ['mac_sdk=10.6', 'clang=1']),
              }),
         call(['ninja', '-C', 'out_dir/Release', 'target'], cwd='src_dir')
     ])
@@ -181,15 +186,11 @@ class GypNinjaPosixTestCase(BasePosixTestCase):
               'output_dir=out_dir'],
              cwd='src_dir',
              env={
+               'GYP_CROSSCOMPILE': '1',
                'GYP_GENERATORS': 'ninja',
-               'GYP_DEFINES': 'target_arch=arm armv7=1 arm_thumb=0 arm_neon=1'
-                              ' arm_float_abi=hard nacl_enable_arm_gcc=1',
-               'CC': 'arm-linux-gnueabihf-gcc',
-               'CXX': 'arm-linux-gnueabihf-g++',
-               'AR': 'arm-linux-gnueabihf-ar',
-               'AS': 'arm-linux-gnueabihf-as',
-               'CC_host': 'cc',
-               'CXX_host': 'c++',
+               'GYP_DEFINES': ' '.join(self.gyp_defines_base +
+                                       ['target_arch=arm',
+                                        'arm_float_abi=hard']),
              }),
         call(['ninja', '-C', 'out_dir/Release', 'target'], cwd='src_dir')
     ])
@@ -204,16 +205,12 @@ class GypNinjaPosixTestCase(BasePosixTestCase):
               'output_dir=out_dir'],
              cwd='src_dir',
              env={
+               'GYP_CROSSCOMPILE': '1',
                'GYP_GENERATORS': 'ninja',
-               'GYP_DEFINES': 'target_arch=arm armv7=1 arm_thumb=0 arm_neon=1'
-                              ' arm_float_abi=hard nacl_enable_arm_gcc=1'
-                              ' disable_cross_trusted=1',
-               'CC': 'arm-linux-gnueabihf-gcc',
-               'CXX': 'arm-linux-gnueabihf-g++',
-               'AR': 'arm-linux-gnueabihf-ar',
-               'AS': 'arm-linux-gnueabihf-as',
-               'CC_host': 'cc',
-               'CXX_host': 'c++',
+               'GYP_DEFINES': ' '.join(self.gyp_defines_base +
+                                       ['target_arch=arm',
+                                        'arm_float_abi=hard',
+                                        'disable_cross_trusted=1']),
              }),
         call(['ninja', '-C', 'out_dir/Release', 'target'], cwd='src_dir')
     ])

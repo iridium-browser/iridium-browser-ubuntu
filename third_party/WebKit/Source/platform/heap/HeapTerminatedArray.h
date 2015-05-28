@@ -18,7 +18,7 @@ public:
     using TerminatedArray<T>::begin;
     using TerminatedArray<T>::end;
 
-    void trace(Visitor* visitor)
+    DEFINE_INLINE_TRACE()
     {
         for (typename TerminatedArray<T>::iterator it = begin(); it != end(); ++it)
             visitor->trace(*it);
@@ -50,7 +50,7 @@ private:
 };
 
 template<typename T>
-class TraceEagerlyTrait<HeapTerminatedArray<T> > {
+class TraceEagerlyTrait<HeapTerminatedArray<T>> {
 public:
     static const bool value = TraceEagerlyTrait<T>::value;
 };

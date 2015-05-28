@@ -53,15 +53,15 @@ const QuicTag kQBIC = TAG('Q', 'B', 'I', 'C');   // TCP cubic
 // Connection options (COPT) values
 const QuicTag kTBBR = TAG('T', 'B', 'B', 'R');   // Reduced Buffer Bloat TCP
 const QuicTag kRENO = TAG('R', 'E', 'N', 'O');   // Reno Congestion Control
+const QuicTag kBYTE = TAG('B', 'Y', 'T', 'E');   // TCP cubic or reno in bytes
 const QuicTag kIW10 = TAG('I', 'W', '1', '0');   // Force ICWND to 10
 const QuicTag kPACE = TAG('P', 'A', 'C', 'E');   // Paced TCP cubic
 const QuicTag k1CON = TAG('1', 'C', 'O', 'N');   // Emulate a single connection
 const QuicTag kNTLP = TAG('N', 'T', 'L', 'P');   // No tail loss probe
 const QuicTag kNCON = TAG('N', 'C', 'O', 'N');   // N Connection Congestion Ctrl
-
-// Loss detection algorithm types
-const QuicTag kNACK = TAG('N', 'A', 'C', 'K');   // TCP style nack counting
+const QuicTag kNRTO = TAG('N', 'R', 'T', 'O');   // CWND reduction on loss
 const QuicTag kTIME = TAG('T', 'I', 'M', 'E');   // Time based
+const QuicTag kMIN1 = TAG('M', 'I', 'N', '1');   // Min CWND of 1 packet
 
 // Optional support of truncated Connection IDs.  If sent by a peer, the value
 // is the minimum number of bytes allowed for the connection ID sent to the
@@ -73,6 +73,7 @@ const QuicTag kFHDR = TAG('F', 'H', 'D', 'R');   // FEC protect headers
 
 // Enable bandwidth resumption experiment.
 const QuicTag kBWRE = TAG('B', 'W', 'R', 'E');  // Bandwidth resumption.
+const QuicTag kBWMX = TAG('B', 'W', 'M', 'X');  // Max bandwidth resumption.
 
 // Proof types (i.e. certificate types)
 // NOTE: although it would be silly to do so, specifying both kX509 and kX59R

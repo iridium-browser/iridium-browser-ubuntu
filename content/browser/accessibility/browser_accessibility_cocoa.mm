@@ -109,11 +109,14 @@ NSDictionary* attributeToMethodNameMap = nil;
     { @"AXARIABusy", @"ariaBusy" },
     { @"AXARIALive", @"ariaLive" },
     { @"AXARIARelevant", @"ariaRelevant" },
+    { @"AXDropEffects", @"dropeffect" },
+    { @"AXGrabbed", @"grabbed" },
     { @"AXInvalid", @"invalid" },
     { @"AXLoaded", @"loaded" },
     { @"AXLoadingProgress", @"loadingProgress" },
     { @"AXPlaceholder", @"placeholder" },
     { @"AXRequired", @"required" },
+    { @"AXSortDirection", @"sortDirection" },
     { @"AXVisited", @"visited" },
   };
 
@@ -234,7 +237,7 @@ NSDictionary* attributeToMethodNameMap = nil;
 }
 
 - (NSValue*)columnIndexRange {
-  if ([self internalRole] != ui::AX_ROLE_CELL)
+  if (!browserAccessibility_->IsCellOrTableHeaderRole())
     return nil;
 
   int column = -1;
@@ -326,6 +329,11 @@ NSDictionary* attributeToMethodNameMap = nil;
   return nil;
 }
 
+- (NSString*)dropeffect {
+  return NSStringForStringAttribute(
+      browserAccessibility_, ui::AX_ATTR_DROPEFFECT);
+}
+
 - (NSNumber*)enabled {
   return [NSNumber numberWithBool:
       GetState(browserAccessibility_, ui::AX_STATE_ENABLED)];
@@ -341,6 +349,11 @@ NSDictionary* attributeToMethodNameMap = nil;
   NSNumber* ret = [NSNumber numberWithBool:
       manager->GetFocus(NULL) == browserAccessibility_];
   return ret;
+}
+
+- (NSNumber*)grabbed {
+  bool boolValue = browserAccessibility_->GetBoolAttribute(ui::AX_ATTR_GRABBED);
+  return [NSNumber numberWithBool:boolValue];
 }
 
 - (id)header {
@@ -392,15 +405,35 @@ NSDictionary* attributeToMethodNameMap = nil;
 }
 
 - (NSString*)invalid {
-  base::string16 invalidUTF;
-  if (!browserAccessibility_->GetHtmlAttribute("aria-invalid", &invalidUTF))
-    return NULL;
-  NSString* invalid = base::SysUTF16ToNSString(invalidUTF);
-  if ([invalid isEqualToString:@"false"] ||
-      [invalid isEqualToString:@""]) {
+  int invalidState;
+  if (!browserAccessibility_->GetIntAttribute(
+      ui::AX_ATTR_INVALID_STATE, &invalidState))
     return @"false";
+
+  switch (invalidState) {
+  case ui::AX_INVALID_STATE_FALSE:
+    return @"false";
+  case ui::AX_INVALID_STATE_TRUE:
+    return @"true";
+  case ui::AX_INVALID_STATE_SPELLING:
+    return @"spelling";
+  case ui::AX_INVALID_STATE_GRAMMAR:
+    return @"grammar";
+  case ui::AX_INVALID_STATE_OTHER:
+    {
+      std::string ariaInvalidValue;
+      if (browserAccessibility_->GetStringAttribute(
+          ui::AX_ATTR_ARIA_INVALID_VALUE,
+          &ariaInvalidValue))
+        return base::SysUTF8ToNSString(ariaInvalidValue);
+      // Return @"true" since we cannot be more specific about the value.
+      return @"true";
+    }
+  default:
+    NOTREACHED();
   }
-  return invalid;
+
+  return @"false";
 }
 
 - (NSString*)placeholder {
@@ -462,7 +495,9 @@ NSDictionary* attributeToMethodNameMap = nil;
 }
 
 - (NSNumber*)numberOfCharacters {
-  return [NSNumber numberWithInt:browserAccessibility_->value().length()];
+  std::string value = browserAccessibility_->GetStringAttribute(
+      ui::AX_ATTR_VALUE);
+  return [NSNumber numberWithInt:value.size()];
 }
 
 // The origin of this accessibility object in the page's document.
@@ -644,6 +679,12 @@ NSDictionary* attributeToMethodNameMap = nil;
   case ui::AX_ROLE_STATUS:
     return base::SysUTF16ToNSString(content_client->GetLocalizedString(
         IDS_AX_ROLE_STATUS));
+  case ui::AX_ROLE_SEARCH_BOX:
+    return base::SysUTF16ToNSString(content_client->GetLocalizedString(
+        IDS_AX_ROLE_SEARCH_BOX));
+  case ui::AX_ROLE_SWITCH:
+    return base::SysUTF16ToNSString(content_client->GetLocalizedString(
+        IDS_AX_ROLE_SWITCH));
   case ui::AX_ROLE_TOGGLE_BUTTON:
     return base::SysUTF16ToNSString(content_client->GetLocalizedString(
         IDS_AX_ROLE_TOGGLE_BUTTON));
@@ -675,7 +716,7 @@ NSDictionary* attributeToMethodNameMap = nil;
 }
 
 - (NSValue*)rowIndexRange {
-  if ([self internalRole] != ui::AX_ROLE_CELL)
+  if (!browserAccessibility_->IsCellOrTableHeaderRole())
     return nil;
 
   int row = -1;
@@ -752,6 +793,28 @@ NSDictionary* attributeToMethodNameMap = nil;
 - (NSValue*)size {
   gfx::Rect bounds = browserAccessibility_->GetLocalBoundsRect();
   return  [NSValue valueWithSize:NSMakeSize(bounds.width(), bounds.height())];
+}
+
+- (NSString*)sortDirection {
+  int sortDirection;
+  if (!browserAccessibility_->GetIntAttribute(
+      ui::AX_ATTR_SORT_DIRECTION, &sortDirection))
+    return @"";
+
+  switch (sortDirection) {
+  case ui::AX_SORT_DIRECTION_UNSORTED:
+    return @"";
+  case ui::AX_SORT_DIRECTION_ASCENDING:
+    return @"AXSortDirectionAscending";
+  case ui::AX_SORT_DIRECTION_DESCENDING:
+    return @"AXSortDirectionDescending";
+  case ui::AX_SORT_DIRECTION_OTHER:
+    return @"AXSortDirectionUnknown";
+  default:
+    NOTREACHED();
+  }
+
+  return @"";
 }
 
 // Returns a subrole based upon the role.
@@ -898,8 +961,9 @@ NSDictionary* attributeToMethodNameMap = nil;
 }
 
 - (NSValue*)visibleCharacterRange {
-  return [NSValue valueWithRange:
-      NSMakeRange(0, browserAccessibility_->value().length())];
+  std::string value = browserAccessibility_->GetStringAttribute(
+      ui::AX_ATTR_VALUE);
+  return [NSValue valueWithRange:NSMakeRange(0, value.size())];
 }
 
 - (NSArray*)visibleCells {
@@ -949,6 +1013,9 @@ NSDictionary* attributeToMethodNameMap = nil;
   BrowserAccessibilityManagerMac* manager =
       static_cast<BrowserAccessibilityManagerMac*>(
           browserAccessibility_->manager());
+  if (!manager || !manager->parent_view())
+    return nil;
+
   return [manager->parent_view() window];
 }
 
@@ -1013,7 +1080,9 @@ NSDictionary* attributeToMethodNameMap = nil;
   const std::vector<int32>& line_breaks =
       browserAccessibility_->GetIntListAttribute(
           ui::AX_ATTR_LINE_BREAKS);
-  int len = static_cast<int>(browserAccessibility_->value().size());
+  std::string value = browserAccessibility_->GetStringAttribute(
+      ui::AX_ATTR_VALUE);
+  int len = static_cast<int>(value.size());
 
   if ([attribute isEqualToString:
       NSAccessibilityStringForRangeParameterizedAttribute]) {
@@ -1083,7 +1152,7 @@ NSDictionary* attributeToMethodNameMap = nil;
            j < child->PlatformChildCount();
            ++j) {
         BrowserAccessibility* cell = child->PlatformGetChild(j);
-        if (cell->GetRole() != ui::AX_ROLE_CELL)
+        if (!cell->IsCellOrTableHeaderRole())
           continue;
         int colIndex;
         if (!cell->GetIntAttribute(
@@ -1270,6 +1339,7 @@ NSDictionary* attributeToMethodNameMap = nil;
     [ret addObjectsFromArray:[NSArray arrayWithObjects:
         NSAccessibilityColumnIndexRangeAttribute,
         NSAccessibilityRowIndexRangeAttribute,
+        @"AXSortDirection",
         nil]];
   } else if ([role isEqualToString:@"AXWebArea"]) {
     [ret addObjectsFromArray:[NSArray arrayWithObjects:
@@ -1362,7 +1432,21 @@ NSDictionary* attributeToMethodNameMap = nil;
         nil]];
   }
 
-  //Add expanded attribute only if it has expanded or collapsed state.
+  if (browserAccessibility_->HasStringAttribute(
+          ui::AX_ATTR_DROPEFFECT)) {
+    [ret addObjectsFromArray:[NSArray arrayWithObjects:
+        @"AXDropEffects",
+        nil]];
+  }
+
+  // Add aria-grabbed attribute only if it has true.
+  if (browserAccessibility_->HasBoolAttribute(ui::AX_ATTR_GRABBED)) {
+    [ret addObjectsFromArray:[NSArray arrayWithObjects:
+        @"AXGrabbed",
+        nil]];
+  }
+
+  // Add expanded attribute only if it has expanded or collapsed state.
   if (GetState(browserAccessibility_, ui::AX_STATE_EXPANDED) ||
         GetState(browserAccessibility_, ui::AX_STATE_COLLAPSED)) {
     [ret addObjectsFromArray:[NSArray arrayWithObjects:

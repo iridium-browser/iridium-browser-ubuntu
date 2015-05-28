@@ -35,24 +35,17 @@ public:
     }
 
 protected:
-    virtual SkString onShortName() SK_OVERRIDE {
+    SkString onShortName() override {
         SkString str;
         str.printf("bitmaprect_%s", fUseIRect ? "i" : "s");
         return str;
     }
 
-    virtual SkISize onISize() SK_OVERRIDE {
+    SkISize onISize() override {
         return SkISize::Make(640, 480);
     }
 
-#ifdef SK_CPU_ARM64
-    // Skip tiled drawing on 64-bit ARM until https://skbug.com/2908 is fixed.
-    virtual uint32_t onGetFlags() const SK_OVERRIDE {
-        return kSkipTiled_Flag;
-    }
-#endif
-
-    virtual void onDraw(SkCanvas* canvas) SK_OVERRIDE {
+    void onDraw(SkCanvas* canvas) override {
         canvas->drawColor(0xFFCCCCCC);
 
         const SkIRect src[] = {
@@ -94,22 +87,25 @@ private:
 };
 
 //////////////////////////////////////////////////////////////////////////////
+
 static void make_3x3_bitmap(SkBitmap* bitmap) {
+    const int xSize = 3;
+    const int ySize = 3;
 
-    static const int gXSize = 3;
-    static const int gYSize = 3;
-
-    SkColor textureData[gXSize][gYSize] = {
+    const SkColor textureData[xSize][ySize] = {
         { SK_ColorRED,    SK_ColorWHITE, SK_ColorBLUE },
         { SK_ColorGREEN,  SK_ColorBLACK, SK_ColorCYAN },
         { SK_ColorYELLOW, SK_ColorGRAY,  SK_ColorMAGENTA }
     };
 
+    bitmap->allocN32Pixels(xSize, ySize, true);
+    SkCanvas canvas(*bitmap);
+    SkPaint paint;
 
-    bitmap->allocN32Pixels(gXSize, gYSize);
-    for (int y = 0; y < gYSize; y++) {
-        for (int x = 0; x < gXSize; x++) {
-            *bitmap->getAddr32(x, y) = textureData[x][y];
+    for (int y = 0; y < ySize; y++) {
+        for (int x = 0; x < xSize; x++) {
+            paint.setColor(textureData[x][y]);
+            canvas.drawIRect(SkIRect::MakeXYWH(x, y, 1, 1), paint);
         }
     }
 }
@@ -128,17 +124,17 @@ public:
     }
 
 protected:
-    virtual SkString onShortName() SK_OVERRIDE {
+    SkString onShortName() override {
         SkString str;
         str.printf("3x3bitmaprect");
         return str;
     }
 
-    virtual SkISize onISize() SK_OVERRIDE {
+    SkISize onISize() override {
         return SkISize::Make(640, 480);
     }
 
-    virtual void onDraw(SkCanvas* canvas) SK_OVERRIDE {
+    void onDraw(SkCanvas* canvas) override {
 
         SkBitmap bitmap;
         make_3x3_bitmap(&bitmap);
@@ -165,9 +161,9 @@ static void make_big_bitmap(SkBitmap* bitmap) {
         for (int x = 0; x < gXSize; ++x) {
             if (x <= gBorderWidth || x >= gXSize-gBorderWidth ||
                 y <= gBorderWidth || y >= gYSize-gBorderWidth) {
-                *bitmap->getAddr32(x, y) = 0x88FFFFFF;
+                *bitmap->getAddr32(x, y) = SkPreMultiplyColor(0x88FFFFFF);
             } else {
-                *bitmap->getAddr32(x, y) = 0x88FF0000;
+                *bitmap->getAddr32(x, y) = SkPreMultiplyColor(0x88FF0000);
             }
         }
     }
@@ -187,21 +183,21 @@ public:
     }
 
 protected:
-    virtual SkString onShortName() SK_OVERRIDE {
+    SkString onShortName() override {
         SkString str;
         str.printf("bigbitmaprect_%s", fUseIRect ? "i" : "s");
         return str;
     }
 
-    virtual SkISize onISize() SK_OVERRIDE {
+    SkISize onISize() override {
         return SkISize::Make(640, 480);
     }
 
-    virtual void onOnceBeforeDraw() SK_OVERRIDE {
+    void onOnceBeforeDraw() override {
         make_big_bitmap(&fBigBitmap);
     }
 
-    virtual void onDraw(SkCanvas* canvas) SK_OVERRIDE {
+    void onDraw(SkCanvas* canvas) override {
 
         SkXfermode* mode = SkXfermode::Create(SkXfermode::kXor_Mode);
 
@@ -240,17 +236,17 @@ public:
     BitmapRectRounding() {}
 
 protected:
-    SkString onShortName() SK_OVERRIDE {
+    SkString onShortName() override {
         SkString str;
         str.printf("bitmaprect_rounding");
         return str;
     }
 
-    SkISize onISize() SK_OVERRIDE {
+    SkISize onISize() override {
         return SkISize::Make(640, 480);
     }
 
-    void onOnceBeforeDraw() SK_OVERRIDE {
+    void onOnceBeforeDraw() override {
         fBM.allocN32Pixels(10, 10);
         fBM.eraseColor(SK_ColorBLUE);
     }
@@ -260,7 +256,7 @@ protected:
     // If it does, we may see a red-line at the bottom, instead of the bitmap exactly matching
     // the clip (in which case we should see all blue).
     // The correct image should be all blue.
-    void onDraw(SkCanvas* canvas) SK_OVERRIDE {
+    void onDraw(SkCanvas* canvas) override {
         SkPaint paint;
         paint.setColor(SK_ColorRED);
 
@@ -271,7 +267,7 @@ protected:
         canvas->drawRect(r, paint);
         canvas->drawBitmapRect(fBM, NULL, r, NULL);
     }
-    
+
 private:
     typedef skiagm::GM INHERITED;
 };

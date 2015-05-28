@@ -14,11 +14,22 @@ declare_args() {
   # catching bugs but in some cases may cause conflicts or excessive slowness.
   disable_iterator_debugging = false
 
-  # Set to true to not store any build metadata (this isn't working yet but
-  # this flag will help us to get there). See http://crbug.com/314403.
-  # TODO(sebmarchand): Update this comment once this flag guarantee that
-  #     there's no build metadata in the build artifacts.
-  dont_embed_build_metadata = false
+  # Set to true to not store any build metadata, e.g. ifdef out all __DATE__
+  # and __TIME__. Set to 0 to reenable the use of these macros in the code
+  # base. See http://crbug.com/314403.
+  #
+  # Continue to embed build meta data in Official builds, basically the
+  # time it was built.
+  # TODO(maruel): This decision should be revisited because having an
+  # official deterministic build has high value too but MSVC toolset can't
+  # generate anything deterministic with WPO enabled AFAIK.
+  dont_embed_build_metadata = is_official_build
+
+  # Set to true to enable dcheck in Release builds.
+  dcheck_always_on = false
+
+  # Set to true to compile with the OpenGL ES 2.0 conformance tests.
+  internal_gles2_conform_tests = false
 }
 
 # TODO(brettw) Most of these should be removed. Instead of global feature
@@ -73,6 +84,9 @@ config("feature_flags") {
   }
   if (dont_embed_build_metadata) {
     defines += [ "DONT_EMBED_BUILD_METADATA" ]
+  }
+  if (dcheck_always_on) {
+    defines += [ "DCHECK_ALWAYS_ON=1" ]
   }
   if (use_udev) {
     # TODO(brettw) should probably be "=1".
@@ -196,9 +210,6 @@ config("feature_flags") {
   if (enable_one_click_signin) {
     defines += [ "ENABLE_ONE_CLICK_SIGNIN" ]
   }
-  if (use_athena) {
-    defines += [ "USE_ATHENA=1" ]
-  }
   if (enable_hidpi) {
     defines += [ "ENABLE_HIDPI=1" ]
   }
@@ -211,6 +222,15 @@ config("feature_flags") {
   if (v8_use_external_startup_data) {
     defines += [ "V8_USE_EXTERNAL_STARTUP_DATA" ]
   }
+  if (enable_background) {
+    defines += [ "ENABLE_BACKGROUND=1" ]
+  }
+  if (enable_pre_sync_backup) {
+    defines += [ "ENABLE_PRE_SYNC_BACKUP" ]
+  }
+  if (enable_video_hole) {
+    defines += [ "VIDEO_HOLE=1" ]
+  }
 }
 
 # Debug/release ----------------------------------------------------------------
@@ -222,13 +242,17 @@ config("debug") {
     "WTF_USE_DYNAMIC_ANNOTATIONS=1",
   ]
 
+  if (is_nacl) {
+    defines += [ "DYNAMIC_ANNOTATIONS_PREFIX=NACL_" ]
+  }
+
   if (is_win) {
     if (disable_iterator_debugging) {
       # Iterator debugging is enabled by the compiler on debug builds, and we
       # have to tell it to turn it off.
       defines += [ "_HAS_ITERATOR_DEBUGGING=0" ]
     }
-  } else if (is_linux && !is_android && cpu_arch == "x64" &&
+  } else if (is_linux && !is_android && current_cpu == "x64" &&
              !disable_iterator_debugging) {
     # Enable libstdc++ debugging facilities to help catch problems early, see
     # http://crbug.com/65151 .

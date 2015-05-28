@@ -76,8 +76,6 @@ int ScrollableArea::maxOverlapBetweenPages()
 ScrollableArea::ScrollableArea()
     : m_constrainsScrollingToContentEdge(true)
     , m_inLiveResize(false)
-    , m_verticalScrollElasticity(ScrollElasticityNone)
-    , m_horizontalScrollElasticity(ScrollElasticityNone)
     , m_scrollbarOverlayStyle(ScrollbarOverlayStyleDefault)
     , m_scrollOriginChanged(false)
 {
@@ -156,12 +154,19 @@ bool ScrollableArea::scroll(ScrollDirection direction, ScrollGranularity granula
     if (direction == ScrollUp || direction == ScrollLeft)
         delta = -delta;
 
-    return scrollAnimator()->scroll(orientation, granularity, step, delta);
+    return scrollAnimator()->scroll(orientation, granularity, step, delta).didScroll;
 }
 
-void ScrollableArea::scrollToOffsetWithoutAnimation(const FloatPoint& offset)
+void ScrollableArea::setScrollPosition(const DoublePoint& position, ScrollBehavior behavior)
 {
-    cancelProgrammaticScrollAnimation();
+    // FIXME(417782): This should be unified with LayerScrollableArea::scrollToOffset.
+    ASSERT_NOT_REACHED();
+}
+
+void ScrollableArea::scrollToOffsetWithoutAnimation(const FloatPoint& offset, bool cancelProgrammaticAnimations)
+{
+    if (cancelProgrammaticAnimations)
+        cancelProgrammaticScrollAnimation();
     scrollAnimator()->scrollToOffsetWithoutAnimation(offset);
 }
 
@@ -180,10 +185,10 @@ void ScrollableArea::programmaticallyScrollSmoothlyToOffset(const FloatPoint& of
     programmaticScrollAnimator()->animateToOffset(offset);
 }
 
-void ScrollableArea::notifyScrollPositionChanged(const IntPoint& position)
+void ScrollableArea::notifyScrollPositionChanged(const DoublePoint& position)
 {
-    scrollPositionChanged(DoublePoint(position));
-    scrollAnimator()->setCurrentPosition(scrollPosition());
+    scrollPositionChanged(position);
+    scrollAnimator()->setCurrentPosition(toFloatPoint(scrollPositionDouble()));
 }
 
 void ScrollableArea::scrollPositionChanged(const DoublePoint& position)
@@ -237,11 +242,11 @@ bool ScrollableArea::scrollBehaviorFromString(const String& behaviorString, Scro
     return true;
 }
 
-bool ScrollableArea::handleWheelEvent(const PlatformWheelEvent& wheelEvent)
+ScrollResult ScrollableArea::handleWheelEvent(const PlatformWheelEvent& wheelEvent)
 {
-    // ctrl+wheel events are used to trigger zooming, not scrolling.
-    if (wheelEvent.modifiers() & PlatformEvent::CtrlKey)
-        return false;
+    // Wheel events which do not scroll are used to trigger zooming.
+    if (!wheelEvent.canScroll())
+        return ScrollResult(false);
 
     cancelProgrammaticScrollAnimation();
     return scrollAnimator()->handleWheelEvent(wheelEvent);
@@ -419,6 +424,12 @@ bool ScrollableArea::hasLayerForScrollCorner() const
     return layerForScrollCorner();
 }
 
+void ScrollableArea::layerForScrollingDidChange()
+{
+    if (ProgrammaticScrollAnimator* programmaticScrollAnimator = existingProgrammaticScrollAnimator())
+        programmaticScrollAnimator->layerForCompositedScrollingDidChange();
+}
+
 bool ScrollableArea::scheduleAnimation()
 {
     if (HostWindow* window = hostWindow()) {
@@ -430,19 +441,31 @@ bool ScrollableArea::scheduleAnimation()
 
 void ScrollableArea::serviceScrollAnimations(double monotonicTime)
 {
-    bool hasRunningAnimation = false;
+    bool requiresAnimationService = false;
     if (ScrollAnimator* scrollAnimator = existingScrollAnimator()) {
         scrollAnimator->serviceScrollAnimations();
         if (scrollAnimator->hasRunningAnimation())
-            hasRunningAnimation = true;
+            requiresAnimationService = true;
     }
     if (ProgrammaticScrollAnimator* programmaticScrollAnimator = existingProgrammaticScrollAnimator()) {
         programmaticScrollAnimator->tickAnimation(monotonicTime);
-        if (programmaticScrollAnimator->hasRunningAnimation())
-            hasRunningAnimation = true;
+        if (programmaticScrollAnimator->hasAnimationThatRequiresService())
+            requiresAnimationService = true;
     }
-    if (!hasRunningAnimation)
+    if (!requiresAnimationService)
         deregisterForAnimation();
+}
+
+void ScrollableArea::updateCompositorScrollAnimations()
+{
+    if (ProgrammaticScrollAnimator* programmaticScrollAnimator = existingProgrammaticScrollAnimator())
+        programmaticScrollAnimator->updateCompositorAnimations();
+}
+
+void ScrollableArea::notifyCompositorAnimationFinished(int groupId)
+{
+    if (ProgrammaticScrollAnimator* programmaticScrollAnimator = existingProgrammaticScrollAnimator())
+        programmaticScrollAnimator->notifyCompositorAnimationFinished(groupId);
 }
 
 void ScrollableArea::cancelProgrammaticScrollAnimation()

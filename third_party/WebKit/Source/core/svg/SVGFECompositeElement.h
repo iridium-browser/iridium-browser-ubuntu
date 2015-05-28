@@ -44,13 +44,12 @@ public:
     SVGAnimatedString* in2() { return m_in2.get(); }
     SVGAnimatedEnumeration<CompositeOperationType>* svgOperator() { return m_svgOperator.get(); }
 
-    virtual void trace(Visitor*) override;
+    DECLARE_VIRTUAL_TRACE();
 
 private:
     explicit SVGFECompositeElement(Document&);
 
     bool isSupportedAttribute(const QualifiedName&);
-    virtual void parseAttribute(const QualifiedName&, const AtomicString&) override;
     virtual bool setFilterEffectAttribute(FilterEffect*, const QualifiedName&) override;
     virtual void svgAttributeChanged(const QualifiedName&) override;
     virtual PassRefPtrWillBeRawPtr<FilterEffect> build(SVGFilterBuilder*, Filter*) override;
@@ -61,7 +60,7 @@ private:
     RefPtrWillBeMember<SVGAnimatedNumber> m_k4;
     RefPtrWillBeMember<SVGAnimatedString> m_in1;
     RefPtrWillBeMember<SVGAnimatedString> m_in2;
-    RefPtrWillBeMember<SVGAnimatedEnumeration<CompositeOperationType> > m_svgOperator;
+    RefPtrWillBeMember<SVGAnimatedEnumeration<CompositeOperationType>> m_svgOperator;
 };
 
 } // namespace blink

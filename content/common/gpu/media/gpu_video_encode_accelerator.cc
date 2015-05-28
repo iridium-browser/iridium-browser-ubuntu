@@ -9,6 +9,8 @@
 #include "base/logging.h"
 #include "base/memory/shared_memory.h"
 #include "base/message_loop/message_loop_proxy.h"
+#include "base/numerics/safe_math.h"
+#include "base/sys_info.h"
 #include "build/build_config.h"
 #include "content/common/gpu/gpu_channel.h"
 #include "content/common/gpu/gpu_messages.h"
@@ -18,13 +20,12 @@
 #include "media/base/video_frame.h"
 
 #if defined(OS_CHROMEOS)
-#if defined(ARCH_CPU_ARMEL) || (defined(USE_OZONE) && defined(USE_V4L2_CODEC))
+#if defined(USE_V4L2_CODEC)
 #include "content/common/gpu/media/v4l2_video_encode_accelerator.h"
-// defined(ARCH_CPU_ARMEL) || (defined(USE_OZONE) && defined(USE_V4L2_CODEC))
 #endif
 #if defined(ARCH_CPU_X86_FAMILY)
 #include "content/common/gpu/media/vaapi_video_encode_accelerator.h"
-#endif  // defined(ARCH_CPU_X86_FAMILY)
+#endif
 #elif defined(OS_ANDROID) && defined(ENABLE_WEBRTC)
 #include "content/common/gpu/media/android_video_encode_accelerator.h"
 #endif
@@ -212,8 +213,7 @@ GpuVideoEncodeAccelerator::CreateVEAFps() {
 scoped_ptr<media::VideoEncodeAccelerator>
 GpuVideoEncodeAccelerator::CreateV4L2VEA() {
   scoped_ptr<media::VideoEncodeAccelerator> encoder;
-#if defined(OS_CHROMEOS) && (defined(ARCH_CPU_ARMEL) || \
-    (defined(USE_OZONE) && defined(USE_V4L2_CODEC)))
+#if defined(OS_CHROMEOS) && defined(USE_V4L2_CODEC)
   scoped_refptr<V4L2Device> device = V4L2Device::Create(V4L2Device::kEncoder);
   if (device)
     encoder.reset(new V4L2VideoEncodeAccelerator(device));
@@ -245,6 +245,7 @@ GpuVideoEncodeAccelerator::CreateAndroidVEA() {
 
 void GpuVideoEncodeAccelerator::OnEncode(int32 frame_id,
                                          base::SharedMemoryHandle buffer_handle,
+                                         uint32 buffer_offset,
                                          uint32 buffer_size,
                                          bool force_keyframe) {
   DVLOG(3) << "GpuVideoEncodeAccelerator::OnEncode(): frame_id=" << frame_id
@@ -259,16 +260,30 @@ void GpuVideoEncodeAccelerator::OnEncode(int32 frame_id,
     return;
   }
 
+  uint32 aligned_offset =
+      buffer_offset % base::SysInfo::VMAllocationGranularity();
+  base::CheckedNumeric<off_t> map_offset = buffer_offset;
+  map_offset -= aligned_offset;
+  base::CheckedNumeric<size_t> map_size = buffer_size;
+  map_size += aligned_offset;
+
+  if (!map_offset.IsValid() || !map_size.IsValid()) {
+    DLOG(ERROR) << "GpuVideoEncodeAccelerator::OnEncode():"
+                << " invalid (buffer_offset,buffer_size)";
+    NotifyError(media::VideoEncodeAccelerator::kPlatformFailureError);
+    return;
+  }
+
   scoped_ptr<base::SharedMemory> shm(
       new base::SharedMemory(buffer_handle, true));
-  if (!shm->Map(buffer_size)) {
+  if (!shm->MapAt(map_offset.ValueOrDie(), map_size.ValueOrDie())) {
     DLOG(ERROR) << "GpuVideoEncodeAccelerator::OnEncode(): "
                    "could not map frame_id=" << frame_id;
     NotifyError(media::VideoEncodeAccelerator::kPlatformFailureError);
     return;
   }
 
-  uint8* shm_memory = reinterpret_cast<uint8*>(shm->memory());
+  uint8* shm_memory = reinterpret_cast<uint8*>(shm->memory()) + aligned_offset;
   scoped_refptr<media::VideoFrame> frame =
       media::VideoFrame::WrapExternalPackedMemory(
           input_format_,
@@ -278,6 +293,7 @@ void GpuVideoEncodeAccelerator::OnEncode(int32 frame_id,
           shm_memory,
           buffer_size,
           buffer_handle,
+          buffer_offset,
           base::TimeDelta(),
           // It's turtles all the way down...
           base::Bind(base::IgnoreResult(&base::MessageLoopProxy::PostTask),

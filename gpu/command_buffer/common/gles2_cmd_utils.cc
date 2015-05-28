@@ -329,6 +329,16 @@ int GLES2Util::GLGetNumValuesReturned(int id) const {
     case GL_CURRENT_VERTEX_ATTRIB:
       return 4;
 
+    // -- glGetSynciv
+    case GL_OBJECT_TYPE:
+      return 1;
+    case GL_SYNC_STATUS:
+      return 1;
+    case GL_SYNC_CONDITION:
+      return 1;
+    case GL_SYNC_FLAGS:
+      return 1;
+
     // -- glHint with GL_OES_standard_derivatives
     case GL_FRAGMENT_SHADER_DERIVATIVE_HINT_OES:
       return 1;
@@ -394,13 +404,14 @@ int ElementsPerGroup(int format, int type) {
 // Return the number of bytes per element, based on the element type.
 int BytesPerElement(int type) {
   switch (type) {
+    case GL_FLOAT_32_UNSIGNED_INT_24_8_REV:
+      return 8;
     case GL_FLOAT:
     case GL_UNSIGNED_INT_24_8_OES:
     case GL_UNSIGNED_INT:
     case GL_UNSIGNED_INT_2_10_10_10_REV:
     case GL_UNSIGNED_INT_10F_11F_11F_REV:
     case GL_UNSIGNED_INT_5_9_9_9_REV:
-    case GL_FLOAT_32_UNSIGNED_INT_24_8_REV:
       return 4;
     case GL_HALF_FLOAT_OES:
     case GL_UNSIGNED_SHORT:
@@ -420,12 +431,18 @@ int BytesPerElement(int type) {
 }  // anonymous namespace
 
 uint32 GLES2Util::ComputeImageGroupSize(int format, int type) {
-  return BytesPerElement(type) * ElementsPerGroup(format, type);
+  int bytes_per_element = BytesPerElement(type);
+  DCHECK_GE(8, bytes_per_element);
+  int elements_per_group = ElementsPerGroup(format, type);
+  DCHECK_GE(4, elements_per_group);
+  return  bytes_per_element * elements_per_group;
 }
 
 bool GLES2Util::ComputeImagePaddedRowSize(
         int width, int format, int type, int unpack_alignment,
         uint32* padded_row_size) {
+  DCHECK(unpack_alignment == 1 || unpack_alignment == 2 ||
+         unpack_alignment == 4 || unpack_alignment == 8);
   uint32 bytes_per_group = ComputeImageGroupSize(format, type);
   uint32 unpadded_row_size;
   if (!SafeMultiplyUint32(width, bytes_per_group, &unpadded_row_size)) {
@@ -444,6 +461,8 @@ bool GLES2Util::ComputeImageDataSizes(
     int width, int height, int depth, int format, int type,
     int unpack_alignment, uint32* size, uint32* ret_unpadded_row_size,
     uint32* ret_padded_row_size) {
+  DCHECK(unpack_alignment == 1 || unpack_alignment == 2 ||
+         unpack_alignment == 4 || unpack_alignment == 8);
   uint32 bytes_per_group = ComputeImageGroupSize(format, type);
   uint32 row_size;
   if (!SafeMultiplyUint32(width, bytes_per_group, &row_size)) {
@@ -701,6 +720,16 @@ uint32 GLES2Util::GetChannelsForFormat(int format) {
     case GL_RGB16F_EXT:
     case GL_RGB32F_EXT:
     case GL_SRGB_EXT:
+    case GL_SRGB8:
+    case GL_RGB8_SNORM:
+    case GL_R11F_G11F_B10F:
+    case GL_RGB9_E5:
+    case GL_RGB8UI:
+    case GL_RGB8I:
+    case GL_RGB16UI:
+    case GL_RGB16I:
+    case GL_RGB32UI:
+    case GL_RGB32I:
       return kRGB;
     case GL_BGRA_EXT:
     case GL_BGRA8_EXT:
@@ -712,20 +741,51 @@ uint32 GLES2Util::GetChannelsForFormat(int format) {
     case GL_RGB5_A1:
     case GL_SRGB_ALPHA_EXT:
     case GL_SRGB8_ALPHA8_EXT:
+    case GL_RGBA8_SNORM:
+    case GL_RGB10_A2:
+    case GL_RGBA8UI:
+    case GL_RGBA8I:
+    case GL_RGB10_A2UI:
+    case GL_RGBA16UI:
+    case GL_RGBA16I:
+    case GL_RGBA32UI:
+    case GL_RGBA32I:
       return kRGBA;
     case GL_DEPTH_COMPONENT32_OES:
     case GL_DEPTH_COMPONENT24_OES:
     case GL_DEPTH_COMPONENT16:
     case GL_DEPTH_COMPONENT:
+    case GL_DEPTH_COMPONENT32F:
       return kDepth;
     case GL_STENCIL_INDEX8:
       return kStencil;
     case GL_DEPTH_STENCIL_OES:
     case GL_DEPTH24_STENCIL8_OES:
+    case GL_DEPTH32F_STENCIL8:
       return kDepth | kStencil;
     case GL_RED_EXT:
+    case GL_R8:
+    case GL_R8_SNORM:
+    case GL_R16F:
+    case GL_R32F:
+    case GL_R8UI:
+    case GL_R8I:
+    case GL_R16UI:
+    case GL_R16I:
+    case GL_R32UI:
+    case GL_R32I:
       return kRed;
     case GL_RG_EXT:
+    case GL_RG8:
+    case GL_RG8_SNORM:
+    case GL_RG16F:
+    case GL_RG32F:
+    case GL_RG8UI:
+    case GL_RG8I:
+    case GL_RG16UI:
+    case GL_RG16I:
+    case GL_RG32UI:
+    case GL_RG32I:
       return kRed | kGreen;
     default:
       return 0x0000;
@@ -791,6 +851,8 @@ bool GLES2Util::ParseUniformName(
     size_t* array_pos,
     int* element_index,
     bool* getting_array) {
+  if (name.empty())
+    return false;
   bool getting_array_location = false;
   size_t open_pos = std::string::npos;
   base::CheckedNumeric<int> index = 0;
@@ -822,6 +884,67 @@ bool GLES2Util::ParseUniformName(
   return true;
 }
 
+size_t GLES2Util::CalcClearBufferivDataCount(int buffer) {
+  switch (buffer) {
+    case GL_COLOR:
+      return 4;
+    case GL_STENCIL:
+      return 1;
+    default:
+      return 0;
+  }
+}
+
+size_t GLES2Util::CalcClearBufferfvDataCount(int buffer) {
+  switch (buffer) {
+    case GL_COLOR:
+      return 4;
+    case GL_DEPTH:
+      return 1;
+    default:
+      return 0;
+  }
+}
+
+// static
+void GLES2Util::MapUint64ToTwoUint32(
+    uint64_t v64, uint32_t* v32_0, uint32_t* v32_1) {
+  DCHECK(v32_0 && v32_1);
+  *v32_0 = static_cast<uint32_t>(v64 & 0xFFFFFFFF);
+  *v32_1 = static_cast<uint32_t>((v64 & 0xFFFFFFFF00000000) >> 32);
+}
+
+// static
+uint64_t GLES2Util::MapTwoUint32ToUint64(uint32_t v32_0, uint32_t v32_1) {
+  uint64_t v64 = v32_1;
+  return (v64 << 32) | v32_0;
+}
+
+// static
+uint32_t GLES2Util::MapBufferTargetToBindingEnum(uint32_t target) {
+  switch (target) {
+    case GL_ARRAY_BUFFER:
+      return GL_ARRAY_BUFFER_BINDING;
+    case GL_COPY_READ_BUFFER:
+      return GL_COPY_READ_BUFFER_BINDING;
+    case GL_COPY_WRITE_BUFFER:
+      return GL_COPY_WRITE_BUFFER_BINDING;
+    case GL_ELEMENT_ARRAY_BUFFER:
+      return GL_ELEMENT_ARRAY_BUFFER_BINDING;
+    case GL_PIXEL_PACK_BUFFER:
+      return GL_PIXEL_PACK_BUFFER_BINDING;
+    case GL_PIXEL_UNPACK_BUFFER:
+      return GL_PIXEL_UNPACK_BUFFER_BINDING;
+    case GL_TRANSFORM_FEEDBACK_BUFFER:
+      return GL_TRANSFORM_FEEDBACK_BUFFER_BINDING;
+    case GL_UNIFORM_BUFFER:
+      return GL_UNIFORM_BUFFER_BINDING;
+    default:
+      return 0;
+  }
+}
+
+
 namespace {
 
 // WebGraphicsContext3DCommandBufferImpl configuration attributes. Those in
@@ -846,6 +969,7 @@ const int32 kBufferDestroyed = 0x3095;  // EGL_BUFFER_DESTROYED
 const int32 kBindGeneratesResource = 0x10000;
 const int32 kFailIfMajorPerfCaveat = 0x10001;
 const int32 kLoseContextWhenOutOfMemory = 0x10002;
+const int32 kES3ContextRequired = 0x10003;
 
 }  // namespace
 
@@ -861,7 +985,8 @@ ContextCreationAttribHelper::ContextCreationAttribHelper()
       buffer_preserved(true),
       bind_generates_resource(true),
       fail_if_major_perf_caveat(false),
-      lose_context_when_out_of_memory(false) {}
+      lose_context_when_out_of_memory(false),
+      es3_context_required(false) {}
 
 void ContextCreationAttribHelper::Serialize(std::vector<int32>* attribs) const {
   if (alpha_size != -1) {
@@ -904,6 +1029,8 @@ void ContextCreationAttribHelper::Serialize(std::vector<int32>* attribs) const {
   attribs->push_back(fail_if_major_perf_caveat ? 1 : 0);
   attribs->push_back(kLoseContextWhenOutOfMemory);
   attribs->push_back(lose_context_when_out_of_memory ? 1 : 0);
+  attribs->push_back(kES3ContextRequired);
+  attribs->push_back(es3_context_required ? 1 : 0);
   attribs->push_back(kNone);
 }
 
@@ -957,6 +1084,9 @@ bool ContextCreationAttribHelper::Parse(const std::vector<int32>& attribs) {
         break;
       case kLoseContextWhenOutOfMemory:
         lose_context_when_out_of_memory = value != 0;
+        break;
+      case kES3ContextRequired:
+        es3_context_required = value != 0;
         break;
       case kNone:
         // Terminate list, even if more attributes.

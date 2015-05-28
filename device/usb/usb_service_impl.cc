@@ -2,111 +2,92 @@
 // Use of this source code is governed by a BSD-style license that can be
 // found in the LICENSE file.
 
-#include "device/usb/usb_service.h"
+#include "device/usb/usb_service_impl.h"
 
-#include <map>
 #include <set>
 
 #include "base/bind.h"
-#include "base/lazy_instance.h"
+#include "base/location.h"
 #include "base/memory/weak_ptr.h"
-#include "base/message_loop/message_loop.h"
 #include "base/single_thread_task_runner.h"
 #include "base/stl_util.h"
 #include "base/thread_task_runner_handle.h"
-#include "device/usb/usb_context.h"
-#include "device/usb/usb_device_impl.h"
+#include "components/device_event_log/device_event_log.h"
 #include "device/usb/usb_error.h"
-#include "third_party/libusb/src/libusb/libusb.h"
 
 #if defined(OS_WIN)
+#include <setupapi.h>
 #include <usbiodef.h>
 
 #include "base/scoped_observer.h"
+#include "base/strings/string_util.h"
 #include "device/core/device_monitor_win.h"
 #endif  // OS_WIN
 
 namespace device {
 
+#if defined(OS_WIN)
+
 namespace {
 
-base::LazyInstance<scoped_ptr<UsbService> >::Leaky g_usb_service_instance =
-    LAZY_INSTANCE_INITIALIZER;
+// Wrapper around a HDEVINFO that automatically destroys it.
+class ScopedDeviceInfoList {
+ public:
+  explicit ScopedDeviceInfoList(HDEVINFO handle) : handle_(handle) {}
+
+  ~ScopedDeviceInfoList() {
+    if (valid()) {
+      SetupDiDestroyDeviceInfoList(handle_);
+    }
+  }
+
+  bool valid() { return handle_ != INVALID_HANDLE_VALUE; }
+
+  HDEVINFO get() { return handle_; }
+
+ private:
+  HDEVINFO handle_;
+
+  DISALLOW_COPY_AND_ASSIGN(ScopedDeviceInfoList);
+};
+
+// Wrapper around an SP_DEVINFO_DATA that initializes it properly and
+// automatically deletes it.
+class ScopedDeviceInfo {
+ public:
+  ScopedDeviceInfo() {
+    memset(&dev_info_data_, 0, sizeof(dev_info_data_));
+    dev_info_data_.cbSize = sizeof(dev_info_data_);
+  }
+
+  ~ScopedDeviceInfo() {
+    if (dev_info_set_ != INVALID_HANDLE_VALUE) {
+      SetupDiDeleteDeviceInfo(dev_info_set_, &dev_info_data_);
+    }
+  }
+
+  // Once the SP_DEVINFO_DATA has been populated it must be freed using the
+  // HDEVINFO it was created from.
+  void set_valid(HDEVINFO dev_info_set) {
+    DCHECK(dev_info_set_ == INVALID_HANDLE_VALUE);
+    DCHECK(dev_info_set != INVALID_HANDLE_VALUE);
+    dev_info_set_ = dev_info_set;
+  }
+
+  PSP_DEVINFO_DATA get() { return &dev_info_data_; }
+
+ private:
+  HDEVINFO dev_info_set_ = INVALID_HANDLE_VALUE;
+  SP_DEVINFO_DATA dev_info_data_;
+};
 
 }  // namespace
 
-typedef struct libusb_device* PlatformUsbDevice;
-typedef struct libusb_context* PlatformUsbContext;
-
-class UsbServiceImpl : public UsbService,
-                       private base::MessageLoop::DestructionObserver {
- public:
-  explicit UsbServiceImpl(
-      PlatformUsbContext context,
-      scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner);
-  ~UsbServiceImpl() override;
-
- private:
-  // device::UsbService implementation
-  scoped_refptr<UsbDevice> GetDeviceById(uint32 unique_id) override;
-  void GetDevices(std::vector<scoped_refptr<UsbDevice>>* devices) override;
-
-  // base::MessageLoop::DestructionObserver implementation.
-  void WillDestroyCurrentMessageLoop() override;
-
-  // Enumerate USB devices from OS and update devices_ map.
-  void RefreshDevices();
-
-  // Adds a new UsbDevice to the devices_ map based on the given libusb device.
-  scoped_refptr<UsbDeviceImpl> AddDevice(PlatformUsbDevice platform_device);
-
-  // Handle hotplug events from libusb.
-  static int LIBUSB_CALL HotplugCallback(libusb_context* context,
-                                         PlatformUsbDevice device,
-                                         libusb_hotplug_event event,
-                                         void* user_data);
-  // These functions release a reference to the provided platform device.
-  void OnDeviceAdded(PlatformUsbDevice platform_device);
-  void OnDeviceRemoved(PlatformUsbDevice platform_device);
-
-  scoped_refptr<UsbContext> context_;
-  scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
-  scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner_;
-
-#if defined(OS_WIN)
-  class UIThreadHelper;
-  UIThreadHelper* ui_thread_helper_;
-#endif  // OS_WIN
-
-  // TODO(reillyg): Figure out a better solution for device IDs.
-  uint32 next_unique_id_;
-
-  // When available the device list will be updated when new devices are
-  // connected instead of only when a full enumeration is requested.
-  // TODO(reillyg): Support this on all platforms. crbug.com/411715
-  bool hotplug_enabled_;
-  libusb_hotplug_callback_handle hotplug_handle_;
-
-  // The map from unique IDs to UsbDevices.
-  typedef std::map<uint32, scoped_refptr<UsbDeviceImpl> > DeviceMap;
-  DeviceMap devices_;
-
-  // The map from PlatformUsbDevices to UsbDevices.
-  typedef std::map<PlatformUsbDevice, scoped_refptr<UsbDeviceImpl> >
-      PlatformDeviceMap;
-  PlatformDeviceMap platform_devices_;
-
-  base::WeakPtrFactory<UsbServiceImpl> weak_factory_;
-
-  DISALLOW_COPY_AND_ASSIGN(UsbServiceImpl);
-};
-
-#if defined(OS_WIN)
 // This class lives on the application main thread so that it can listen for
 // device change notification window messages. It registers for notifications
-// regarding devices implementating the "UsbDevice" interface, which represents
-// most of the devices the UsbService will enumerate.
-class UsbServiceImpl::UIThreadHelper : DeviceMonitorWin::Observer {
+// that may indicate new devices that the UsbService will enumerate.
+class UsbServiceImpl::UIThreadHelper final
+    : private DeviceMonitorWin::Observer {
  public:
   UIThreadHelper(base::WeakPtr<UsbServiceImpl> usb_service)
       : task_runner_(base::ThreadTaskRunnerHandle::Get()),
@@ -116,29 +97,59 @@ class UsbServiceImpl::UIThreadHelper : DeviceMonitorWin::Observer {
   ~UIThreadHelper() {}
 
   void Start() {
-    DeviceMonitorWin* device_monitor =
-        DeviceMonitorWin::GetForDeviceInterface(GUID_DEVINTERFACE_USB_DEVICE);
+    DeviceMonitorWin* device_monitor = DeviceMonitorWin::GetForAllInterfaces();
     if (device_monitor) {
       device_observer_.Add(device_monitor);
     }
   }
 
  private:
-  void OnDeviceAdded(const std::string& device_path) override {
-    task_runner_->PostTask(
-        FROM_HERE, base::Bind(&UsbServiceImpl::RefreshDevices, usb_service_));
+  void OnDeviceAdded(const GUID& class_guid,
+                     const std::string& device_path) override {
+    // Only the root node of a composite USB device has the class GUID
+    // GUID_DEVINTERFACE_USB_DEVICE but we want to wait until WinUSB is loaded.
+    // This first pass filter will catch anything that's sitting on the USB bus
+    // (including devices on 3rd party USB controllers) to avoid the more
+    // expensive driver check that needs to be done on the FILE thread.
+    if (device_path.find("usb") != std::string::npos) {
+      task_runner_->PostTask(
+          FROM_HERE, base::Bind(&UsbServiceImpl::RefreshDevicesIfWinUsbDevice,
+                                usb_service_, device_path));
+    }
   }
 
-  void OnDeviceRemoved(const std::string& device_path) override {
-    task_runner_->PostTask(
-        FROM_HERE, base::Bind(&UsbServiceImpl::RefreshDevices, usb_service_));
+  void OnDeviceRemoved(const GUID& class_guid,
+                       const std::string& device_path) override {
+    // The root USB device node is removed last
+    if (class_guid == GUID_DEVINTERFACE_USB_DEVICE) {
+      task_runner_->PostTask(
+          FROM_HERE, base::Bind(&UsbServiceImpl::RefreshDevices, usb_service_));
+    }
   }
 
   scoped_refptr<base::SingleThreadTaskRunner> task_runner_;
   base::WeakPtr<UsbServiceImpl> usb_service_;
   ScopedObserver<DeviceMonitorWin, DeviceMonitorWin::Observer> device_observer_;
 };
-#endif
+
+#endif  // OS_WIN
+
+// static
+UsbService* UsbServiceImpl::Create(
+    scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner) {
+  PlatformUsbContext context = NULL;
+  const int rv = libusb_init(&context);
+  if (rv != LIBUSB_SUCCESS) {
+    USB_LOG(ERROR) << "Failed to initialize libusb: "
+                   << ConvertPlatformUsbErrorToString(rv);
+    return nullptr;
+  }
+  if (!context) {
+    return nullptr;
+  }
+
+  return new UsbServiceImpl(context, ui_task_runner);
+}
 
 scoped_refptr<UsbDevice> UsbServiceImpl::GetDeviceById(uint32 unique_id) {
   DCHECK(CalledOnValidThread());
@@ -164,11 +175,6 @@ void UsbServiceImpl::GetDevices(
   }
 }
 
-void UsbServiceImpl::WillDestroyCurrentMessageLoop() {
-  DCHECK(CalledOnValidThread());
-  g_usb_service_instance.Get().reset(NULL);
-}
-
 UsbServiceImpl::UsbServiceImpl(
     PlatformUsbContext context,
     scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner)
@@ -177,7 +183,6 @@ UsbServiceImpl::UsbServiceImpl(
       next_unique_id_(0),
       hotplug_enabled_(false),
       weak_factory_(this) {
-  base::MessageLoop::current()->AddDestructionObserver(this);
   task_runner_ = base::ThreadTaskRunnerHandle::Get();
   int rv = libusb_hotplug_register_callback(
       context_->context(),
@@ -199,7 +204,6 @@ UsbServiceImpl::UsbServiceImpl(
 }
 
 UsbServiceImpl::~UsbServiceImpl() {
-  base::MessageLoop::current()->RemoveDestructionObserver(this);
   if (hotplug_enabled_) {
     libusb_hotplug_deregister_callback(context_->context(), hotplug_handle_);
   }
@@ -220,8 +224,8 @@ void UsbServiceImpl::RefreshDevices() {
   const ssize_t device_count =
       libusb_get_device_list(context_->context(), &platform_devices);
   if (device_count < 0) {
-    VLOG(1) << "Failed to get device list: "
-            << ConvertPlatformUsbErrorToString(device_count);
+    USB_LOG(ERROR) << "Failed to get device list: "
+                   << ConvertPlatformUsbErrorToString(device_count);
   }
 
   std::set<UsbDevice*> connected_devices;
@@ -262,6 +266,52 @@ void UsbServiceImpl::RefreshDevices() {
   libusb_free_device_list(platform_devices, true);
 }
 
+#if defined(OS_WIN)
+void UsbServiceImpl::RefreshDevicesIfWinUsbDevice(
+    const std::string& device_path) {
+  ScopedDeviceInfoList dev_info_list(SetupDiCreateDeviceInfoList(NULL, NULL));
+  if (!dev_info_list.valid()) {
+    USB_PLOG(ERROR) << "Failed to create a device information set";
+    return;
+  }
+
+  // This will add the device to |dev_info_list| so we can query driver info.
+  if (!SetupDiOpenDeviceInterfaceA(dev_info_list.get(), device_path.c_str(), 0,
+                                   NULL)) {
+    USB_PLOG(ERROR) << "Failed to get device interface data for "
+                    << device_path;
+    return;
+  }
+
+  ScopedDeviceInfo dev_info;
+  if (!SetupDiEnumDeviceInfo(dev_info_list.get(), 0, dev_info.get())) {
+    USB_PLOG(ERROR) << "Failed to get device info for " << device_path;
+    return;
+  }
+  dev_info.set_valid(dev_info_list.get());
+
+  DWORD reg_data_type;
+  BYTE buffer[256];
+  if (!SetupDiGetDeviceRegistryPropertyA(dev_info_list.get(), dev_info.get(),
+                                         SPDRP_SERVICE, &reg_data_type,
+                                         &buffer[0], sizeof buffer, NULL)) {
+    USB_PLOG(ERROR) << "Failed to get device service property";
+    return;
+  }
+  if (reg_data_type != REG_SZ) {
+    USB_LOG(ERROR) << "Unexpected data type for driver service: "
+                   << reg_data_type;
+    return;
+  }
+
+  USB_LOG(DEBUG) << "Driver for " << device_path << " is " << buffer << ".";
+  if (base::strncasecmp("WinUSB", (const char*)&buffer[0], sizeof "WinUSB") ==
+      0) {
+    RefreshDevices();
+  }
+}
+#endif  // OS_WIN
+
 scoped_refptr<UsbDeviceImpl> UsbServiceImpl::AddDevice(
     PlatformUsbDevice platform_device) {
   libusb_device_descriptor descriptor;
@@ -280,8 +330,8 @@ scoped_refptr<UsbDeviceImpl> UsbServiceImpl::AddDevice(
     NotifyDeviceAdded(new_device);
     return new_device;
   } else {
-    VLOG(1) << "Failed to get device descriptor: "
-            << ConvertPlatformUsbErrorToString(rv);
+    USB_LOG(EVENT) << "Failed to get device descriptor: "
+                   << ConvertPlatformUsbErrorToString(rv);
     return nullptr;
   }
 }
@@ -353,65 +403,6 @@ void UsbServiceImpl::OnDeviceRemoved(PlatformUsbDevice platform_device) {
   }
 
   libusb_unref_device(platform_device);
-}
-
-void UsbService::Observer::OnDeviceAdded(scoped_refptr<UsbDevice> device) {
-}
-
-void UsbService::Observer::OnDeviceRemoved(scoped_refptr<UsbDevice> device) {
-}
-
-// static
-UsbService* UsbService::GetInstance(
-    scoped_refptr<base::SingleThreadTaskRunner> ui_task_runner) {
-  UsbService* instance = g_usb_service_instance.Get().get();
-  if (!instance) {
-    PlatformUsbContext context = NULL;
-
-    const int rv = libusb_init(&context);
-    if (rv != LIBUSB_SUCCESS) {
-      VLOG(1) << "Failed to initialize libusb: "
-              << ConvertPlatformUsbErrorToString(rv);
-      return NULL;
-    }
-    if (!context)
-      return NULL;
-
-    instance = new UsbServiceImpl(context, ui_task_runner);
-    g_usb_service_instance.Get().reset(instance);
-  }
-  return instance;
-}
-
-// static
-void UsbService::SetInstanceForTest(UsbService* instance) {
-  g_usb_service_instance.Get().reset(instance);
-}
-
-UsbService::UsbService() {
-}
-
-UsbService::~UsbService() {
-}
-
-void UsbService::AddObserver(Observer* observer) {
-  DCHECK(CalledOnValidThread());
-  observer_list_.AddObserver(observer);
-}
-
-void UsbService::RemoveObserver(Observer* observer) {
-  DCHECK(CalledOnValidThread());
-  observer_list_.RemoveObserver(observer);
-}
-
-void UsbService::NotifyDeviceAdded(scoped_refptr<UsbDevice> device) {
-  DCHECK(CalledOnValidThread());
-  FOR_EACH_OBSERVER(Observer, observer_list_, OnDeviceAdded(device));
-}
-
-void UsbService::NotifyDeviceRemoved(scoped_refptr<UsbDevice> device) {
-  DCHECK(CalledOnValidThread());
-  FOR_EACH_OBSERVER(Observer, observer_list_, OnDeviceRemoved(device));
 }
 
 }  // namespace device

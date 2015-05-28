@@ -103,8 +103,6 @@ using testing::Not;
 using testing::SetArgumentPointee;
 using testing::Return;
 
-class HistoryService;
-
 namespace syncable {
 class Id;
 }
@@ -497,7 +495,7 @@ class ProfileSyncServiceAutofillTest
 
     personal_data_manager_->Init(
         WebDataServiceFactory::GetAutofillWebDataForProfile(
-            profile_, Profile::EXPLICIT_ACCESS),
+            profile_, ServiceAccessType::EXPLICIT_ACCESS),
         profile_->GetPrefs(),
         profile_->IsOffTheRecord());
 

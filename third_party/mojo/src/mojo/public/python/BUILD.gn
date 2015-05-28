@@ -1,0 +1,118 @@
+# Copyright 2014 The Chromium Authors. All rights reserved.
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
+
+import("//third_party/cython/rules.gni")
+import("rules.gni")
+
+group("python") {
+  deps = [
+    ":bindings",
+    ":mojo_system",
+    ":mojo_system_impl",
+  ]
+}
+
+# GYP version: mojo.gyp:mojo_python_system
+python_binary_module("mojo_system") {
+  configs = [ "../build/config:mojo_sdk" ]
+  deps = [
+    ":system_embedded",
+  ]
+}
+
+python_binary_source_set("system_embedded") {
+  cython_sources = [
+    "c_async_waiter.pxd",
+    "c_core.pxd",
+    "c_export.pxd",
+    "c_thunks.pxd",
+    "mojo_system.pyx",
+  ]
+  configs = [ "../build/config:mojo_sdk" ]
+  deps = [
+    "../c/system",
+    "../cpp/bindings:callback",
+    "../cpp/system",
+    "../cpp/utility",
+    "../platform/native:system",
+  ]
+}
+
+python_binary_module("mojo_system_impl") {
+  cython_sources = [
+    "c_environment.pxd",
+    "c_export.pxd",
+    "c_thunks.pxd",
+    "mojo_system_impl.pyx",
+  ]
+  sources = [
+    "src/python_system_helper.cc",
+    "src/python_system_helper.h",
+  ]
+  configs = [ "../build/config:mojo_sdk" ]
+  deps = [
+    ":python_common",
+    "../c/environment",
+    "../c/system",
+    "../cpp/bindings:callback",
+    "../cpp/environment:standalone",
+    "../cpp/system",
+    "../cpp/utility",
+    "../platform/native:system",
+  ]
+}
+
+python_binary_source_set("python_common") {
+  sources = [
+    "src/common.cc",
+    "src/common.h",
+  ]
+  configs = [ "../build/config:mojo_sdk" ]
+  deps = [
+    "../c/environment:environment",
+    "../cpp/bindings:callback",
+    "../cpp/environment:environment",
+    "../cpp/system:system",
+    "../cpp/utility",
+  ]
+}
+
+python_package("packaged_application") {
+  sources = [
+    "mojo_application/__init__.py",
+    "mojo_application/application_delegate.py",
+    "mojo_application/application_impl.py",
+    "mojo_application/application_runner.py",
+    "mojo_application/service_provider_impl.py",
+  ]
+}
+
+# GYP version: mojo.gyp:mojo_python_bindings
+copy("bindings") {
+  sources = [
+    "mojo_bindings/__init__.py",
+    "mojo_bindings/descriptor.py",
+    "mojo_bindings/messaging.py",
+    "mojo_bindings/promise.py",
+    "mojo_bindings/reflection.py",
+    "mojo_bindings/serialization.py",
+  ]
+  outputs = [
+    "$root_out_dir/python/mojo_bindings/{{source_file_part}}",
+  ]
+  deps = [
+    ":mojo_system",
+  ]
+}
+
+python_package("packaged_bindings") {
+  sources = [
+    "mojo_bindings/__init__.py",
+    "mojo_bindings/descriptor.py",
+    "mojo_bindings/messaging.py",
+    "mojo_bindings/promise.py",
+    "mojo_bindings/reflection.py",
+    "mojo_bindings/serialization.py",
+  ]
+}

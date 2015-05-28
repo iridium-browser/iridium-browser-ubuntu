@@ -10,13 +10,14 @@
 #define LIBANGLE_RENDERER_D3D_D3D11_SWAPCHAIN11_H_
 
 #include "common/angleutils.h"
-#include "libANGLE/renderer/SwapChain.h"
+#include "libANGLE/renderer/d3d/SwapChainD3D.h"
+#include "libANGLE/renderer/d3d/d3d11/RenderTarget11.h"
 
 namespace rx
 {
 class Renderer11;
 
-class SwapChain11 : public SwapChain
+class SwapChain11 : public SwapChainD3D
 {
   public:
     SwapChain11(Renderer11 *renderer, NativeWindow nativeWindow, HANDLE shareHandle,
@@ -27,6 +28,9 @@ class SwapChain11 : public SwapChain
     virtual EGLint reset(EGLint backbufferWidth, EGLint backbufferHeight, EGLint swapInterval);
     virtual EGLint swapRect(EGLint x, EGLint y, EGLint width, EGLint height);
     virtual void recreate();
+
+    RenderTargetD3D *getColorRenderTarget() override { return &mColorRenderTarget; }
+    RenderTargetD3D *getDepthStencilRenderTarget() override { return &mDepthStencilRenderTarget; }
 
     virtual ID3D11Texture2D *getOffscreenTexture();
     virtual ID3D11RenderTargetView *getRenderTarget();
@@ -39,11 +43,9 @@ class SwapChain11 : public SwapChain
     EGLint getWidth() const { return mWidth; }
     EGLint getHeight() const { return mHeight; }
 
-    static SwapChain11 *makeSwapChain11(SwapChain *swapChain);
+    static SwapChain11 *makeSwapChain11(SwapChainD3D *swapChain);
 
   private:
-    DISALLOW_COPY_AND_ASSIGN(SwapChain11);
-
     void release();
     void initPassThroughResources();
     void releaseOffscreenTexture();
@@ -74,6 +76,9 @@ class SwapChain11 : public SwapChain
     ID3D11InputLayout *mPassThroughIL;
     ID3D11VertexShader *mPassThroughVS;
     ID3D11PixelShader *mPassThroughPS;
+
+    SurfaceRenderTarget11 mColorRenderTarget;
+    SurfaceRenderTarget11 mDepthStencilRenderTarget;
 };
 
 }

@@ -17,30 +17,18 @@ var remoting = remoting || {};
  * @constructor
  */
 remoting.WindowFrame = function(titleBar) {
-  /**
-   * @type {remoting.ClientSession}
-   * @private
-   */
-  this.clientSession_ = null;
+  /** @private {remoting.DesktopConnectedView} */
+  this.desktopConnectedView_ = null;
 
-  /**
-   * @type {HTMLElement}
-   * @private
-   */
+  /** @private {HTMLElement} */
   this.titleBar_ = titleBar;
 
-  /**
-   * @type {HTMLElement}
-   * @private
-   */
+  /** @private {HTMLElement} */
   this.title_ = /** @type {HTMLElement} */
       (titleBar.querySelector('.window-title'));
   base.debug.assert(this.title_ != null);
 
-  /**
-   * @type {HTMLElement}
-   * @private
-   */
+  /** @private {HTMLElement} */
   this.maximizeRestoreControl_ = /** @type {HTMLElement} */
       (titleBar.querySelector('.window-maximize-restore'));
   base.debug.assert(this.maximizeRestoreControl_ != null);
@@ -52,23 +40,20 @@ remoting.WindowFrame = function(titleBar) {
       this.onShowOptionsMenu_.bind(this),
       this.onHideOptionsMenu_.bind(this));
 
-  /**
-   * @type {HTMLElement}
-   * @private
-   */
+  /** @private {HTMLElement} */
   this.optionsMenuList_ = /** @type {HTMLElement} */
       (optionsButton.querySelector('.window-options-menu'));
   base.debug.assert(this.optionsMenuList_ != null);
 
   /**
-   * @type {Array.<{cls:string, fn: function()}>}
+   * @type {Array<{cls:string, fn: function()}>}
    */
   var handlers = [
     { cls: 'window-disconnect', fn: this.disconnectSession_.bind(this) },
     { cls: 'window-maximize-restore',
       fn: this.maximizeOrRestoreWindow_.bind(this) },
     { cls: 'window-minimize', fn: this.minimizeWindow_.bind(this) },
-    { cls: 'window-close', fn: window.close.bind(window) },
+    { cls: 'window-close', fn: remoting.app.quit.bind(remoting.app) },
     { cls: 'window-controls-stub', fn: this.toggleWindowControls_.bind(this) }
   ];
   for (var i = 0; i < handlers.length; ++i) {
@@ -104,20 +89,20 @@ remoting.WindowFrame.prototype.createOptionsMenu = function() {
 };
 
 /**
- * @param {remoting.ClientSession} clientSession The client session, or null if
- *     there is no connection.
+ * @param {remoting.DesktopConnectedView} desktopConnectedView The view for the
+ *     current session, or null if there is no connection.
  */
-remoting.WindowFrame.prototype.setClientSession = function(clientSession) {
-  this.clientSession_ = clientSession;
+remoting.WindowFrame.prototype.setDesktopConnectedView = function(
+    desktopConnectedView) {
+  this.desktopConnectedView_ = desktopConnectedView;
   var windowTitle = document.head.querySelector('title');
-  if (this.clientSession_) {
-    this.title_.innerText = clientSession.getHostDisplayName();
-    windowTitle.innerText = clientSession.getHostDisplayName() + ' - ' +
-        chrome.i18n.getMessage(/*i18n-content*/'PRODUCT_NAME');
+  if (this.desktopConnectedView_) {
+    this.title_.innerText = desktopConnectedView.getHostDisplayName();
+    windowTitle.innerText = desktopConnectedView.getHostDisplayName() + ' - ' +
+        remoting.app.getApplicationName();
   } else {
     this.title_.innerHTML = '&nbsp;';
-    windowTitle.innerText =
-        chrome.i18n.getMessage(/*i18n-content*/'PRODUCT_NAME');
+    windowTitle.innerText = remoting.app.getApplicationName();
   }
   this.handleWindowStateChange_();
 };
@@ -150,7 +135,7 @@ remoting.WindowFrame.prototype.disconnectSession_ = function() {
   if (chrome.app.window.current().isFullscreen()) {
     chrome.app.window.current().restore();
   }
-  remoting.disconnect();
+  remoting.app.disconnect();
 };
 
 /**

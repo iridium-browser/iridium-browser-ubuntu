@@ -6,6 +6,7 @@
 #include "build/build_config.h"
 #include "chrome/browser/ui/browser.h"
 #include "chrome/browser/ui/browser_tabstrip.h"
+#include "chrome/browser/ui/exclusive_access/exclusive_access_context.h"
 #include "chrome/browser/ui/exclusive_access/fullscreen_controller.h"
 #include "chrome/browser/ui/exclusive_access/fullscreen_controller_state_test.h"
 #include "chrome/browser/ui/tabs/tab_strip_model.h"
@@ -23,7 +24,8 @@
 
 // A BrowserWindow used for testing FullscreenController. The behavior of this
 // mock is verfied manually by running FullscreenControllerStateInteractiveTest.
-class FullscreenControllerTestWindow : public TestBrowserWindow {
+class FullscreenControllerTestWindow : public TestBrowserWindow,
+                                       ExclusiveAccessContext {
  public:
   // Simulate the window state with an enumeration.
   enum WindowState {
@@ -55,6 +57,16 @@ class FullscreenControllerTestWindow : public TestBrowserWindow {
   static const char* GetWindowStateString(WindowState state);
   WindowState state() const { return state_; }
   void set_browser(Browser* browser) { browser_ = browser; }
+  ExclusiveAccessContext* GetExclusiveAccessContext() override;
+
+  // ExclusiveAccessContext Interface:
+  Profile* GetProfile() override;
+  content::WebContents* GetActiveWebContents() override;
+  void HideDownloadShelf() override;
+  void UnhideDownloadShelf() override;
+  void UpdateExclusiveAccessExitBubbleContent(
+      const GURL& url,
+      ExclusiveAccessBubbleType bubble_type) override;
 
   // Simulates the window changing state.
   void ChangeWindowFullscreenState();
@@ -205,6 +217,32 @@ bool FullscreenControllerTestWindow::IsTransitionReentrant(
       mac_with_toolbar_mode_changed;
 }
 
+ExclusiveAccessContext*
+FullscreenControllerTestWindow::GetExclusiveAccessContext() {
+  return this;
+}
+
+Profile* FullscreenControllerTestWindow::GetProfile() {
+  return browser_->profile();
+}
+
+content::WebContents* FullscreenControllerTestWindow::GetActiveWebContents() {
+  return browser_->tab_strip_model()->GetActiveWebContents();
+}
+
+void FullscreenControllerTestWindow::UnhideDownloadShelf() {
+  GetDownloadShelf()->Unhide();
+}
+
+void FullscreenControllerTestWindow::HideDownloadShelf() {
+  GetDownloadShelf()->Hide();
+}
+
+void FullscreenControllerTestWindow::UpdateExclusiveAccessExitBubbleContent(
+    const GURL& url,
+    ExclusiveAccessBubbleType bubble_type) {
+  TestBrowserWindow::UpdateExclusiveAccessExitBubbleContent(url, bubble_type);
+}
 
 // FullscreenControllerStateUnitTest -------------------------------------------
 
@@ -229,7 +267,7 @@ class FullscreenControllerStateUnitTest : public BrowserWithTestWindowTest,
   FullscreenControllerTestWindow* window_;
 };
 
-FullscreenControllerStateUnitTest::FullscreenControllerStateUnitTest ()
+FullscreenControllerStateUnitTest::FullscreenControllerStateUnitTest()
     : window_(NULL) {
 }
 
@@ -315,7 +353,6 @@ bool FullscreenControllerStateUnitTest::ShouldSkipStateAndEventPair(
 Browser* FullscreenControllerStateUnitTest::GetBrowser() {
   return BrowserWithTestWindowTest::browser();
 }
-
 
 // Soak tests ------------------------------------------------------------------
 
@@ -428,7 +465,9 @@ TEST_F(FullscreenControllerStateUnitTest, ExitFullscreenViaBrowserWindow) {
   browser()->window()->ExitFullscreen();
   ChangeWindowFullscreenState();
   EXPECT_EQ(EXCLUSIVE_ACCESS_BUBBLE_TYPE_NONE,
-            browser()->fullscreen_controller()->GetExclusiveAccessBubbleType());
+            browser()
+                ->exclusive_access_manager()
+                ->GetExclusiveAccessExitBubbleType());
 }
 
 // Test that switching tabs takes the browser out of tab fullscreen.
@@ -640,7 +679,7 @@ TEST_F(FullscreenControllerStateUnitTest,
 
   // Now, the first tab (backgrounded) exits fullscreen.  This should not affect
   // the second tab's fullscreen, nor the state of the browser window.
-  GetFullscreenController()->ToggleFullscreenModeForTab(first_tab, false);
+  GetFullscreenController()->ExitFullscreenModeForTab(first_tab);
   EXPECT_TRUE(browser()->window()->IsFullscreen());
   EXPECT_FALSE(wc_delegate->IsFullscreenForTabOrPending(first_tab));
   EXPECT_TRUE(wc_delegate->IsFullscreenForTabOrPending(second_tab));
@@ -763,8 +802,9 @@ TEST_F(FullscreenControllerStateUnitTest,
   EXPECT_TRUE(wc_delegate->IsFullscreenForTabOrPending(tab));
   EXPECT_TRUE(second_wc_delegate->IsFullscreenForTabOrPending(tab));
   EXPECT_FALSE(GetFullscreenController()->IsWindowFullscreenForTabOrPending());
-  EXPECT_FALSE(second_browser->fullscreen_controller()->
-                   IsWindowFullscreenForTabOrPending());
+  EXPECT_FALSE(second_browser->exclusive_access_manager()
+                   ->fullscreen_controller()
+                   ->IsWindowFullscreenForTabOrPending());
 
   // Now, detach and reattach it back to the first browser window.  Again, the
   // tab should remain in fullscreen mode and neither browser window should have
@@ -777,8 +817,9 @@ TEST_F(FullscreenControllerStateUnitTest,
   EXPECT_TRUE(wc_delegate->IsFullscreenForTabOrPending(tab));
   EXPECT_TRUE(second_wc_delegate->IsFullscreenForTabOrPending(tab));
   EXPECT_FALSE(GetFullscreenController()->IsWindowFullscreenForTabOrPending());
-  EXPECT_FALSE(second_browser->fullscreen_controller()->
-                   IsWindowFullscreenForTabOrPending());
+  EXPECT_FALSE(second_browser->exclusive_access_manager()
+                   ->fullscreen_controller()
+                   ->IsWindowFullscreenForTabOrPending());
 
   // Exit fullscreen.
   ASSERT_TRUE(InvokeEvent(TAB_FULLSCREEN_FALSE));
@@ -786,8 +827,9 @@ TEST_F(FullscreenControllerStateUnitTest,
   EXPECT_FALSE(wc_delegate->IsFullscreenForTabOrPending(tab));
   EXPECT_FALSE(second_wc_delegate->IsFullscreenForTabOrPending(tab));
   EXPECT_FALSE(GetFullscreenController()->IsWindowFullscreenForTabOrPending());
-  EXPECT_FALSE(second_browser->fullscreen_controller()->
-                   IsWindowFullscreenForTabOrPending());
+  EXPECT_FALSE(second_browser->exclusive_access_manager()
+                   ->fullscreen_controller()
+                   ->IsWindowFullscreenForTabOrPending());
 
   // Required tear-down specific to this test.
   second_browser->tab_strip_model()->CloseAllTabs();

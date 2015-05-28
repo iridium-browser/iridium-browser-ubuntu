@@ -28,7 +28,8 @@ ExtensionKeybindingRegistry::ExtensionKeybindingRegistry(
     : browser_context_(context),
       extension_filter_(extension_filter),
       delegate_(delegate),
-      extension_registry_observer_(this) {
+      extension_registry_observer_(this),
+      shortcut_handling_suspended_(false) {
   extension_registry_observer_.Add(ExtensionRegistry::Get(browser_context_));
 
   Profile* profile = Profile::FromBrowserContext(browser_context_);
@@ -41,6 +42,11 @@ ExtensionKeybindingRegistry::ExtensionKeybindingRegistry(
 }
 
 ExtensionKeybindingRegistry::~ExtensionKeybindingRegistry() {
+}
+
+void ExtensionKeybindingRegistry::SetShortcutHandlingSuspended(bool suspended) {
+  shortcut_handling_suspended_ = suspended;
+  OnShortcutHandlingSuspended(suspended);
 }
 
 void ExtensionKeybindingRegistry::RemoveExtensionKeybinding(
@@ -185,23 +191,29 @@ void ExtensionKeybindingRegistry::Observe(
   switch (type) {
     case extensions::NOTIFICATION_EXTENSION_COMMAND_ADDED:
     case extensions::NOTIFICATION_EXTENSION_COMMAND_REMOVED: {
-      std::pair<const std::string, const std::string>* payload =
-          content::Details<std::pair<const std::string, const std::string> >(
-              details).ptr();
+      ExtensionCommandRemovedDetails* payload =
+          content::Details<ExtensionCommandRemovedDetails>(details).ptr();
 
       const Extension* extension = ExtensionRegistry::Get(browser_context_)
                                        ->enabled_extensions()
-                                       .GetByID(payload->first);
+                                       .GetByID(payload->extension_id);
       // During install and uninstall the extension won't be found. We'll catch
       // those events above, with the LOADED/UNLOADED, so we ignore this event.
       if (!extension)
         return;
 
       if (ExtensionMatchesFilter(extension)) {
-        if (type == extensions::NOTIFICATION_EXTENSION_COMMAND_ADDED)
-          AddExtensionKeybindings(extension, payload->second);
-        else
-          RemoveExtensionKeybinding(extension, payload->second);
+        if (type == extensions::NOTIFICATION_EXTENSION_COMMAND_ADDED) {
+          // Component extensions triggers OnExtensionLoaded for extension
+          // installs as well as loads. This can cause adding of multiple key
+          // targets.
+          if (extension->location() == Manifest::COMPONENT)
+            return;
+
+          AddExtensionKeybindings(extension, payload->command_name);
+        } else {
+          RemoveExtensionKeybinding(extension, payload->command_name);
+        }
       }
       break;
     }

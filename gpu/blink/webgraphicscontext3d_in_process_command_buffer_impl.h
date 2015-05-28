@@ -57,12 +57,13 @@ class GPU_BLINK_EXPORT WebGraphicsContext3DInProcessCommandBufferImpl
   size_t GetMappedMemoryLimit();
 
   bool InitializeOnCurrentThread();
+  void SetLock(base::Lock* lock);
 
   //----------------------------------------------------------------------
   // WebGraphicsContext3D methods
   virtual bool isContextLost();
 
-  virtual WGC3Denum getGraphicsResetStatusARB();
+  virtual blink::WGC3Denum getGraphicsResetStatusARB();
 
   ::gpu::ContextSupport* GetContextSupport();
 

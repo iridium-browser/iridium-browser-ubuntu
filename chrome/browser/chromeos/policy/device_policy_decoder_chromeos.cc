@@ -388,6 +388,51 @@ void DecodeReportingPolicies(const em::ChromeDeviceSettingsProto& policy,
                     new base::FundamentalValue(container.report_users()),
                     NULL);
     }
+    if (container.has_report_hardware_status()) {
+      policies->Set(key::kReportDeviceHardwareStatus,
+                    POLICY_LEVEL_MANDATORY,
+                    POLICY_SCOPE_MACHINE,
+                    new base::FundamentalValue(
+                        container.report_hardware_status()),
+                    NULL);
+    }
+    if (container.has_report_session_status()) {
+      policies->Set(key::kReportDeviceSessionStatus,
+                    POLICY_LEVEL_MANDATORY,
+                    POLICY_SCOPE_MACHINE,
+                    new base::FundamentalValue(
+                        container.report_session_status()),
+                    NULL);
+    }
+    if (container.has_device_status_frequency()) {
+      policies->Set(key::kReportUploadFrequency,
+                    POLICY_LEVEL_MANDATORY,
+                    POLICY_SCOPE_MACHINE,
+                    DecodeIntegerValue(
+                        container.device_status_frequency()).release(),
+                    NULL);
+    }
+  }
+
+  if (policy.has_device_heartbeat_settings()) {
+    const em::DeviceHeartbeatSettingsProto& container(
+        policy.device_heartbeat_settings());
+    if (container.has_heartbeat_enabled()) {
+      policies->Set(key::kHeartbeatEnabled,
+                    POLICY_LEVEL_MANDATORY,
+                    POLICY_SCOPE_MACHINE,
+                    new base::FundamentalValue(
+                        container.heartbeat_enabled()),
+                    NULL);
+    }
+    if (container.has_heartbeat_frequency()) {
+      policies->Set(key::kHeartbeatFrequency,
+                    POLICY_LEVEL_MANDATORY,
+                    POLICY_SCOPE_MACHINE,
+                    DecodeIntegerValue(
+                        container.heartbeat_frequency()).release(),
+                    NULL);
+    }
   }
 }
 
@@ -540,6 +585,7 @@ void DecodeAccessibilityPolicies(const em::ChromeDeviceSettingsProto& policy,
               container.login_screen_default_screen_magnifier_type()).release(),
           NULL);
     }
+
     if (container.has_login_screen_default_virtual_keyboard_enabled()) {
       policies->Set(
           key::kDeviceLoginScreenDefaultVirtualKeyboardEnabled,
@@ -548,6 +594,18 @@ void DecodeAccessibilityPolicies(const em::ChromeDeviceSettingsProto& policy,
           new base::FundamentalValue(
               container.login_screen_default_virtual_keyboard_enabled()),
           NULL);
+    }
+
+    // The behavior when policy is not set and when it is set to an empty string
+    // is the same. Thus lets add policy to the map only if it is set and its
+    // value is not an empty string.
+    if (container.has_login_screen_domain_auto_complete() &&
+        !container.login_screen_domain_auto_complete().empty()) {
+      policies->Set(
+          key::kDeviceLoginScreenDomainAutoComplete, POLICY_LEVEL_MANDATORY,
+          POLICY_SCOPE_MACHINE,
+          new base::StringValue(container.login_screen_domain_auto_complete()),
+          nullptr);
     }
   }
 }
@@ -699,6 +757,17 @@ void DecodeGenericPolicies(const em::ChromeDeviceSettingsProto& policy,
           POLICY_SCOPE_MACHINE,
           new base::FundamentalValue(container.block_devmode()),
           NULL);
+    }
+  }
+
+  if (policy.has_extension_cache_size()) {
+    const em::ExtensionCacheSizeProto& container(policy.extension_cache_size());
+    if (container.has_extension_cache_size()) {
+      policies->Set(
+          key::kExtensionCacheSize, POLICY_LEVEL_MANDATORY,
+          POLICY_SCOPE_MACHINE,
+          DecodeIntegerValue(container.extension_cache_size()).release(),
+          nullptr);
     }
   }
 }

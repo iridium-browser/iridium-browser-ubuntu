@@ -17,6 +17,7 @@
 #include "content/common/input/synthetic_gesture_packet.h"
 #include "content/common/input/synthetic_gesture_params.h"
 #include "content/common/input/synthetic_pinch_gesture_params.h"
+#include "content/common/input/synthetic_smooth_drag_gesture_params.h"
 #include "content/common/input/synthetic_smooth_scroll_gesture_params.h"
 #include "content/common/input/synthetic_tap_gesture_params.h"
 #include "content/common/input/touch_action.h"
@@ -75,6 +76,13 @@ IPC_STRUCT_TRAITS_END()
 
 IPC_STRUCT_TRAITS_BEGIN(content::SyntheticGestureParams)
   IPC_STRUCT_TRAITS_MEMBER(gesture_source_type)
+IPC_STRUCT_TRAITS_END()
+
+IPC_STRUCT_TRAITS_BEGIN(content::SyntheticSmoothDragGestureParams)
+  IPC_STRUCT_TRAITS_PARENT(content::SyntheticGestureParams)
+  IPC_STRUCT_TRAITS_MEMBER(start_point)
+  IPC_STRUCT_TRAITS_MEMBER(distances)
+  IPC_STRUCT_TRAITS_MEMBER(speed_in_pixels_s)
 IPC_STRUCT_TRAITS_END()
 
 IPC_STRUCT_TRAITS_BEGIN(content::SyntheticSmoothScrollGestureParams)
@@ -244,6 +252,9 @@ IPC_MESSAGE_ROUTED1(InputHostMsg_SetTouchAction,
 // restrictions on the root scroll offset.
 IPC_MESSAGE_ROUTED1(InputHostMsg_DidOverscroll,
                     content::DidOverscrollParams /* params */)
+
+// Sent by the compositor when a fling animation is stopped.
+IPC_MESSAGE_ROUTED0(InputHostMsg_DidStopFlinging)
 
 // Acknowledges receipt of a InputMsg_MoveCaret message.
 IPC_MESSAGE_ROUTED0(InputHostMsg_MoveCaret_ACK)

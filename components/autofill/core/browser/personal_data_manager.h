@@ -23,6 +23,7 @@
 #include "components/keyed_service/core/keyed_service.h"
 #include "components/webdata/common/web_data_service_consumer.h"
 
+class Browser;
 class PrefService;
 class RemoveAutofillTester;
 
@@ -80,6 +81,11 @@ class PersonalDataManager : public KeyedService,
   bool ImportFormData(const FormStructure& form,
                       scoped_ptr<CreditCard>* credit_card);
 
+  // Called to indicate |data_model| was used (to fill in a form). Updates
+  // the database accordingly. Can invalidate |data_model|, particularly if
+  // it's a Mac address book entry.
+  virtual void RecordUseOf(const AutofillDataModel& data_model);
+
   // Saves |imported_profile| to the WebDB if it exists. Returns the guid of
   // the new or updated profile, or the empty string if no profile was saved.
   virtual std::string SaveImportedProfile(
@@ -115,6 +121,15 @@ class PersonalDataManager : public KeyedService,
   // status can be changed.
   void UpdateServerCreditCard(const CreditCard& credit_card);
 
+  // Resets the card for |guid| to the masked state.
+  void ResetFullServerCard(const std::string& guid);
+
+  // Resets all unmasked cards to the masked state.
+  void ResetFullServerCards();
+
+  // Deletes all server profiles and cards (both masked and unmasked).
+  void ClearAllServerData();
+
   // Returns the credit card with the specified |guid|, or NULL if there is
   // no credit card with the specified |guid|.
   CreditCard* GetCreditCardByGUID(const std::string& guid);
@@ -134,7 +149,13 @@ class PersonalDataManager : public KeyedService,
   // auxiliary profiles.  |web_profiles()| returns only web profiles.
   virtual const std::vector<AutofillProfile*>& GetProfiles() const;
   virtual const std::vector<AutofillProfile*>& web_profiles() const;
+  // Returns just LOCAL_CARD cards.
+  virtual const std::vector<CreditCard*>& GetLocalCreditCards() const;
+  // Returns all credit cards, server and local.
   virtual const std::vector<CreditCard*>& GetCreditCards() const;
+
+  // Returns true if there is some data synced from Wallet.
+  bool HasServerData() const;
 
   // Loads profiles that can suggest data for |type|. |field_contents| is the
   // part the user has already typed. |field_is_autofilled| is true if the field
@@ -213,6 +234,10 @@ class PersonalDataManager : public KeyedService,
   void BinaryChanging();
 #endif  // defined(OS_MACOSX) && !defined(OS_IOS)
 
+  // Returns true if the wallet integration feature is enabled. Note that the
+  // feature can still disabled by a user pref.
+  bool IsExperimentalWalletIntegrationEnabled() const;
+
  protected:
   // Only PersonalDataManagerFactory and certain tests can create instances of
   // PersonalDataManager.
@@ -231,6 +256,8 @@ class PersonalDataManager : public KeyedService,
       int, std::vector<autofill::AutofillProfile>*);
   friend void autofill_helper::SetCreditCards(
       int, std::vector<autofill::CreditCard>*);
+  friend void SetTestProfiles(
+      Browser* browser, std::vector<AutofillProfile>* profiles);
 
   // Sets |web_profiles_| to the contents of |profiles| and updates the web
   // database by adding, updating and removing profiles.
@@ -354,6 +381,9 @@ class PersonalDataManager : public KeyedService,
 
   // An observer to listen for changes to prefs::kAutofillEnabled.
   scoped_ptr<BooleanPrefMember> enabled_pref_;
+
+  // An observer to listen for changes to prefs::kAutofillWalletImportEnabled.
+  scoped_ptr<BooleanPrefMember> wallet_enabled_pref_;
 
   DISALLOW_COPY_AND_ASSIGN(PersonalDataManager);
 };

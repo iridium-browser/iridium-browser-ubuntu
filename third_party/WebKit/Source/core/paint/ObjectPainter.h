@@ -5,7 +5,8 @@
 #ifndef ObjectPainter_h
 #define ObjectPainter_h
 
-#include "core/rendering/style/RenderStyleConstants.h"
+#include "core/style/ComputedStyleConstants.h"
+#include "wtf/Vector.h"
 
 namespace blink {
 
@@ -14,15 +15,15 @@ class GraphicsContext;
 class LayoutPoint;
 class LayoutRect;
 struct PaintInfo;
-class RenderObject;
-class RenderStyle;
+class LayoutObject;
+class ComputedStyle;
 
 class ObjectPainter {
 public:
-    ObjectPainter(RenderObject& renderObject) : m_renderObject(renderObject) { }
+    ObjectPainter(LayoutObject& layoutObject) : m_layoutObject(layoutObject) { }
 
-    void paintOutline(const PaintInfo&, const LayoutRect& paintRect);
-    void paintFocusRing(const PaintInfo&, const LayoutPoint& paintOffset, RenderStyle*);
+    void paintOutline(const PaintInfo&, const LayoutRect& objectBounds, const LayoutRect& visualOverflowBounds);
+    void paintFocusRing(const PaintInfo&, const ComputedStyle&, const Vector<LayoutRect>& focusRingRects);
 
     static void drawLineForBoxSide(GraphicsContext*, int x1, int y1, int x2, int y2, BoxSide, Color, EBorderStyle, int adjbw1, int adjbw2, bool antialias = false);
 private:
@@ -35,7 +36,7 @@ private:
     static void drawSolidBoxSide(GraphicsContext*, int x1, int y1, int x2, int y2,
         BoxSide, Color, int adjacentWidth1, int adjacentWidth2, bool antialias);
 
-    RenderObject& m_renderObject;
+    LayoutObject& m_layoutObject;
 };
 
 } // namespace blink

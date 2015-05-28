@@ -65,6 +65,14 @@
     justify-content: center;
 }
 
+.responsive-design-slider-corner {
+    position: absolute;
+    right: -14px;
+    width: 14px;
+    bottom: -14px;
+    height: 14px;
+}
+
 .responsive-design-thumb-handle {
     content: url(Images/statusbarResizerHorizontal.png);
     pointer-events: none;
@@ -290,7 +298,7 @@
     top: 3px;
 }
 
-.responsive-design-icon:disabled {
+div.responsive-design-icon:disabled {
     opacity: 1 !important;
 }
 
@@ -393,10 +401,6 @@
 
 .responsive-design-section-device input[type='checkbox']:checked:after {
     background: rgb(255, 156, 0);
-}
-
-.responsive-design-device-select button {
-    display: none !important;
 }
 
 /* Network section */

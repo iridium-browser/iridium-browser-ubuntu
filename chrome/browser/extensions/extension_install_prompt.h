@@ -15,7 +15,6 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "base/strings/string16.h"
-#include "chrome/browser/extensions/extension_install_prompt_experiment.h"
 #include "extensions/common/url_pattern.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/gfx/image/image.h"
@@ -36,7 +35,7 @@ class WebContents;
 
 namespace extensions {
 class BundleInstaller;
-class CrxInstallerError;
+class CrxInstallError;
 class Extension;
 class ExtensionInstallUI;
 class ExtensionWebstorePrivateApiTest;
@@ -75,6 +74,7 @@ class ExtensionInstallPrompt
     LAUNCH_PROMPT,
     REMOTE_INSTALL_PROMPT,
     REPAIR_PROMPT,
+    DELEGATED_PERMISSIONS_PROMPT,
     NUM_PROMPT_TYPES
   };
 
@@ -122,7 +122,6 @@ class ExtensionInstallPrompt
                          bool show_user_count,
                          double average_rating,
                          int rating_count);
-    void SetUserNameFromProfile(Profile* profile);
 
     PromptType type() const { return type_; }
     void set_type(PromptType type) { type_ = type; }
@@ -141,7 +140,6 @@ class ExtensionInstallPrompt
     base::string16 GetRetainedDevicesHeading() const;
 
     bool ShouldShowPermissions() const;
-    bool ShouldShowExplanationText() const;
 
     // Getters for webstore metadata. Only populated when the type is
     // INLINE_INSTALL_PROMPT.
@@ -188,17 +186,17 @@ class ExtensionInstallPrompt
       retained_device_messages_ = retained_device_messages;
     }
 
+    const std::string& delegated_username() const {
+      return delegated_username_;
+    }
+    void set_delegated_username(const std::string& delegated_username) {
+      delegated_username_ = delegated_username;
+    }
+
     const gfx::Image& icon() const { return icon_; }
     void set_icon(const gfx::Image& icon) { icon_ = icon; }
 
     bool has_webstore_data() const { return has_webstore_data_; }
-
-    const ExtensionInstallPromptExperiment* experiment() const {
-      return experiment_.get();
-    }
-    void set_experiment(ExtensionInstallPromptExperiment* experiment) {
-      experiment_ = experiment;
-    }
 
    private:
     friend class base::RefCountedThreadSafe<Prompt>;
@@ -240,6 +238,8 @@ class ExtensionInstallPrompt
     const extensions::Extension* extension_;
     const extensions::BundleInstaller* bundle_;
 
+    std::string delegated_username_;
+
     // The icon to be displayed.
     gfx::Image icon_;
 
@@ -261,8 +261,6 @@ class ExtensionInstallPrompt
 
     std::vector<base::FilePath> retained_files_;
     std::vector<base::string16> retained_device_messages_;
-
-    scoped_refptr<ExtensionInstallPromptExperiment> experiment_;
 
     DISALLOW_COPY_AND_ASSIGN(Prompt);
   };
@@ -353,6 +351,16 @@ class ExtensionInstallPrompt
                               const extensions::Extension* extension,
                               const ShowDialogCallback& show_dialog_callback);
 
+  // This is called by the webstore API to verify the permissions for a
+  // delegated install.
+  //
+  // We *MUST* eventually call either Proceed() or Abort() on |delegate|.
+  virtual void ConfirmPermissionsForDelegatedInstall(
+      Delegate* delegate,
+      const extensions::Extension* extension,
+      const std::string& delegated_username,
+      const SkBitmap* icon);
+
   // This is called by the app handler launcher to verify whether the app
   // should be re-enabled. This is declared virtual for testing.
   //
@@ -393,7 +401,7 @@ class ExtensionInstallPrompt
                                 SkBitmap* icon);
 
   // Installation failed. This is declared virtual for testing.
-  virtual void OnInstallFailure(const extensions::CrxInstallerError& error);
+  virtual void OnInstallFailure(const extensions::CrxInstallError& error);
 
   void set_callback_for_test(const ShowDialogCallback& show_dialog_callback) {
     show_dialog_callback_ = show_dialog_callback;
@@ -437,6 +445,10 @@ class ExtensionInstallPrompt
 
   // The bundle we are showing the UI for, if type BUNDLE_INSTALL_PROMPT.
   const extensions::BundleInstaller* bundle_;
+
+  // The name of the user we are asking about, if type
+  // DELEGATED_PERMISSIONS_PROMPT.
+  std::string delegated_username_;
 
   // A custom set of permissions to show in the install prompt instead of the
   // extension's active permissions.

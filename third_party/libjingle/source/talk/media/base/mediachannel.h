@@ -156,6 +156,7 @@ struct AudioOptions {
     adjust_agc_delta.SetFrom(change.adjust_agc_delta);
     experimental_agc.SetFrom(change.experimental_agc);
     experimental_aec.SetFrom(change.experimental_aec);
+    delay_agnostic_aec.SetFrom(change.delay_agnostic_aec);
     experimental_ns.SetFrom(change.experimental_ns);
     aec_dump.SetFrom(change.aec_dump);
     tx_agc_target_dbov.SetFrom(change.tx_agc_target_dbov);
@@ -184,6 +185,7 @@ struct AudioOptions {
         conference_mode == o.conference_mode &&
         experimental_agc == o.experimental_agc &&
         experimental_aec == o.experimental_aec &&
+        delay_agnostic_aec == o.delay_agnostic_aec &&
         experimental_ns == o.experimental_ns &&
         adjust_agc_delta == o.adjust_agc_delta &&
         aec_dump == o.aec_dump &&
@@ -214,6 +216,7 @@ struct AudioOptions {
     ost << ToStringIfSet("agc_delta", adjust_agc_delta);
     ost << ToStringIfSet("experimental_agc", experimental_agc);
     ost << ToStringIfSet("experimental_aec", experimental_aec);
+    ost << ToStringIfSet("delay_agnostic_aec", delay_agnostic_aec);
     ost << ToStringIfSet("experimental_ns", experimental_ns);
     ost << ToStringIfSet("aec_dump", aec_dump);
     ost << ToStringIfSet("tx_agc_target_dbov", tx_agc_target_dbov);
@@ -252,6 +255,7 @@ struct AudioOptions {
   Settable<int> adjust_agc_delta;
   Settable<bool> experimental_agc;
   Settable<bool> experimental_aec;
+  Settable<bool> delay_agnostic_aec;
   Settable<bool> experimental_ns;
   Settable<bool> aec_dump;
   // Note that tx_agc_* only applies to non-experimental AGC.
@@ -681,7 +685,7 @@ struct MediaSenderInfo {
   int packets_sent;
   int packets_lost;
   float fraction_lost;
-  int rtt_ms;
+  int64_t rtt_ms;
   std::string codec_name;
   std::vector<SsrcSenderInfo> local_stats;
   std::vector<SsrcReceiverInfo> remote_stats;
@@ -779,6 +783,8 @@ struct VoiceReceiverInfo : public MediaReceiverInfo {
         delay_estimate_ms(0),
         audio_level(0),
         expand_rate(0),
+        speech_expand_rate(0),
+        secondary_decoded_rate(0),
         decoding_calls_to_silence_generator(0),
         decoding_calls_to_neteq(0),
         decoding_normal(0),
@@ -794,8 +800,12 @@ struct VoiceReceiverInfo : public MediaReceiverInfo {
   int jitter_buffer_preferred_ms;
   int delay_estimate_ms;
   int audio_level;
-  // fraction of synthesized speech inserted through pre-emptive expansion
+  // fraction of synthesized audio inserted through expansion.
   float expand_rate;
+  // fraction of synthesized speech inserted through expansion.
+  float speech_expand_rate;
+  // fraction of data out of secondary decoding, including FEC and RED.
+  float secondary_decoded_rate;
   int decoding_calls_to_silence_generator;
   int decoding_calls_to_neteq;
   int decoding_normal;
@@ -822,10 +832,8 @@ struct VideoSenderInfo : public MediaSenderInfo {
         preferred_bitrate(0),
         adapt_reason(0),
         adapt_changes(0),
-        capture_jitter_ms(0),
         avg_encode_ms(0),
-        encode_usage_percent(0),
-        capture_queue_delay_ms_per_s(0) {
+        encode_usage_percent(0) {
   }
 
   std::vector<SsrcGroup> ssrc_groups;
@@ -843,10 +851,8 @@ struct VideoSenderInfo : public MediaSenderInfo {
   int preferred_bitrate;
   int adapt_reason;
   int adapt_changes;
-  int capture_jitter_ms;
   int avg_encode_ms;
   int encode_usage_percent;
-  int capture_queue_delay_ms_per_s;
   VariableInfo<int> adapt_frame_drops;
   VariableInfo<int> effects_frame_drops;
   VariableInfo<double> capturer_frame_time;
@@ -938,8 +944,7 @@ struct BandwidthEstimationInfo {
         actual_enc_bitrate(0),
         retransmit_bitrate(0),
         transmit_bitrate(0),
-        bucket_delay(0),
-        total_received_propagation_delta_ms(0) {
+        bucket_delay(0) {
   }
 
   int available_send_bandwidth;
@@ -948,12 +953,7 @@ struct BandwidthEstimationInfo {
   int actual_enc_bitrate;
   int retransmit_bitrate;
   int transmit_bitrate;
-  int bucket_delay;
-  // The following stats are only valid when
-  // StatsOptions::include_received_propagation_stats is true.
-  int total_received_propagation_delta_ms;
-  std::vector<int> recent_received_propagation_delta_ms;
-  std::vector<int64_t> recent_received_packet_group_arrival_time_ms;
+  int64_t bucket_delay;
 };
 
 struct VoiceMediaInfo {
@@ -983,12 +983,6 @@ struct DataMediaInfo {
   }
   std::vector<DataSenderInfo> senders;
   std::vector<DataReceiverInfo> receivers;
-};
-
-struct StatsOptions {
-  StatsOptions() : include_received_propagation_stats(false) {}
-
-  bool include_received_propagation_stats;
 };
 
 class VoiceMediaChannel : public MediaChannel {
@@ -1109,13 +1103,7 @@ class VideoMediaChannel : public MediaChannel {
   // |capturer|. If |ssrc| is non zero create a new stream with |ssrc| as SSRC.
   virtual bool SetCapturer(uint32 ssrc, VideoCapturer* capturer) = 0;
   // Gets quality stats for the channel.
-  virtual bool GetStats(const StatsOptions& options, VideoMediaInfo* info) = 0;
-  // This is needed for MediaMonitor to use the same template for voice, video
-  // and data MediaChannels.
-  bool GetStats(VideoMediaInfo* info) {
-    return GetStats(StatsOptions(), info);
-  }
-
+  virtual bool GetStats(VideoMediaInfo* info) = 0;
   // Send an intra frame to the receivers.
   virtual bool SendIntraFrame() = 0;
   // Reuqest each of the remote senders to send an intra frame.

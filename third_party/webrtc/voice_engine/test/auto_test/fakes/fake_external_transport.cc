@@ -18,7 +18,6 @@
 
 FakeExternalTransport::FakeExternalTransport(webrtc::VoENetwork* ptr)
     : my_network_(ptr),
-      thread_(NULL),
       lock_(NULL),
       event_(NULL),
       length_(0),
@@ -28,26 +27,21 @@ FakeExternalTransport::FakeExternalTransport(webrtc::VoENetwork* ptr)
   const char* thread_name = "external_thread";
   lock_ = webrtc::CriticalSectionWrapper::CreateCriticalSection();
   event_ = webrtc::EventWrapper::Create();
-  thread_ = webrtc::ThreadWrapper::CreateThread(
-      Run, this, webrtc::kHighPriority, thread_name);
+  thread_ = webrtc::ThreadWrapper::CreateThread(Run, this, thread_name);
   if (thread_) {
-    unsigned int id;
-    thread_->Start(id);
+    thread_->Start();
+    thread_->SetPriority(webrtc::kHighPriority);
   }
 }
 
 FakeExternalTransport::~FakeExternalTransport() {
   if (thread_) {
-    thread_->SetNotAlive();
     event_->Set();
-    if (thread_->Stop()) {
-      delete thread_;
-      thread_ = NULL;
-      delete event_;
-      event_ = NULL;
-      delete lock_;
-      lock_ = NULL;
-    }
+    thread_->Stop();
+    delete event_;
+    event_ = NULL;
+    delete lock_;
+    lock_ = NULL;
   }
 }
 

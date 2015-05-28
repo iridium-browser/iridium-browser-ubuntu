@@ -49,6 +49,8 @@ WebInspector.ScreencastView._navBarHeight = 29;
 
 WebInspector.ScreencastView._HttpRegex = /^https?:\/\/(.+)/;
 
+WebInspector.ScreencastView._SchemeRegex = /^(https?|about|chrome):/;
+
 WebInspector.ScreencastView.prototype = {
     initialize: function()
     {
@@ -94,8 +96,8 @@ WebInspector.ScreencastView.prototype = {
         this._shortcuts = /** !Object.<number, function(Event=):boolean> */ ({});
         this._shortcuts[WebInspector.KeyboardShortcut.makeKey("l", WebInspector.KeyboardShortcut.Modifiers.Ctrl)] = this._focusNavigationBar.bind(this);
 
-        WebInspector.resourceTreeModel.addEventListener(WebInspector.ResourceTreeModel.EventTypes.ScreencastFrame, this._screencastFrame, this);
-        WebInspector.resourceTreeModel.addEventListener(WebInspector.ResourceTreeModel.EventTypes.ScreencastVisibilityChanged, this._screencastVisibilityChanged, this);
+        this._target.resourceTreeModel.addEventListener(WebInspector.ResourceTreeModel.EventTypes.ScreencastFrame, this._screencastFrame, this);
+        this._target.resourceTreeModel.addEventListener(WebInspector.ResourceTreeModel.EventTypes.ScreencastVisibilityChanged, this._screencastVisibilityChanged, this);
 
         WebInspector.targetManager.addEventListener(WebInspector.TargetManager.Events.SuspendStateChanged, this._onSuspendStateChange, this);
         this._updateGlasspane();
@@ -150,8 +152,6 @@ WebInspector.ScreencastView.prototype = {
         this._imageElement.src = "data:image/jpg;base64," + base64Data;
         this._pageScaleFactor = metadata.pageScaleFactor;
         this._screenOffsetTop = metadata.offsetTop;
-        this._deviceWidth = metadata.deviceWidth;
-        this._deviceHeight = metadata.deviceHeight;
         this._scrollOffsetX = metadata.scrollOffsetX;
         this._scrollOffsetY = metadata.scrollOffsetY;
 
@@ -277,8 +277,8 @@ WebInspector.ScreencastView.prototype = {
         }
 
         var text = event.type === "keypress" ? String.fromCharCode(event.charCode) : undefined;
-        InputAgent.dispatchKeyEvent(type, this._modifiersForEvent(event), event.timeStamp / 1000, text, text ? text.toLowerCase() : undefined,
-                                    event.keyIdentifier, event.keyCode /* windowsVirtualKeyCode */, event.keyCode /* nativeVirtualKeyCode */, false, false, false);
+        this._target.inputAgent().dispatchKeyEvent(type, this._modifiersForEvent(event), event.timeStamp / 1000, text, text ? text.toLowerCase() : undefined,
+                                    event.keyIdentifier, event.code, event.keyCode /* windowsVirtualKeyCode */, event.keyCode /* nativeVirtualKeyCode */, false, false, false);
         event.consume();
         this._canvasElement.focus();
     },
@@ -319,7 +319,7 @@ WebInspector.ScreencastView.prototype = {
         }
         if (event.type === "mouseup")
             delete this._eventScreenOffsetTop;
-        InputAgent.invoke_emulateTouchFromMouseEvent(params);
+        WebInspector.targetManager.mainTarget().inputAgent().invoke_emulateTouchFromMouseEvent(params);
     },
 
     /**
@@ -331,7 +331,7 @@ WebInspector.ScreencastView.prototype = {
             var params = this._eventParams;
             delete this._eventParams;
             params.type = "mouseReleased";
-            InputAgent.invoke_emulateTouchFromMouseEvent(params);
+            WebInspector.targetManager.mainTarget().inputAgent().invoke_emulateTouchFromMouseEvent(params);
         }
     },
 
@@ -391,9 +391,10 @@ WebInspector.ScreencastView.prototype = {
      * @override
      * @param {?WebInspector.DOMNode} node
      * @param {?DOMAgent.HighlightConfig} config
+     * @param {!DOMAgent.BackendNodeId=} backendNodeId
      * @param {!RuntimeAgent.RemoteObjectId=} objectId
      */
-    highlightDOMNode: function(node, config, objectId)
+    highlightDOMNode: function(node, config, backendNodeId, objectId)
     {
         this._highlightNode = node;
         this._highlightConfig = config;
@@ -438,8 +439,8 @@ WebInspector.ScreencastView.prototype = {
         function scaleQuad(quad)
         {
             for (var i = 0; i < quad.length; i += 2) {
-                quad[i] = quad[i] * this._pageScaleFactor * this._screenZoom;
-                quad[i + 1] = (quad[i + 1] * this._pageScaleFactor + this._screenOffsetTop) * this._screenZoom;
+                quad[i] = quad[i] * this._screenZoom;
+                quad[i + 1] = (quad[i + 1] + this._screenOffsetTop) * this._screenZoom;
             }
         }
 
@@ -677,6 +678,14 @@ WebInspector.ScreencastView.prototype = {
     },
 
     /**
+     * @override
+     * @param {!PageAgent.FrameId} frameId
+     */
+    highlightFrame: function(frameId)
+    {
+    },
+
+    /**
      * @param {!CanvasRenderingContext2D} context
      */
     _createCheckerboardPattern: function(context)
@@ -728,13 +737,13 @@ WebInspector.ScreencastView.prototype = {
         var newIndex = this._historyIndex + offset;
         if (newIndex < 0 || newIndex >= this._historyEntries.length)
           return;
-        PageAgent.navigateToHistoryEntry(this._historyEntries[newIndex].id);
+        this._target.pageAgent().navigateToHistoryEntry(this._historyEntries[newIndex].id);
         this._requestNavigationHistory();
     },
 
     _navigateReload: function()
     {
-        WebInspector.resourceTreeModel.reloadPage();
+        this._target.resourceTreeModel.reloadPage();
     },
 
     _navigationUrlKeyUp: function(event)
@@ -744,15 +753,15 @@ WebInspector.ScreencastView.prototype = {
         var url = this._navigationUrl.value;
         if (!url)
             return;
-        if (!url.match(WebInspector.ScreencastView._HttpRegex))
+        if (!url.match(WebInspector.ScreencastView._SchemeRegex))
             url = "http://" + url;
-        PageAgent.navigate(url);
+        this._target.pageAgent().navigate(url);
         this._canvasElement.focus();
     },
 
     _requestNavigationHistory: function()
     {
-        PageAgent.getNavigationHistory(this._onNavigationHistory.bind(this));
+        this._target.pageAgent().getNavigationHistory(this._onNavigationHistory.bind(this));
     },
 
     _onNavigationHistory: function(error, currentIndex, entries)

@@ -24,7 +24,7 @@ typedef unsigned __int64 uint64_t;
 #include <stdint.h>
 #endif
 
-#include <algorithm>  // for std::min
+#include <algorithm>
 #include <cassert>
 #include <cstddef>
 #include <cstring>
@@ -61,15 +61,17 @@ class OTSStream {
     }
 
     if (chksum_buffer_offset_ == 4) {
-      uint32_t chksum;
-      std::memcpy(&chksum, chksum_buffer_, 4);
-      chksum_ += ntohl(chksum);
+      uint32_t tmp;
+      std::memcpy(&tmp, chksum_buffer_, 4);
+      chksum_ += ntohl(tmp);
       chksum_buffer_offset_ = 0;
     }
 
     while (length >= 4) {
-      chksum_ += ntohl(*reinterpret_cast<const uint32_t*>(
-          reinterpret_cast<const uint8_t*>(data) + offset));
+      uint32_t tmp;
+      std::memcpy(&tmp, reinterpret_cast<const uint8_t *>(data) + offset,
+        sizeof(uint32_t));
+      chksum_ += ntohl(tmp);
       length -= 4;
       offset += 4;
     }
@@ -177,26 +179,47 @@ class OTSStream {
   unsigned chksum_buffer_offset_;
 };
 
-// -----------------------------------------------------------------------------
-// Process a given OpenType file and write out a sanitised version
-//   output: a pointer to an object implementing the OTSStream interface. The
-//     sanitisied output will be written to this. In the even of a failure,
-//     partial output may have been written.
-//   input: the OpenType file
-//   length: the size, in bytes, of |input|
-// -----------------------------------------------------------------------------
+#ifdef __GCC__
+#define MSGFUNC_FMT_ATTR __attribute__((format(printf, 2, 3)))
+#else
+#define MSGFUNC_FMT_ATTR
+#endif
+
+enum TableAction {
+  TABLE_ACTION_DEFAULT,  // Use OTS's default action for that table
+  TABLE_ACTION_SANITIZE, // Sanitize the table, potentially droping it
+  TABLE_ACTION_PASSTHRU, // Serialize the table unchanged
+  TABLE_ACTION_DROP      // Drop the table
+};
+
+class OTSContext {
+  public:
+    OTSContext() {}
+    virtual ~OTSContext() {}
+
+    // Process a given OpenType file and write out a sanitised version
+    //   output: a pointer to an object implementing the OTSStream interface. The
+    //     sanitisied output will be written to this. In the even of a failure,
+    //     partial output may have been written.
+    //   input: the OpenType file
+    //   length: the size, in bytes, of |input|
+    bool Process(OTSStream *output, const uint8_t *input, size_t length);
+
+    // This function will be called when OTS is reporting an error.
+    //   level: the severity of the generated message:
+    //     0: error messages in case OTS fails to sanitize the font.
+    //     1: warning messages about issue OTS fixed in the sanitized font.
+    virtual void Message(int level, const char *format, ...) MSGFUNC_FMT_ATTR {}
+
+    // This function will be called when OTS needs to decide what to do for a
+    // font table.
+    //   tag: table tag as an integer in big-endian byte order, independent of
+    //   platform endianness
+    virtual TableAction GetTableAction(uint32_t tag) { return ots::TABLE_ACTION_DEFAULT; }
+};
+
+// For backward compatibility - remove once Chrome switches over to the new API.
 bool Process(OTSStream *output, const uint8_t *input, size_t length);
-
-// Force to disable debug output even when the library is compiled with
-// -DOTS_DEBUG.
-void DisableDebugOutput();
-
-// Enable WOFF2 support(experimental).
-// TODO(bashi): Remove WOFF2 from OTS.
-void EnableWOFF2();
-
-// Force to disable dropping CBDT/CBLC tables.
-void DoNotDropColorBitmapTables();
 
 }  // namespace ots
 

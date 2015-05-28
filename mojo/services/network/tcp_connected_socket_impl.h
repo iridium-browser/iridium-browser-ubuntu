@@ -8,9 +8,9 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "mojo/common/handle_watcher.h"
-#include "mojo/public/cpp/bindings/interface_impl.h"
 #include "mojo/services/network/public/interfaces/tcp_connected_socket.mojom.h"
 #include "net/socket/tcp_socket.h"
+#include "third_party/mojo/src/mojo/public/cpp/bindings/interface_impl.h"
 
 namespace mojo {
 
@@ -30,12 +30,14 @@ class TCPConnectedSocketImpl : public InterfaceImpl<TCPConnectedSocket> {
   void ReceiveMore();
   void OnReceiveStreamReady(MojoResult result);
   void DidReceive(bool completed_synchronously, int result);
+  void ShutdownReceive();
 
   // "Writing" is reading from the Mojo send_stream and writing to the
   // TCPSocket.
   void SendMore();
   void OnSendStreamReady(MojoResult result);
   void DidSend(bool completed_asynchronously, int result);
+  void ShutdownSend();
 
   scoped_ptr<net::TCPSocket> socket_;
 

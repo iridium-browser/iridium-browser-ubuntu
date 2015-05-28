@@ -11,6 +11,7 @@
 #include "cc/layers/layer.h"
 #include "cc/trees/layer_tree_host.h"
 #include "ui/gfx/geometry/point_f.h"
+#include "ui/gfx/geometry/vector2d_conversions.h"
 
 namespace cc {
 
@@ -21,15 +22,19 @@ namespace {
 struct DataForRecursion {
   TransformTree* transform_tree;
   ClipTree* clip_tree;
+  OpacityTree* opacity_tree;
   Layer* transform_tree_parent;
   Layer* transform_fixed_parent;
   Layer* render_target;
   int clip_tree_parent;
-  gfx::Vector2dF offset_to_transform_tree_parent;
-  gfx::Vector2dF offset_to_transform_fixed_parent;
+  int opacity_tree_parent;
   const Layer* page_scale_layer;
   float page_scale_factor;
   float device_scale_factor;
+  bool in_subtree_of_page_scale_application_layer;
+  bool should_flatten;
+  const gfx::Transform* device_transform;
+  gfx::Vector2dF scroll_compensation_adjustment;
 };
 
 static Layer* GetTransformParent(const DataForRecursion& data, Layer* layer) {
@@ -60,6 +65,7 @@ static bool RequiresClipNode(Layer* layer,
 
 void AddClipNodeIfNeeded(const DataForRecursion& data_from_ancestor,
                          Layer* layer,
+                         bool created_transform_node,
                          DataForRecursion* data_for_children) {
   ClipNode* parent = GetClipParent(data_from_ancestor, layer);
   int parent_id = parent->id;
@@ -82,13 +88,17 @@ void AddClipNodeIfNeeded(const DataForRecursion& data_from_ancestor,
     data_for_children->clip_tree_parent = parent_id;
   } else if (layer->parent()) {
     // Note the root clip gets handled elsewhere.
-    Layer* transform_parent = GetTransformParent(*data_for_children, layer);
+    Layer* transform_parent = data_for_children->transform_tree_parent;
+    if (layer->position_constraint().is_fixed_position() &&
+        !created_transform_node) {
+      transform_parent = data_for_children->transform_fixed_parent;
+    }
     ClipNode node;
     node.data.clip = gfx::RectF(
         gfx::PointF() + layer->offset_to_transform_parent(), layer->bounds());
     node.data.transform_id = transform_parent->transform_tree_index();
     node.data.target_id =
-        data_from_ancestor.render_target->transform_tree_index();
+        data_for_children->render_target->transform_tree_index();
 
     data_for_children->clip_tree_parent =
         data_for_children->clip_tree->Insert(node, parent_id);
@@ -102,7 +112,7 @@ void AddClipNodeIfNeeded(const DataForRecursion& data_from_ancestor,
   // better way, since we will need both the clipped and unclipped versions.
 }
 
-void AddTransformNodeIfNeeded(const DataForRecursion& data_from_ancestor,
+bool AddTransformNodeIfNeeded(const DataForRecursion& data_from_ancestor,
                               Layer* layer,
                               DataForRecursion* data_for_children) {
   const bool is_root = !layer->parent();
@@ -116,105 +126,155 @@ void AddTransformNodeIfNeeded(const DataForRecursion& data_from_ancestor,
 
   const bool has_animated_transform =
       layer->layer_animation_controller()->IsAnimatingProperty(
-          Animation::Transform);
-
-  const bool has_transform_origin = layer->transform_origin() != gfx::Point3F();
+          Animation::TRANSFORM);
 
   const bool has_surface = !!layer->render_surface();
 
-  const bool flattening_change = layer->parent() &&
-                                 layer->should_flatten_transform() &&
-                                 !layer->parent()->should_flatten_transform();
-
-  bool requires_node = is_root || is_scrollable || is_fixed ||
-                       has_significant_transform || has_animated_transform ||
-                       is_page_scale_application_layer || flattening_change ||
-                       has_transform_origin || has_surface;
+  bool requires_node = is_root || is_scrollable || has_significant_transform ||
+                       has_animated_transform || has_surface ||
+                       is_page_scale_application_layer;
 
   Layer* transform_parent = GetTransformParent(data_from_ancestor, layer);
 
-  // May be non-zero if layer is fixed or has a scroll parent.
   gfx::Vector2dF parent_offset;
   if (transform_parent) {
-    // TODO(vollick): This is to mimic existing bugs (crbug.com/441447).
-    if (!is_fixed)
-      parent_offset = transform_parent->offset_to_transform_parent();
-
-    gfx::Transform to_parent;
-    Layer* source = data_from_ancestor.transform_tree_parent;
     if (layer->scroll_parent()) {
-      source = layer->parent();
-      parent_offset += layer->parent()->offset_to_transform_parent();
-    }
-    data_from_ancestor.transform_tree->ComputeTransform(
-        source->transform_tree_index(),
-        transform_parent->transform_tree_index(), &to_parent);
+      gfx::Transform to_parent;
+      Layer* source = layer->parent();
+      parent_offset += source->offset_to_transform_parent();
+      data_from_ancestor.transform_tree->ComputeTransform(
+          source->transform_tree_index(),
+          transform_parent->transform_tree_index(), &to_parent);
+      parent_offset += to_parent.To2dTranslation();
+    } else if (!is_fixed) {
+      parent_offset = transform_parent->offset_to_transform_parent();
+    } else {
+      if (data_from_ancestor.transform_tree_parent !=
+          data_from_ancestor.transform_fixed_parent) {
+        gfx::Vector2dF fixed_offset = data_from_ancestor.transform_tree_parent
+                                          ->offset_to_transform_parent();
+        gfx::Transform parent_to_parent;
+        data_from_ancestor.transform_tree->ComputeTransform(
+            data_from_ancestor.transform_tree_parent->transform_tree_index(),
+            data_from_ancestor.transform_fixed_parent->transform_tree_index(),
+            &parent_to_parent);
 
-    parent_offset += to_parent.To2dTranslation();
+        fixed_offset += parent_to_parent.To2dTranslation();
+        parent_offset += fixed_offset;
+      }
+      parent_offset += data_from_ancestor.scroll_compensation_adjustment;
+    }
   }
 
   if (layer->IsContainerForFixedPositionLayers() || is_root)
     data_for_children->transform_fixed_parent = layer;
   data_for_children->transform_tree_parent = layer;
 
+  if (layer->IsContainerForFixedPositionLayers() || is_fixed)
+    data_for_children->scroll_compensation_adjustment = gfx::Vector2dF();
+
   if (!requires_node) {
+    data_for_children->should_flatten |= layer->should_flatten_transform();
     gfx::Vector2dF local_offset = layer->position().OffsetFromOrigin() +
                                   layer->transform().To2dTranslation();
     layer->set_offset_to_transform_parent(parent_offset + local_offset);
+    layer->set_should_flatten_transform_from_property_tree(
+        data_from_ancestor.should_flatten);
     layer->set_transform_tree_index(transform_parent->transform_tree_index());
+    return false;
+  }
+
+  int parent_index = 0;
+  if (transform_parent)
+    parent_index = transform_parent->transform_tree_index();
+
+  data_for_children->transform_tree->Insert(TransformNode(), parent_index);
+
+  TransformNode* node = data_for_children->transform_tree->back();
+  layer->set_transform_tree_index(node->id);
+
+  node->data.scrolls = is_scrollable;
+  node->data.flattens_inherited_transform = data_for_children->should_flatten;
+
+  // Surfaces inherently flatten transforms.
+  data_for_children->should_flatten =
+      layer->should_flatten_transform() || has_surface;
+  node->data.target_id =
+      data_from_ancestor.render_target->transform_tree_index();
+  node->data.content_target_id =
+      data_for_children->render_target->transform_tree_index();
+  DCHECK_NE(node->data.target_id, -1);
+  node->data.is_animated = layer->TransformIsAnimating();
+
+  float scale_factors = 1.0f;
+  if (is_root) {
+    node->data.post_local = *data_from_ancestor.device_transform;
+    scale_factors = data_from_ancestor.device_scale_factor;
+  }
+
+  if (is_page_scale_application_layer)
+    scale_factors *= data_from_ancestor.page_scale_factor;
+
+  if (has_surface && !is_root) {
+    node->data.needs_sublayer_scale = true;
+    node->data.layer_scale_factor = data_from_ancestor.device_scale_factor;
+    if (data_from_ancestor.in_subtree_of_page_scale_application_layer)
+      node->data.layer_scale_factor *= data_from_ancestor.page_scale_factor;
+  }
+
+  node->data.post_local.Scale(scale_factors, scale_factors);
+  node->data.post_local.Translate3d(
+      layer->position().x() + parent_offset.x() + layer->transform_origin().x(),
+      layer->position().y() + parent_offset.y() + layer->transform_origin().y(),
+      layer->transform_origin().z());
+
+  if (!layer->scroll_parent()) {
+    node->data.scroll_offset =
+        gfx::ScrollOffsetToVector2dF(layer->CurrentScrollOffset());
+  }
+
+  node->data.local = layer->transform();
+  node->data.pre_local.Translate3d(-layer->transform_origin().x(),
+                                   -layer->transform_origin().y(),
+                                   -layer->transform_origin().z());
+
+  node->data.needs_local_transform_update = true;
+  data_from_ancestor.transform_tree->UpdateTransforms(node->id);
+
+  layer->set_offset_to_transform_parent(gfx::Vector2dF());
+
+  // Flattening (if needed) will be handled by |node|.
+  layer->set_should_flatten_transform_from_property_tree(false);
+
+  data_for_children->scroll_compensation_adjustment +=
+      layer->ScrollCompensationAdjustment() - node->data.scroll_snap;
+  return true;
+}
+
+void AddOpacityNodeIfNeeded(const DataForRecursion& data_from_ancestor,
+                            Layer* layer,
+                            DataForRecursion* data_for_children) {
+  const bool is_root = !layer->parent();
+  const bool has_transparency = layer->opacity() != 1.f;
+  const bool has_animated_opacity =
+      layer->layer_animation_controller()->IsAnimatingProperty(
+          Animation::OPACITY) ||
+      layer->OpacityCanAnimateOnImplThread();
+  bool requires_node = is_root || has_transparency || has_animated_opacity;
+
+  int parent_id = data_from_ancestor.opacity_tree_parent;
+
+  if (!requires_node) {
+    layer->set_opacity_tree_index(parent_id);
+    data_for_children->opacity_tree_parent = parent_id;
     return;
   }
 
-  if (!is_root) {
-    data_for_children->transform_tree->Insert(
-        TransformNode(), transform_parent->transform_tree_index());
-  }
-
-  TransformNode* node = data_for_children->transform_tree->back();
-
-  node->data.flattens = layer->should_flatten_transform();
-  node->data.target_id =
-      data_from_ancestor.render_target->transform_tree_index();
-  node->data.is_animated = layer->TransformIsAnimating();
-
-  gfx::Transform transform;
-  float device_and_page_scale_factors = 1.0f;
-  if (is_root)
-    device_and_page_scale_factors = data_from_ancestor.device_scale_factor;
-  if (is_page_scale_application_layer)
-    device_and_page_scale_factors *= data_from_ancestor.page_scale_factor;
-
-  transform.Scale(device_and_page_scale_factors, device_and_page_scale_factors);
-
-  // TODO(vollick): We've accounted for the scroll offset here but we haven't
-  // taken into account snapping to screen space pixels. For the purposes of
-  // computing rects we need to record, this should be fine (the visible rects
-  // we compute may be slightly different than what we'd compute with snapping,
-  // but since we significantly expand the visible rect when determining what to
-  // record, the slight difference should be inconsequential).
-  gfx::Vector2dF position = layer->position().OffsetFromOrigin();
-  if (!layer->scroll_parent()) {
-    position -= gfx::Vector2dF(layer->TotalScrollOffset().x(),
-        layer->TotalScrollOffset().y());
-  }
-
-  position += parent_offset;
-
-  transform.Translate3d(position.x() + layer->transform_origin().x(),
-                        position.y() + layer->transform_origin().y(),
-                        layer->transform_origin().z());
-  transform.PreconcatTransform(layer->transform());
-  transform.Translate3d(-layer->transform_origin().x(),
-                        -layer->transform_origin().y(),
-                        -layer->transform_origin().z());
-
-  node->data.to_parent = transform;
-  node->data.is_invertible = transform.GetInverse(&node->data.from_parent);
-
-  data_from_ancestor.transform_tree->UpdateScreenSpaceTransform(node->id);
-
-  layer->set_offset_to_transform_parent(gfx::Vector2dF());
-  layer->set_transform_tree_index(node->id);
+  OpacityNode node;
+  node.data = layer->opacity();
+  data_for_children->opacity_tree_parent =
+      data_for_children->opacity_tree->Insert(node, parent_id);
+  layer->set_opacity_tree_index(data_for_children->opacity_tree_parent);
 }
 
 void BuildPropertyTreesInternal(Layer* layer,
@@ -223,8 +283,16 @@ void BuildPropertyTreesInternal(Layer* layer,
   if (layer->render_surface())
     data_for_children.render_target = layer;
 
-  AddTransformNodeIfNeeded(data_from_parent, layer, &data_for_children);
-  AddClipNodeIfNeeded(data_from_parent, layer, &data_for_children);
+  bool created_transform_node =
+      AddTransformNodeIfNeeded(data_from_parent, layer, &data_for_children);
+  AddClipNodeIfNeeded(data_from_parent, layer, created_transform_node,
+                      &data_for_children);
+
+  if (data_from_parent.opacity_tree)
+    AddOpacityNodeIfNeeded(data_from_parent, layer, &data_for_children);
+
+  if (layer == data_from_parent.page_scale_layer)
+    data_for_children.in_subtree_of_page_scale_application_layer = true;
 
   for (size_t i = 0; i < layer->children().size(); ++i) {
     if (!layer->children()[i]->scroll_parent())
@@ -251,30 +319,29 @@ void PropertyTreeBuilder::BuildPropertyTrees(
     const gfx::Rect& viewport,
     const gfx::Transform& device_transform,
     TransformTree* transform_tree,
-    ClipTree* clip_tree) {
+    ClipTree* clip_tree,
+    OpacityTree* opacity_tree) {
   DataForRecursion data_for_recursion;
   data_for_recursion.transform_tree = transform_tree;
   data_for_recursion.clip_tree = clip_tree;
+  data_for_recursion.opacity_tree = opacity_tree;
   data_for_recursion.transform_tree_parent = nullptr;
   data_for_recursion.transform_fixed_parent = nullptr;
   data_for_recursion.render_target = root_layer;
   data_for_recursion.clip_tree_parent = 0;
+  data_for_recursion.opacity_tree_parent = -1;
   data_for_recursion.page_scale_layer = page_scale_layer;
   data_for_recursion.page_scale_factor = page_scale_factor;
   data_for_recursion.device_scale_factor = device_scale_factor;
-
-  int transform_root_id = transform_tree->Insert(TransformNode(), 0);
+  data_for_recursion.in_subtree_of_page_scale_application_layer = false;
+  data_for_recursion.should_flatten = false;
+  data_for_recursion.device_transform = &device_transform;
 
   ClipNode root_clip;
   root_clip.data.clip = viewport;
   root_clip.data.transform_id = 0;
   data_for_recursion.clip_tree_parent = clip_tree->Insert(root_clip, 0);
-
   BuildPropertyTreesInternal(root_layer, data_for_recursion);
-
-  TransformNode* transform_root = transform_tree->Node(transform_root_id);
-  transform_root->data.set_to_parent(device_transform *
-                                     transform_root->data.to_parent);
 }
 
 }  // namespace cc

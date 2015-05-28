@@ -38,18 +38,21 @@ class AXObjectCacheImpl;
 class AXARIAGridCell final : public AXTableCell {
 
 private:
-    AXARIAGridCell(RenderObject*, AXObjectCacheImpl*);
+    AXARIAGridCell(LayoutObject*, AXObjectCacheImpl*);
 
 public:
-    static PassRefPtr<AXARIAGridCell> create(RenderObject*, AXObjectCacheImpl*);
+    static PassRefPtr<AXARIAGridCell> create(LayoutObject*, AXObjectCacheImpl*);
     virtual ~AXARIAGridCell();
 
     // fills in the start location and row span of cell
     virtual void rowIndexRange(pair<unsigned, unsigned>& rowRange) override;
     // fills in the start location and column span of cell
     virtual void columnIndexRange(pair<unsigned, unsigned>& columnRange) override;
+    virtual AccessibilityRole scanToDecideHeaderRole() override final;
 
 protected:
+    bool isAriaColumnHeader() const;
+    bool isAriaRowHeader() const;
     virtual AXObject* parentTable() const override;
 };
 

@@ -4,14 +4,16 @@
 
 import time
 
-from measurements import smoothness
 from telemetry.page import page_test
 from telemetry.value import scalar
+
+from measurements import smoothness
 
 
 class RecordPerArea(page_test.PageTest):
   def __init__(self, start_wait_time=2):
-    super(RecordPerArea, self).__init__('RunPageInteractions', True)
+    super(RecordPerArea, self).__init__(
+        needs_browser_restart_after_each_page=True)
     self._start_wait_time = start_wait_time
 
   def CustomizeBrowserOptions(self, options):

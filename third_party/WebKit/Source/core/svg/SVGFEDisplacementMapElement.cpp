@@ -54,7 +54,7 @@ inline SVGFEDisplacementMapElement::SVGFEDisplacementMapElement(Document& docume
     addToPropertyMap(m_yChannelSelector);
 }
 
-void SVGFEDisplacementMapElement::trace(Visitor* visitor)
+DEFINE_TRACE(SVGFEDisplacementMapElement)
 {
     visitor->trace(m_scale);
     visitor->trace(m_in1);
@@ -77,11 +77,6 @@ bool SVGFEDisplacementMapElement::isSupportedAttribute(const QualifiedName& attr
         supportedAttributes.add(SVGNames::scaleAttr);
     }
     return supportedAttributes.contains<SVGAttributeHashTranslator>(attrName);
-}
-
-void SVGFEDisplacementMapElement::parseAttribute(const QualifiedName& name, const AtomicString& value)
-{
-    parseAttributeNew(name, value);
 }
 
 bool SVGFEDisplacementMapElement::setFilterEffectAttribute(FilterEffect* effect, const QualifiedName& attrName)

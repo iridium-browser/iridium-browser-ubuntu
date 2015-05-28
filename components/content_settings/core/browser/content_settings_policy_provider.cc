@@ -32,9 +32,9 @@ const char* kPrefToManageType[] = {
   NULL,  // No policy for default value of fullscreen requests
   NULL,  // No policy for default value of mouse lock requests
   NULL,  // No policy for default value of mixed script blocking
+  NULL,  // The MEDIASTREAM setting is deprecated
   prefs::kManagedDefaultMediaStreamSetting,
-  NULL,  // No policy for default value of media stream mic
-  NULL,  // No policy for default value of media stream camera
+  prefs::kManagedDefaultMediaStreamSetting,
   NULL,  // No policy for default value of protocol handlers
   NULL,  // No policy for default value of PPAPI broker
   NULL,  // No policy for default value of multiple automatic downloads
@@ -46,9 +46,7 @@ const char* kPrefToManageType[] = {
 #elif defined(OS_ANDROID) || defined(OS_CHROMEOS)
   NULL,  // No policy for default value of protected media identifier
 #endif
-#if defined(OS_ANDROID)
   NULL,  // No policy for default value of app banners
-#endif
 };
 static_assert(arraysize(kPrefToManageType) == CONTENT_SETTINGS_NUM_TYPES,
               "kPrefToManageType should have CONTENT_SETTINGS_NUM_TYPES "
@@ -468,7 +466,8 @@ void PolicyProvider::OnPreferenceChanged(const std::string& name) {
   } else if (name == prefs::kManagedDefaultNotificationsSetting) {
     UpdateManagedDefaultSetting(CONTENT_SETTINGS_TYPE_NOTIFICATIONS);
   } else if (name == prefs::kManagedDefaultMediaStreamSetting) {
-    UpdateManagedDefaultSetting(CONTENT_SETTINGS_TYPE_MEDIASTREAM);
+    UpdateManagedDefaultSetting(CONTENT_SETTINGS_TYPE_MEDIASTREAM_MIC);
+    UpdateManagedDefaultSetting(CONTENT_SETTINGS_TYPE_MEDIASTREAM_CAMERA);
   } else if (name == prefs::kManagedAutoSelectCertificateForUrls ||
              name == prefs::kManagedCookiesAllowedForUrls ||
              name == prefs::kManagedCookiesBlockedForUrls ||

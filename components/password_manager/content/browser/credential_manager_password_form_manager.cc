@@ -5,7 +5,7 @@
 #include "components/password_manager/content/browser/credential_manager_password_form_manager.h"
 
 #include "components/autofill/core/common/password_form.h"
-#include "components/password_manager/content/browser/content_credential_manager_dispatcher.h"
+#include "components/password_manager/content/browser/credential_manager_dispatcher.h"
 #include "components/password_manager/core/browser/password_manager_client.h"
 #include "components/password_manager/core/browser/password_store.h"
 
@@ -17,7 +17,7 @@ CredentialManagerPasswordFormManager::CredentialManagerPasswordFormManager(
     PasswordManagerClient* client,
     base::WeakPtr<PasswordManagerDriver> driver,
     const PasswordForm& observed_form,
-    ContentCredentialManagerDispatcher* dispatcher)
+    CredentialManagerDispatcher* dispatcher)
     : PasswordFormManager(driver->GetPasswordManager(),
                           client,
                           driver,
@@ -31,8 +31,8 @@ CredentialManagerPasswordFormManager::~CredentialManagerPasswordFormManager() {
 }
 
 void CredentialManagerPasswordFormManager::OnGetPasswordStoreResults(
-    const std::vector<PasswordForm*>& results) {
-  PasswordFormManager::OnGetPasswordStoreResults(results);
+    ScopedVector<autofill::PasswordForm> results) {
+  PasswordFormManager::OnGetPasswordStoreResults(results.Pass());
 
   // Mark the form as "preferred", as we've been told by the API that this is
   // indeed the credential set that the user used to sign into the site.

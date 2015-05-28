@@ -1,9 +1,11 @@
 <?xml version="1.0" ?><!DOCTYPE translationbundle><translationbundle lang="kn">
 <translation id="1408730541890277710">ಚಿತ್ರಗಳನ್ನು ಅವುಗಳ ಪರ್ಯಾಯ ಪಠ್ಯದೊಂದಿಗೆ ಬದಲಾಯಿಸಿ.</translation>
+<translation id="6017514345406065928">ಹಸಿರು</translation>
 <translation id="595639123821853262">ತಿರುಗುಮುರುಗಾದ ಗ್ರೇಸ್ಕೇಲ್</translation>
 <translation id="8260673944985561857">ಕೆರೆಟ್ ಬ್ರೌಸಿಂಗ್ ಆಯ್ಕೆಗಳು</translation>
 <translation id="3410969471888629217">ಸೈಟ್ ಕಸ್ಟಮೈಸ್ ಮಾಡುವಿಕೆಯನ್ನು ಮರೆತುಬಿಡಿ</translation>
 <translation id="6050189528197190982">ಗ್ರೇಸ್ಕೇಲ್</translation>
+<translation id="8261559421026395104">ಇದಕ್ಕಾಗಿ ಗ್ರಹಿಕೆಯನ್ನು ಸುಧಾರಿಸಿ:</translation>
 <translation id="5094574508723441140">ಹೆಚ್ಚಿಸಿದ ವೈದೃಶ್ಯ</translation>
 <translation id="8609925175482059018">ಕೆರೆಟ್ ಬ್ರೌಸಿಂಗ್ ಆನ್ ಮಾಡಲು &lt;span class='key'&gt;F7&lt;/span&gt; ಅನ್ನು ಒತ್ತಿರಿ. ಆಫ್ ಮಾಡಲು ಅದನ್ನು ಪುನಃ ಒತ್ತಿರಿ.</translation>
 <translation id="3435896845095436175">ಸಕ್ರಿಯಗೊಳಿಸು</translation>
@@ -14,6 +16,8 @@
 <translation id="2394933097471027016">ಈಗಲೇ ಪ್ರಯತ್ನಿಸಿ - ಈ ಪುಟದಲ್ಲಿ ಕೆರೆಟ್ ಬ್ರೌಸಿಂಗ್ ಅನ್ನು ಯಾವಾಗಲೂ ಸಕ್ರಿಯಗೊಳಿಸಲಾಗಿರುತ್ತದೆ!</translation>
 <translation id="3622586652998721735">ಡೀಫಾಲ್ಟ್ ಯೋಜನೆಯಂತೆ ಹೊಂದಿಸಿ</translation>
 <translation id="2179565792157161713">ದೀರ್ಘ ವಿವರಣೆಯನ್ನು ಹೊಸ ಟ್ಯಾಬ್‌ನಲ್ಲಿ ತೆರೆಯಿರಿ</translation>
+<translation id="7942349550061667556">ಕೆಂಪು</translation>
+<translation id="1555130319947370107">ನೀಲಿ</translation>
 <translation id="2471847333270902538"><ph name="SITE"/> ಗೆ ಬಣ್ಣದ ಯೋಜನೆ:</translation>
 <translation id="381767806621926835">ಅದರ ದೀರ್ಘ ವಿವರಣೆಯನ್ನು ಪ್ರವೇಶಿಸಲು &quot;longdesc&quot; ಅಥವಾ &quot;aria-describedat&quot; ಗುಣಲಕ್ಷಣದೊಂದಿಗೆ ಯಾವುದರ ಮೇಲಾದರೂ ರೈಟ್-ಕ್ಲಿಕ್ ಮಾಡಿ.</translation>
 <translation id="786423340267544509">aria-describedat ಅಥವಾ longdesc ಗುಣಲಕ್ಷಣಗಳ ಜೊತೆಗೆ ಅಂಶಗಳಿಗೆ ಅಂಚು ಸೇರಿಸಿ.</translation>
@@ -31,6 +35,7 @@
 <translation id="4896660567607030658">ಪ್ರತಿಕ್ರಿಯೆ ನೀಡದೆ, ಕೇವಲ ಕರ್ಸರ್ ಅನ್ನು ತೋರಿಸಿ.</translation>
 <translation id="5631241868147802353">ಡೀಫಾಲ್ಟ್ ಬಣ್ಣ ಯೋಜನೆ:</translation>
 <translation id="5173942593318174089">ಅನಿಮೇಷನ್ ಜೊತೆಗೆ ಕರ್ಸರ್ ಸ್ಥಾನವನ್ನು ಹೈಲೈಟ್ ಮಾಡಿ.</translation>
+<translation id="7379645913608427028">ಡಿಗ್ರಿ</translation>
 <translation id="894241283505723656">ಸಂದರ್ಭ ಮೆನುವಿನಲ್ಲಿ ದೀರ್ಘ ವಿವರಣೆಗಳು</translation>
 <translation id="5555153510860501336">ಅಧಿಕ ವೈದೃಶ್ಯವನ್ನು ನಿಷ್ಕ್ರಿಯಗೊಳಿಸಲಾಗಿದೆ</translation>
 <translation id="1703735871906654364">ಕೆರೆಟ್ ಬ್ರೌಸಿಂಗ್</translation>
@@ -38,6 +43,7 @@
 <translation id="6550675742724504774">ಆಯ್ಕೆಗಳು</translation>
 <translation id="5650358096585648000">ದೃಶ್ಯಾವಳಿ ಪ್ರತಿಕ್ರಿಯೆ</translation>
 <translation id="4388820049312272371">ತ್ವರಿತ ಫ್ಲಾಶ್ ಜೊತೆಗೆ ಕರ್ಸರ್ ಸ್ಥಾನವನ್ನು ಹೈಲೈಟ್ ಮಾಡಿ.</translation>
+<translation id="2223143012868735942">ಬಣ್ಣದ ಗ್ರಹಿಕೆಯನ್ನು ಸುಧಾರಿಸಲು ವೆಬ್‌ಪುಟಗಳಿಗೆ ಕಸ್ಟಮೈಸ್ ಮಾಡಬಹುದಾದ ಬಣ್ಣ ಫಿಲ್ಟರ್ ಅನ್ನು ಅನ್ವಯಿಸಲಾಗಿದೆ.</translation>
 <translation id="4023902424053835668">ಬಾಣದ ಕೀಗಳನ್ನು ಬಳಸುವ ಮೂಲಕ ವೆಬ್ ಪುಟಗಳ ಪಠ್ಯವನ್ನು ಬ್ರೌಸ್ ಮಾಡಿ.</translation>
 <translation id="2795227192542594043">ಈ ವಿಸ್ತರಣೆಯು ವೆಬ್ ಪುಟದಲ್ಲಿ ಸರಿಸಬಹುದಾದ ಕರ್ಸರ್ ಅನ್ನು ನಿಮಗೆ ನೀಡುತ್ತದೆ, ಕೀಬೋರ್ಡ್ ಮೂಲಕ ಪಠ್ಯವನ್ನು ಆಯ್ಕೆಮಾಡಲು ನಿಮಗೆ ಅನುಮತಿಸುತ್ತದೆ.</translation>
 <translation id="4394049700291259645">ನಿಷ್ಕ್ರಿಯಗೊಳಿಸಿ</translation>

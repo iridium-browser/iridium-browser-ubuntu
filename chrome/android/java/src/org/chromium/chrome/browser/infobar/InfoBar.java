@@ -5,6 +5,7 @@
 package org.chromium.chrome.browser.infobar;
 
 import android.content.Context;
+import android.graphics.Bitmap;
 import android.view.View;
 
 import org.chromium.base.CalledByNative;
@@ -35,7 +36,12 @@ public abstract class InfoBar implements InfoBarView {
     public static final int ACTION_TYPE_TRANSLATE = 3;
     public static final int ACTION_TYPE_TRANSLATE_SHOW_ORIGINAL = 4;
 
+    // Download Overwrite InfoBar
+    public static final int ACTION_TYPE_OVERWRITE = 5;
+    public static final int ACTION_TYPE_CREATE_NEW_FILE = 6;
+
     private final int mIconDrawableId;
+    private final Bitmap mIconBitmap;
     private final CharSequence mMessage;
 
     private InfoBarListeners.Dismiss mListener;
@@ -64,10 +70,12 @@ public abstract class InfoBar implements InfoBarView {
      * @param iconDrawableId ID of the resource to use for the Icon.  If 0, no icon will be shown.
      * @param message The message to show in the infobar.
      */
-    public InfoBar(InfoBarListeners.Dismiss listener, int iconDrawableId, CharSequence message) {
+    public InfoBar(InfoBarListeners.Dismiss listener, int iconDrawableId, Bitmap iconBitmap,
+            CharSequence message) {
         mListener = listener;
         mId = generateId();
         mIconDrawableId = iconDrawableId;
+        mIconBitmap = iconBitmap;
         mMessage = message;
         mExpireOnNavigation = true;
     }
@@ -145,8 +153,10 @@ public abstract class InfoBar implements InfoBarView {
     protected final View createView() {
         assert mContext != null;
 
-        InfoBarLayout layout = new InfoBarLayout(mContext, this, mIconDrawableId, mMessage);
+        InfoBarLayout layout =
+                new InfoBarLayout(mContext, this, mIconDrawableId, mIconBitmap, mMessage);
         createContent(layout);
+        layout.onContentCreated();
         return layout;
     }
 

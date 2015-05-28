@@ -81,7 +81,7 @@ class MapsPage(page.Page):
     self.pixel_expectations = 'data/maps_002_expectations.json'
 
   def RunNavigateSteps(self, action_runner):
-    action_runner.NavigateToPage(self)
+    super(MapsPage, self).RunNavigateSteps(action_runner)
     action_runner.WaitForJavaScriptCondition(
         'window.testDone', timeout_in_seconds=180)
 
@@ -89,6 +89,10 @@ class MapsPage(page.Page):
 class Maps(cloud_storage_test_base.TestBase):
   """Google Maps pixel tests."""
   test = _MapsValidator
+
+  @classmethod
+  def Name(cls):
+    return 'maps'
 
   def CreateExpectations(self):
     return maps_expectations.MapsExpectations()

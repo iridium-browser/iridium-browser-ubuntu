@@ -77,7 +77,7 @@ SVGFitToViewBox::SVGFitToViewBox(SVGElement* element, PropertyMapPolicy property
     }
 }
 
-void SVGFitToViewBox::trace(Visitor* visitor)
+DEFINE_TRACE(SVGFitToViewBox)
 {
     visitor->trace(m_viewBox);
     visitor->trace(m_preserveAspectRatio);

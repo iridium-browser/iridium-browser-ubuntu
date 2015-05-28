@@ -9,17 +9,19 @@
 #include "base/base_switches.h"
 #include "base/command_line.h"
 #include "base/debug/profiler.h"
-#include "base/debug/trace_event.h"
 #include "base/files/file_util.h"
 #include "base/hash.h"
+#include "base/metrics/sparse_histogram.h"
 #include "base/path_service.h"
 #include "base/process/launch.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
+#include "base/trace_event/trace_event.h"
 #include "base/win/iat_patch_function.h"
 #include "base/win/scoped_handle.h"
 #include "base/win/scoped_process_information.h"
 #include "base/win/windows_version.h"
+#include "content/common/content_switches_internal.h"
 #include "content/public/common/content_client.h"
 #include "content/public/common/content_switches.h"
 #include "content/public/common/sandbox_init.h"
@@ -27,6 +29,7 @@
 #include "sandbox/win/src/process_mitigations.h"
 #include "sandbox/win/src/sandbox.h"
 #include "sandbox/win/src/sandbox_nt_util.h"
+#include "sandbox/win/src/sandbox_policy_base.h"
 #include "sandbox/win/src/win_utils.h"
 #include "ui/gfx/win/direct_write.h"
 
@@ -79,6 +82,7 @@ const wchar_t* const kTroublesomeDlls[] = {
   L"npggNT.des",                  // GameGuard 2008.
   L"npggNT.dll",                  // GameGuard (older).
   L"oawatch.dll",                 // Online Armor.
+  L"pastali32.dll",               // PastaLeads.
   L"pavhook.dll",                 // Panda Internet Security.
   L"pavlsphook.dll",              // Panda Antivirus.
   L"pavshook.dll",                // Panda Antivirus.
@@ -337,6 +341,19 @@ bool AddGenericPolicy(sandbox::TargetPolicy* policy) {
   if (result != sandbox::SBOX_ALL_OK)
     return false;
 #endif  // NDEBUG
+
+  // Add the policy for read-only PDB file access for AddressSanitizer.
+#if defined(ADDRESS_SANITIZER)
+  base::FilePath exe;
+  if (!PathService::Get(base::FILE_EXE, &exe))
+    return false;
+  base::FilePath pdb_path = exe.DirName().Append(L"*.pdb");
+  result = policy->AddRule(sandbox::TargetPolicy::SUBSYS_FILES,
+                           sandbox::TargetPolicy::FILES_ALLOW_READONLY,
+                           pdb_path.value().c_str());
+  if (result != sandbox::SBOX_ALL_OK)
+    return false;
+#endif
 
   AddGenericDllEvictionPolicy(policy);
   return true;
@@ -620,9 +637,9 @@ base::Process StartSandboxedProcess(
                                          sandbox::MITIGATION_DEP_NO_ATL_THUNK |
                                          sandbox::MITIGATION_SEHOP;
 
-  if (base::win::GetVersion() >= base::win::VERSION_WIN8 &&
-      type_str == switches::kRendererProcess &&
-      switches::IsWin32kRendererLockdownEnabled()) {
+#if !defined(NACL_WIN64)
+  if (type_str == switches::kRendererProcess &&
+      IsWin32kRendererLockdownEnabled()) {
     if (policy->AddRule(sandbox::TargetPolicy::SUBSYS_WIN32K_LOCKDOWN,
                         sandbox::TargetPolicy::FAKE_USER_GDI_INIT,
                         NULL) != sandbox::SBOX_ALL_OK) {
@@ -630,6 +647,7 @@ base::Process StartSandboxedProcess(
     }
     mitigations |= sandbox::MITIGATION_WIN32K_DISABLE;
   }
+#endif
 
   if (policy->SetProcessMitigations(mitigations) != sandbox::SBOX_ALL_OK)
     return base::Process();
@@ -709,6 +727,7 @@ base::Process StartSandboxedProcess(
                cmd_line->GetProgram().value().c_str(),
                cmd_line->GetCommandLineString().c_str(),
                policy, &temp_process_info);
+  DWORD last_error = ::GetLastError();
   policy->Release();
   base::win::ScopedProcessInformation target(temp_process_info);
 
@@ -717,7 +736,16 @@ base::Process StartSandboxedProcess(
   if (sandbox::SBOX_ALL_OK != result) {
     if (result == sandbox::SBOX_ERROR_GENERIC)
       DPLOG(ERROR) << "Failed to launch process";
-    else
+    else if (result == sandbox::SBOX_ERROR_CREATE_PROCESS) {
+      // TODO(shrikant): Remove this special case handling after determining
+      // cause for lowbox/createprocess errors.
+      sandbox::PolicyBase* policy_base =
+          static_cast<sandbox::PolicyBase*>(policy);
+      UMA_HISTOGRAM_SPARSE_SLOWLY(policy_base->GetLowBoxSid() ?
+                                      "Process.Sandbox.Lowbox.Launch.Error" :
+                                      "Process.Sandbox.Launch.Error",
+                                  last_error);
+    } else
       DLOG(ERROR) << "Failed to launch process. Error: " << result;
     return base::Process();
   }

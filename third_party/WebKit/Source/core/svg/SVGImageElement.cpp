@@ -25,18 +25,18 @@
 
 #include "core/CSSPropertyNames.h"
 #include "core/XLinkNames.h"
-#include "core/rendering/RenderImageResource.h"
-#include "core/rendering/svg/RenderSVGImage.h"
+#include "core/layout/LayoutImageResource.h"
+#include "core/layout/svg/LayoutSVGImage.h"
 
 namespace blink {
 
 inline SVGImageElement::SVGImageElement(Document& document)
     : SVGGraphicsElement(SVGNames::imageTag, document)
     , SVGURIReference(this)
-    , m_x(SVGAnimatedLength::create(this, SVGNames::xAttr, SVGLength::create(LengthModeWidth), AllowNegativeLengths))
-    , m_y(SVGAnimatedLength::create(this, SVGNames::yAttr, SVGLength::create(LengthModeHeight), AllowNegativeLengths))
-    , m_width(SVGAnimatedLength::create(this, SVGNames::widthAttr, SVGLength::create(LengthModeWidth), ForbidNegativeLengths))
-    , m_height(SVGAnimatedLength::create(this, SVGNames::heightAttr, SVGLength::create(LengthModeHeight), ForbidNegativeLengths))
+    , m_x(SVGAnimatedLength::create(this, SVGNames::xAttr, SVGLength::create(SVGLengthMode::Width), AllowNegativeLengths))
+    , m_y(SVGAnimatedLength::create(this, SVGNames::yAttr, SVGLength::create(SVGLengthMode::Height), AllowNegativeLengths))
+    , m_width(SVGAnimatedLength::create(this, SVGNames::widthAttr, SVGLength::create(SVGLengthMode::Width), ForbidNegativeLengths))
+    , m_height(SVGAnimatedLength::create(this, SVGNames::heightAttr, SVGLength::create(SVGLengthMode::Height), ForbidNegativeLengths))
     , m_preserveAspectRatio(SVGAnimatedPreserveAspectRatio::create(this, SVGNames::preserveAspectRatioAttr, SVGPreserveAspectRatio::create()))
     , m_imageLoader(SVGImageLoader::create(this))
     , m_needsLoaderURIUpdate(true)
@@ -50,7 +50,7 @@ inline SVGImageElement::SVGImageElement(Document& document)
 
 DEFINE_NODE_FACTORY(SVGImageElement)
 
-void SVGImageElement::trace(Visitor* visitor)
+DEFINE_TRACE(SVGImageElement)
 {
     visitor->trace(m_x);
     visitor->trace(m_y);
@@ -64,7 +64,7 @@ void SVGImageElement::trace(Visitor* visitor)
 
 bool SVGImageElement::currentFrameHasSingleSecurityOrigin() const
 {
-    if (RenderSVGImage* renderSVGImage = toRenderSVGImage(renderer())) {
+    if (LayoutSVGImage* renderSVGImage = toLayoutSVGImage(layoutObject())) {
         if (renderSVGImage->imageResource()->hasImage()) {
             if (Image* image = renderSVGImage->imageResource()->cachedImage()->image())
                 return image->currentFrameHasSingleSecurityOrigin();
@@ -88,26 +88,36 @@ bool SVGImageElement::isSupportedAttribute(const QualifiedName& attrName)
     return supportedAttributes.contains<SVGAttributeHashTranslator>(attrName);
 }
 
-bool SVGImageElement::isPresentationAttribute(const QualifiedName& name) const
+bool SVGImageElement::isPresentationAttribute(const QualifiedName& attrName) const
 {
-    if (name == SVGNames::widthAttr || name == SVGNames::heightAttr)
+    if (attrName == SVGNames::xAttr || attrName == SVGNames::yAttr
+        || attrName == SVGNames::widthAttr || attrName == SVGNames::heightAttr)
         return true;
-    return SVGGraphicsElement::isPresentationAttribute(name);
+    return SVGGraphicsElement::isPresentationAttribute(attrName);
+}
+
+bool SVGImageElement::isPresentationAttributeWithSVGDOM(const QualifiedName& attrName) const
+{
+    if (attrName == SVGNames::xAttr || attrName == SVGNames::yAttr
+        || attrName == SVGNames::widthAttr || attrName == SVGNames::heightAttr)
+        return true;
+    return SVGGraphicsElement::isPresentationAttributeWithSVGDOM(attrName);
 }
 
 void SVGImageElement::collectStyleForPresentationAttribute(const QualifiedName& name, const AtomicString& value, MutableStylePropertySet* style)
 {
-    if (!isSupportedAttribute(name))
-        SVGGraphicsElement::collectStyleForPresentationAttribute(name, value, style);
-    else if (name == SVGNames::widthAttr)
-        addPropertyToPresentationAttributeStyle(style, CSSPropertyWidth, value);
-    else if (name == SVGNames::heightAttr)
-        addPropertyToPresentationAttributeStyle(style, CSSPropertyHeight, value);
-}
+    RefPtrWillBeRawPtr<SVGAnimatedPropertyBase> property = propertyFromAttribute(name);
 
-void SVGImageElement::parseAttribute(const QualifiedName& name, const AtomicString& value)
-{
-    parseAttributeNew(name, value);
+    if (property == m_width)
+        addSVGLengthPropertyToPresentationAttributeStyle(style, CSSPropertyWidth, *m_width->currentValue());
+    else if (property == m_height)
+        addSVGLengthPropertyToPresentationAttributeStyle(style, CSSPropertyHeight, *m_height->currentValue());
+    else if (property == m_x)
+        addSVGLengthPropertyToPresentationAttributeStyle(style, CSSPropertyX, *m_x->currentValue());
+    else if (property == m_y)
+        addSVGLengthPropertyToPresentationAttributeStyle(style, CSSPropertyY, *m_y->currentValue());
+    else
+        SVGGraphicsElement::collectStyleForPresentationAttribute(name, value, style);
 }
 
 void SVGImageElement::svgAttributeChanged(const QualifiedName& attrName)
@@ -124,8 +134,12 @@ void SVGImageElement::svgAttributeChanged(const QualifiedName& attrName)
                           || attrName == SVGNames::widthAttr
                           || attrName == SVGNames::heightAttr;
 
-    if (isLengthAttribute)
+    if (isLengthAttribute) {
+        invalidateSVGPresentationAttributeStyle();
+        setNeedsStyleRecalc(LocalStyleChange,
+            StyleChangeReasonForTracing::fromAttribute(attrName));
         updateRelativeLengthsInformation();
+    }
 
     if (SVGURIReference::isKnownAttribute(attrName)) {
         if (inDocument())
@@ -135,17 +149,15 @@ void SVGImageElement::svgAttributeChanged(const QualifiedName& attrName)
         return;
     }
 
-    RenderObject* renderer = this->renderer();
+    LayoutObject* renderer = this->layoutObject();
     if (!renderer)
         return;
 
-    if (isLengthAttribute) {
-        if (toRenderSVGImage(renderer)->updateImageViewport())
-            markForLayoutAndParentResourceInvalidation(renderer);
-        return;
-    }
-
-    if (attrName == SVGNames::preserveAspectRatioAttr) {
+    if (isLengthAttribute || attrName == SVGNames::preserveAspectRatioAttr) {
+        // FIXME: if isLengthAttribute then we should avoid this
+        // call if the viewport didn't change, however since we don't
+        // have the computed style yet we can't use updateImageViewport.
+        // See http://crbug.com/466200.
         markForLayoutAndParentResourceInvalidation(renderer);
         return;
     }
@@ -161,9 +173,9 @@ bool SVGImageElement::selfHasRelativeLengths() const
         || m_height->currentValue()->isRelative();
 }
 
-RenderObject* SVGImageElement::createRenderer(RenderStyle*)
+LayoutObject* SVGImageElement::createLayoutObject(const ComputedStyle&)
 {
-    return new RenderSVGImage(this);
+    return new LayoutSVGImage(this);
 }
 
 bool SVGImageElement::haveLoadedRequiredResources()
@@ -175,7 +187,7 @@ void SVGImageElement::attach(const AttachContext& context)
 {
     SVGGraphicsElement::attach(context);
 
-    if (RenderSVGImage* imageObj = toRenderSVGImage(renderer())) {
+    if (LayoutSVGImage* imageObj = toLayoutSVGImage(layoutObject())) {
         if (imageObj->imageResource()->hasImage())
             return;
 

@@ -8,7 +8,6 @@
 #include "content/browser/service_worker/service_worker_registration.h"
 #include "content/common/service_worker/service_worker_messages.h"
 #include "content/common/service_worker/service_worker_types.h"
-#include "ipc/ipc_sender.h"
 
 namespace content {
 
@@ -39,48 +38,43 @@ GetWebServiceWorkerState(ServiceWorkerVersion* version) {
 
 scoped_ptr<ServiceWorkerHandle> ServiceWorkerHandle::Create(
     base::WeakPtr<ServiceWorkerContextCore> context,
-    IPC::Sender* sender,
+    base::WeakPtr<ServiceWorkerProviderHost> provider_host,
     ServiceWorkerVersion* version) {
-  if (!context || !version)
+  if (!context || !provider_host || !version)
     return scoped_ptr<ServiceWorkerHandle>();
-  ServiceWorkerRegistration* registration =
-      context->GetLiveRegistration(version->registration_id());
+  DCHECK(context->GetLiveRegistration(version->registration_id()));
   return make_scoped_ptr(new ServiceWorkerHandle(
-      context, sender, registration, version));
+      context, provider_host, version));
 }
 
 ServiceWorkerHandle::ServiceWorkerHandle(
     base::WeakPtr<ServiceWorkerContextCore> context,
-    IPC::Sender* sender,
-    ServiceWorkerRegistration* registration,
+    base::WeakPtr<ServiceWorkerProviderHost> provider_host,
     ServiceWorkerVersion* version)
     : context_(context),
-      sender_(sender),
+      provider_host_(provider_host),
+      provider_id_(provider_host ? provider_host->provider_id()
+                                 : kInvalidServiceWorkerProviderId),
       handle_id_(context.get() ? context->GetNewServiceWorkerHandleId() : -1),
       ref_count_(1),
-      registration_(registration),
       version_(version) {
   version_->AddListener(this);
 }
 
 ServiceWorkerHandle::~ServiceWorkerHandle() {
   version_->RemoveListener(this);
-  // TODO(kinuko): At this point we can discard the registration if
-  // all documents/handles that have a reference to the registration is
-  // closed or freed up, but could also keep it alive in cache
-  // (e.g. in context_) for a while with some timer so that we don't
-  // need to re-load the same registration from disk over and over.
 }
 
 void ServiceWorkerHandle::OnVersionStateChanged(ServiceWorkerVersion* version) {
-  sender_->Send(new ServiceWorkerMsg_ServiceWorkerStateChanged(
-      kDocumentMainThreadId, handle_id_, GetWebServiceWorkerState(version)));
+  if (!provider_host_)
+    return;
+  provider_host_->SendServiceWorkerStateChangedMessage(
+      handle_id_, GetWebServiceWorkerState(version));
 }
 
 ServiceWorkerObjectInfo ServiceWorkerHandle::GetObjectInfo() {
   ServiceWorkerObjectInfo info;
   info.handle_id = handle_id_;
-  info.scope = registration_->pattern();
   info.url = version_->script_url();
   info.state = GetWebServiceWorkerState(version_.get());
   info.version_id = version_->version_id();

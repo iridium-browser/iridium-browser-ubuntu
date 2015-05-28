@@ -411,6 +411,16 @@ enum PP_SessionType {
 };
 
 /**
+ * <code>PP_InitDataType</code> contains Initialization Data Type constants.
+ */
+[assert_size(4)]
+enum PP_InitDataType {
+  PP_INITDATATYPE_CENC = 0,
+  PP_INITDATATYPE_KEYIDS = 1,
+  PP_INITDATATYPE_WEBM = 2
+};
+
+/**
  * <code>PP_CdmExceptionCode</code> contains exception code constants.
  */
 [assert_size(4)]
@@ -442,7 +452,9 @@ enum PP_CdmKeyStatus {
   PP_CDMKEYSTATUS_USABLE = 0,
   PP_CDMKEYSTATUS_INVALID = 1,
   PP_CDMKEYSTATUS_EXPIRED = 2,
-  PP_CDMKEYSTATUS_OUTPUTNOTALLOWED = 3
+  PP_CDMKEYSTATUS_OUTPUTNOTALLOWED = 3,
+  PP_CDMKEYSTATUS_OUTPUTDOWNSCALED = 4,
+  PP_CDMKEYSTATUS_STATUSPENDING = 5
 };
 
 /**

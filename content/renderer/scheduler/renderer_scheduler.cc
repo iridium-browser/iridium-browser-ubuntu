@@ -5,7 +5,8 @@
 #include "content/renderer/scheduler/renderer_scheduler.h"
 
 #include "base/command_line.h"
-#include "base/message_loop/message_loop_proxy.h"
+#include "base/message_loop/message_loop.h"
+#include "content/child/scheduler/scheduler_message_loop_delegate.h"
 #include "content/public/common/content_switches.h"
 #include "content/renderer/scheduler/null_renderer_scheduler.h"
 #include "content/renderer/scheduler/renderer_scheduler_impl.h"
@@ -24,8 +25,9 @@ scoped_ptr<RendererScheduler> RendererScheduler::Create() {
   if (command_line->HasSwitch(switches::kDisableBlinkScheduler)) {
     return make_scoped_ptr(new NullRendererScheduler());
   } else {
-    return make_scoped_ptr(
-        new RendererSchedulerImpl(base::MessageLoopProxy::current()));
+    base::MessageLoop* message_loop = base::MessageLoop::current();
+    return make_scoped_ptr(new RendererSchedulerImpl(
+        SchedulerMessageLoopDelegate::Create(message_loop)));
   }
 }
 

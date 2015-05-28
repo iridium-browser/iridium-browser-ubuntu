@@ -8,7 +8,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/values.h"
 #include "chrome/common/extensions/manifest_handlers/automation.h"
-#include "content/public/renderer/v8_value_converter.h"
+#include "content/public/child/v8_value_converter.h"
 #include "extensions/common/extension.h"
 #include "extensions/common/manifest.h"
 #include "extensions/renderer/script_context.h"
@@ -74,6 +74,10 @@ void AutomationInternalCustomBindings::GetSchemaAdditions(
   additions->Set(
       v8::String::NewFromUtf8(GetIsolate(), "StateType"),
       ToEnumObject(GetIsolate(), ui::AX_STATE_NONE, ui::AX_STATE_LAST));
+
+  additions->Set(
+      v8::String::NewFromUtf8(GetIsolate(), "TreeChangeType"),
+      ToEnumObject(GetIsolate(), ui::AX_MUTATION_NONE, ui::AX_MUTATION_LAST));
 
   args.GetReturnValue().Set(additions);
 }

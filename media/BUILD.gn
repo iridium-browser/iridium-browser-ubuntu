@@ -8,6 +8,7 @@ import("//build/config/features.gni")
 import("//build/config/linux/pkg_config.gni")
 import("//build/config/ui.gni")
 import("//media/media_options.gni")
+import("//testing/test.gni")
 
 # Common configuration for targets in the media directory.
 # NOT for exporting.
@@ -19,7 +20,7 @@ config("media_config") {
   if (!media_use_ffmpeg) {
     defines += [ "MEDIA_DISABLE_FFMPEG" ]
   }
-  if (cpu_arch == "arm" && arm_use_neon) {
+  if (current_cpu == "arm" && arm_use_neon) {
     defines += [ "USE_NEON" ]
   }
   if (use_pulseaudio) {
@@ -30,6 +31,9 @@ config("media_config") {
   }
   if (use_cras) {
     defines += [ "USE_CRAS" ]
+  }
+  if (use_alsa) {
+    defines += [ "USE_ALSA" ]
   }
 }
 
@@ -79,8 +83,12 @@ if (use_ozone) {
 
 component("media") {
   sources = [
+    "blink/skcanvas_video_renderer.cc",
+    "blink/skcanvas_video_renderer.h",
     "cdm/aes_decryptor.cc",
     "cdm/aes_decryptor.h",
+    "cdm/cenc_utils.cc",
+    "cdm/cenc_utils.h",
     "cdm/default_cdm_factory.cc",
     "cdm/default_cdm_factory.h",
     "cdm/json_web_key.cc",
@@ -96,8 +104,6 @@ component("media") {
     "filters/audio_clock.h",
     "filters/audio_renderer_algorithm.cc",
     "filters/audio_renderer_algorithm.h",
-    "filters/audio_renderer_impl.cc",
-    "filters/audio_renderer_impl.h",
     "filters/chunk_demuxer.cc",
     "filters/chunk_demuxer.h",
     "filters/context_3d.h",
@@ -113,24 +119,20 @@ component("media") {
     "filters/decrypting_demuxer_stream.h",
     "filters/decrypting_video_decoder.cc",
     "filters/decrypting_video_decoder.h",
-    "filters/default_renderer_factory.cc",
-    "filters/default_renderer_factory.h",
+    "filters/default_media_permission.cc",
+    "filters/default_media_permission.h",
     "filters/file_data_source.cc",
     "filters/file_data_source.h",
     "filters/frame_processor.cc",
     "filters/frame_processor.h",
-    "filters/gpu_video_accelerator_factories.cc",
-    "filters/gpu_video_accelerator_factories.h",
     "filters/gpu_video_decoder.cc",
     "filters/gpu_video_decoder.h",
     "filters/h264_bit_reader.cc",
     "filters/h264_bit_reader.h",
     "filters/h264_parser.cc",
     "filters/h264_parser.h",
-    "filters/renderer_impl.cc",
-    "filters/renderer_impl.h",
-    "filters/skcanvas_video_renderer.cc",
-    "filters/skcanvas_video_renderer.h",
+    "filters/jpeg_parser.cc",
+    "filters/jpeg_parser.h",
     "filters/source_buffer_platform.cc",
     "filters/source_buffer_platform.h",
     "filters/source_buffer_range.cc",
@@ -144,8 +146,6 @@ component("media") {
     "filters/video_frame_scheduler_impl.h",
     "filters/video_frame_scheduler_proxy.cc",
     "filters/video_frame_scheduler_proxy.h",
-    "filters/video_renderer_impl.cc",
-    "filters/video_renderer_impl.h",
     "filters/vp8_bool_decoder.cc",
     "filters/vp8_bool_decoder.h",
     "filters/vp8_parser.cc",
@@ -153,86 +153,6 @@ component("media") {
     "filters/webvtt_util.h",
     "filters/wsola_internals.cc",
     "filters/wsola_internals.h",
-    "midi/midi_manager.cc",
-    "midi/midi_manager.h",
-    "midi/midi_manager_mac.cc",
-    "midi/midi_manager_mac.h",
-    "midi/midi_manager_usb.cc",
-    "midi/midi_manager_usb.h",
-    "midi/midi_manager_win.cc",
-    "midi/midi_manager_win.h",
-    "midi/midi_message_queue.cc",
-    "midi/midi_message_queue.h",
-    "midi/midi_message_util.cc",
-    "midi/midi_message_util.h",
-    "midi/midi_port_info.cc",
-    "midi/midi_port_info.h",
-    "midi/usb_midi_descriptor_parser.cc",
-    "midi/usb_midi_descriptor_parser.h",
-    "midi/usb_midi_device.h",
-    "midi/usb_midi_input_stream.cc",
-    "midi/usb_midi_input_stream.h",
-    "midi/usb_midi_jack.h",
-    "midi/usb_midi_output_stream.cc",
-    "midi/usb_midi_output_stream.h",
-    "video/capture/fake_video_capture_device.cc",
-    "video/capture/fake_video_capture_device.h",
-    "video/capture/fake_video_capture_device_factory.h",
-    "video/capture/fake_video_capture_device_factory.cc",
-    "video/capture/file_video_capture_device.cc",
-    "video/capture/file_video_capture_device.h",
-    "video/capture/file_video_capture_device_factory.h",
-    "video/capture/file_video_capture_device_factory.cc",
-    "video/capture/linux/video_capture_device_factory_linux.cc",
-    "video/capture/linux/video_capture_device_factory_linux.h",
-    "video/capture/linux/video_capture_device_linux.cc",
-    "video/capture/linux/video_capture_device_linux.h",
-    "video/capture/linux/video_capture_device_chromeos.cc",
-    "video/capture/linux/video_capture_device_chromeos.h",
-    "video/capture/mac/platform_video_capturing_mac.h",
-    "video/capture/mac/video_capture_device_avfoundation_mac.h",
-    "video/capture/mac/video_capture_device_avfoundation_mac.mm",
-    "video/capture/mac/video_capture_device_decklink_mac.h",
-    "video/capture/mac/video_capture_device_decklink_mac.mm",
-    "video/capture/mac/video_capture_device_factory_mac.h",
-    "video/capture/mac/video_capture_device_factory_mac.mm",
-    "video/capture/mac/video_capture_device_mac.h",
-    "video/capture/mac/video_capture_device_mac.mm",
-    "video/capture/mac/video_capture_device_qtkit_mac.h",
-    "video/capture/mac/video_capture_device_qtkit_mac.mm",
-    "video/capture/video_capture_device.cc",
-    "video/capture/video_capture_device.h",
-    "video/capture/video_capture_device_factory.cc",
-    "video/capture/video_capture_device_factory.h",
-    "video/capture/video_capture_device_info.cc",
-    "video/capture/video_capture_device_info.h",
-    "video/capture/video_capture_types.cc",
-    "video/capture/video_capture_types.h",
-    "video/capture/win/capability_list_win.cc",
-    "video/capture/win/capability_list_win.h",
-    "video/capture/win/filter_base_win.cc",
-    "video/capture/win/filter_base_win.h",
-    "video/capture/win/pin_base_win.cc",
-    "video/capture/win/pin_base_win.h",
-    "video/capture/win/sink_filter_observer_win.h",
-    "video/capture/win/sink_filter_win.cc",
-    "video/capture/win/sink_filter_win.h",
-    "video/capture/win/sink_input_pin_win.cc",
-    "video/capture/win/sink_input_pin_win.h",
-    "video/capture/win/video_capture_device_factory_win.cc",
-    "video/capture/win/video_capture_device_factory_win.h",
-    "video/capture/win/video_capture_device_mf_win.cc",
-    "video/capture/win/video_capture_device_mf_win.h",
-    "video/capture/win/video_capture_device_win.cc",
-    "video/capture/win/video_capture_device_win.h",
-    "video/h264_poc.cc",
-    "video/h264_poc.h",
-    "video/picture.cc",
-    "video/picture.h",
-    "video/video_decode_accelerator.cc",
-    "video/video_decode_accelerator.h",
-    "video/video_encode_accelerator.cc",
-    "video/video_encode_accelerator.h",
     "formats/common/offset_byte_queue.cc",
     "formats/common/offset_byte_queue.h",
     "formats/webm/webm_audio_client.cc",
@@ -259,9 +179,100 @@ component("media") {
     "formats/webm/webm_video_client.h",
     "formats/webm/webm_webvtt_parser.cc",
     "formats/webm/webm_webvtt_parser.h",
+    "midi/midi_manager.cc",
+    "midi/midi_manager.h",
+    "midi/midi_manager_mac.cc",
+    "midi/midi_manager_mac.h",
+    "midi/midi_manager_usb.cc",
+    "midi/midi_manager_usb.h",
+    "midi/midi_manager_win.cc",
+    "midi/midi_manager_win.h",
+    "midi/midi_message_queue.cc",
+    "midi/midi_message_queue.h",
+    "midi/midi_message_util.cc",
+    "midi/midi_message_util.h",
+    "midi/midi_port_info.cc",
+    "midi/midi_port_info.h",
+    "midi/midi_scheduler.cc",
+    "midi/midi_scheduler.h",
+    "midi/usb_midi_descriptor_parser.cc",
+    "midi/usb_midi_descriptor_parser.h",
+    "midi/usb_midi_device.h",
+    "midi/usb_midi_input_stream.cc",
+    "midi/usb_midi_input_stream.h",
+    "midi/usb_midi_jack.h",
+    "midi/usb_midi_output_stream.cc",
+    "midi/usb_midi_output_stream.h",
+    "renderers/audio_renderer_impl.cc",
+    "renderers/audio_renderer_impl.h",
+    "renderers/gpu_video_accelerator_factories.h",
+    "renderers/renderer_impl.cc",
+    "renderers/renderer_impl.h",
+    "renderers/video_renderer_impl.cc",
+    "renderers/video_renderer_impl.h",
+    "video/capture/file_video_capture_device.cc",
+    "video/capture/file_video_capture_device.h",
+    "video/capture/linux/v4l2_capture_delegate.cc",
+    "video/capture/linux/v4l2_capture_delegate.h",
+    "video/capture/linux/v4l2_capture_delegate_multi_plane.cc",
+    "video/capture/linux/v4l2_capture_delegate_multi_plane.h",
+    "video/capture/linux/v4l2_capture_delegate_single_plane.cc",
+    "video/capture/linux/v4l2_capture_delegate_single_plane.h",
+    "video/capture/linux/video_capture_device_chromeos.cc",
+    "video/capture/linux/video_capture_device_chromeos.h",
+    "video/capture/linux/video_capture_device_linux.cc",
+    "video/capture/linux/video_capture_device_linux.h",
+    "video/capture/mac/platform_video_capturing_mac.h",
+    "video/capture/mac/video_capture_device_avfoundation_mac.h",
+    "video/capture/mac/video_capture_device_avfoundation_mac.mm",
+    "video/capture/mac/video_capture_device_decklink_mac.h",
+    "video/capture/mac/video_capture_device_decklink_mac.mm",
+    "video/capture/mac/video_capture_device_factory_mac.h",
+    "video/capture/mac/video_capture_device_factory_mac.mm",
+    "video/capture/mac/video_capture_device_mac.h",
+    "video/capture/mac/video_capture_device_mac.mm",
+    "video/capture/mac/video_capture_device_qtkit_mac.h",
+    "video/capture/mac/video_capture_device_qtkit_mac.mm",
+    "video/capture/video_capture_device.cc",
+    "video/capture/video_capture_device.h",
+    "video/capture/video_capture_device_info.cc",
+    "video/capture/video_capture_device_info.h",
+    "video/capture/win/capability_list_win.cc",
+    "video/capture/win/capability_list_win.h",
+    "video/capture/win/filter_base_win.cc",
+    "video/capture/win/filter_base_win.h",
+    "video/capture/win/pin_base_win.cc",
+    "video/capture/win/pin_base_win.h",
+    "video/capture/win/sink_filter_observer_win.h",
+    "video/capture/win/sink_filter_win.cc",
+    "video/capture/win/sink_filter_win.h",
+    "video/capture/win/sink_input_pin_win.cc",
+    "video/capture/win/sink_input_pin_win.h",
+    "video/capture/win/video_capture_device_factory_win.cc",
+    "video/capture/win/video_capture_device_factory_win.h",
+    "video/capture/win/video_capture_device_mf_win.cc",
+    "video/capture/win/video_capture_device_mf_win.h",
+    "video/capture/win/video_capture_device_win.cc",
+    "video/capture/win/video_capture_device_win.h",
+    "video/fake_video_encode_accelerator.cc",
+    "video/fake_video_encode_accelerator.h",
+    "video/h264_poc.cc",
+    "video/h264_poc.h",
+    "video/picture.cc",
+    "video/picture.h",
+    "video/video_decode_accelerator.cc",
+    "video/video_decode_accelerator.h",
+    "video/video_encode_accelerator.cc",
+    "video/video_encode_accelerator.h",
   ]
 
-  configs += [ ":media_config" ]
+  configs += [
+    ":media_config",
+
+    # TODO(wolenetz): Fix size_t to int trunctaion in win64.
+    # See http://crbug.com/171009
+    "//build/config/compiler:no_size_t_to_int_warning",
+  ]
   all_dependent_configs = [ ":media_dependent_config" ]
 
   cflags = []
@@ -301,7 +312,7 @@ component("media") {
     }
   }
 
-  if (cpu_arch == "arm" && arm_use_neon) {
+  if (current_cpu == "arm" && arm_use_neon) {
     defines += [ "USE_NEON" ]
   }
 
@@ -317,6 +328,8 @@ component("media") {
     sources += [
       "filters/opus_audio_decoder.cc",
       "filters/opus_audio_decoder.h",
+      "renderers/default_renderer_factory.cc",
+      "renderers/default_renderer_factory.h",
     ]
   } else {
     sources += [
@@ -340,7 +353,7 @@ component("media") {
     }
   }
 
-  if (cpu_arch != "arm" && is_chromeos && use_x11) {
+  if (current_cpu != "arm" && is_chromeos) {
     sources += [
       "filters/h264_bitstream_buffer.cc",
       "filters/h264_bitstream_buffer.h",
@@ -349,11 +362,14 @@ component("media") {
 
   if (use_alsa) {
     libs += [ "asound" ]
-    defines += [ "USE_ALSA" ]
     sources += [
       "midi/midi_manager_alsa.cc",
       "midi/midi_manager_alsa.h",
     ]
+  }
+
+  if (use_udev) {
+    deps += [ "//device/udev_linux" ]
   }
 
   # A simple WebM encoder for animated avatars on ChromeOS.
@@ -386,19 +402,26 @@ component("media") {
     ]
   }
 
+  if (is_openbsd) {
+    sources -= [
+      "video/capture/linux/v4l2_capture_delegate_multi_plane.cc",
+      "video/capture/linux/v4l2_capture_delegate_multi_plane.h",
+    ]
+  }
+
   if (is_ios) {
     deps += [ "//media/base/mac" ]
   }
 
   if (is_win) {
+    deps += [ "//device/usb" ]
+
     libs += [
       "mf.lib",
       "mfplat.lib",
       "mfreadwrite.lib",
       "mfuuid.lib",
     ]
-    cflags += [ "/wd4267" ]  # TODO(wolenetz): Fix size_t to int trunctaion in win64. See
-                             # http://crbug.com/171009
   }
 
   if (proprietary_codecs) {
@@ -453,10 +476,10 @@ component("media") {
       "formats/mpeg/adts_constants.h",
       "formats/mpeg/adts_stream_parser.cc",
       "formats/mpeg/adts_stream_parser.h",
-      "formats/mpeg/mpeg_audio_stream_parser_base.cc",
-      "formats/mpeg/mpeg_audio_stream_parser_base.h",
       "formats/mpeg/mpeg1_audio_stream_parser.cc",
       "formats/mpeg/mpeg1_audio_stream_parser.h",
+      "formats/mpeg/mpeg_audio_stream_parser_base.cc",
+      "formats/mpeg/mpeg_audio_stream_parser_base.h",
     ]
   }
 
@@ -476,11 +499,30 @@ component("media") {
     "//skia",
     "//third_party/libyuv",
     "//third_party/opus",
-    "//ui/events:events_base",
-    "//ui/gfx",
     "//ui/gfx/geometry",
     "//url",
   ]
+
+  # Add the sources and dependencies that need the X11 or fontconfig libraries.
+  if (!is_ensemble) {
+    sources += [
+      "video/capture/fake_video_capture_device.cc",
+      "video/capture/fake_video_capture_device.h",
+      "video/capture/fake_video_capture_device_factory.cc",
+      "video/capture/fake_video_capture_device_factory.h",
+      "video/capture/file_video_capture_device_factory.cc",
+      "video/capture/file_video_capture_device_factory.h",
+      "video/capture/linux/video_capture_device_factory_linux.cc",
+      "video/capture/linux/video_capture_device_factory_linux.h",
+      "video/capture/video_capture_device_factory.cc",
+      "video/capture/video_capture_device_factory.h",
+    ]
+
+    deps += [
+      "//ui/events:events_base",
+      "//ui/gfx",
+    ]
+  }
 }
 
 # Minimal media component for media/cast on iOS.
@@ -503,12 +545,13 @@ if (is_ios) {
 
 test("media_unittests") {
   sources = [
+    "blink/skcanvas_video_renderer_unittest.cc",
     "cdm/aes_decryptor_unittest.cc",
+    "cdm/cenc_utils_unittest.cc",
     "cdm/json_web_key_unittest.cc",
     "filters/audio_clock_unittest.cc",
     "filters/audio_decoder_selector_unittest.cc",
     "filters/audio_renderer_algorithm_unittest.cc",
-    "filters/audio_renderer_impl_unittest.cc",
     "filters/chunk_demuxer_unittest.cc",
     "filters/decrypting_audio_decoder_unittest.cc",
     "filters/decrypting_demuxer_stream_unittest.cc",
@@ -523,29 +566,19 @@ test("media_unittests") {
     "filters/frame_processor_unittest.cc",
     "filters/h264_bit_reader_unittest.cc",
     "filters/h264_parser_unittest.cc",
-    "filters/renderer_impl_unittest.cc",
-    "filters/skcanvas_video_renderer_unittest.cc",
+    "filters/jpeg_parser_unittest.cc",
     "filters/source_buffer_stream_unittest.cc",
     "filters/video_decoder_selector_unittest.cc",
     "filters/video_frame_scheduler_impl_unittest.cc",
     "filters/video_frame_scheduler_unittest.cc",
     "filters/video_frame_stream_unittest.cc",
-    "filters/video_renderer_impl_unittest.cc",
     "filters/vp8_bool_decoder_unittest.cc",
     "filters/vp8_parser_unittest.cc",
-    "midi/midi_manager_unittest.cc",
-    "midi/midi_manager_usb_unittest.cc",
-    "midi/midi_message_queue_unittest.cc",
-    "midi/midi_message_util_unittest.cc",
-    "midi/usb_midi_descriptor_parser_unittest.cc",
-    "midi/usb_midi_input_stream_unittest.cc",
-    "midi/usb_midi_output_stream_unittest.cc",
-    "video/capture/fake_video_capture_device_unittest.cc",
-    "video/capture/video_capture_device_unittest.cc",
-    "video/h264_poc_unittest.cc",
     "formats/common/offset_byte_queue_unittest.cc",
     "formats/webm/cluster_builder.cc",
     "formats/webm/cluster_builder.h",
+    "formats/webm/opus_packet_builder.cc",
+    "formats/webm/opus_packet_builder.h",
     "formats/webm/tracks_builder.cc",
     "formats/webm/tracks_builder.h",
     "formats/webm/webm_cluster_parser_unittest.cc",
@@ -553,7 +586,24 @@ test("media_unittests") {
     "formats/webm/webm_parser_unittest.cc",
     "formats/webm/webm_tracks_parser_unittest.cc",
     "formats/webm/webm_webvtt_parser_unittest.cc",
+    "midi/midi_manager_unittest.cc",
+    "midi/midi_manager_usb_unittest.cc",
+    "midi/midi_message_queue_unittest.cc",
+    "midi/midi_message_util_unittest.cc",
+    "midi/usb_midi_descriptor_parser_unittest.cc",
+    "midi/usb_midi_input_stream_unittest.cc",
+    "midi/usb_midi_output_stream_unittest.cc",
+    "renderers/audio_renderer_impl_unittest.cc",
+    "renderers/renderer_impl_unittest.cc",
+    "renderers/video_renderer_impl_unittest.cc",
+    "video/capture/fake_video_capture_device_unittest.cc",
+    "video/capture/video_capture_device_unittest.cc",
+    "video/h264_poc_unittest.cc",
   ]
+
+  # TODO(wolenetz): Fix size_t to int trunctaion in win64.
+  # See http://crbug.com/171009
+  configs += [ "//build/config/compiler:no_size_t_to_int_warning" ]
 
   deps = [
     ":media",
@@ -594,7 +644,7 @@ test("media_unittests") {
     ]
   }
 
-  if (cpu_arch != "arm" && is_chromeos) {
+  if (current_cpu != "arm" && is_chromeos) {
     sources += [ "filters/h264_bitstream_buffer_unittest.cc" ]
   }
 
@@ -625,18 +675,19 @@ test("media_unittests") {
     ]
   }
 
-  if (is_win && cpu_arch == "x64") {
-    cflags += [ "/wd4267" ]  # TODO(wolenetz): Fix size_t to int trunctaion in win64. See
-                             # http://crbug.com/171009
-  }
-
   if (is_mac || is_ios) {
     deps += [ "//media/base/mac" ]
   }
 
   if (is_mac) {
-    sources +=
-        [ "video/capture/mac/video_capture_device_factory_mac_unittest.mm" ]
+    sources += [
+      "midi/midi_manager_mac_unittest.cc",
+      "video/capture/mac/video_capture_device_factory_mac_unittest.mm",
+    ]
+  }
+
+  if (use_alsa) {
+    sources += [ "midi/midi_manager_alsa_unittest.cc" ]
   }
 
   #      include_dirs += [
@@ -681,10 +732,10 @@ source_set("test_support") {
   sources = [
     "filters/clockless_video_frame_scheduler.cc",
     "filters/clockless_video_frame_scheduler.h",
-    "filters/mock_gpu_video_accelerator_factories.cc",
-    "filters/mock_gpu_video_accelerator_factories.h",
     "filters/test_video_frame_scheduler.cc",
     "filters/test_video_frame_scheduler.h",
+    "renderers/mock_gpu_video_accelerator_factories.cc",
+    "renderers/mock_gpu_video_accelerator_factories.h",
     "video/mock_video_decode_accelerator.cc",
     "video/mock_video_decode_accelerator.h",
   ]
@@ -767,6 +818,7 @@ if (use_x11) {
       ":media",
       ":shared_memory_support",
       "//base",
+      "//tools/xdisplaycheck",
       "//ui/gl",
       "//ui/gfx",
       "//ui/gfx/geometry",

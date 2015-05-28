@@ -15,12 +15,6 @@ public abstract class ChromeSwitches {
     /** Testing: pretend that the switch value is the name of a child account. */
     public static final String CHILD_ACCOUNT = "child-account";
 
-    // Disables the new Website Settings dialog, which replaces the old one.
-    // TODO(sashab): Once the new WebsiteSettingsPopup is ready to be permanent,
-    // remove this flag and delete WebsiteSettingsLegacyPopup and all it's
-    // dependencies.
-    public static final String DISABLE_NEW_WEBSITE_SETTINGS = "disable-new-website-settings";
-
     /** Mimic a low end device */
     public static final String ENABLE_ACCESSIBILITY_TAB_SWITCHER =
             "enable-accessibility-tab-switcher";
@@ -115,6 +109,12 @@ public abstract class ChromeSwitches {
     /** Enable begin frame scheduling. */
     public static final String ENABLE_BEGIN_FRAME_SCHEDULING = "enable-begin-frame-scheduling";
 
+    /**
+     * Enable enhanced bookmarks feature.
+     * Native switch - switches::kEnhancedBookmarksExperiment
+     */
+    public static final String ENABLE_ENHANCED_BOOKMARKS = "enhanced-bookmarks-experiment";
+
     /** Enable the DOM Distiller. */
     public static final String ENABLE_DOM_DISTILLER = "enable-dom-distiller";
 
@@ -125,11 +125,24 @@ public abstract class ChromeSwitches {
     /** Enable the Reader Mode icon in toolbar. */
     public static final String ENABLE_READER_MODE_TOOLBAR_ICON = "enable-reader-mode-toolbar-icon";
 
+    /** Enable Reader Mode button animation. */
+    public static final String ENABLE_READER_MODE_BUTTON_ANIMATION =
+            "enable-dom-distiller-button-animation";
+
+    /** Enable the native app banners. */
+    public static final String ENABLE_APP_INSTALL_ALERTS = "enable-app-install-alerts";
+
     /**
      * Use sandbox Wallet environment for requestAutocomplete.
      * Native switch - autofill::switches::kWalletServiceUseSandbox.
      */
     public static final String USE_SANDBOX_WALLET_ENVIRONMENT = "wallet-service-use-sandbox";
+
+    /**
+     * Change Google base URL.
+     * Native switch - switches::kGoogleBaseURL.
+     */
+    public static final String GOOGLE_BASE_URL = "google-base-url";
 
     // Prevent instantiation.
     private ChromeSwitches() {}

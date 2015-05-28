@@ -9,14 +9,15 @@
 #include <sys/types.h>
 #endif
 
-#include "base/debug/trace_event.h"
 #include "base/files/file_util.h"
 #include "base/lazy_instance.h"
 #include "base/memory/shared_memory.h"
 #include "base/metrics/histogram.h"
 #include "base/process/process_metrics.h"
 #include "base/stl_util.h"
+#include "base/strings/stringprintf.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/trace_event/trace_event.h"
 #include "third_party/leveldatabase/chromium_logger.h"
 #include "third_party/re2/re2/re2.h"
 
@@ -216,7 +217,6 @@ class ChromiumWritableFile : public leveldb::WritableFile {
   ChromiumWritableFile(const std::string& fname,
                        base::File* f,
                        const UMALogger* uma_logger,
-                       WriteTracker* tracker,
                        bool make_backup);
   virtual ~ChromiumWritableFile() {}
   leveldb::Status Append(const leveldb::Slice& data) override;
@@ -231,7 +231,6 @@ class ChromiumWritableFile : public leveldb::WritableFile {
   std::string filename_;
   scoped_ptr<base::File> file_;
   const UMALogger* uma_logger_;
-  WriteTracker* tracker_;
   Type file_type_;
   std::string parent_dir_;
   bool make_backup_;
@@ -240,12 +239,10 @@ class ChromiumWritableFile : public leveldb::WritableFile {
 ChromiumWritableFile::ChromiumWritableFile(const std::string& fname,
                                            base::File* f,
                                            const UMALogger* uma_logger,
-                                           WriteTracker* tracker,
                                            bool make_backup)
     : filename_(fname),
       file_(f),
       uma_logger_(uma_logger),
-      tracker_(tracker),
       file_type_(kOther),
       make_backup_(make_backup) {
   FilePath path = FilePath::FromUTF8Unsafe(fname);
@@ -253,8 +250,6 @@ ChromiumWritableFile::ChromiumWritableFile(const std::string& fname,
     file_type_ = kManifest;
   else if (path.MatchesExtension(table_extension))
     file_type_ = kTable;
-  if (file_type_ != kManifest)
-    tracker_->DidCreateNewFile(filename_);
   parent_dir_ = FilePath::FromUTF8Unsafe(fname).DirName().AsUTF8Unsafe();
 }
 
@@ -277,13 +272,6 @@ Status ChromiumWritableFile::SyncParent() {
 }
 
 Status ChromiumWritableFile::Append(const Slice& data) {
-  if (file_type_ == kManifest && tracker_->DoesDirNeedSync(filename_)) {
-    Status s = SyncParent();
-    if (!s.ok())
-      return s;
-    tracker_->DidSyncDir(filename_);
-  }
-
   int bytes_written = file_->WriteAtCurrentPos(data.data(), data.size());
   if (bytes_written != data.size()) {
     base::File::Error error = LastFileError();
@@ -319,6 +307,12 @@ Status ChromiumWritableFile::Sync() {
   if (make_backup_ && file_type_ == kTable)
     uma_logger_->RecordBackupResult(ChromiumEnv::MakeBackup(filename_));
 
+  // leveldb's implicit contract for Sync() is that if this instance is for a
+  // manifest file then the directory is also sync'ed. See leveldb's
+  // env_posix.cc.
+  if (file_type_ == kManifest)
+    return SyncParent();
+
   return Status::OK();
 }
 
@@ -326,6 +320,7 @@ class IDBEnv : public ChromiumEnv {
  public:
   IDBEnv() : ChromiumEnv() {
     name_ = "LevelDBEnv.IDB";
+    uma_ioerror_base_name_ = name_ + ".IOError.BFE";
     make_backup_ = true;
   }
 };
@@ -396,7 +391,7 @@ Status MakeIOError(Slice filename,
                    base::File::Error error) {
   DCHECK_LT(error, 0);
   char buf[512];
-  snprintf(buf, sizeof(buf), "%s (ChromeMethodPFE: %d::%s::%d)",
+  snprintf(buf, sizeof(buf), "%s (ChromeMethodBFE: %d::%s::%d)",
            message.c_str(), method, MethodIDToString(method), -error);
   return Status::IOError(filename, buf);
 }
@@ -412,7 +407,7 @@ Status MakeIOError(Slice filename,
 
 ErrorParsingResult ParseMethodAndError(const leveldb::Status& status,
                                        MethodID* method_param,
-                                       int* error) {
+                                       base::File::Error* error) {
   const std::string status_string = status.ToString();
   int method;
   if (RE2::PartialMatch(status_string.c_str(), "ChromeMethodOnly: (\\d+)",
@@ -420,18 +415,15 @@ ErrorParsingResult ParseMethodAndError(const leveldb::Status& status,
     *method_param = static_cast<MethodID>(method);
     return METHOD_ONLY;
   }
+  int parsed_error;
   if (RE2::PartialMatch(status_string.c_str(),
-                        "ChromeMethodPFE: (\\d+)::.*::(\\d+)", &method,
-                        error)) {
-    *error = -*error;
+                        "ChromeMethodBFE: (\\d+)::.*::(\\d+)", &method,
+                        &parsed_error)) {
     *method_param = static_cast<MethodID>(method);
-    return METHOD_AND_PFE;
-  }
-  if (RE2::PartialMatch(status_string.c_str(),
-                        "ChromeMethodErrno: (\\d+)::.*::(\\d+)", &method,
-                        error)) {
-    *method_param = static_cast<MethodID>(method);
-    return METHOD_AND_ERRNO;
+    *error = static_cast<base::File::Error>(-parsed_error);
+    DCHECK_LT(*error, base::File::FILE_OK);
+    DCHECK_GT(*error, base::File::FILE_ERROR_MAX);
+    return METHOD_AND_BFE;
   }
   return NONE;
 }
@@ -507,13 +499,12 @@ bool IndicatesDiskFull(const leveldb::Status& status) {
   if (status.ok())
     return false;
   leveldb_env::MethodID method;
-  int error = -1;
+  base::File::Error error = base::File::FILE_OK;
   leveldb_env::ErrorParsingResult result =
       leveldb_env::ParseMethodAndError(status, &method, &error);
-  return (result == leveldb_env::METHOD_AND_PFE &&
+  return (result == leveldb_env::METHOD_AND_BFE &&
           static_cast<base::File::Error>(error) ==
-              base::File::FILE_ERROR_NO_SPACE) ||
-         (result == leveldb_env::METHOD_AND_ERRNO && error == ENOSPC);
+              base::File::FILE_ERROR_NO_SPACE);
 }
 
 bool ChromiumEnv::MakeBackup(const std::string& fname) {
@@ -529,6 +520,7 @@ ChromiumEnv::ChromiumEnv()
       bgsignal_(&mu_),
       started_bgthread_(false),
       kMaxRetryTimeMillis(1000) {
+  uma_ioerror_base_name_ = name_ + ".IOError.BFE";
 }
 
 ChromiumEnv::~ChromiumEnv() {
@@ -892,22 +884,13 @@ Status ChromiumEnv::NewWritableFile(const std::string& fname,
     return MakeIOError(fname, "Unable to create writable file",
                        kNewWritableFile, f->error_details());
   } else {
-    *result =
-        new ChromiumWritableFile(fname, f.release(), this, this, make_backup_);
+    *result = new ChromiumWritableFile(fname, f.release(), this, make_backup_);
     return Status::OK();
   }
 }
 
 Status ChromiumEnv::NewAppendableFile(const std::string& fname,
                                       leveldb::WritableFile** result) {
-#if defined(OS_CHROMEOS)
-  // Disabled until crbug.com/460568 is fixed. Technically this method shouldn't
-  // be called if reuse_logs is false, but a leveldb bug (fixed, but not yet in
-  // Chrome) still calls this function. Using default leveldb Env implementation
-  // to workaround this bug.
-  return Env::NewAppendableFile(fname, result);
-#endif
-
   *result = NULL;
   FilePath path = FilePath::FromUTF8Unsafe(fname);
   scoped_ptr<base::File> f(new base::File(
@@ -917,8 +900,7 @@ Status ChromiumEnv::NewAppendableFile(const std::string& fname,
     return MakeIOError(fname, "Unable to create appendable file",
                        kNewAppendableFile, f->error_details());
   }
-  *result =
-      new ChromiumWritableFile(fname, f.release(), this, this, make_backup_);
+  *result = new ChromiumWritableFile(fname, f.release(), this, make_backup_);
   return Status::OK();
 }
 
@@ -955,9 +937,9 @@ void ChromiumEnv::RecordBackupResult(bool result) const {
 
 base::HistogramBase* ChromiumEnv::GetOSErrorHistogram(MethodID method,
                                                       int limit) const {
-  std::string uma_name(name_);
-  // TODO(dgrogan): This is probably not the best way to concatenate strings.
-  uma_name.append(".IOError.").append(MethodIDToString(method));
+  std::string uma_name;
+  base::StringAppendF(&uma_name, "%s.%s", uma_ioerror_base_name_.c_str(),
+                      MethodIDToString(method));
   return base::LinearHistogram::FactoryGet(uma_name, 1, limit, limit + 1,
       base::Histogram::kUmaTargetedHistogramFlag);
 }
@@ -1081,25 +1063,6 @@ void ChromiumEnv::BGThread() {
 
 void ChromiumEnv::StartThread(void (*function)(void* arg), void* arg) {
   new Thread(function, arg);  // Will self-delete.
-}
-
-static std::string GetDirName(const std::string& filename) {
-  return FilePath::FromUTF8Unsafe(filename).DirName().AsUTF8Unsafe();
-}
-
-void ChromiumEnv::DidCreateNewFile(const std::string& filename) {
-  base::AutoLock auto_lock(directory_sync_lock_);
-  directories_needing_sync_.insert(GetDirName(filename));
-}
-
-bool ChromiumEnv::DoesDirNeedSync(const std::string& filename) {
-  base::AutoLock auto_lock(directory_sync_lock_);
-  return ContainsKey(directories_needing_sync_, GetDirName(filename));
-}
-
-void ChromiumEnv::DidSyncDir(const std::string& filename) {
-  base::AutoLock auto_lock(directory_sync_lock_);
-  directories_needing_sync_.erase(GetDirName(filename));
 }
 
 }  // namespace leveldb_env

@@ -29,9 +29,9 @@
 
 #include "platform/Timer.h"
 #include "platform/heap/Handle.h"
+#include "wtf/Forward.h"
 #include "wtf/OwnPtr.h"
 #include "wtf/PassRefPtr.h"
-#include "wtf/text/AtomicString.h"
 
 namespace blink {
 
@@ -77,7 +77,7 @@ public:
     void suspend();
     void resume();
 
-    void trace(Visitor*);
+    DECLARE_TRACE();
 
 private:
     // The main purpose of this class is to throttle the "progress"

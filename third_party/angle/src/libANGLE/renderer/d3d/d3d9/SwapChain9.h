@@ -10,13 +10,14 @@
 #define LIBANGLE_RENDERER_D3D_D3D9_SWAPCHAIN9_H_
 
 #include "common/angleutils.h"
-#include "libANGLE/renderer/SwapChain.h"
+#include "libANGLE/renderer/d3d/SwapChainD3D.h"
+#include "libANGLE/renderer/d3d/d3d9/RenderTarget9.h"
 
 namespace rx
 {
 class Renderer9;
 
-class SwapChain9 : public SwapChain
+class SwapChain9 : public SwapChainD3D
 {
   public:
     SwapChain9(Renderer9 *renderer, NativeWindow nativeWindow, HANDLE shareHandle,
@@ -28,6 +29,9 @@ class SwapChain9 : public SwapChain
     virtual EGLint swapRect(EGLint x, EGLint y, EGLint width, EGLint height);
     virtual void recreate();
 
+    RenderTargetD3D *getColorRenderTarget() override { return &mColorRenderTarget; }
+    RenderTargetD3D *getDepthStencilRenderTarget() override { return &mDepthStencilRenderTarget; }
+
     virtual IDirect3DSurface9 *getRenderTarget();
     virtual IDirect3DSurface9 *getDepthStencil();
     virtual IDirect3DTexture9 *getOffscreenTexture();
@@ -35,11 +39,9 @@ class SwapChain9 : public SwapChain
     EGLint getWidth() const { return mWidth; }
     EGLint getHeight() const { return mHeight; }
 
-    static SwapChain9 *makeSwapChain9(SwapChain *swapChain);
+    static SwapChain9 *makeSwapChain9(SwapChainD3D *swapChain);
 
   private:
-    DISALLOW_COPY_AND_ASSIGN(SwapChain9);
-
     void release();
 
     Renderer9 *mRenderer;
@@ -52,6 +54,9 @@ class SwapChain9 : public SwapChain
     IDirect3DSurface9 *mRenderTarget;
     IDirect3DSurface9 *mDepthStencil;
     IDirect3DTexture9* mOffscreenTexture;
+
+    SurfaceRenderTarget9 mColorRenderTarget;
+    SurfaceRenderTarget9 mDepthStencilRenderTarget;
 };
 
 }

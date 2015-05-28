@@ -38,13 +38,6 @@
         {
             "type": "ui-setting",
             "section": "Elements",
-            "title": "Show user agent styles",
-            "settingName": "showUserAgentStyles",
-            "settingType": "checkbox"
-        },
-        {
-            "type": "ui-setting",
-            "section": "Elements",
             "title": "Show user agent shadow DOM",
             "settingName": "showUAShadowDOM",
             "settingType": "checkbox"
@@ -76,9 +69,15 @@
         "extensions"
     ],
     "scripts": [
+        "BezierUI.js",
+        "AnimationControlPane.js",
+        "AnimationTimeline.js",
+        "StylesPopoverHelper.js",
+        "BezierEditor.js",
         "Spectrum.js",
         "ElementsBreadcrumbs.js",
         "ElementsSidebarPane.js",
+        "ElementsSidebarView.js",
         "ElementsTreeElement.js",
         "ElementsTreeOutline.js",
         "EventListenersSidebarPane.js",
@@ -87,11 +86,16 @@
         "PropertiesSidebarPane.js",
         "StylesSectionModel.js",
         "StylesSidebarPane.js",
+        "ComputedStyleSidebarPane.js",
         "ElementsPanel.js",
         "AnimationsSidebarPane.js"
     ],
     "stylesheets": [
+        "accessibilityNode.css",
+        "animationTimeline.css",
+        "bezierEditor.css",
         "breadcrumbs.css",
+        "computedStyleSidebarPane.css",
         "elementsPanel.css",
         "elementsTreeOutline.css",
         "spectrum.css"

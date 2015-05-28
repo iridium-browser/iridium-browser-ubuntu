@@ -13,18 +13,17 @@
 #include "net/quic/test_tools/quic_session_peer.h"
 #include "net/quic/test_tools/quic_test_utils.h"
 #include "net/tools/quic/quic_spdy_client_stream.h"
-#include "net/tools/quic/test_tools/quic_test_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
 using net::test::CryptoTestUtils;
 using net::test::DefaultQuicConfig;
+using net::test::MockConnection;
 using net::test::PacketSavingConnection;
 using net::test::QuicSessionPeer;
 using net::test::SupportedVersions;
 using net::test::TestPeerIPAddress;
 using net::test::ValueRestore;
 using net::test::kTestPort;
-using net::tools::test::MockConnection;
 using testing::Invoke;
 using testing::_;
 
@@ -40,8 +39,8 @@ class ToolsQuicClientSessionTest
     : public ::testing::TestWithParam<QuicVersion> {
  protected:
   ToolsQuicClientSessionTest()
-      : connection_(
-            new PacketSavingConnection(false, SupportedVersions(GetParam()))) {
+      : connection_(new PacketSavingConnection(Perspective::IS_CLIENT,
+                                               SupportedVersions(GetParam()))) {
     session_.reset(new QuicClientSession(DefaultQuicConfig(), connection_));
     session_->InitializeSession(
         QuicServerId(kServerHostname, kPort, false, PRIVACY_MODE_DISABLED),
@@ -70,7 +69,7 @@ TEST_P(ToolsQuicClientSessionTest, CryptoConnect) {
 
 TEST_P(ToolsQuicClientSessionTest, MaxNumStreams) {
   session_->config()->SetMaxStreamsPerConnection(1, 1);
-  // FLAGS_max_streams_per_connection = 1;
+
   // Initialize crypto before the client session will create a stream.
   CompleteCryptoHandshake();
 

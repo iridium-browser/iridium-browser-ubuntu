@@ -41,11 +41,11 @@ scoped_ptr<VideoCaptureDevice> VideoCaptureDeviceFactoryAndroid::Create(
   if (!base::StringToInt(device_name.id(), &id))
     return scoped_ptr<VideoCaptureDevice>();
 
-  VideoCaptureDeviceAndroid* video_capture_device(
+  scoped_ptr<VideoCaptureDeviceAndroid> video_capture_device(
       new VideoCaptureDeviceAndroid(device_name));
 
   if (video_capture_device->Init())
-    return scoped_ptr<VideoCaptureDevice>(video_capture_device);
+    return video_capture_device.Pass();
 
   DLOG(ERROR) << "Error creating Video Capture Device.";
   return scoped_ptr<VideoCaptureDevice>();
@@ -71,9 +71,14 @@ void VideoCaptureDeviceFactoryAndroid::GetDeviceNames(
     if (device_name.obj() == NULL)
       continue;
 
+    const int capture_api_type =
+        Java_VideoCaptureFactory_getCaptureApiType(env, camera_id, context);
+
     VideoCaptureDevice::Name name(
         base::android::ConvertJavaStringToUTF8(device_name),
-        base::IntToString(camera_id));
+        base::IntToString(camera_id),
+        static_cast<VideoCaptureDevice::Name::CaptureApiType>(
+            capture_api_type));
     device_names->push_back(name);
 
     DVLOG(1) << "VideoCaptureDeviceFactoryAndroid::GetDeviceNames: camera "

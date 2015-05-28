@@ -5,6 +5,7 @@
 #ifndef CONTENT_BROWSER_RENDERER_HOST_PEPPER_PEPPER_UDP_SOCKET_MESSAGE_FILTER_H_
 #define CONTENT_BROWSER_RENDERER_HOST_PEPPER_PEPPER_UDP_SOCKET_MESSAGE_FILTER_H_
 
+#include <queue>
 #include <string>
 
 #include "base/basictypes.h"
@@ -60,7 +61,22 @@ class CONTENT_EXPORT PepperUDPSocketMessageFilter
     SOCKET_OPTION_ADDRESS_REUSE = 1 << 0,
     SOCKET_OPTION_BROADCAST = 1 << 1,
     SOCKET_OPTION_RCVBUF_SIZE = 1 << 2,
-    SOCKET_OPTION_SNDBUF_SIZE = 1 << 3
+    SOCKET_OPTION_SNDBUF_SIZE = 1 << 3,
+    SOCKET_OPTION_MULTICAST_LOOP = 1 << 4,
+    SOCKET_OPTION_MULTICAST_TTL = 1 << 5
+  };
+
+  struct PendingSend {
+    PendingSend(const net::IPAddressNumber& address,
+                int port,
+                const scoped_refptr<net::IOBufferWithSize>& buffer,
+                const ppapi::host::ReplyMessageContext& context);
+    ~PendingSend();
+
+    net::IPAddressNumber address;
+    int port;
+    scoped_refptr<net::IOBufferWithSize> buffer;
+    ppapi::host::ReplyMessageContext context;
   };
 
   // ppapi::host::ResourceMessageFilter overrides.
@@ -81,6 +97,10 @@ class CONTENT_EXPORT PepperUDPSocketMessageFilter
   int32_t OnMsgClose(const ppapi::host::HostMessageContext* context);
   int32_t OnMsgRecvSlotAvailable(
       const ppapi::host::HostMessageContext* context);
+  int32_t OnMsgJoinGroup(const ppapi::host::HostMessageContext* context,
+                         const PP_NetAddress_Private& addr);
+  int32_t OnMsgLeaveGroup(const ppapi::host::HostMessageContext* context,
+                          const PP_NetAddress_Private& addr);
 
   void DoBind(const ppapi::host::ReplyMessageContext& context,
               const PP_NetAddress_Private& addr);
@@ -88,11 +108,12 @@ class CONTENT_EXPORT PepperUDPSocketMessageFilter
   void DoSendTo(const ppapi::host::ReplyMessageContext& context,
                 const std::string& data,
                 const PP_NetAddress_Private& addr);
+  int StartPendingSend();
   void Close();
 
   void OnRecvFromCompleted(int net_result);
-  void OnSendToCompleted(const ppapi::host::ReplyMessageContext& context,
-                         int net_result);
+  void OnSendToCompleted(int net_result);
+  void FinishPendingSend(int net_result);
 
   void SendBindReply(const ppapi::host::ReplyMessageContext& context,
                      int32_t result,
@@ -110,6 +131,8 @@ class CONTENT_EXPORT PepperUDPSocketMessageFilter
   void SendSendToError(const ppapi::host::ReplyMessageContext& context,
                        int32_t result);
 
+  int32_t CanUseMulticastAPI(const PP_NetAddress_Private& addr);
+
   // Bitwise-or of SocketOption flags. This stores the state about whether
   // each option is set before Bind() is called.
   int socket_options_;
@@ -118,11 +141,16 @@ class CONTENT_EXPORT PepperUDPSocketMessageFilter
   int32_t rcvbuf_size_;
   int32_t sndbuf_size_;
 
+  // Multicast options, if socket hasn't been bound
+  int multicast_ttl_;
+  int32_t can_use_multicast_;
+
   scoped_ptr<net::UDPSocket> socket_;
   bool closed_;
 
   scoped_refptr<net::IOBuffer> recvfrom_buffer_;
-  scoped_refptr<net::IOBufferWithSize> sendto_buffer_;
+
+  std::queue<PendingSend> pending_sends_;
 
   net::IPEndPoint recvfrom_address_;
 

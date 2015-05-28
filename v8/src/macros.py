@@ -39,21 +39,9 @@ const NEW_TWO_BYTE_STRING = false;
 const GETTER = 0;
 const SETTER = 1;
 
-# These definitions must match the index of the properties in objects.h.
-const kApiTagOffset                 = 0;
-const kApiPropertyListOffset        = 1;
-const kApiSerialNumberOffset        = 3;
-const kApiConstructorOffset         = 3;
-const kApiPrototypeTemplateOffset   = 5;
-const kApiParentTemplateOffset      = 6;
-const kApiFlagOffset                = 14;
-
 const NO_HINT     = 0;
 const NUMBER_HINT = 1;
 const STRING_HINT = 2;
-
-const kFunctionTag  = 0;
-const kNewObjectTag = 1;
 
 # For date.js.
 const HoursPerDay      = 24;
@@ -64,12 +52,6 @@ const msPerMinute      = 60000;
 const msPerHour        = 3600000;
 const msPerDay         = 86400000;
 const msPerMonth       = 2592000000;
-
-# For apinatives.js
-const kUninitialized = -1;
-const kReadOnlyPrototypeBit = 3;
-const kRemovePrototypeBit = 4;  # For FunctionTemplateInfo, matches objects.h
-const kDoNotCacheBit = 5;  # For FunctionTemplateInfo, matches objects.h
 
 # Note: kDayZeroInJulianDay = ToJulianDay(1970, 0, 1).
 const kInvalidDate        = 'Invalid Date';
@@ -86,6 +68,11 @@ const kMinYear  = -1000000;
 const kMaxYear  = 1000000;
 const kMinMonth = -10000000;
 const kMaxMonth = 10000000;
+
+# Safe maximum number of arguments to push to stack, when multiplied by
+# pointer size. Used by Function.prototype.apply(), Reflect.apply() and
+# Reflect.construct().
+const kSafeArgumentsLength = 0x800000;
 
 # Strict mode flags for passing to %SetProperty
 const kSloppyMode = 0;
@@ -129,7 +116,6 @@ macro IS_GENERATOR(arg)         = (%_ClassOf(arg) === 'Generator');
 macro IS_SET_ITERATOR(arg)      = (%_ClassOf(arg) === 'Set Iterator');
 macro IS_MAP_ITERATOR(arg)      = (%_ClassOf(arg) === 'Map Iterator');
 macro IS_UNDETECTABLE(arg)      = (%_IsUndetectableObject(arg));
-macro FLOOR(arg)                = $floor(arg);
 
 # Macro for ECMAScript 5 queries of the type:
 # "Type(O) is object."

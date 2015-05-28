@@ -112,6 +112,7 @@ RenderFrameHostImpl* FrameAccessibility::GetChild(
     if (iter->browser_plugin_instance_id) {
       RenderFrameHost* guest =
           parent_frame_host->delegate()->GetGuestByInstanceID(
+              iter->parent_frame_host,
               iter->browser_plugin_instance_id);
       if (guest)
         return static_cast<RenderFrameHostImpl*>(guest);
@@ -142,6 +143,7 @@ void FrameAccessibility::GetAllChildFrames(
     if (iter->browser_plugin_instance_id) {
       RenderFrameHost* guest =
           parent_frame_host->delegate()->GetGuestByInstanceID(
+              iter->parent_frame_host,
               iter->browser_plugin_instance_id);
       if (guest)
         child_frame_hosts->push_back(static_cast<RenderFrameHostImpl*>(guest));
@@ -158,12 +160,18 @@ bool FrameAccessibility::GetParent(
        ++iter) {
     if (iter->child_frame_tree_node_id) {
       FrameTreeNode* child_node =
-          FrameTree::GloballyFindByID(iter->child_frame_tree_node_id);
+          FrameTreeNode::GloballyFindByID(iter->child_frame_tree_node_id);
       if (child_node &&
           child_node->current_frame_host() == child_frame_host) {
-        // We should have gotten a *direct* child of the parent frame.
-        if (child_node->parent() !=
-            iter->parent_frame_host->frame_tree_node()) {
+        // Assert that the child node is a descendant of the parent frame in
+        // the frame tree. It may not be a direct descendant because the
+        // parent frame's accessibility tree may span multiple frames from the
+        // same origin.
+        FrameTreeNode* parent_node = iter->parent_frame_host->frame_tree_node();
+        FrameTreeNode* child_node_ancestor = child_node->parent();
+        while (child_node_ancestor && child_node_ancestor != parent_node)
+          child_node_ancestor = child_node_ancestor->parent();
+        if (child_node_ancestor != parent_node) {
           NOTREACHED();
           return false;
         }
@@ -179,6 +187,7 @@ bool FrameAccessibility::GetParent(
     if (iter->browser_plugin_instance_id) {
       RenderFrameHost* guest =
           iter->parent_frame_host->delegate()->GetGuestByInstanceID(
+              iter->parent_frame_host,
               iter->browser_plugin_instance_id);
       if (guest == child_frame_host) {
         if (out_parent_frame_host)
@@ -197,12 +206,19 @@ RenderFrameHostImpl* FrameAccessibility::GetRFHIFromFrameTreeNodeId(
     RenderFrameHostImpl* parent_frame_host,
     int64 child_frame_tree_node_id) {
   FrameTreeNode* child_node =
-      FrameTree::GloballyFindByID(child_frame_tree_node_id);
+      FrameTreeNode::GloballyFindByID(child_frame_tree_node_id);
   if (!child_node)
     return nullptr;
 
-  // We should have gotten a *direct* child of the parent frame.
-  if (child_node->parent() != parent_frame_host->frame_tree_node()) {
+  // Assert that the child node is a descendant of the parent frame in
+  // the frame tree. It may not be a direct descendant because the
+  // parent frame's accessibility tree may span multiple frames from the
+  // same origin.
+  FrameTreeNode* parent_node = parent_frame_host->frame_tree_node();
+  FrameTreeNode* child_node_ancestor = child_node->parent();
+  while (child_node_ancestor && child_node_ancestor != parent_node)
+    child_node_ancestor = child_node_ancestor->parent();
+  if (child_node_ancestor != parent_node) {
     NOTREACHED();
     return nullptr;
   }

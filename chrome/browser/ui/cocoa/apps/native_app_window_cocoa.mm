@@ -13,7 +13,6 @@
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/cocoa/browser_window_utils.h"
 #import "chrome/browser/ui/cocoa/chrome_event_processing_window.h"
-#import "chrome/browser/ui/cocoa/custom_frame_view.h"
 #include "chrome/browser/ui/cocoa/extensions/extension_keybinding_registry_cocoa.h"
 #include "chrome/browser/ui/cocoa/extensions/extension_view_mac.h"
 #include "chrome/common/chrome_switches.h"
@@ -23,6 +22,7 @@
 #include "extensions/common/extension.h"
 #include "skia/ext/skia_utils_mac.h"
 #include "third_party/skia/include/core/SkRegion.h"
+#import "ui/gfx/mac/nswindow_frame_controls.h"
 #include "ui/gfx/skia_util.h"
 
 // NOTE: State Before Update.
@@ -50,15 +50,6 @@ using extensions::AppWindow;
 @end
 
 namespace {
-
-void SetFullScreenCollectionBehavior(NSWindow* window, bool allow_fullscreen) {
-  NSWindowCollectionBehavior behavior = [window collectionBehavior];
-  if (allow_fullscreen)
-    behavior |= NSWindowCollectionBehaviorFullScreenPrimary;
-  else
-    behavior &= ~NSWindowCollectionBehaviorFullScreenPrimary;
-  [window setCollectionBehavior:behavior];
-}
 
 void SetWorkspacesCollectionBehavior(NSWindow* window, bool always_visible) {
   NSWindowCollectionBehavior behavior = [window collectionBehavior];
@@ -208,71 +199,29 @@ std::vector<gfx::Rect> CalculateNonDraggableRegions(
 
 @end
 
-// This is really a method on NSGrayFrame, so it should only be called on the
-// view passed into -[NSWindow drawCustomFrameRect:forView:].
-@interface NSView (PrivateMethods)
-- (CGFloat)roundedCornerRadius;
-@end
-
-// TODO(jamescook): Should these be AppNSWindow to match AppWindow?
-// http://crbug.com/344082
-@interface ShellNSWindow : ChromeEventProcessingWindow
-@end
-@implementation ShellNSWindow
-
-// Similar to ChromeBrowserWindow, don't draw the title, but allow it to be seen
-// in menus, Expose, etc.
-- (BOOL)_isTitleHidden {
-  return YES;
-}
-
-- (void)drawCustomFrameRect:(NSRect)frameRect forView:(NSView*)view {
-  // Make the background color of the content area white. We can't just call
-  // -setBackgroundColor as that causes the title bar to be drawn in a solid
-  // color.
-  NSRect rect = [self contentRectForFrameRect:frameRect];
-  [[NSColor whiteColor] set];
-  NSRectFill(rect);
-
-  // Draw the native title bar. We remove the content area since the native
-  // implementation draws a gray background.
-  rect.origin.y = NSMaxY(rect);
-  rect.size.height = CGFLOAT_MAX;
-  rect = NSIntersectionRect(rect, frameRect);
-
-  [NSBezierPath clipRect:rect];
-  [super drawCustomFrameRect:frameRect
-                     forView:view];
-}
-
-@end
-
-@interface ShellCustomFrameNSWindow : ShellNSWindow {
+// A view that paints a solid color. Used to change the title bar background.
+@interface TitlebarBackgroundView : NSView {
  @private
   base::scoped_nsobject<NSColor> color_;
   base::scoped_nsobject<NSColor> inactiveColor_;
 }
-
 - (void)setColor:(NSColor*)color
     inactiveColor:(NSColor*)inactiveColor;
-
 @end
 
-@implementation ShellCustomFrameNSWindow
+@implementation TitlebarBackgroundView
 
-- (void)drawCustomFrameRect:(NSRect)rect forView:(NSView*)view {
-  [[NSBezierPath bezierPathWithRect:rect] addClip];
-  [[NSColor clearColor] set];
-  NSRectFill(rect);
-
-  // Set up our clip.
+- (void)drawRect:(NSRect)rect {
+  // Only the top corners are rounded. For simplicity, round all 4 corners but
+  // draw the bottom corners outside of the visible bounds.
   CGFloat cornerRadius = 4.0;
-  if ([view respondsToSelector:@selector(roundedCornerRadius)])
-    cornerRadius = [view roundedCornerRadius];
-  [[NSBezierPath bezierPathWithRoundedRect:[view bounds]
+  NSRect roundedRect = [self bounds];
+  roundedRect.origin.y -= cornerRadius;
+  roundedRect.size.height += cornerRadius;
+  [[NSBezierPath bezierPathWithRoundedRect:roundedRect
                                    xRadius:cornerRadius
                                    yRadius:cornerRadius] addClip];
-  if ([self isMainWindow] || [self isKeyWindow])
+  if ([[self window] isMainWindow] || [[self window] isKeyWindow])
     [color_ set];
   else
     [inactiveColor_ set];
@@ -287,12 +236,25 @@ std::vector<gfx::Rect> CalculateNonDraggableRegions(
 
 @end
 
-@interface ShellFramelessNSWindow : ShellNSWindow
+// TODO(jamescook): Should these be AppNSWindow to match AppWindow?
+// http://crbug.com/344082
+@interface AppNSWindow : ChromeEventProcessingWindow
 @end
 
-@implementation ShellFramelessNSWindow
+@implementation AppNSWindow
 
-- (void)drawCustomFrameRect:(NSRect)rect forView:(NSView*)view {}
+// Similar to ChromeBrowserWindow, don't draw the title, but allow it to be seen
+// in menus, Expose, etc.
+- (BOOL)_isTitleHidden {
+  return YES;
+}
+
+@end
+
+@interface AppFramelessNSWindow : AppNSWindow
+@end
+
+@implementation AppFramelessNSWindow
 
 + (NSRect)frameRectForContentRect:(NSRect)contentRect
                         styleMask:(NSUInteger)mask {
@@ -350,13 +312,8 @@ NativeAppWindowCocoa::NativeAppWindowCocoa(
   Observe(WebContents());
 
   base::scoped_nsobject<NSWindow> window;
-  Class window_class;
-  if (has_frame_) {
-    window_class = has_frame_color_ ?
-        [ShellCustomFrameNSWindow class] : [ShellNSWindow class];
-  } else {
-    window_class = [ShellFramelessNSWindow class];
-  }
+  Class window_class = has_frame_ ?
+      [AppNSWindow class] : [AppFramelessNSWindow class];
 
   // Estimate the initial bounds of the window. Once the frame insets are known,
   // the window bounds and constraints can be set precisely.
@@ -375,7 +332,23 @@ NativeAppWindowCocoa::NativeAppWindowCocoa(
   [window setTitle:base::SysUTF8ToNSString(name)];
   [[window contentView] setWantsLayer:YES];
   if (has_frame_ && has_frame_color_) {
-    [base::mac::ObjCCastStrict<ShellCustomFrameNSWindow>(window)
+    // AppKit only officially supports adding subviews to the window's
+    // contentView and not its superview (an NSNextStepFrame). The 10.10 SDK
+    // allows adding an NSTitlebarAccessoryViewController to a window, but the
+    // view can only be placed above the window control buttons, so we'd have to
+    // replicate those.
+    NSView* window_view = [[window contentView] superview];
+    CGFloat height = NSHeight([window_view bounds]) -
+                     NSHeight([[window contentView] bounds]);
+    titlebar_background_view_.reset([[TitlebarBackgroundView alloc]
+        initWithFrame:NSMakeRect(0, NSMaxY([window_view bounds]) - height,
+                                 NSWidth([window_view bounds]), height)]);
+    [titlebar_background_view_
+        setAutoresizingMask:NSViewWidthSizable | NSViewMinYMargin];
+    [window_view addSubview:titlebar_background_view_
+                 positioned:NSWindowBelow
+                 relativeTo:nil];
+    [titlebar_background_view_
              setColor:gfx::SkColorToSRGBNSColor(active_frame_color_)
         inactiveColor:gfx::SkColorToSRGBNSColor(inactive_frame_color_)];
   }
@@ -491,7 +464,7 @@ void NativeAppWindowCocoa::SetFullscreen(int fullscreen_types) {
     // is disabled), temporarily enable it. It will be disabled again on leaving
     // fullscreen.
     if (fullscreen && !shows_fullscreen_controls_)
-      SetFullScreenCollectionBehavior(window(), true);
+      gfx::SetNSWindowCanFullscreen(window(), true);
     [window() toggleFullScreen:nil];
     return;
   }
@@ -820,6 +793,7 @@ void NativeAppWindowCocoa::WindowWillClose() {
 }
 
 void NativeAppWindowCocoa::WindowDidBecomeKey() {
+  [titlebar_background_view_ setNeedsDisplay:YES];
   content::RenderWidgetHostView* rwhv =
       WebContents()->GetRenderWidgetHostView();
   if (rwhv)
@@ -836,6 +810,8 @@ void NativeAppWindowCocoa::WindowDidResignKey() {
   // lose key window status.
   if ([NSApp isActive] && ([NSApp keyWindow] == window()))
     return;
+
+  [titlebar_background_view_ setNeedsDisplay:YES];
 
   WebContents()->StoreFocus();
 
@@ -887,7 +863,7 @@ void NativeAppWindowCocoa::WindowDidEnterFullscreen() {
 void NativeAppWindowCocoa::WindowDidExitFullscreen() {
   is_fullscreen_ = false;
   if (!shows_fullscreen_controls_)
-    SetFullScreenCollectionBehavior(window(), false);
+    gfx::SetNSWindowCanFullscreen(window(), false);
 
   app_window_->Restore();
   app_window_->OnNativeWindowChanged();
@@ -938,39 +914,15 @@ void NativeAppWindowCocoa::SetContentSizeConstraints(
   size_constraints_.set_minimum_size(min_size);
   size_constraints_.set_maximum_size(max_size);
 
-  gfx::Size minimum_size = size_constraints_.GetMinimumSize();
-  [window() setContentMinSize:NSMakeSize(minimum_size.width(),
-                                         minimum_size.height())];
-
-  gfx::Size maximum_size = size_constraints_.GetMaximumSize();
-  const int kUnboundedSize = extensions::SizeConstraints::kUnboundedSize;
-  CGFloat max_width = maximum_size.width() == kUnboundedSize ?
-      CGFLOAT_MAX : maximum_size.width();
-  CGFloat max_height = maximum_size.height() == kUnboundedSize ?
-      CGFLOAT_MAX : maximum_size.height();
-  [window() setContentMaxSize:NSMakeSize(max_width, max_height)];
-
   // Update the window controls.
   shows_resize_controls_ =
       is_resizable_ && !size_constraints_.HasFixedSize();
   shows_fullscreen_controls_ =
       is_resizable_ && !size_constraints_.HasMaximumSize() && has_frame_;
 
-  if (!is_fullscreen_) {
-    [window() setStyleMask:GetWindowStyleMask()];
-
-    // Set the window to participate in Lion Fullscreen mode. Setting this flag
-    // has no effect on Snow Leopard or earlier. UI controls for fullscreen are
-    // only shown for apps that have unbounded size.
-    if (base::mac::IsOSLionOrLater())
-      SetFullScreenCollectionBehavior(window(), shows_fullscreen_controls_);
-  }
-
-  if (has_frame_) {
-    [window() setShowsResizeIndicator:shows_resize_controls_];
-    [[window() standardWindowButton:NSWindowZoomButton]
-        setEnabled:shows_fullscreen_controls_];
-  }
+  gfx::ApplyNSWindowSizeConstraints(window(), min_size, max_size,
+                                    shows_resize_controls_,
+                                    shows_fullscreen_controls_);
 }
 
 void NativeAppWindowCocoa::SetAlwaysOnTop(bool always_on_top) {
@@ -990,10 +942,10 @@ void NativeAppWindowCocoa::SetInterceptAllKeys(bool want_all_key) {
 NativeAppWindowCocoa::~NativeAppWindowCocoa() {
 }
 
-ShellNSWindow* NativeAppWindowCocoa::window() const {
+AppNSWindow* NativeAppWindowCocoa::window() const {
   NSWindow* window = [window_controller_ window];
-  CHECK(!window || [window isKindOfClass:[ShellNSWindow class]]);
-  return static_cast<ShellNSWindow*>(window);
+  CHECK(!window || [window isKindOfClass:[AppNSWindow class]]);
+  return static_cast<AppNSWindow*>(window);
 }
 
 content::WebContents* NativeAppWindowCocoa::WebContents() const {

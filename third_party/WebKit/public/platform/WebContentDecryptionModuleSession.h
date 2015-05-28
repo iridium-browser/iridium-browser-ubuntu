@@ -32,11 +32,14 @@
 #define WebContentDecryptionModuleSession_h
 
 #include "WebCommon.h"
+#include "WebVector.h"
 #include "public/platform/WebContentDecryptionModuleException.h"
 #include "public/platform/WebContentDecryptionModuleResult.h"
+#include "public/platform/WebEncryptedMediaTypes.h"
 
 namespace blink {
 
+class WebEncryptedMediaKeyInformation;
 class WebString;
 class WebURL;
 
@@ -51,14 +54,19 @@ public:
         };
 
         virtual void message(MessageType, const unsigned char* message, size_t messageLength) = 0;
-        // FIXME: Remove this method once Chromium updated to call the method above.
-        virtual void message(const unsigned char* message, size_t messageLength, const WebURL& destinationURL) = 0;
         virtual void close() = 0;
 
         // Called when the expiration time for the session changes.
         // |updatedExpiryTimeInMS| is specified as the number of milliseconds
         // since 01 January, 1970 UTC.
         virtual void expirationChanged(double updatedExpiryTimeInMS) = 0;
+
+        // Called when the set of keys for this session changes or existing keys
+        // change state. |hasAdditionalUsableKey| is set if a key is newly
+        // usable (e.g. new key available, previously expired key has been
+        // renewed, etc.) and the browser should attempt to resume playback
+        // if necessary.
+        virtual void keysStatusesChange(const WebVector<WebEncryptedMediaKeyInformation>&, bool hasAdditionalUsableKey) = 0;
 
     protected:
         virtual ~Client();
@@ -69,7 +77,7 @@ public:
     virtual void setClientInterface(Client*) = 0;
     virtual WebString sessionId() const = 0;
 
-    virtual void initializeNewSession(const WebString& initDataType, const unsigned char* initData, size_t initDataLength, const WebString& sessionType, WebContentDecryptionModuleResult) = 0;
+    virtual void initializeNewSession(WebEncryptedMediaInitDataType, const unsigned char* initData, size_t initDataLength, WebEncryptedMediaSessionType, WebContentDecryptionModuleResult) = 0;
     virtual void load(const WebString& sessionId, WebContentDecryptionModuleResult) = 0;
     virtual void update(const unsigned char* response, size_t responseLength, WebContentDecryptionModuleResult) = 0;
     virtual void close(WebContentDecryptionModuleResult) = 0;

@@ -7,17 +7,18 @@
 #include <algorithm>
 
 #include "base/atomic_sequence_num.h"
-#include "base/debug/trace_event.h"
 #include "base/location.h"
 #include "base/metrics/histogram.h"
 #include "base/single_thread_task_runner.h"
 #include "base/time/time.h"
+#include "base/trace_event/trace_event.h"
 #include "cc/animation/animation.h"
 #include "cc/animation/animation_events.h"
 #include "cc/animation/animation_registrar.h"
 #include "cc/animation/keyframed_animation_curve.h"
 #include "cc/animation/layer_animation_controller.h"
 #include "cc/base/simple_enclosed_region.h"
+#include "cc/debug/frame_viewer_instrumentation.h"
 #include "cc/layers/layer_client.h"
 #include "cc/layers/layer_impl.h"
 #include "cc/layers/scrollbar_layer_interface.h"
@@ -52,6 +53,7 @@ Layer::Layer()
       transform_tree_index_(-1),
       opacity_tree_index_(-1),
       clip_tree_index_(-1),
+      should_flatten_transform_from_property_tree_(false),
       should_scroll_on_main_thread_(false),
       have_wheel_event_handlers_(false),
       have_scroll_event_handlers_(false),
@@ -71,6 +73,7 @@ Layer::Layer()
       force_render_surface_(false),
       transform_is_invertible_(true),
       has_render_surface_(false),
+      scroll_blocks_on_(SCROLL_BLOCKS_ON_NONE),
       background_color_(0),
       opacity_(1.f),
       blend_mode_(SkXfermode::kSrcOver_Mode),
@@ -78,7 +81,8 @@ Layer::Layer()
       clip_parent_(nullptr),
       replica_layer_(nullptr),
       raster_scale_(0.f),
-      client_(nullptr) {
+      client_(nullptr),
+      frame_timing_requests_dirty_(false) {
   layer_animation_controller_ = LayerAnimationController::Create(layer_id_);
   layer_animation_controller_->AddValueObserver(this);
   layer_animation_controller_->set_value_provider(this);
@@ -373,6 +377,13 @@ bool Layer::HasAncestor(const Layer* ancestor) const {
 void Layer::RequestCopyOfOutput(
     scoped_ptr<CopyOutputRequest> request) {
   DCHECK(IsPropertyChangeAllowed());
+  if (void* source = request->source()) {
+    auto it = std::find_if(
+        copy_requests_.begin(), copy_requests_.end(),
+        [source](const CopyOutputRequest* x) { return x->source() == source; });
+    if (it != copy_requests_.end())
+      copy_requests_.erase(it);
+  }
   if (request->IsEmpty())
     return;
   copy_requests_.push_back(request.Pass());
@@ -469,7 +480,7 @@ void Layer::SetFilters(const FilterOperations& filters) {
 }
 
 bool Layer::FilterIsAnimating() const {
-  return layer_animation_controller_->IsAnimatingProperty(Animation::Filter);
+  return layer_animation_controller_->IsAnimatingProperty(Animation::FILTER);
 }
 
 void Layer::SetBackgroundFilters(const FilterOperations& filters) {
@@ -489,7 +500,7 @@ void Layer::SetOpacity(float opacity) {
 }
 
 bool Layer::OpacityIsAnimating() const {
-  return layer_animation_controller_->IsAnimatingProperty(Animation::Opacity);
+  return layer_animation_controller_->IsAnimatingProperty(Animation::OPACITY);
 }
 
 bool Layer::OpacityCanAnimateOnImplThread() const {
@@ -599,7 +610,7 @@ bool Layer::AnimationsPreserveAxisAlignment() const {
 }
 
 bool Layer::TransformIsAnimating() const {
-  return layer_animation_controller_->IsAnimatingProperty(Animation::Transform);
+  return layer_animation_controller_->IsAnimatingProperty(Animation::TRANSFORM);
 }
 
 void Layer::SetScrollParent(Layer* parent) {
@@ -669,6 +680,18 @@ void Layer::SetScrollOffset(const gfx::ScrollOffset& scroll_offset) {
     return;
   scroll_offset_ = scroll_offset;
   SetNeedsCommit();
+}
+
+void Layer::SetScrollCompensationAdjustment(
+    const gfx::Vector2dF& scroll_compensation_adjustment) {
+  if (scroll_compensation_adjustment_ == scroll_compensation_adjustment)
+    return;
+  scroll_compensation_adjustment_ = scroll_compensation_adjustment;
+  SetNeedsCommit();
+}
+
+gfx::Vector2dF Layer::ScrollCompensationAdjustment() const {
+  return scroll_compensation_adjustment_;
 }
 
 void Layer::SetScrollOffsetFromImplSide(
@@ -742,6 +765,14 @@ void Layer::SetTouchEventHandlerRegion(const Region& region) {
   if (touch_event_handler_region_ == region)
     return;
   touch_event_handler_region_ = region;
+  SetNeedsCommit();
+}
+
+void Layer::SetScrollBlocksOn(ScrollBlocksOn scroll_blocks_on) {
+  DCHECK(IsPropertyChangeAllowed());
+  if (scroll_blocks_on_ == scroll_blocks_on)
+    return;
+  scroll_blocks_on_ = scroll_blocks_on;
   SetNeedsCommit();
 }
 
@@ -874,12 +905,7 @@ void Layer::PushPropertiesTo(LayerImpl* layer) {
   layer->SetContentBounds(content_bounds());
   layer->SetContentsScale(contents_scale_x(), contents_scale_y());
 
-  bool is_tracing;
-  TRACE_EVENT_CATEGORY_GROUP_ENABLED(
-      TRACE_DISABLED_BY_DEFAULT("cc.debug") "," TRACE_DISABLED_BY_DEFAULT(
-          "devtools.timeline.layers"),
-      &is_tracing);
-  if (is_tracing)
+  if (frame_viewer_instrumentation::IsTracingLayerTreeSnapshots())
     layer->SetDebugInfo(TakeDebugInfo());
 
   layer->SetDoubleSided(double_sided_);
@@ -887,7 +913,7 @@ void Layer::PushPropertiesTo(LayerImpl* layer) {
       draw_checkerboard_for_missing_tiles_);
   layer->SetDrawsContent(DrawsContent());
   layer->SetHideLayerAndSubtree(hide_layer_and_subtree_);
-  layer->SetHasRenderSurface(has_render_surface_);
+  layer->SetHasRenderSurface(has_render_surface_ || layer->HasCopyRequest());
   if (!layer->FilterIsAnimatingOnImplOnly() && !FilterIsAnimating())
     layer->SetFilters(filters_);
   DCHECK(!(FilterIsAnimating() && layer->FilterIsAnimatingOnImplOnly()));
@@ -898,6 +924,7 @@ void Layer::PushPropertiesTo(LayerImpl* layer) {
   layer->SetHaveScrollEventHandlers(have_scroll_event_handlers_);
   layer->SetNonFastScrollableRegion(non_fast_scrollable_region_);
   layer->SetTouchEventHandlerRegion(touch_event_handler_region_);
+  layer->SetScrollBlocksOn(scroll_blocks_on_);
   layer->SetContentsOpaque(contents_opaque_);
   if (!layer->OpacityIsAnimatingOnImplOnly() && !OpacityIsAnimating())
     layer->SetOpacity(opacity_);
@@ -965,17 +992,15 @@ void Layer::PushPropertiesTo(LayerImpl* layer) {
     layer->SetClipChildren(nullptr);
   }
 
-  // Adjust the scroll delta to be just the scrolls that have happened since
-  // the BeginMainFrame was sent.  This happens for impl-side painting
-  // in LayerImpl::ApplyScrollDeltasSinceBeginMainFrame in a separate tree walk.
-  if (layer->layer_tree_impl()->settings().impl_side_painting) {
-    layer->SetScrollOffset(scroll_offset_);
-  } else {
-    layer->SetScrollOffsetAndDelta(
-        scroll_offset_,
-        layer->ScrollDelta() - layer->sent_scroll_delta());
-    layer->SetSentScrollDelta(gfx::Vector2dF());
-  }
+  // When a scroll offset animation is interrupted the new scroll position on
+  // the pending tree will clobber any impl-side scrolling occuring on the
+  // active tree. To do so, avoid scrolling the pending tree along with it
+  // instead of trying to undo that scrolling later.
+  if (layer_animation_controller_->scroll_offset_animation_was_interrupted())
+    layer->PushScrollOffsetFromMainThreadAndClobberActiveValue(scroll_offset_);
+  else
+    layer->PushScrollOffsetFromMainThread(scroll_offset_);
+  layer->SetScrollCompensationAdjustment(ScrollCompensationAdjustment());
 
   // Wrap the copy_requests_ in a PostTask to the main thread.
   ScopedPtrVector<CopyOutputRequest> main_thread_copy_requests;
@@ -1009,6 +1034,11 @@ void Layer::PushPropertiesTo(LayerImpl* layer) {
   layer_animation_controller_->PushAnimationUpdatesTo(
       layer->layer_animation_controller());
 
+  if (frame_timing_requests_dirty_) {
+    layer->PassFrameTimingRequests(&frame_timing_requests_);
+    frame_timing_requests_dirty_ = false;
+  }
+
   // Reset any state that should be cleared for the next update.
   stacking_order_changed_ = false;
   update_rect_ = gfx::Rect();
@@ -1018,7 +1048,8 @@ void Layer::PushPropertiesTo(LayerImpl* layer) {
 }
 
 scoped_ptr<LayerImpl> Layer::CreateLayerImpl(LayerTreeImpl* tree_impl) {
-  return LayerImpl::Create(tree_impl, layer_id_);
+  return LayerImpl::Create(tree_impl, layer_id_,
+                           new LayerImpl::SyncedScrollOffset);
 }
 
 bool Layer::DrawsContent() const {
@@ -1081,7 +1112,8 @@ bool Layer::IsSuitableForGpuRasterization() const {
   return true;
 }
 
-scoped_refptr<base::debug::ConvertableToTraceFormat> Layer::TakeDebugInfo() {
+scoped_refptr<base::trace_event::ConvertableToTraceFormat>
+Layer::TakeDebugInfo() {
   if (client_)
     return client_->TakeDebugInfo();
   else
@@ -1112,7 +1144,7 @@ void Layer::ClearRenderSurfaceLayerList() {
 }
 
 gfx::ScrollOffset Layer::ScrollOffsetForAnimation() const {
-  return TotalScrollOffset();
+  return CurrentScrollOffset();
 }
 
 // On<Property>Animated is called due to an ongoing accelerated animation.
@@ -1153,7 +1185,7 @@ bool Layer::AddAnimation(scoped_ptr <Animation> animation) {
   if (!layer_animation_controller_->animation_registrar())
     return false;
 
-  if (animation->target_property() == Animation::ScrollOffset &&
+  if (animation->target_property() == Animation::SCROLL_OFFSET &&
       !layer_animation_controller_->animation_registrar()
            ->supports_scroll_animations())
     return false;
@@ -1173,6 +1205,12 @@ void Layer::PauseAnimation(int animation_id, double time_offset) {
 
 void Layer::RemoveAnimation(int animation_id) {
   layer_animation_controller_->RemoveAnimation(animation_id);
+  SetNeedsCommit();
+}
+
+void Layer::RemoveAnimation(int animation_id,
+                            Animation::TargetProperty property) {
+  layer_animation_controller_->RemoveAnimation(animation_id, property);
   SetNeedsCommit();
 }
 
@@ -1210,10 +1248,6 @@ ScrollbarLayerInterface* Layer::ToScrollbarLayer() {
 
 RenderingStatsInstrumentation* Layer::rendering_stats_instrumentation() const {
   return layer_tree_host_->rendering_stats_instrumentation();
-}
-
-bool Layer::SupportsLCDText() const {
-  return false;
 }
 
 void Layer::RemoveFromScrollTree() {
@@ -1264,6 +1298,8 @@ gfx::Transform Layer::screen_space_transform_from_property_trees(
   if (transform_tree_index() >= 0) {
     gfx::Transform ssxform = tree.Node(transform_tree_index())->data.to_screen;
     xform.ConcatTransform(ssxform);
+    if (should_flatten_transform_from_property_tree_)
+      xform.FlattenTo2d();
   }
   xform.Scale(1.0 / contents_scale_x(), 1.0 / contents_scale_y());
   return xform;
@@ -1271,16 +1307,78 @@ gfx::Transform Layer::screen_space_transform_from_property_trees(
 
 gfx::Transform Layer::draw_transform_from_property_trees(
     const TransformTree& tree) const {
-  gfx::Transform xform(1, 0, 0, 1, offset_to_transform_parent().x(),
-                       offset_to_transform_parent().y());
-  if (transform_tree_index() >= 0) {
-    const TransformNode* node = tree.Node(transform_tree_index());
-    gfx::Transform ssxform;
-    tree.ComputeTransform(node->id, node->data.target_id, &ssxform);
-    xform.ConcatTransform(ssxform);
+  const TransformNode* node = tree.Node(transform_tree_index());
+  // TODO(vollick): ultimately we'll need to find this information (whether or
+  // not we establish a render surface) somewhere other than the layer.
+  const TransformNode* target_node =
+      has_render_surface_ ? node : tree.Node(node->data.content_target_id);
+
+  gfx::Transform xform;
+  const bool owns_non_root_surface = parent() && render_surface();
+  if (!owns_non_root_surface) {
+    // If you're not the root, or you don't own a surface, you need to apply
+    // your local offset.
+    xform = node->data.to_target;
+    if (should_flatten_transform_from_property_tree_)
+      xform.FlattenTo2d();
+    xform.Translate(offset_to_transform_parent().x(),
+                    offset_to_transform_parent().y());
+    // A fixed-position layer does not necessarily have the same render target
+    // as its transform node. In particular, its transform node may be an
+    // ancestor of its render target's transform node. For example, given layer
+    // tree R->S->F, suppose F is fixed and S owns a render surface (e.g., say S
+    // has opacity 0.9 and both S and F draw content). Then F's transform node
+    // is the root node, so the target space transform from that node is defined
+    // with respect to the root render surface. But F will render to S's
+    // surface, so must apply a change of basis transform to the target space
+    // transform from its transform node.
+    if (position_constraint_.is_fixed_position()) {
+      gfx::Transform tree_target_to_render_target;
+      tree.ComputeTransform(node->data.content_target_id,
+                            render_target()->transform_tree_index(),
+                            &tree_target_to_render_target);
+      xform.ConcatTransform(tree_target_to_render_target);
+    }
+  } else {
+    // Surfaces need to apply their sublayer scale.
+    xform.Scale(target_node->data.sublayer_scale.x(),
+                target_node->data.sublayer_scale.y());
   }
   xform.Scale(1.0 / contents_scale_x(), 1.0 / contents_scale_y());
   return xform;
+}
+
+float Layer::DrawOpacityFromPropertyTrees(const OpacityTree& tree) const {
+  if (!render_target())
+    return 0.f;
+
+  const OpacityNode* target_node =
+      tree.Node(render_target()->opacity_tree_index());
+  const OpacityNode* node = tree.Node(opacity_tree_index());
+  if (node == target_node)
+    return 1.f;
+
+  float draw_opacity = 1.f;
+  while (node != target_node) {
+    draw_opacity *= node->data;
+    node = tree.parent(node);
+  }
+  return draw_opacity;
+}
+
+void Layer::SetFrameTimingRequests(
+    const std::vector<FrameTimingRequest>& requests) {
+  frame_timing_requests_ = requests;
+  frame_timing_requests_dirty_ = true;
+  SetNeedsCommit();
+}
+
+void Layer::DidBeginTracing() {
+  // We'll be dumping layer trees as part of trace, so make sure
+  // PushPropertiesTo() propagates layer debug info to the impl
+  // side -- otherwise this won't happen for the the layers that
+  // remain unchanged since tracing started.
+  SetNeedsPushProperties();
 }
 
 }  // namespace cc

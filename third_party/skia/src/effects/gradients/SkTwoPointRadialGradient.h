@@ -19,19 +19,19 @@ public:
 
     virtual BitmapType asABitmap(SkBitmap* bitmap,
                                  SkMatrix* matrix,
-                                 TileMode* xy) const SK_OVERRIDE;
-    virtual GradientType asAGradient(GradientInfo* info) const SK_OVERRIDE;
+                                 TileMode* xy) const override;
+    GradientType asAGradient(GradientInfo* info) const override;
     virtual bool asFragmentProcessor(GrContext* context, const SkPaint&, const SkMatrix& viewM,
                                      const SkMatrix*, GrColor*,
-                                     GrFragmentProcessor**)  const SK_OVERRIDE;
+                                     GrFragmentProcessor**)  const override;
 
-    virtual size_t contextSize() const SK_OVERRIDE;
+    size_t contextSize() const override;
 
     class TwoPointRadialGradientContext : public SkGradientShaderBase::GradientShaderBaseContext {
     public:
         TwoPointRadialGradientContext(const SkTwoPointRadialGradient&, const ContextRec&);
 
-        virtual void shadeSpan(int x, int y, SkPMColor dstC[], int count) SK_OVERRIDE;
+        void shadeSpan(int x, int y, SkPMColor dstC[], int count) override;
 
     private:
         typedef SkGradientShaderBase::GradientShaderBaseContext INHERITED;
@@ -46,8 +46,8 @@ public:
 
 protected:
     SkTwoPointRadialGradient(SkReadBuffer& buffer);
-    virtual void flatten(SkWriteBuffer& buffer) const SK_OVERRIDE;
-    virtual Context* onCreateContext(const ContextRec&, void* storage) const SK_OVERRIDE;
+    void flatten(SkWriteBuffer& buffer) const override;
+    Context* onCreateContext(const ContextRec&, void* storage) const override;
 
 private:
     const SkPoint fCenter1;

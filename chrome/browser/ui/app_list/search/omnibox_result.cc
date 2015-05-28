@@ -17,6 +17,8 @@
 #include "url/gurl.h"
 #include "url/url_canon.h"
 
+using bookmarks::BookmarkModel;
+
 namespace app_list {
 
 namespace {
@@ -132,7 +134,7 @@ void OmniboxResult::Open(int event_flags) {
                             ui::DispositionFromEventFlags(event_flags));
 }
 
-scoped_ptr<SearchResult> OmniboxResult::Duplicate() {
+scoped_ptr<SearchResult> OmniboxResult::Duplicate() const {
   return scoped_ptr<SearchResult>(new OmniboxResult(profile_, list_controller_,
                                                     autocomplete_controller_,
                                                     is_voice_query_, match_));

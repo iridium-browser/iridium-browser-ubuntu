@@ -20,7 +20,7 @@
   <h1>Objective</h1>
   <p>
     We would like to create a simple, open, but complete format to describe
-    multiple network configurations for Wi-Fi, Ethernet, Cellular,
+    multiple network configurations for WiFi, Ethernet, Cellular,
     Bluetooth/WiFi-Direct, and VPN connections in a single file format, in order
     to simplify and automate network configuration for users.
   </p>
@@ -33,7 +33,7 @@
     is a problem shared across desktop, laptop, tablet, and phone users of all
     operating system types. It is exacerbated in business and schools which
     often have complex network configurations (VPNs and 802.1X networking) that
-    change often and have many connected devices. Configuration of Wi-Fi is
+    change often and have many connected devices. Configuration of WiFi is
     still done manually, often by administrators physically standing next to
     users working on devices. Certificate distribution is particularly painful
     which often results in admins instead using passphrases to protect networks
@@ -202,7 +202,7 @@
         (optional)
         <span class="type">array of NetworkConfiguration</span>
       </span>
-      Describes Wi-Fi, Ethernet, VPN, and wireless connections.
+      Describes WiFi, Ethernet, VPN, and wireless connections.
     </dd>
 
     <dt class="field">Certificates</dt>
@@ -374,7 +374,7 @@
         <span class="value">WiFi</span>, otherwise ignored)
         <span class="type">WiFi</span>
       </span>
-      Wi-Fi settings.
+      WiFi settings.
     </dd>
 
     <dt class="field">WiMAX</dt>
@@ -649,9 +649,9 @@
 </section>
 
 <section>
-  <h1>Wi-Fi networks</h1>
+  <h1>WiFi networks</h1>
   <p>
-    For Wi-Fi connections, <span class="field">Type</span> must be set to
+    For WiFi connections, <span class="field">Type</span> must be set to
     <span class="value">WiFi</span> and the
     field <span class="field">WiFi</span> must be set to an object of
     type <span class="type">WiFi</span> containing the following fields:
@@ -698,12 +698,7 @@
         a hex representation of <span class="field">SSID</span>)
         <span class="type">string</span>
       </span>
-      Hex representation of the network's SSID. If the
-      <span class="field">SSID</span> field is set, but
-      <span class="field">HexSSID</span> is not, converts the contents of the
-      <span class="field">SSID</span> field to UTF-8 encoding,
-      creates the hex representation and assigns the result to
-      <span class="field">HexSSID</span>.
+      Hex representation of the network's SSID.
     </dd>
 
     <dt class="field">HiddenSSID</dt>
@@ -748,12 +743,20 @@
     <dt class="field">SSID</dt>
     <dd>
       <span class="field_meta">
-        (optional if <span class="field">HexSSID</span> is set)
+        (optional if <span class="field">HexSSID</span> is set, otherwise
+        ignored)
         <span class="type">string</span>
       </span>
-      SSID of the network. This field can only used for unicode strings in the
-      UTF-8 encoding. For non-UTF-8 encodings the
-      <span class="field">HexSSID</span> field must be used.
+      Property to access the decoded SSID of a network.<br/>
+      If this field is set, but <span class="field">HexSSID</span> is not,
+      its value will be UTF-8 encoded and the hex representation will be
+      assigned to <span class="field">HexSSID</span>. To configure a non-UTF-8
+      SSID, field <span class="field">HexSSID</span> must be used.<br/>
+      When reading the configuration of a network, both this field and
+      <span class="field">HexSSID</span> might be set. Then this field is the
+      decoding of <span class="field">HexSSID</span>. If possible the HexSSID is
+      decoded using UTF-8, otherwise an encoding is guessed on a best effort
+      basis.
     </dd>
 
     <dt class="field">SignalStrength</dt>
@@ -847,6 +850,16 @@
       OpenVPN settings.
     </dd>
 
+    <dt class="field">ThirdPartyVPN</dt>
+    <dd>
+      <span class="field_meta">
+        (required if <span class="field">Type</span> is
+        <span class="value">ThirdPartyVPN</span>, otherwise ignored)
+        <span class="type">ThirdPartyVPN</span>
+      </span>
+      Third-party VPN provider settings.
+    </dd>
+
     <dt class="field">Type</dt>
     <dd>
       <span class="field_meta">
@@ -856,8 +869,9 @@
       <span class="rule">
         <span class="rule_id"></span>
         Allowed values are <span class="value">IPsec</span>,
-        <span class="value">L2TP-IPsec</span>, and
-        <span class="value">OpenVPN</span>.
+        <span class="value">L2TP-IPsec</span>,
+        <span class="value">OpenVPN</span>, and
+        <span class="value">ThirdPartyVPN</span>.
       </span>
       Type of the VPN.
     </dd>
@@ -1577,7 +1591,29 @@
       Determines which of the host's X.509 names will be verified. Allowed values are <span class="value">name</span>, <span class="value">name-prefix</span> and <span class="value">subject</span>. See OpenVPN's documentation for "--verify-x509-name" for the meaning of each value. Defaults to OpenVPN's default if not specified. 
     </dd>
   </dl>
+</section>
 
+<section>
+  <h1>Third-party VPN provider based connections and types</h1>
+  <p>
+    <span class="field">VPN.Type</span> must be
+    <span class="value">ThirdPartyVPN</span>.
+  </p>
+
+  <p>
+    <span class="type">ThirdPartyVPN</span> type contains the following:
+  </p>
+
+  <dl class="field_list">
+    <dt class="field">ExtensionID</dt>
+    <dd>
+      <span class="field_meta">
+        (required)
+        <span class="type">string</span>
+      </span>
+      The extension ID of the third-party VPN provider used by this network.
+    </dd>
+  </dl>
 </section>
 
 </section>
@@ -2268,11 +2304,16 @@
       network technology currently in use.
       <span class="rule"><span class="rule_id"></span>
         Allowed values are
-        <span class="value">1xRTT</span>, <span class="value">EVDO</span>,
-        <span class="value">GPRS</span>, <span class="value">EDGE</span>,
+        <span class="value">CDMA1XRTT</span>,
+        <span class="value">EDGE</span>,
+        <span class="value">EVDO</span>,
+        <span class="value">GPRS</span>,
+        <span class="value">GSM</span>,
+        <span class="value">HSPA</span>,
+        <span class="value">HSPAPlus</span>,
+        <span class="value">LTE</span>,
+        <span class="value">LTEAdvanced</span>
         <span class="value">UMTS</span>,
-        <span class="value">HSPA</span>, <span class="value">HSPA+</span>,
-        <span class="value">LTE</span>, <span class="value">LTE Advanced</span>
       </span>
     </dd>
 
@@ -2284,21 +2325,17 @@
       The revision of the Preferred Roaming List that is loaded in the modem.
     </dd>
 
-    <dt class="field">ProviderRequiresRoaming</dt>
-    <dd>
-      <span class="field_meta">(optional, read-only)
-        <span class="type">boolean</span>
-      </span>
-      Indicates that the cellular provider (determined based on IMSI and SPN)
-      requires roaming.
-    </dd>
-
     <dt class="field">RoamingState</dt>
     <dd>
       <span class="field_meta">(optional, read-only)
         <span class="type">string</span>
       </span>
       The roaming status of the cellular modem on the current network.
+      <span class="rule"><span class="rule_id"></span>
+        Allowed values are <span class="value">Home</span>,
+        <span class="value">Roaming</span>, or if the provider has no home
+        network, <span class="value">Required</span>.
+      </span>
     </dd>
 
     <dt class="field">ServingOperator</dt>
@@ -2515,7 +2552,7 @@
 <section>
   <h1>Bluetooth / WiFi Direct Networks</h1>
   <p>
-    This format will eventually also cover configuration of Bluetooth and Wi-Fi
+    This format will eventually also cover configuration of Bluetooth and WiFi
     Direct network technologies, however they are currently not supported.
   </p>
 </section>

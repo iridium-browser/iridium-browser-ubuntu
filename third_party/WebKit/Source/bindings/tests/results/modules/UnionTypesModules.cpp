@@ -28,6 +28,13 @@ void BooleanOrString::setBoolean(bool value)
     m_type = SpecificTypeBoolean;
 }
 
+BooleanOrString BooleanOrString::fromBoolean(bool value)
+{
+    BooleanOrString container;
+    container.setBoolean(value);
+    return container;
+}
+
 String BooleanOrString::getAsString() const
 {
     ASSERT(isString());
@@ -41,18 +48,33 @@ void BooleanOrString::setString(String value)
     m_type = SpecificTypeString;
 }
 
+BooleanOrString BooleanOrString::fromString(String value)
+{
+    BooleanOrString container;
+    container.setString(value);
+    return container;
+}
+
+#if COMPILER(MSVC) && defined(COMPONENT_BUILD) && LINK_CORE_MODULES_SEPARATELY
+BooleanOrString::BooleanOrString(const BooleanOrString&) = default;
+BooleanOrString::~BooleanOrString() = default;
+BooleanOrString& BooleanOrString::operator=(const BooleanOrString&) = default;
+#endif
+
 void V8BooleanOrString::toImpl(v8::Isolate* isolate, v8::Local<v8::Value> v8Value, BooleanOrString& impl, ExceptionState& exceptionState)
 {
     if (v8Value.IsEmpty())
         return;
 
     if (v8Value->IsBoolean()) {
-        impl.setBoolean(v8Value->ToBoolean()->Value());
+        impl.setBoolean(v8Value.As<v8::Boolean>()->Value());
         return;
     }
 
     {
-        TOSTRING_VOID_EXCEPTIONSTATE(V8StringResource<>, cppValue, v8Value, exceptionState);
+        V8StringResource<> cppValue = v8Value;
+        if (!cppValue.prepare(exceptionState))
+            return;
         impl.setString(cppValue);
         return;
     }
@@ -74,7 +96,7 @@ v8::Local<v8::Value> toV8(const BooleanOrString& impl, v8::Local<v8::Object> cre
     return v8::Local<v8::Value>();
 }
 
-BooleanOrString NativeValueTraits<BooleanOrString>::nativeValue(const v8::Local<v8::Value>& value, v8::Isolate* isolate, ExceptionState& exceptionState)
+BooleanOrString NativeValueTraits<BooleanOrString>::nativeValue(v8::Isolate* isolate, v8::Local<v8::Value> value, ExceptionState& exceptionState)
 {
     BooleanOrString impl;
     V8BooleanOrString::toImpl(isolate, value, impl, exceptionState);

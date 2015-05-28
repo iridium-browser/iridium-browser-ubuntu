@@ -21,8 +21,11 @@ static const int kEventFlagFromModifiers[] = {
     EF_LEFT_MOUSE_BUTTON,    // EVDEV_MODIFIER_LEFT_MOUSE_BUTTON
     EF_MIDDLE_MOUSE_BUTTON,  // EVDEV_MODIFIER_MIDDLE_MOUSE_BUTTON
     EF_RIGHT_MOUSE_BUTTON,   // EVDEV_MODIFIER_RIGHT_MOUSE_BUTTON
+    EF_BACK_MOUSE_BUTTON,    // EVDEV_MODIFIER_BACK_MOUSE_BUTTON
+    EF_FORWARD_MOUSE_BUTTON, // EVDEV_MODIFIER_FORWARD_MOUSE_BUTTON
     EF_COMMAND_DOWN,         // EVDEV_MODIFIER_COMMAND
     EF_ALTGR_DOWN,           // EVDEV_MODIFIER_ALTGR
+    EF_MOD3_DOWN,            // EVDEV_MODIFIER_MOD3
 };
 
 }  // namespace
@@ -54,8 +57,6 @@ void EventModifiersEvdev::UpdateModifierLock(unsigned int modifier, bool down) {
   if (down)
     modifier_flags_locked_ ^= kEventFlagFromModifiers[modifier];
 
-  // TODO(spang): Synchronize with the CapsLock LED.
-
   UpdateFlags(modifier);
 }
 
@@ -66,8 +67,6 @@ void EventModifiersEvdev::SetModifierLock(unsigned int modifier, bool locked) {
     modifier_flags_locked_ |= kEventFlagFromModifiers[modifier];
   else
     modifier_flags_locked_ &= ~kEventFlagFromModifiers[modifier];
-
-  // TODO(spang): Synchronize with the CapsLock LED.
 
   UpdateFlags(modifier);
 }

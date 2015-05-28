@@ -27,9 +27,19 @@
 #include "base/mac/foundation_util.h"
 #endif
 
+#if defined(OS_WIN)
+#include "base/win/registry.h"
+#endif
+
 #include "widevine_cdm_version.h"  // In SHARED_INTERMEDIATE_DIR.
 
 namespace {
+
+#if defined(OS_WIN)
+const wchar_t kFlashRegistryRoot[] = L"SOFTWARE\\Macromedia\\FlashPlayerPepper";
+
+const wchar_t kFlashPlayerPathValueName[] = L"PlayerPath";
+#endif
 
 // File name of the internal Flash plugin on different platforms.
 const base::FilePath::CharType kInternalFlashPluginFileName[] =
@@ -46,18 +56,11 @@ const base::FilePath::CharType kPepperFlashBaseDirectory[] =
     FILE_PATH_LITERAL("PepperFlash");
 
 #if defined(OS_WIN)
-const base::FilePath::CharType kPepperFlashDebuggerBaseDirectory[] =
+const base::FilePath::CharType kPepperFlashSystemBaseDirectory[] =
     FILE_PATH_LITERAL("Macromed\\Flash");
-#endif
-
-// File name of the internal PDF plugin on different platforms.
-const base::FilePath::CharType kInternalPDFPluginFileName[] =
-#if defined(OS_WIN)
-    FILE_PATH_LITERAL("pdf.dll");
-#elif defined(OS_MACOSX)
-    FILE_PATH_LITERAL("PDF.plugin");
-#else  // Linux and Chrome OS
-    FILE_PATH_LITERAL("libpdf.so");
+#elif defined(OS_MACOSX) && !defined(OS_IOS)
+const base::FilePath::CharType kPepperFlashSystemBaseDirectory[] =
+    FILE_PATH_LITERAL("Internet Plug-Ins/PepperFlashPlayer");
 #endif
 
 const base::FilePath::CharType kInternalNaClPluginFileName[] =
@@ -113,6 +116,20 @@ bool GetInternalPluginsDirectory(base::FilePath* result) {
   // The rest of the world expects plugins in the module directory.
   return PathService::Get(base::DIR_MODULE, result);
 }
+
+#if defined(OS_WIN)
+// Gets the Flash path if installed on the system.
+bool GetSystemFlashDirectory(base::FilePath* out_path) {
+  base::win::RegKey path_key(HKEY_LOCAL_MACHINE, kFlashRegistryRoot, KEY_READ);
+  base::string16 path_str;
+  if (FAILED(path_key.ReadValue(kFlashPlayerPathValueName, &path_str)))
+    return false;
+  base::FilePath plugin_path = base::FilePath(path_str).DirName();
+
+  *out_path = plugin_path;
+  return true;
+}
+#endif
 
 }  // namespace
 
@@ -214,9 +231,23 @@ bool PathProvider(int key, base::FilePath* result) {
       if (!GetDefaultUserDataDirectory(&cur))
         return false;
 #endif
+#if defined(OS_MACOSX)
+      cur = cur.Append(FILE_PATH_LITERAL("Crashpad"));
+#else
       cur = cur.Append(FILE_PATH_LITERAL("Crash Reports"));
+#endif
       create_dir = true;
       break;
+#if defined(OS_WIN)
+    case chrome::DIR_WATCHER_DATA:
+      // The watcher data is always stored relative to the default user data
+      // directory.  This allows the watcher to be initialized before
+      // command-line options have been parsed.
+      if (!GetDefaultUserDataDirectory(&cur))
+        return false;
+      cur = cur.Append(FILE_PATH_LITERAL("Diagnostics"));
+      break;
+#endif
     case chrome::DIR_RESOURCES:
 #if defined(OS_MACOSX)
       cur = base::mac::FrameworkBundlePath();
@@ -261,16 +292,17 @@ bool PathProvider(int key, base::FilePath* result) {
         return false;
       cur = cur.Append(kPepperFlashBaseDirectory);
       break;
-    case chrome::DIR_PEPPER_FLASH_DEBUGGER_PLUGIN:
+    case chrome::DIR_PEPPER_FLASH_SYSTEM_PLUGIN:
 #if defined(OS_WIN)
-      if (!PathService::Get(base::DIR_SYSTEM, &cur))
+      if (!GetSystemFlashDirectory(&cur))
         return false;
-      cur = cur.Append(kPepperFlashDebuggerBaseDirectory);
-#elif defined(OS_MACOSX)
-      // TODO(luken): finalize Mac OS directory paths, current consensus is
-      // around /Library/Internet Plug-Ins/PepperFlashPlayer/
-      return false;
+#elif defined(OS_MACOSX) && !defined(OS_IOS)
+      if (!GetLocalLibraryDirectory(&cur))
+        return false;
+      cur = cur.Append(kPepperFlashSystemBaseDirectory);
 #else
+      // Chrome on iOS does not supports PPAPI binaries, return false.
+      // TODO(wfh): If Adobe release PPAPI binaries for Linux, add support here.
       return false;
 #endif
       break;
@@ -293,11 +325,6 @@ bool PathProvider(int key, base::FilePath* result) {
       if (!PathService::Get(chrome::DIR_PEPPER_FLASH_PLUGIN, &cur))
         return false;
       cur = cur.Append(chrome::kPepperFlashPluginFilename);
-      break;
-    case chrome::FILE_PDF_PLUGIN:
-      if (!GetInternalPluginsDirectory(&cur))
-        return false;
-      cur = cur.Append(kInternalPDFPluginFileName);
       break;
     case chrome::FILE_EFFECTS_PLUGIN:
       if (!GetInternalPluginsDirectory(&cur))
@@ -472,18 +499,6 @@ bool PathProvider(int key, base::FilePath* result) {
     }
 #endif
 #if defined(OS_MACOSX) && !defined(OS_IOS)
-    case chrome::DIR_MANAGED_PREFS: {
-      if (!GetLocalLibraryDirectory(&cur))
-        return false;
-      cur = cur.Append(FILE_PATH_LITERAL("Managed Preferences"));
-      char* login = getlogin();
-      if (!login)
-        return false;
-      cur = cur.AppendASCII(login);
-      if (!base::PathExists(cur))  // We don't want to create this.
-        return false;
-      break;
-    }
     case chrome::DIR_USER_LIBRARY: {
       if (!GetUserLibraryDirectory(&cur))
         return false;

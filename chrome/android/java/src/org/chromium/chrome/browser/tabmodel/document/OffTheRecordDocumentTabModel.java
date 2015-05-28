@@ -9,6 +9,7 @@ import android.content.Intent;
 import org.chromium.base.VisibleForTesting;
 import org.chromium.chrome.browser.Tab;
 import org.chromium.chrome.browser.TabState;
+import org.chromium.chrome.browser.document.IncognitoNotificationManager;
 import org.chromium.chrome.browser.tabmodel.EmptyTabModel;
 import org.chromium.chrome.browser.tabmodel.OffTheRecordTabModel;
 import org.chromium.chrome.browser.tabmodel.TabModel;
@@ -20,9 +21,12 @@ import org.chromium.chrome.browser.tabmodel.TabModel;
  * the Activity is dead when it occurs.
  */
 public class OffTheRecordDocumentTabModel extends OffTheRecordTabModel implements DocumentTabModel {
-    public OffTheRecordDocumentTabModel(OffTheRecordTabModelDelegate tabModelCreator,
+    private final ActivityDelegate mActivityDelegate;
+
+    public OffTheRecordDocumentTabModel(OffTheRecordTabModelDelegate offTheRecordDelegate,
             ActivityDelegate delegate) {
-        super(tabModelCreator);
+        super(offTheRecordDelegate);
+        mActivityDelegate = delegate;
         if (delegate.getTasksFromRecents(true).size() > 0) {
             ensureTabModelImpl();
         }
@@ -31,6 +35,14 @@ public class OffTheRecordDocumentTabModel extends OffTheRecordTabModel implement
     @VisibleForTesting
     public boolean isDocumentTabModelImplCreated() {
         return !(getDelegateModel() instanceof EmptyTabModel);
+    }
+
+    @Override
+    protected void destroyIncognitoIfNecessary() {
+        super.destroyIncognitoIfNecessary();
+        if (!mActivityDelegate.isIncognitoDocumentAccessibleToUser()) {
+            IncognitoNotificationManager.dismissIncognitoNotification();
+        }
     }
 
     private DocumentTabModel getDelegateDocumentTabModel() {
@@ -64,8 +76,7 @@ public class OffTheRecordDocumentTabModel extends OffTheRecordTabModel implement
 
     @Override
     public void updateRecentlyClosed() {
-        if (!isDocumentTabModelImplCreated()) return;
-        getDelegateDocumentTabModel().updateRecentlyClosed();
+        if (isDocumentTabModelImplCreated()) getDelegateDocumentTabModel().updateRecentlyClosed();
         destroyIncognitoIfNecessary();
     }
 
@@ -100,9 +111,9 @@ public class OffTheRecordDocumentTabModel extends OffTheRecordTabModel implement
     }
 
     @Override
-    public void addTab(Tab tab) {
+    public void addTab(Intent intent, Tab tab) {
         ensureTabModelImpl();
-        getDelegateDocumentTabModel().addTab(tab);
+        getDelegateDocumentTabModel().addTab(intent, tab);
     }
 
     @Override
@@ -134,9 +145,9 @@ public class OffTheRecordDocumentTabModel extends OffTheRecordTabModel implement
     }
 
     @Override
-    public void setLastShownId(int id) {
-        ensureTabModelImpl();
-        getDelegateDocumentTabModel().setLastShownId(id);
+    public boolean setLastShownId(int id) {
+        if (!isDocumentTabModelImplCreated()) return false;
+        return getDelegateDocumentTabModel().setLastShownId(id);
     }
 
     @Override

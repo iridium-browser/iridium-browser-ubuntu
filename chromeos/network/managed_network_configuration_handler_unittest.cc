@@ -21,6 +21,7 @@
 #include "chromeos/network/network_configuration_handler.h"
 #include "chromeos/network/network_policy_observer.h"
 #include "chromeos/network/network_profile_handler.h"
+#include "chromeos/network/network_state_handler.h"
 #include "chromeos/network/onc/onc_test_utils.h"
 #include "chromeos/network/onc/onc_utils.h"
 #include "dbus/object_path.h"
@@ -63,8 +64,24 @@ const char kUser1ProfilePath[] = "/profile/user1/shill";
 MATCHER_P(IsEqualTo,
           value,
           std::string(negation ? "isn't" : "is") + " equal to " +
-          ValueToString(value)) {
+              ValueToString(value)) {
   return value->Equals(&arg);
+}
+
+// Match properties in |value| to |arg|. |arg| may contain extra properties).
+MATCHER_P(MatchesProperties,
+          value,
+          std::string(negation ? "does't match " : "matches ") +
+              ValueToString(value)) {
+  for (base::DictionaryValue::Iterator iter(*value); !iter.IsAtEnd();
+       iter.Advance()) {
+    const base::Value* property;
+    if (!arg.GetWithoutPathExpansion(iter.key(), &property) ||
+        !iter.value().Equals(property)) {
+      return false;
+    }
+  }
+  return true;
 }
 
 class ShillProfileTestClient {
@@ -171,7 +188,7 @@ class TestNetworkProfileHandler : public NetworkProfileHandler {
   TestNetworkProfileHandler() {
     Init();
   }
-  virtual ~TestNetworkProfileHandler() {}
+  ~TestNetworkProfileHandler() override {}
 
   void AddProfileForTest(const NetworkProfile& profile) {
     AddProfile(profile);
@@ -211,8 +228,7 @@ class ManagedNetworkConfigurationHandlerTest : public testing::Test {
         mock_service_client_(NULL) {
   }
 
-  virtual ~ManagedNetworkConfigurationHandlerTest() {
-  }
+  ~ManagedNetworkConfigurationHandlerTest() override {}
 
   void SetUp() override {
     scoped_ptr<DBusThreadManagerSetter> dbus_setter =
@@ -241,14 +257,16 @@ class ManagedNetworkConfigurationHandlerTest : public testing::Test {
         .WillByDefault(Invoke(&services_stub_,
                               &ShillServiceTestClient::GetProperties));
 
+    network_state_handler_.reset(NetworkStateHandler::InitializeForTest());
     network_profile_handler_.reset(new TestNetworkProfileHandler());
     network_configuration_handler_.reset(
         NetworkConfigurationHandler::InitializeForTest(
-            NULL /* no NetworkStateHandler */));
+            network_state_handler_.get(),
+            NULL /* no NetworkDeviceHandler */));
     managed_network_configuration_handler_.reset(
         new ManagedNetworkConfigurationHandlerImpl());
     managed_network_configuration_handler_->Init(
-        NULL /* no NetworkStateHandler */,
+        network_state_handler_.get(),
         network_profile_handler_.get(),
         network_configuration_handler_.get(),
         NULL /* no DeviceHandler */);
@@ -260,6 +278,7 @@ class ManagedNetworkConfigurationHandlerTest : public testing::Test {
   void TearDown() override {
     if (managed_network_configuration_handler_)
       managed_network_configuration_handler_->RemoveObserver(&policy_observer_);
+    network_state_handler_.reset();
     managed_network_configuration_handler_.reset();
     network_configuration_handler_.reset();
     network_profile_handler_.reset();
@@ -359,6 +378,7 @@ class ManagedNetworkConfigurationHandlerTest : public testing::Test {
   ShillProfileTestClient profiles_stub_;
   ShillServiceTestClient services_stub_;
   TestNetworkPolicyObserver policy_observer_;
+  scoped_ptr<NetworkStateHandler> network_state_handler_;
   scoped_ptr<TestNetworkProfileHandler> network_profile_handler_;
   scoped_ptr<NetworkConfigurationHandler> network_configuration_handler_;
   scoped_ptr<ManagedNetworkConfigurationHandlerImpl>
@@ -861,8 +881,7 @@ TEST_F(ManagedNetworkConfigurationHandlerTest, AutoConnectDisallowed) {
   EXPECT_CALL(*mock_manager_client_,
               ConfigureServiceForProfile(
                   dbus::ObjectPath(kUser1ProfilePath),
-                  IsEqualTo(expected_shill_properties.get()),
-                  _, _));
+                  MatchesProperties(expected_shill_properties.get()), _, _));
 
   SetPolicy(::onc::ONC_SOURCE_USER_POLICY,
             kUser1,

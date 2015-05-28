@@ -8,6 +8,7 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/metrics/field_trial.h"
 #include "base/strings/utf_string_conversions.h"
+#include "base/time/time.h"
 #include "chrome/browser/prerender/prerender_manager.h"
 #include "chrome/browser/prerender/prerender_manager_factory.h"
 #include "chrome/browser/search/instant_unittest_base.h"
@@ -60,7 +61,8 @@ class MockSearchIPCRouterDelegate : public SearchIPCRouter::Delegate {
   MOCK_METHOD1(OnDeleteMostVisitedItem, void(const GURL& url));
   MOCK_METHOD1(OnUndoMostVisitedDeletion, void(const GURL& url));
   MOCK_METHOD0(OnUndoAllMostVisitedDeletions, void());
-  MOCK_METHOD1(OnLogEvent, void(NTPLoggingEventType event));
+  MOCK_METHOD2(OnLogEvent, void(NTPLoggingEventType event,
+                                base::TimeDelta time));
   MOCK_METHOD2(OnLogMostVisitedImpression,
                void(int position, const base::string16& provider));
   MOCK_METHOD2(OnLogMostVisitedNavigation,
@@ -376,68 +378,6 @@ class SearchTabHelperWindowTest : public BrowserWithTestWindowTest {
   }
 };
 
-TEST_F(SearchTabHelperWindowTest, OnProvisionalLoadFailRedirectNTPToLocal) {
-  AddTab(browser(), GURL(chrome::kChromeUINewTabURL));
-  content::WebContents* contents =
-        browser()->tab_strip_model()->GetWebContentsAt(0);
-  content::NavigationController* controller = &contents->GetController();
-
-  SearchTabHelper* search_tab_helper =
-      SearchTabHelper::FromWebContents(contents);
-  ASSERT_NE(static_cast<SearchTabHelper*>(NULL), search_tab_helper);
-
-  // A failed provisional load of a cacheable NTP should be redirected to local
-  // NTP.
-  const GURL cacheableNTPURL = chrome::GetNewTabPageURL(profile());
-  search_tab_helper->DidFailProvisionalLoad(
-      contents->GetMainFrame(), cacheableNTPURL, 1, base::string16());
-  CommitPendingLoad(controller);
-  EXPECT_EQ(GURL(chrome::kChromeSearchLocalNtpUrl),
-                 controller->GetLastCommittedEntry()->GetURL());
-}
-
-TEST_F(SearchTabHelperWindowTest, OnProvisionalLoadFailDontRedirectIfAborted) {
-  AddTab(browser(), GURL("chrome://blank"));
-  content::WebContents* contents =
-        browser()->tab_strip_model()->GetWebContentsAt(0);
-  content::NavigationController* controller = &contents->GetController();
-
-  SearchTabHelper* search_tab_helper =
-      SearchTabHelper::FromWebContents(contents);
-  ASSERT_NE(static_cast<SearchTabHelper*>(NULL), search_tab_helper);
-
-  // A failed provisional load of a cacheable NTP should be redirected to local
-  // NTP.
-  const GURL cacheableNTPURL = chrome::GetNewTabPageURL(profile());
-  search_tab_helper->DidFailProvisionalLoad(contents->GetMainFrame(),
-                                            cacheableNTPURL,
-                                            net::ERR_ABORTED,
-                                            base::string16());
-  CommitPendingLoad(controller);
-  EXPECT_EQ(GURL("chrome://blank"),
-                 controller->GetLastCommittedEntry()->GetURL());
-}
-
-TEST_F(SearchTabHelperWindowTest, OnProvisionalLoadFailDontRedirectNonNTP) {
-  AddTab(browser(), GURL(chrome::kChromeUINewTabURL));
-  content::WebContents* contents =
-        browser()->tab_strip_model()->GetWebContentsAt(0);
-  content::NavigationController* controller = &contents->GetController();
-
-  SearchTabHelper* search_tab_helper =
-      SearchTabHelper::FromWebContents(contents);
-  ASSERT_NE(static_cast<SearchTabHelper*>(NULL), search_tab_helper);
-
-  // Any other web page shouldn't be redirected when provisional load fails.
-  search_tab_helper->DidFailProvisionalLoad(contents->GetMainFrame(),
-                                            GURL("http://www.example.com"),
-                                            1,
-                                            base::string16());
-  CommitPendingLoad(controller);
-  EXPECT_NE(GURL(chrome::kChromeSearchLocalNtpUrl),
-                 controller->GetLastCommittedEntry()->GetURL());
-}
-
 class SearchTabHelperPrerenderTest : public InstantUnitTestBase {
  public:
   ~SearchTabHelperPrerenderTest() override {}
@@ -451,8 +391,6 @@ class SearchTabHelperPrerenderTest : public InstantUnitTestBase {
     InstantUnitTestBase::SetUp();
 
     AddTab(browser(), GURL(chrome::kChromeUINewTabURL));
-    prerender::PrerenderManagerFactory::GetForProfile(browser()->profile())->
-        OnCookieStoreLoaded();
     SearchTabHelper::FromWebContents(web_contents())->set_omnibox_has_focus_fn(
         omnibox_has_focus);
     SearchTabHelperPrerenderTest::omnibox_has_focus_ = true;

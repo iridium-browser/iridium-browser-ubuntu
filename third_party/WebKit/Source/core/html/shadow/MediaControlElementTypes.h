@@ -30,9 +30,10 @@
 #ifndef MediaControlElementTypes_h
 #define MediaControlElementTypes_h
 
+#include "core/CoreExport.h"
 #include "core/html/HTMLDivElement.h"
 #include "core/html/HTMLInputElement.h"
-#include "core/rendering/RenderBlock.h"
+#include "core/layout/LayoutBlock.h"
 
 namespace blink {
 
@@ -52,15 +53,12 @@ enum MediaControlElementType {
     MediaTimelineContainer,
     MediaCurrentTimeDisplay,
     MediaTimeRemainingDisplay,
-    MediaStatusDisplay,
     MediaControlsPanel,
     MediaVolumeSliderContainer,
     MediaVolumeSlider,
     MediaVolumeSliderThumb,
     MediaFullScreenVolumeSlider,
     MediaFullScreenVolumeSliderThumb,
-    MediaTextTrackDisplayContainer,
-    MediaTextTrackDisplay,
     MediaExitFullscreenButton,
     MediaOverlayPlayButton,
     MediaCastOffButton,
@@ -69,10 +67,10 @@ enum MediaControlElementType {
     MediaOverlayCastOnButton,
 };
 
-HTMLMediaElement* toParentMediaElement(Node*);
-inline HTMLMediaElement* toParentMediaElement(RenderObject* renderer) { return toParentMediaElement(renderer->node()); }
+CORE_EXPORT HTMLMediaElement* toParentMediaElement(Node*);
+inline HTMLMediaElement* toParentMediaElement(LayoutObject* renderer) { return toParentMediaElement(renderer->node()); }
 
-MediaControlElementType mediaControlElementType(Node*);
+CORE_EXPORT MediaControlElementType mediaControlElementType(Node*);
 
 // ----------------------------
 
@@ -83,7 +81,7 @@ public:
 
     MediaControlElementType displayType() { return m_displayType; }
 
-    virtual void trace(Visitor*);
+    DECLARE_VIRTUAL_TRACE();
 
 protected:
     MediaControlElement(MediaControls&, MediaControlElementType, HTMLElement*);
@@ -104,7 +102,7 @@ private:
 class MediaControlDivElement : public HTMLDivElement, public MediaControlElement {
     WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(MediaControlDivElement);
 public:
-    virtual void trace(Visitor*) override;
+    DECLARE_VIRTUAL_TRACE();
 
 protected:
     MediaControlDivElement(MediaControls&, MediaControlElementType);
@@ -116,9 +114,9 @@ private:
 // ----------------------------
 
 class MediaControlInputElement : public HTMLInputElement, public MediaControlElement {
-    WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(MediaControlInputElement);
+    WILL_BE_USING_GARBAGE_COLLECTED_MIXIN_NESTED(MediaControlInputElement, HTMLFormControlElement);
 public:
-    virtual void trace(Visitor*) override;
+    DECLARE_VIRTUAL_TRACE();
 
 protected:
     MediaControlInputElement(MediaControls&, MediaControlElementType);

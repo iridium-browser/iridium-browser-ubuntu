@@ -108,6 +108,7 @@ class MockUserManager : public ChromeUserManager {
   virtual const user_manager::User* GetPrimaryUser() const override;
 
   // ChromeUserManager overrides:
+  virtual BootstrapManager* GetBootstrapManager() override;
   virtual MultiProfileUserController* GetMultiProfileUserController() override;
   virtual UserImageManager* GetUserImageManager(
       const std::string& user_id) override;
@@ -124,6 +125,10 @@ class MockUserManager : public ChromeUserManager {
   // Creates a new public session user. Users previously created by this
   // MockUserManager become invalid.
   user_manager::User* CreatePublicAccountUser(const std::string& email);
+
+  // Creates a new kiosk app user. Users previously created by this
+  // MockUserManager become invalid.
+  user_manager::User* CreateKioskAppUser(const std::string& user_id);
 
   // Adds a new User instance to the back of the user list. Users previously
   // created by this MockUserManager remain valid.

@@ -7,6 +7,7 @@
 #include <algorithm>
 
 #include "base/callback.h"
+#include "base/callback_helpers.h"
 #include "base/single_thread_task_runner.h"
 #include "base/thread_task_runner_handle.h"
 #include "base/timer/timer.h"
@@ -56,7 +57,7 @@ class LibjingleTransport
       public sigslot::has_slots<> {
  public:
   LibjingleTransport(cricket::PortAllocator* port_allocator,
-                           const NetworkSettings& network_settings);
+                     const NetworkSettings& network_settings);
   ~LibjingleTransport() override;
 
   // Called by JingleTransportFactory when it has fresh Jingle info.
@@ -86,6 +87,8 @@ class LibjingleTransport
   // socket is destroyed.
   void OnChannelDestroyed();
 
+  void NotifyRouteChanged();
+
   // Tries to connect by restarting ICE. Called by |reconnect_timer_|.
   void TryReconnect();
 
@@ -102,7 +105,6 @@ class LibjingleTransport
 
   std::list<cricket::Candidate> pending_candidates_;
   scoped_ptr<cricket::P2PTransportChannel> channel_;
-  bool channel_was_writable_;
   int connect_attempts_left_;
   base::RepeatingTimer<LibjingleTransport> reconnect_timer_;
 
@@ -120,7 +122,6 @@ LibjingleTransport::LibjingleTransport(cricket::PortAllocator* port_allocator,
           rtc::CreateRandomString(cricket::ICE_UFRAG_LENGTH)),
       ice_password_(rtc::CreateRandomString(cricket::ICE_PWD_LENGTH)),
       can_start_(false),
-      channel_was_writable_(false),
       connect_attempts_left_(kMaxReconnectAttempts),
       weak_factory_(this) {
   DCHECK(!ice_username_fragment_.empty());
@@ -149,6 +150,8 @@ void LibjingleTransport::OnCanStart() {
     DoStart();
 
   while (!pending_candidates_.empty()) {
+    channel_->SetRemoteIceCredentials(pending_candidates_.front().username(),
+                                      pending_candidates_.front().password());
     channel_->OnCandidate(pending_candidates_.front());
     pending_candidates_.pop_front();
   }
@@ -200,6 +203,10 @@ void LibjingleTransport::DoStart() {
   reconnect_timer_.Start(
       FROM_HERE, base::TimeDelta::FromSeconds(kReconnectDelaySeconds),
       this, &LibjingleTransport::TryReconnect);
+
+  base::ThreadTaskRunnerHandle::Get()->PostTask(
+      FROM_HERE, base::Bind(&LibjingleTransport::NotifyConnected,
+                            weak_factory_.GetWeakPtr()));
 }
 
 void LibjingleTransport::NotifyConnected() {
@@ -208,10 +215,7 @@ void LibjingleTransport::NotifyConnected() {
       new jingle_glue::TransportChannelSocketAdapter(channel_.get()));
   socket->SetOnDestroyedCallback(base::Bind(
       &LibjingleTransport::OnChannelDestroyed, base::Unretained(this)));
-
-  Transport::ConnectedCallback callback = callback_;
-  callback_.Reset();
-  callback.Run(socket.Pass());
+  base::ResetAndReturn(&callback_).Run(socket.Pass());
 }
 
 void LibjingleTransport::AddRemoteCandidate(
@@ -226,6 +230,8 @@ void LibjingleTransport::AddRemoteCandidate(
     return;
 
   if (channel_) {
+    channel_->SetRemoteIceCredentials(candidate.username(),
+                                      candidate.password());
     channel_->OnCandidate(candidate);
   } else {
     pending_candidates_.push_back(candidate);
@@ -258,6 +264,35 @@ void LibjingleTransport::OnCandidateReady(
 void LibjingleTransport::OnRouteChange(
     cricket::TransportChannel* channel,
     const cricket::Candidate& candidate) {
+  // Ignore notifications if the channel is not writable.
+  if (channel_->writable())
+    NotifyRouteChanged();
+}
+
+void LibjingleTransport::OnWritableState(
+    cricket::TransportChannel* channel) {
+  DCHECK_EQ(channel, channel_.get());
+
+  if (channel->writable()) {
+    connect_attempts_left_ = kMaxReconnectAttempts;
+    reconnect_timer_.Stop();
+
+    // Route change notifications are ignored when the |channel_| is not
+    // writable. Notify the event handler about the current route once the
+    // channel is writable.
+    NotifyRouteChanged();
+  } else {
+    reconnect_timer_.Reset();
+    TryReconnect();
+  }
+}
+
+void LibjingleTransport::OnChannelDestroyed() {
+  // The connection socket is being deleted, so delete the transport too.
+  delete this;
+}
+
+void LibjingleTransport::NotifyRouteChanged() {
   TransportRoute route;
 
   DCHECK(channel_->best_connection());
@@ -276,7 +311,7 @@ void LibjingleTransport::OnRouteChange(
       CandidateTypeToTransportRouteType(connection->remote_candidate().type()));
 
   if (!jingle_glue::SocketAddressToIPEndPoint(
-          candidate.address(), &route.remote_address)) {
+          connection->remote_candidate().address(), &route.remote_address)) {
     LOG(FATAL) << "Failed to convert peer IP address.";
   }
 
@@ -288,33 +323,6 @@ void LibjingleTransport::OnRouteChange(
   }
 
   event_handler_->OnTransportRouteChange(this, route);
-}
-
-void LibjingleTransport::OnWritableState(
-    cricket::TransportChannel* channel) {
-  DCHECK_EQ(channel, channel_.get());
-
-  if (channel->writable()) {
-    if (!channel_was_writable_) {
-      channel_was_writable_ = true;
-      base::ThreadTaskRunnerHandle::Get()->PostTask(
-          FROM_HERE,
-          base::Bind(&LibjingleTransport::NotifyConnected,
-                     weak_factory_.GetWeakPtr()));
-    }
-    connect_attempts_left_ = kMaxReconnectAttempts;
-    reconnect_timer_.Stop();
-  } else if (!channel->writable() && channel_was_writable_) {
-    reconnect_timer_.Reset();
-    TryReconnect();
-  }
-}
-
-void LibjingleTransport::OnChannelDestroyed() {
-  if (is_connected()) {
-    // The connection socket is being deleted, so delete the transport too.
-    delete this;
-  }
 }
 
 void LibjingleTransport::TryReconnect() {

@@ -5,12 +5,10 @@
 #include "config.h"
 #include "core/paint/SVGInlineFlowBoxPainter.h"
 
+#include "core/layout/svg/line/SVGInlineFlowBox.h"
+#include "core/layout/svg/line/SVGInlineTextBox.h"
 #include "core/paint/SVGInlineTextBoxPainter.h"
-#include "core/rendering/PaintInfo.h"
-#include "core/rendering/svg/SVGInlineFlowBox.h"
-#include "core/rendering/svg/SVGInlineTextBox.h"
-#include "core/rendering/svg/SVGRenderingContext.h"
-#include "platform/graphics/GraphicsContextStateSaver.h"
+#include "core/paint/SVGPaintContext.h"
 
 namespace blink {
 
@@ -31,13 +29,10 @@ void SVGInlineFlowBoxPainter::paint(const PaintInfo& paintInfo, const LayoutPoin
 {
     ASSERT(paintInfo.phase == PaintPhaseForeground || paintInfo.phase == PaintPhaseSelection);
 
-    // FIXME: SVGRenderingContext wants a non-const PaintInfo to muck with.
-    PaintInfo localPaintInfo(paintInfo);
-    GraphicsContextStateSaver stateSaver(*localPaintInfo.context);
-    SVGRenderingContext renderingContext(&m_svgInlineFlowBox.renderer(), localPaintInfo);
-    if (renderingContext.isRenderingPrepared()) {
+    SVGPaintContext paintContext(m_svgInlineFlowBox.layoutObject(), paintInfo);
+    if (paintContext.applyClipMaskAndFilterIfNecessary()) {
         for (InlineBox* child = m_svgInlineFlowBox.firstChild(); child; child = child->nextOnLine())
-            child->paint(localPaintInfo, paintOffset, 0, 0);
+            child->paint(paintContext.paintInfo(), paintOffset, 0, 0);
     }
 }
 

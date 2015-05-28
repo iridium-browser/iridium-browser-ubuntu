@@ -34,7 +34,7 @@ static bool noImageSourceSpecified(const Element& element)
 
 void HTMLImageFallbackHelper::createAltTextShadowTree(Element& element)
 {
-    ShadowRoot& root = element.ensureUserAgentShadowRoot();
+    ShadowRoot& root = element.ensureClosedShadowRoot();
 
     RefPtrWillBeRawPtr<HTMLDivElement> container = HTMLDivElement::create(element.document());
     root.appendChild(container);
@@ -66,19 +66,19 @@ void HTMLImageFallbackHelper::createAltTextShadowTree(Element& element)
     altText->appendChild(text);
 }
 
-PassRefPtr<RenderStyle> HTMLImageFallbackHelper::customStyleForAltText(Element& element, PassRefPtr<RenderStyle> newStyle)
+PassRefPtr<ComputedStyle> HTMLImageFallbackHelper::customStyleForAltText(Element& element, PassRefPtr<ComputedStyle> newStyle)
 {
     // If we have an author shadow root or have not created the UA shadow root yet, bail early. We can't
-    // use ensureUserAgentShadowRoot() here because that would alter the DOM tree during style recalc.
-    if (element.shadowRoot() || !element.userAgentShadowRoot())
+    // use ensureClosedShadowRoot() here because that would alter the DOM tree during style recalc.
+    if (element.shadowRoot() || !element.closedShadowRoot())
         return newStyle;
 
-    Element* placeHolder = element.userAgentShadowRoot()->getElementById("alttext-container");
+    Element* placeHolder = element.closedShadowRoot()->getElementById("alttext-container");
+    Element* brokenImage = element.closedShadowRoot()->getElementById("alttext-image");
     // Input elements have a UA shadow root of their own. We may not have replaced it with fallback content yet.
-    if (!placeHolder)
+    if (!placeHolder || !brokenImage)
         return newStyle;
 
-    Element* brokenImage = element.userAgentShadowRoot()->getElementById("alttext-image");
 
     if (element.document().inQuirksMode()) {
         // Mimic the behaviour of the image host by setting symmetric dimensions if only one dimension is specified.
@@ -104,7 +104,7 @@ PassRefPtr<RenderStyle> HTMLImageFallbackHelper::customStyleForAltText(Element& 
     if (noImageSourceSpecified(element) && !newStyle->width().isSpecifiedOrIntrinsic() && !newStyle->height().isSpecifiedOrIntrinsic() && toHTMLElement(element).altText().isEmpty())
         newStyle->setDisplay(NONE);
 
-    // This preserves legacy behaviour originally defined when alt-text was managed by RenderImage.
+    // This preserves legacy behaviour originally defined when alt-text was managed by LayoutImage.
     if (noImageSourceSpecified(element))
         brokenImage->setInlineStyleProperty(CSSPropertyDisplay, CSSValueNone);
     else
@@ -114,4 +114,3 @@ PassRefPtr<RenderStyle> HTMLImageFallbackHelper::customStyleForAltText(Element& 
 }
 
 } // namespace blink
-

@@ -4,6 +4,7 @@
 
 #include "base/memory/scoped_vector.h"
 #include "base/message_loop/message_loop.h"
+#include "base/run_loop.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chromeos/dbus/dbus_thread_manager.h"
 #include "chromeos/dbus/fake_bluetooth_adapter_client.h"
@@ -24,6 +25,7 @@
 
 using device::BluetoothAdapter;
 using device::BluetoothAdapterFactory;
+using device::BluetoothAudioSink;
 using device::BluetoothDevice;
 using device::BluetoothDiscoverySession;
 using device::BluetoothUUID;
@@ -50,43 +52,39 @@ class TestObserver : public BluetoothAdapter::Observer {
     adapter_->AddObserver(this);
   }
 
-  virtual ~TestObserver() {
-    adapter_->RemoveObserver(this);
-  }
+  ~TestObserver() override { adapter_->RemoveObserver(this); }
 
-  virtual void AdapterPresentChanged(BluetoothAdapter* adapter,
-                                     bool present) override {
+  void AdapterPresentChanged(BluetoothAdapter* adapter, bool present) override {
     EXPECT_EQ(adapter_.get(), adapter);
 
     ++present_changed_count_;
     last_present_ = present;
   }
 
-  virtual void AdapterPoweredChanged(BluetoothAdapter* adapter,
-                                     bool powered) override {
+  void AdapterPoweredChanged(BluetoothAdapter* adapter, bool powered) override {
     EXPECT_EQ(adapter_.get(), adapter);
 
     ++powered_changed_count_;
     last_powered_ = powered;
   }
 
-  virtual void AdapterDiscoverableChanged(BluetoothAdapter* adapter,
-                                          bool discoverable) override {
+  void AdapterDiscoverableChanged(BluetoothAdapter* adapter,
+                                  bool discoverable) override {
     EXPECT_EQ(adapter_.get(), adapter);
 
     ++discoverable_changed_count_;
   }
 
-  virtual void AdapterDiscoveringChanged(BluetoothAdapter* adapter,
-                                         bool discovering) override {
+  void AdapterDiscoveringChanged(BluetoothAdapter* adapter,
+                                 bool discovering) override {
     EXPECT_EQ(adapter_.get(), adapter);
 
     ++discovering_changed_count_;
     last_discovering_ = discovering;
   }
 
-  virtual void DeviceAdded(BluetoothAdapter* adapter,
-                           BluetoothDevice* device) override {
+  void DeviceAdded(BluetoothAdapter* adapter,
+                   BluetoothDevice* device) override {
     EXPECT_EQ(adapter_.get(), adapter);
 
     ++device_added_count_;
@@ -96,8 +94,8 @@ class TestObserver : public BluetoothAdapter::Observer {
     QuitMessageLoop();
   }
 
-  virtual void DeviceChanged(BluetoothAdapter* adapter,
-                             BluetoothDevice* device) override {
+  void DeviceChanged(BluetoothAdapter* adapter,
+                     BluetoothDevice* device) override {
     EXPECT_EQ(adapter_.get(), adapter);
 
     ++device_changed_count_;
@@ -107,8 +105,8 @@ class TestObserver : public BluetoothAdapter::Observer {
     QuitMessageLoop();
   }
 
-  virtual void DeviceRemoved(BluetoothAdapter* adapter,
-                             BluetoothDevice* device) override {
+  void DeviceRemoved(BluetoothAdapter* adapter,
+                     BluetoothDevice* device) override {
     EXPECT_EQ(adapter_.get(), adapter);
 
     ++device_removed_count_;
@@ -150,6 +148,25 @@ void SaveConnectionInfo(BluetoothDevice::ConnectionInfo* out,
   *out = conn_info;
 };
 
+class FakeBluetoothProfileServiceProviderDelegate
+    : public chromeos::BluetoothProfileServiceProvider::Delegate {
+ public:
+  FakeBluetoothProfileServiceProviderDelegate() {}
+
+  // BluetoothProfileServiceProvider::Delegate:
+  void Released() override {}
+
+  void NewConnection(const dbus::ObjectPath&,
+                     scoped_ptr<dbus::FileDescriptor>,
+                     const BluetoothProfileServiceProvider::Delegate::Options&,
+                     const ConfirmationCallback&) override {}
+
+  void RequestDisconnection(const dbus::ObjectPath&,
+                            const ConfirmationCallback&) override {}
+
+  void Cancel() override {}
+};
+
 }  // namespace
 
 class TestPairingDelegate : public BluetoothDevice::PairingDelegate {
@@ -165,52 +182,50 @@ class TestPairingDelegate : public BluetoothDevice::PairingDelegate {
         authorize_pairing_count_(0),
         last_passkey_(9999999U),
         last_entered_(999U) {}
-  virtual ~TestPairingDelegate() {}
+  ~TestPairingDelegate() override {}
 
-  virtual void RequestPinCode(BluetoothDevice* device) override {
+  void RequestPinCode(BluetoothDevice* device) override {
     ++call_count_;
     ++request_pincode_count_;
     QuitMessageLoop();
   }
 
-  virtual void RequestPasskey(BluetoothDevice* device) override {
+  void RequestPasskey(BluetoothDevice* device) override {
     ++call_count_;
     ++request_passkey_count_;
     QuitMessageLoop();
   }
 
-  virtual void DisplayPinCode(BluetoothDevice* device,
-                              const std::string& pincode) override {
+  void DisplayPinCode(BluetoothDevice* device,
+                      const std::string& pincode) override {
     ++call_count_;
     ++display_pincode_count_;
     last_pincode_ = pincode;
     QuitMessageLoop();
   }
 
-  virtual void DisplayPasskey(BluetoothDevice* device,
-                              uint32 passkey) override {
+  void DisplayPasskey(BluetoothDevice* device, uint32 passkey) override {
     ++call_count_;
     ++display_passkey_count_;
     last_passkey_ = passkey;
     QuitMessageLoop();
   }
 
-  virtual void KeysEntered(BluetoothDevice* device, uint32 entered) override {
+  void KeysEntered(BluetoothDevice* device, uint32 entered) override {
     ++call_count_;
     ++keys_entered_count_;
     last_entered_ = entered;
     QuitMessageLoop();
   }
 
-  virtual void ConfirmPasskey(BluetoothDevice* device,
-                              uint32 passkey) override {
+  void ConfirmPasskey(BluetoothDevice* device, uint32 passkey) override {
     ++call_count_;
     ++confirm_passkey_count_;
     last_passkey_ = passkey;
     QuitMessageLoop();
   }
 
-  virtual void AuthorizePairing(BluetoothDevice* device) override {
+  void AuthorizePairing(BluetoothDevice* device) override {
     ++call_count_;
     ++authorize_pairing_count_;
     QuitMessageLoop();
@@ -240,7 +255,7 @@ class TestPairingDelegate : public BluetoothDevice::PairingDelegate {
 
 class BluetoothChromeOSTest : public testing::Test {
  public:
-  virtual void SetUp() {
+  void SetUp() override {
     scoped_ptr<DBusThreadManagerSetter> dbus_setter =
         chromeos::DBusThreadManager::GetSetterForTesting();
     // We need to initialize DBusThreadManager early to prevent
@@ -269,7 +284,7 @@ class BluetoothChromeOSTest : public testing::Test {
     last_client_error_ = "";
   }
 
-  virtual void TearDown() {
+  void TearDown() override {
     for (ScopedVector<BluetoothDiscoverySession>::iterator iter =
             discovery_sessions_.begin();
          iter != discovery_sessions_.end();
@@ -278,11 +293,7 @@ class BluetoothChromeOSTest : public testing::Test {
       if (!session->IsActive())
         continue;
       callback_count_ = 0;
-      session->Stop(
-          base::Bind(&BluetoothChromeOSTest::Callback,
-                     base::Unretained(this)),
-          base::Bind(&BluetoothChromeOSTest::ErrorCallback,
-                     base::Unretained(this)));
+      session->Stop(GetCallback(), GetErrorCallback());
       message_loop_.Run();
       ASSERT_EQ(1, callback_count_);
     }
@@ -297,6 +308,10 @@ class BluetoothChromeOSTest : public testing::Test {
     QuitMessageLoop();
   }
 
+  base::Closure GetCallback() {
+    return base::Bind(&BluetoothChromeOSTest::Callback, base::Unretained(this));
+  }
+
   void DiscoverySessionCallback(
       scoped_ptr<BluetoothDiscoverySession> discovery_session) {
     ++callback_count_;
@@ -304,9 +319,25 @@ class BluetoothChromeOSTest : public testing::Test {
     QuitMessageLoop();
   }
 
+  void AudioSinkAcquiredCallback(scoped_refptr<BluetoothAudioSink>) {
+    ++callback_count_;
+    QuitMessageLoop();
+  }
+
+  void ProfileRegisteredCallback(BluetoothAdapterProfileChromeOS* profile) {
+    adapter_profile_ = profile;
+    ++callback_count_;
+    QuitMessageLoop();
+  }
+
   void ErrorCallback() {
     ++error_callback_count_;
     QuitMessageLoop();
+  }
+
+  base::Closure GetErrorCallback() {
+    return base::Bind(&BluetoothChromeOSTest::ErrorCallback,
+                      base::Unretained(this));
   }
 
   void DBusErrorCallback(const std::string& error_name,
@@ -319,6 +350,16 @@ class BluetoothChromeOSTest : public testing::Test {
   void ConnectErrorCallback(BluetoothDevice::ConnectErrorCode error) {
     ++error_callback_count_;
     last_connect_error_ = error;
+  }
+
+  void AudioSinkErrorCallback(BluetoothAudioSink::ErrorCode) {
+    ++error_callback_count_;
+    QuitMessageLoop();
+  }
+
+  void ErrorCompletionCallback(const std::string& error_message) {
+    ++error_callback_count_;
+    QuitMessageLoop();
   }
 
   // Call to fill the adapter_ member with a BluetoothAdapter instance.
@@ -340,17 +381,11 @@ class BluetoothChromeOSTest : public testing::Test {
 
     TestObserver observer(adapter_);
 
-    adapter_->SetPowered(
-        true,
-        base::Bind(&BluetoothChromeOSTest::Callback,
-                   base::Unretained(this)),
-        base::Bind(&BluetoothChromeOSTest::ErrorCallback,
-                   base::Unretained(this)));
+    adapter_->SetPowered(true, GetCallback(), GetErrorCallback());
     adapter_->StartDiscoverySession(
         base::Bind(&BluetoothChromeOSTest::DiscoverySessionCallback,
                    base::Unretained(this)),
-        base::Bind(&BluetoothChromeOSTest::ErrorCallback,
-                   base::Unretained(this)));
+        GetErrorCallback());
     base::MessageLoop::current()->Run();
     ASSERT_EQ(2, callback_count_);
     ASSERT_EQ(0, error_callback_count_);
@@ -365,11 +400,7 @@ class BluetoothChromeOSTest : public testing::Test {
            observer.last_device_address_ != address)
       base::MessageLoop::current()->Run();
 
-    discovery_sessions_[0]->Stop(
-        base::Bind(&BluetoothChromeOSTest::Callback,
-                   base::Unretained(this)),
-        base::Bind(&BluetoothChromeOSTest::ErrorCallback,
-                   base::Unretained(this)));
+    discovery_sessions_[0]->Stop(GetCallback(), GetErrorCallback());
     base::MessageLoop::current()->Run();
     ASSERT_EQ(1, callback_count_);
     ASSERT_EQ(0, error_callback_count_);
@@ -396,6 +427,7 @@ class BluetoothChromeOSTest : public testing::Test {
   enum BluetoothDevice::ConnectErrorCode last_connect_error_;
   std::string last_client_error_;
   ScopedVector<BluetoothDiscoverySession> discovery_sessions_;
+  BluetoothAdapterProfileChromeOS* adapter_profile_;
 
  private:
   // Some tests use a message loop since background processing is simulated;
@@ -420,9 +452,11 @@ TEST_F(BluetoothChromeOSTest, AlreadyPresent) {
 
   // There should be a device
   BluetoothAdapter::DeviceList devices = adapter_->GetDevices();
-  EXPECT_EQ(1U, devices.size());
+  EXPECT_EQ(2U, devices.size());
   EXPECT_EQ(FakeBluetoothDeviceClient::kPairedDeviceAddress,
             devices[0]->GetAddress());
+  EXPECT_EQ(FakeBluetoothDeviceClient::kPairedUnconnectableDeviceAddress,
+            devices[1]->GetAddress());
 }
 
 TEST_F(BluetoothChromeOSTest, BecomePresent) {
@@ -442,8 +476,8 @@ TEST_F(BluetoothChromeOSTest, BecomePresent) {
   EXPECT_TRUE(adapter_->IsPresent());
 
   // We should have had a device announced.
-  EXPECT_EQ(1, observer.device_added_count_);
-  EXPECT_EQ(FakeBluetoothDeviceClient::kPairedDeviceAddress,
+  EXPECT_EQ(2, observer.device_added_count_);
+  EXPECT_EQ(FakeBluetoothDeviceClient::kPairedUnconnectableDeviceAddress,
             observer.last_device_address_);
 
   // Other callbacks shouldn't be called if the values are false.
@@ -469,8 +503,8 @@ TEST_F(BluetoothChromeOSTest, BecomeNotPresent) {
   EXPECT_FALSE(adapter_->IsPresent());
 
   // We should have had a device removed.
-  EXPECT_EQ(1, observer.device_removed_count_);
-  EXPECT_EQ(FakeBluetoothDeviceClient::kPairedDeviceAddress,
+  EXPECT_EQ(2, observer.device_removed_count_);
+  EXPECT_EQ(FakeBluetoothDeviceClient::kPairedUnconnectableDeviceAddress,
             observer.last_device_address_);
 
   // Other callbacks shouldn't be called since the values are false.
@@ -506,8 +540,8 @@ TEST_F(BluetoothChromeOSTest, SecondAdapter) {
   EXPECT_FALSE(adapter_->IsPresent());
 
   // We should have had a device removed.
-  EXPECT_EQ(1, observer.device_removed_count_);
-  EXPECT_EQ(FakeBluetoothDeviceClient::kPairedDeviceAddress,
+  EXPECT_EQ(2, observer.device_removed_count_);
+  EXPECT_EQ(FakeBluetoothDeviceClient::kPairedUnconnectableDeviceAddress,
             observer.last_device_address_);
 
   // Other callbacks shouldn't be called since the values are false.
@@ -534,12 +568,7 @@ TEST_F(BluetoothChromeOSTest, BecomePowered) {
   // with true, and IsPowered() to return true.
   TestObserver observer(adapter_);
 
-  adapter_->SetPowered(
-      true,
-      base::Bind(&BluetoothChromeOSTest::Callback,
-                 base::Unretained(this)),
-      base::Bind(&BluetoothChromeOSTest::ErrorCallback,
-                 base::Unretained(this)));
+  adapter_->SetPowered(true, GetCallback(), GetErrorCallback());
   EXPECT_EQ(1, callback_count_);
   EXPECT_EQ(0, error_callback_count_);
 
@@ -551,12 +580,7 @@ TEST_F(BluetoothChromeOSTest, BecomePowered) {
 
 TEST_F(BluetoothChromeOSTest, BecomeNotPowered) {
   GetAdapter();
-  adapter_->SetPowered(
-      true,
-      base::Bind(&BluetoothChromeOSTest::Callback,
-                 base::Unretained(this)),
-      base::Bind(&BluetoothChromeOSTest::ErrorCallback,
-                 base::Unretained(this)));
+  adapter_->SetPowered(true, GetCallback(), GetErrorCallback());
   EXPECT_EQ(1, callback_count_);
   EXPECT_EQ(0, error_callback_count_);
   callback_count_ = 0;
@@ -567,12 +591,7 @@ TEST_F(BluetoothChromeOSTest, BecomeNotPowered) {
   // with false, and IsPowered() to return false.
   TestObserver observer(adapter_);
 
-  adapter_->SetPowered(
-      false,
-      base::Bind(&BluetoothChromeOSTest::Callback,
-                 base::Unretained(this)),
-      base::Bind(&BluetoothChromeOSTest::ErrorCallback,
-                 base::Unretained(this)));
+  adapter_->SetPowered(false, GetCallback(), GetErrorCallback());
   EXPECT_EQ(1, callback_count_);
   EXPECT_EQ(0, error_callback_count_);
 
@@ -598,12 +617,7 @@ TEST_F(BluetoothChromeOSTest, SetPoweredWhenNotPresent) {
   EXPECT_FALSE(adapter_->IsPresent());
   EXPECT_FALSE(adapter_->IsPowered());
 
-  adapter_->SetPowered(
-      true,
-      base::Bind(&BluetoothChromeOSTest::Callback,
-                 base::Unretained(this)),
-      base::Bind(&BluetoothChromeOSTest::ErrorCallback,
-                 base::Unretained(this)));
+  adapter_->SetPowered(true, GetCallback(), GetErrorCallback());
   EXPECT_EQ(0, callback_count_);
   EXPECT_EQ(1, error_callback_count_);
 
@@ -618,12 +632,7 @@ TEST_F(BluetoothChromeOSTest, ChangeAdapterName) {
 
   static const std::string new_name(".__.");
 
-  adapter_->SetName(
-      new_name,
-      base::Bind(&BluetoothChromeOSTest::Callback,
-                 base::Unretained(this)),
-      base::Bind(&BluetoothChromeOSTest::ErrorCallback,
-                 base::Unretained(this)));
+  adapter_->SetName(new_name, GetCallback(), GetErrorCallback());
   EXPECT_EQ(1, callback_count_);
   EXPECT_EQ(0, error_callback_count_);
 
@@ -646,12 +655,7 @@ TEST_F(BluetoothChromeOSTest, ChangeAdapterNameWhenNotPresent) {
   EXPECT_FALSE(adapter_->IsPresent());
   EXPECT_FALSE(adapter_->IsPowered());
 
-  adapter_->SetName(
-      "^o^",
-      base::Bind(&BluetoothChromeOSTest::Callback,
-                 base::Unretained(this)),
-      base::Bind(&BluetoothChromeOSTest::ErrorCallback,
-                 base::Unretained(this)));
+  adapter_->SetName("^o^", GetCallback(), GetErrorCallback());
   EXPECT_EQ(0, callback_count_);
   EXPECT_EQ(1, error_callback_count_);
 
@@ -666,12 +670,7 @@ TEST_F(BluetoothChromeOSTest, BecomeDiscoverable) {
   // with true, and IsDiscoverable() to return true.
   TestObserver observer(adapter_);
 
-  adapter_->SetDiscoverable(
-      true,
-      base::Bind(&BluetoothChromeOSTest::Callback,
-                 base::Unretained(this)),
-      base::Bind(&BluetoothChromeOSTest::ErrorCallback,
-                 base::Unretained(this)));
+  adapter_->SetDiscoverable(true, GetCallback(), GetErrorCallback());
   EXPECT_EQ(1, callback_count_);
   EXPECT_EQ(0, error_callback_count_);
 
@@ -682,12 +681,7 @@ TEST_F(BluetoothChromeOSTest, BecomeDiscoverable) {
 
 TEST_F(BluetoothChromeOSTest, BecomeNotDiscoverable) {
   GetAdapter();
-  adapter_->SetDiscoverable(
-      true,
-      base::Bind(&BluetoothChromeOSTest::Callback,
-                 base::Unretained(this)),
-      base::Bind(&BluetoothChromeOSTest::ErrorCallback,
-                 base::Unretained(this)));
+  adapter_->SetDiscoverable(true, GetCallback(), GetErrorCallback());
   EXPECT_EQ(1, callback_count_);
   EXPECT_EQ(0, error_callback_count_);
   callback_count_ = 0;
@@ -698,12 +692,7 @@ TEST_F(BluetoothChromeOSTest, BecomeNotDiscoverable) {
   // with false, and IsDiscoverable() to return false.
   TestObserver observer(adapter_);
 
-  adapter_->SetDiscoverable(
-      false,
-      base::Bind(&BluetoothChromeOSTest::Callback,
-                 base::Unretained(this)),
-      base::Bind(&BluetoothChromeOSTest::ErrorCallback,
-                 base::Unretained(this)));
+  adapter_->SetDiscoverable(false, GetCallback(), GetErrorCallback());
   EXPECT_EQ(1, callback_count_);
   EXPECT_EQ(0, error_callback_count_);
 
@@ -729,12 +718,7 @@ TEST_F(BluetoothChromeOSTest, SetDiscoverableWhenNotPresent) {
   EXPECT_FALSE(adapter_->IsPresent());
   EXPECT_FALSE(adapter_->IsDiscoverable());
 
-  adapter_->SetDiscoverable(
-      true,
-      base::Bind(&BluetoothChromeOSTest::Callback,
-                 base::Unretained(this)),
-      base::Bind(&BluetoothChromeOSTest::ErrorCallback,
-                 base::Unretained(this)));
+  adapter_->SetDiscoverable(true, GetCallback(), GetErrorCallback());
   EXPECT_EQ(0, callback_count_);
   EXPECT_EQ(1, error_callback_count_);
 
@@ -746,17 +730,11 @@ TEST_F(BluetoothChromeOSTest, SetDiscoverableWhenNotPresent) {
 TEST_F(BluetoothChromeOSTest, StopDiscovery) {
   GetAdapter();
 
-  adapter_->SetPowered(
-      true,
-      base::Bind(&BluetoothChromeOSTest::Callback,
-                 base::Unretained(this)),
-      base::Bind(&BluetoothChromeOSTest::ErrorCallback,
-                 base::Unretained(this)));
+  adapter_->SetPowered(true, GetCallback(), GetErrorCallback());
   adapter_->StartDiscoverySession(
       base::Bind(&BluetoothChromeOSTest::DiscoverySessionCallback,
                  base::Unretained(this)),
-      base::Bind(&BluetoothChromeOSTest::ErrorCallback,
-                 base::Unretained(this)));
+      GetErrorCallback());
   message_loop_.Run();
   EXPECT_EQ(2, callback_count_);
   EXPECT_EQ(0, error_callback_count_);
@@ -772,11 +750,7 @@ TEST_F(BluetoothChromeOSTest, StopDiscovery) {
   // discovering,
   TestObserver observer(adapter_);
 
-  discovery_sessions_[0]->Stop(
-      base::Bind(&BluetoothChromeOSTest::Callback,
-                 base::Unretained(this)),
-      base::Bind(&BluetoothChromeOSTest::ErrorCallback,
-                 base::Unretained(this)));
+  discovery_sessions_[0]->Stop(GetCallback(), GetErrorCallback());
   message_loop_.Run();
   EXPECT_EQ(1, callback_count_);
   EXPECT_EQ(0, error_callback_count_);
@@ -794,17 +768,11 @@ TEST_F(BluetoothChromeOSTest, Discovery) {
 
   TestObserver observer(adapter_);
 
-  adapter_->SetPowered(
-      true,
-      base::Bind(&BluetoothChromeOSTest::Callback,
-                 base::Unretained(this)),
-      base::Bind(&BluetoothChromeOSTest::ErrorCallback,
-                 base::Unretained(this)));
+  adapter_->SetPowered(true, GetCallback(), GetErrorCallback());
   adapter_->StartDiscoverySession(
       base::Bind(&BluetoothChromeOSTest::DiscoverySessionCallback,
                  base::Unretained(this)),
-      base::Bind(&BluetoothChromeOSTest::ErrorCallback,
-                 base::Unretained(this)));
+      GetErrorCallback());
   message_loop_.Run();
   EXPECT_EQ(2, callback_count_);
   EXPECT_EQ(0, error_callback_count_);
@@ -837,17 +805,11 @@ TEST_F(BluetoothChromeOSTest, Discovery) {
 
 TEST_F(BluetoothChromeOSTest, PoweredAndDiscovering) {
   GetAdapter();
-  adapter_->SetPowered(
-      true,
-      base::Bind(&BluetoothChromeOSTest::Callback,
-                 base::Unretained(this)),
-      base::Bind(&BluetoothChromeOSTest::ErrorCallback,
-                 base::Unretained(this)));
+  adapter_->SetPowered(true, GetCallback(), GetErrorCallback());
   adapter_->StartDiscoverySession(
       base::Bind(&BluetoothChromeOSTest::DiscoverySessionCallback,
                  base::Unretained(this)),
-      base::Bind(&BluetoothChromeOSTest::ErrorCallback,
-                 base::Unretained(this)));
+      GetErrorCallback());
   message_loop_.Run();
   EXPECT_EQ(2, callback_count_);
   EXPECT_EQ(0, error_callback_count_);
@@ -911,12 +873,7 @@ TEST_F(BluetoothChromeOSTest, PoweredAndDiscovering) {
 // correctly for discovery requests done via the BluetoothAdapter.
 TEST_F(BluetoothChromeOSTest, MultipleDiscoverySessions) {
   GetAdapter();
-  adapter_->SetPowered(
-      true,
-      base::Bind(&BluetoothChromeOSTest::Callback,
-                 base::Unretained(this)),
-      base::Bind(&BluetoothChromeOSTest::ErrorCallback,
-                 base::Unretained(this)));
+  adapter_->SetPowered(true, GetCallback(), GetErrorCallback());
   EXPECT_EQ(1, callback_count_);
   EXPECT_EQ(0, error_callback_count_);
   EXPECT_TRUE(adapter_->IsPowered());
@@ -931,10 +888,9 @@ TEST_F(BluetoothChromeOSTest, MultipleDiscoverySessions) {
   // Request device discovery 3 times.
   for (int i = 0; i < 3; i++) {
     adapter_->StartDiscoverySession(
-      base::Bind(&BluetoothChromeOSTest::DiscoverySessionCallback,
-                 base::Unretained(this)),
-      base::Bind(&BluetoothChromeOSTest::ErrorCallback,
-                 base::Unretained(this)));
+        base::Bind(&BluetoothChromeOSTest::DiscoverySessionCallback,
+                   base::Unretained(this)),
+        GetErrorCallback());
   }
   // Run only once, as there should have been one D-Bus call.
   message_loop_.Run();
@@ -951,11 +907,7 @@ TEST_F(BluetoothChromeOSTest, MultipleDiscoverySessions) {
 
   // Request to stop discovery twice.
   for (int i = 0; i < 2; i++) {
-    discovery_sessions_[i]->Stop(
-      base::Bind(&BluetoothChromeOSTest::Callback,
-                 base::Unretained(this)),
-      base::Bind(&BluetoothChromeOSTest::ErrorCallback,
-                 base::Unretained(this)));
+    discovery_sessions_[i]->Stop(GetCallback(), GetErrorCallback());
   }
 
   // The observer should have received no additional discovering changed events,
@@ -974,10 +926,9 @@ TEST_F(BluetoothChromeOSTest, MultipleDiscoverySessions) {
   // Request device discovery 3 times.
   for (int i = 0; i < 3; i++) {
     adapter_->StartDiscoverySession(
-      base::Bind(&BluetoothChromeOSTest::DiscoverySessionCallback,
-                 base::Unretained(this)),
-      base::Bind(&BluetoothChromeOSTest::ErrorCallback,
-                 base::Unretained(this)));
+        base::Bind(&BluetoothChromeOSTest::DiscoverySessionCallback,
+                   base::Unretained(this)),
+        GetErrorCallback());
   }
 
   // The observer should have received no additional discovering changed events,
@@ -992,11 +943,7 @@ TEST_F(BluetoothChromeOSTest, MultipleDiscoverySessions) {
 
   // Request to stop discovery 4 times.
   for (int i = 2; i < 6; i++) {
-    discovery_sessions_[i]->Stop(
-      base::Bind(&BluetoothChromeOSTest::Callback,
-                 base::Unretained(this)),
-      base::Bind(&BluetoothChromeOSTest::ErrorCallback,
-                 base::Unretained(this)));
+    discovery_sessions_[i]->Stop(GetCallback(), GetErrorCallback());
   }
   // Run only once, as there should have been one D-Bus call.
   message_loop_.Run();
@@ -1015,11 +962,7 @@ TEST_F(BluetoothChromeOSTest, MultipleDiscoverySessions) {
     EXPECT_FALSE(discovery_sessions_[i]->IsActive());
 
   // Request to stop discovery on of the inactive sessions.
-  discovery_sessions_[0]->Stop(
-    base::Bind(&BluetoothChromeOSTest::Callback,
-               base::Unretained(this)),
-    base::Bind(&BluetoothChromeOSTest::ErrorCallback,
-               base::Unretained(this)));
+  discovery_sessions_[0]->Stop(GetCallback(), GetErrorCallback());
 
   // The call should have failed.
   EXPECT_EQ(2, observer.discovering_changed_count_);
@@ -1035,12 +978,7 @@ TEST_F(BluetoothChromeOSTest, MultipleDiscoverySessions) {
 TEST_F(BluetoothChromeOSTest,
        UnexpectedChangesDuringMultipleDiscoverySessions) {
   GetAdapter();
-  adapter_->SetPowered(
-      true,
-      base::Bind(&BluetoothChromeOSTest::Callback,
-                 base::Unretained(this)),
-      base::Bind(&BluetoothChromeOSTest::ErrorCallback,
-                 base::Unretained(this)));
+  adapter_->SetPowered(true, GetCallback(), GetErrorCallback());
   EXPECT_EQ(1, callback_count_);
   EXPECT_EQ(0, error_callback_count_);
   EXPECT_TRUE(adapter_->IsPowered());
@@ -1055,10 +993,9 @@ TEST_F(BluetoothChromeOSTest,
   // Request device discovery 3 times.
   for (int i = 0; i < 3; i++) {
     adapter_->StartDiscoverySession(
-      base::Bind(&BluetoothChromeOSTest::DiscoverySessionCallback,
-                 base::Unretained(this)),
-      base::Bind(&BluetoothChromeOSTest::ErrorCallback,
-                 base::Unretained(this)));
+        base::Bind(&BluetoothChromeOSTest::DiscoverySessionCallback,
+                   base::Unretained(this)),
+        GetErrorCallback());
   }
   // Run only once, as there should have been one D-Bus call.
   message_loop_.Run();
@@ -1090,9 +1027,7 @@ TEST_F(BluetoothChromeOSTest,
   // FakeBluetoothAdapterClient's count should be only 1 and a single call to
   // FakeBluetoothAdapterClient::StopDiscovery should work.
   fake_bluetooth_adapter_client_->StopDiscovery(
-      dbus::ObjectPath(FakeBluetoothAdapterClient::kAdapterPath),
-      base::Bind(&BluetoothChromeOSTest::Callback,
-                 base::Unretained(this)),
+      dbus::ObjectPath(FakeBluetoothAdapterClient::kAdapterPath), GetCallback(),
       base::Bind(&BluetoothChromeOSTest::DBusErrorCallback,
                  base::Unretained(this)));
   message_loop_.Run();
@@ -1110,10 +1045,9 @@ TEST_F(BluetoothChromeOSTest,
   // It should be possible to successfully start discovery.
   for (int i = 0; i < 2; i++) {
     adapter_->StartDiscoverySession(
-      base::Bind(&BluetoothChromeOSTest::DiscoverySessionCallback,
-                 base::Unretained(this)),
-      base::Bind(&BluetoothChromeOSTest::ErrorCallback,
-                 base::Unretained(this)));
+        base::Bind(&BluetoothChromeOSTest::DiscoverySessionCallback,
+                   base::Unretained(this)),
+        GetErrorCallback());
   }
   // Run only once, as there should have been one D-Bus call.
   message_loop_.Run();
@@ -1158,10 +1092,9 @@ TEST_F(BluetoothChromeOSTest,
   // application other than us. Starting and stopping discovery will succeed
   // but it won't cause the discovery state to change.
   adapter_->StartDiscoverySession(
-    base::Bind(&BluetoothChromeOSTest::DiscoverySessionCallback,
-               base::Unretained(this)),
-    base::Bind(&BluetoothChromeOSTest::ErrorCallback,
-               base::Unretained(this)));
+      base::Bind(&BluetoothChromeOSTest::DiscoverySessionCallback,
+                 base::Unretained(this)),
+      GetErrorCallback());
   message_loop_.Run();  // Run the loop, as there should have been a D-Bus call.
   EXPECT_EQ(5, observer.discovering_changed_count_);
   EXPECT_EQ(7, callback_count_);
@@ -1171,11 +1104,7 @@ TEST_F(BluetoothChromeOSTest,
   ASSERT_EQ((size_t)1, discovery_sessions_.size());
   EXPECT_TRUE(discovery_sessions_[0]->IsActive());
 
-  discovery_sessions_[0]->Stop(
-    base::Bind(&BluetoothChromeOSTest::Callback,
-               base::Unretained(this)),
-    base::Bind(&BluetoothChromeOSTest::ErrorCallback,
-               base::Unretained(this)));
+  discovery_sessions_[0]->Stop(GetCallback(), GetErrorCallback());
   message_loop_.Run();  // Run the loop, as there should have been a D-Bus call.
   EXPECT_EQ(5, observer.discovering_changed_count_);
   EXPECT_EQ(8, callback_count_);
@@ -1187,10 +1116,9 @@ TEST_F(BluetoothChromeOSTest,
 
   // Start discovery again.
   adapter_->StartDiscoverySession(
-    base::Bind(&BluetoothChromeOSTest::DiscoverySessionCallback,
-               base::Unretained(this)),
-    base::Bind(&BluetoothChromeOSTest::ErrorCallback,
-               base::Unretained(this)));
+      base::Bind(&BluetoothChromeOSTest::DiscoverySessionCallback,
+                 base::Unretained(this)),
+      GetErrorCallback());
   message_loop_.Run();  // Run the loop, as there should have been a D-Bus call.
   EXPECT_EQ(5, observer.discovering_changed_count_);
   EXPECT_EQ(9, callback_count_);
@@ -1204,9 +1132,7 @@ TEST_F(BluetoothChromeOSTest,
   // the discovery state won't change since our BluetoothAdapter also just
   // requested it via D-Bus.
   fake_bluetooth_adapter_client_->StopDiscovery(
-      dbus::ObjectPath(FakeBluetoothAdapterClient::kAdapterPath),
-      base::Bind(&BluetoothChromeOSTest::Callback,
-                 base::Unretained(this)),
+      dbus::ObjectPath(FakeBluetoothAdapterClient::kAdapterPath), GetCallback(),
       base::Bind(&BluetoothChromeOSTest::DBusErrorCallback,
                  base::Unretained(this)));
   message_loop_.Run();
@@ -1218,11 +1144,7 @@ TEST_F(BluetoothChromeOSTest,
 
   // Now end the discovery session. This should change the adapter's discovery
   // state.
-  discovery_sessions_[0]->Stop(
-    base::Bind(&BluetoothChromeOSTest::Callback,
-               base::Unretained(this)),
-    base::Bind(&BluetoothChromeOSTest::ErrorCallback,
-               base::Unretained(this)));
+  discovery_sessions_[0]->Stop(GetCallback(), GetErrorCallback());
   message_loop_.Run();
   EXPECT_EQ(6, observer.discovering_changed_count_);
   EXPECT_EQ(11, callback_count_);
@@ -1234,12 +1156,7 @@ TEST_F(BluetoothChromeOSTest,
 
 TEST_F(BluetoothChromeOSTest, InvalidatedDiscoverySessions) {
   GetAdapter();
-  adapter_->SetPowered(
-      true,
-      base::Bind(&BluetoothChromeOSTest::Callback,
-                 base::Unretained(this)),
-      base::Bind(&BluetoothChromeOSTest::ErrorCallback,
-                 base::Unretained(this)));
+  adapter_->SetPowered(true, GetCallback(), GetErrorCallback());
   EXPECT_EQ(1, callback_count_);
   EXPECT_EQ(0, error_callback_count_);
   EXPECT_TRUE(adapter_->IsPowered());
@@ -1254,10 +1171,9 @@ TEST_F(BluetoothChromeOSTest, InvalidatedDiscoverySessions) {
   // Request device discovery 3 times.
   for (int i = 0; i < 3; i++) {
     adapter_->StartDiscoverySession(
-      base::Bind(&BluetoothChromeOSTest::DiscoverySessionCallback,
-                 base::Unretained(this)),
-      base::Bind(&BluetoothChromeOSTest::ErrorCallback,
-                 base::Unretained(this)));
+        base::Bind(&BluetoothChromeOSTest::DiscoverySessionCallback,
+                   base::Unretained(this)),
+        GetErrorCallback());
   }
   // Run only once, as there should have been one D-Bus call.
   message_loop_.Run();
@@ -1294,9 +1210,7 @@ TEST_F(BluetoothChromeOSTest, InvalidatedDiscoverySessions) {
   // memory errors as the sessions that we explicitly deleted should get
   // cleaned up.
   fake_bluetooth_adapter_client_->StopDiscovery(
-      dbus::ObjectPath(FakeBluetoothAdapterClient::kAdapterPath),
-      base::Bind(&BluetoothChromeOSTest::Callback,
-                 base::Unretained(this)),
+      dbus::ObjectPath(FakeBluetoothAdapterClient::kAdapterPath), GetCallback(),
       base::Bind(&BluetoothChromeOSTest::DBusErrorCallback,
                  base::Unretained(this)));
   message_loop_.Run();
@@ -1311,12 +1225,7 @@ TEST_F(BluetoothChromeOSTest, InvalidatedDiscoverySessions) {
 TEST_F(BluetoothChromeOSTest, QueuedDiscoveryRequests) {
   GetAdapter();
 
-  adapter_->SetPowered(
-      true,
-      base::Bind(&BluetoothChromeOSTest::Callback,
-                 base::Unretained(this)),
-      base::Bind(&BluetoothChromeOSTest::ErrorCallback,
-                 base::Unretained(this)));
+  adapter_->SetPowered(true, GetCallback(), GetErrorCallback());
   EXPECT_EQ(1, callback_count_);
   EXPECT_EQ(0, error_callback_count_);
   EXPECT_TRUE(adapter_->IsPowered());
@@ -1330,10 +1239,9 @@ TEST_F(BluetoothChromeOSTest, QueuedDiscoveryRequests) {
 
   // Request to start discovery. The call should be pending.
   adapter_->StartDiscoverySession(
-    base::Bind(&BluetoothChromeOSTest::DiscoverySessionCallback,
-               base::Unretained(this)),
-    base::Bind(&BluetoothChromeOSTest::ErrorCallback,
-               base::Unretained(this)));
+      base::Bind(&BluetoothChromeOSTest::DiscoverySessionCallback,
+                 base::Unretained(this)),
+      GetErrorCallback());
   EXPECT_EQ(0, callback_count_);
 
   fake_bluetooth_device_client_->EndDiscoverySimulation(
@@ -1350,10 +1258,9 @@ TEST_F(BluetoothChromeOSTest, QueuedDiscoveryRequests) {
   // be no change in state.
   for (int i = 0; i < 2; i++) {
     adapter_->StartDiscoverySession(
-      base::Bind(&BluetoothChromeOSTest::DiscoverySessionCallback,
-                 base::Unretained(this)),
-      base::Bind(&BluetoothChromeOSTest::ErrorCallback,
-                 base::Unretained(this)));
+        base::Bind(&BluetoothChromeOSTest::DiscoverySessionCallback,
+                   base::Unretained(this)),
+        GetErrorCallback());
   }
   EXPECT_EQ(0, callback_count_);
   EXPECT_EQ(0, error_callback_count_);
@@ -1375,11 +1282,7 @@ TEST_F(BluetoothChromeOSTest, QueuedDiscoveryRequests) {
   // Verify the reference count by removing sessions 3 times. The last request
   // should remain pending.
   for (int i = 0; i < 3; i++) {
-    discovery_sessions_[i]->Stop(
-      base::Bind(&BluetoothChromeOSTest::Callback,
-                 base::Unretained(this)),
-      base::Bind(&BluetoothChromeOSTest::ErrorCallback,
-                 base::Unretained(this)));
+    discovery_sessions_[i]->Stop(GetCallback(), GetErrorCallback());
   }
   EXPECT_EQ(5, callback_count_);
   EXPECT_EQ(0, error_callback_count_);
@@ -1391,11 +1294,7 @@ TEST_F(BluetoothChromeOSTest, QueuedDiscoveryRequests) {
   EXPECT_TRUE(discovery_sessions_[2]->IsActive());
 
   // Request to stop the session whose call is pending should fail.
-  discovery_sessions_[2]->Stop(
-    base::Bind(&BluetoothChromeOSTest::Callback,
-               base::Unretained(this)),
-    base::Bind(&BluetoothChromeOSTest::ErrorCallback,
-               base::Unretained(this)));
+  discovery_sessions_[2]->Stop(GetCallback(), GetErrorCallback());
   EXPECT_EQ(5, callback_count_);
   EXPECT_EQ(1, error_callback_count_);
   EXPECT_EQ(2, observer.discovering_changed_count_);
@@ -1405,10 +1304,9 @@ TEST_F(BluetoothChromeOSTest, QueuedDiscoveryRequests) {
 
   // Request to start should get queued.
   adapter_->StartDiscoverySession(
-    base::Bind(&BluetoothChromeOSTest::DiscoverySessionCallback,
-               base::Unretained(this)),
-    base::Bind(&BluetoothChromeOSTest::ErrorCallback,
-               base::Unretained(this)));
+      base::Bind(&BluetoothChromeOSTest::DiscoverySessionCallback,
+                 base::Unretained(this)),
+      GetErrorCallback());
   EXPECT_EQ(5, callback_count_);
   EXPECT_EQ(1, error_callback_count_);
   EXPECT_EQ(2, observer.discovering_changed_count_);
@@ -1441,12 +1339,7 @@ TEST_F(BluetoothChromeOSTest, QueuedDiscoveryRequests) {
 TEST_F(BluetoothChromeOSTest, StartDiscoverySession) {
   GetAdapter();
 
-  adapter_->SetPowered(
-      true,
-      base::Bind(&BluetoothChromeOSTest::Callback,
-                 base::Unretained(this)),
-      base::Bind(&BluetoothChromeOSTest::ErrorCallback,
-                 base::Unretained(this)));
+  adapter_->SetPowered(true, GetCallback(), GetErrorCallback());
   EXPECT_EQ(1, callback_count_);
   EXPECT_EQ(0, error_callback_count_);
   EXPECT_TRUE(adapter_->IsPowered());
@@ -1463,8 +1356,7 @@ TEST_F(BluetoothChromeOSTest, StartDiscoverySession) {
   adapter_->StartDiscoverySession(
       base::Bind(&BluetoothChromeOSTest::DiscoverySessionCallback,
                  base::Unretained(this)),
-      base::Bind(&BluetoothChromeOSTest::ErrorCallback,
-                 base::Unretained(this)));
+      GetErrorCallback());
   message_loop_.Run();
   EXPECT_EQ(1, observer.discovering_changed_count_);
   EXPECT_EQ(1, callback_count_);
@@ -1480,8 +1372,7 @@ TEST_F(BluetoothChromeOSTest, StartDiscoverySession) {
   adapter_->StartDiscoverySession(
       base::Bind(&BluetoothChromeOSTest::DiscoverySessionCallback,
                  base::Unretained(this)),
-      base::Bind(&BluetoothChromeOSTest::ErrorCallback,
-                 base::Unretained(this)));
+      GetErrorCallback());
   message_loop_.Run();
   EXPECT_EQ(1, observer.discovering_changed_count_);
   EXPECT_EQ(2, callback_count_);
@@ -1495,8 +1386,7 @@ TEST_F(BluetoothChromeOSTest, StartDiscoverySession) {
   adapter_->StartDiscoverySession(
       base::Bind(&BluetoothChromeOSTest::DiscoverySessionCallback,
                  base::Unretained(this)),
-      base::Bind(&BluetoothChromeOSTest::ErrorCallback,
-                 base::Unretained(this)));
+      GetErrorCallback());
   message_loop_.Run();
   EXPECT_EQ(1, observer.discovering_changed_count_);
   EXPECT_EQ(3, callback_count_);
@@ -1509,11 +1399,7 @@ TEST_F(BluetoothChromeOSTest, StartDiscoverySession) {
 
   // Stop the previous discovery session. The session should end but discovery
   // should continue.
-  discovery_sessions_[0]->Stop(
-      base::Bind(&BluetoothChromeOSTest::Callback,
-                 base::Unretained(this)),
-      base::Bind(&BluetoothChromeOSTest::ErrorCallback,
-                 base::Unretained(this)));
+  discovery_sessions_[0]->Stop(GetCallback(), GetErrorCallback());
   message_loop_.Run();
   EXPECT_EQ(1, observer.discovering_changed_count_);
   EXPECT_EQ(4, callback_count_);
@@ -1540,7 +1426,7 @@ TEST_F(BluetoothChromeOSTest, DeviceProperties) {
   GetAdapter();
 
   BluetoothAdapter::DeviceList devices = adapter_->GetDevices();
-  ASSERT_EQ(1U, devices.size());
+  ASSERT_EQ(2U, devices.size());
   ASSERT_EQ(FakeBluetoothDeviceClient::kPairedDeviceAddress,
             devices[0]->GetAddress());
 
@@ -1572,7 +1458,7 @@ TEST_F(BluetoothChromeOSTest, DeviceClassChanged) {
   GetAdapter();
 
   BluetoothAdapter::DeviceList devices = adapter_->GetDevices();
-  ASSERT_EQ(1U, devices.size());
+  ASSERT_EQ(2U, devices.size());
   ASSERT_EQ(FakeBluetoothDeviceClient::kPairedDeviceAddress,
             devices[0]->GetAddress());
   ASSERT_EQ(BluetoothDevice::DEVICE_COMPUTER, devices[0]->GetDeviceType());
@@ -1598,7 +1484,7 @@ TEST_F(BluetoothChromeOSTest, DeviceNameChanged) {
   GetAdapter();
 
   BluetoothAdapter::DeviceList devices = adapter_->GetDevices();
-  ASSERT_EQ(1U, devices.size());
+  ASSERT_EQ(2U, devices.size());
   ASSERT_EQ(FakeBluetoothDeviceClient::kPairedDeviceAddress,
             devices[0]->GetAddress());
   ASSERT_EQ(base::UTF8ToUTF16(FakeBluetoothDeviceClient::kPairedDeviceName),
@@ -1626,7 +1512,7 @@ TEST_F(BluetoothChromeOSTest, DeviceUuidsChanged) {
   GetAdapter();
 
   BluetoothAdapter::DeviceList devices = adapter_->GetDevices();
-  ASSERT_EQ(1U, devices.size());
+  ASSERT_EQ(2U, devices.size());
   ASSERT_EQ(FakeBluetoothDeviceClient::kPairedDeviceAddress,
             devices[0]->GetAddress());
 
@@ -1669,7 +1555,7 @@ TEST_F(BluetoothChromeOSTest, ForgetDevice) {
   GetAdapter();
 
   BluetoothAdapter::DeviceList devices = adapter_->GetDevices();
-  ASSERT_EQ(1U, devices.size());
+  ASSERT_EQ(2U, devices.size());
   ASSERT_EQ(FakeBluetoothDeviceClient::kPairedDeviceAddress,
             devices[0]->GetAddress());
 
@@ -1679,9 +1565,7 @@ TEST_F(BluetoothChromeOSTest, ForgetDevice) {
   // with the device we remove.
   TestObserver observer(adapter_);
 
-  devices[0]->Forget(
-      base::Bind(&BluetoothChromeOSTest::ErrorCallback,
-                 base::Unretained(this)));
+  devices[0]->Forget(GetErrorCallback());
   EXPECT_EQ(0, error_callback_count_);
 
   EXPECT_EQ(1, observer.device_removed_count_);
@@ -1689,7 +1573,7 @@ TEST_F(BluetoothChromeOSTest, ForgetDevice) {
 
   // GetDevices shouldn't return the device either.
   devices = adapter_->GetDevices();
-  ASSERT_EQ(0U, devices.size());
+  ASSERT_EQ(1U, devices.size());
 }
 
 TEST_F(BluetoothChromeOSTest, ForgetUnpairedDevice) {
@@ -1702,12 +1586,9 @@ TEST_F(BluetoothChromeOSTest, ForgetUnpairedDevice) {
   ASSERT_FALSE(device->IsPaired());
 
   // Connect the device so it becomes trusted and remembered.
-  device->Connect(
-      NULL,
-      base::Bind(&BluetoothChromeOSTest::Callback,
-                 base::Unretained(this)),
-      base::Bind(&BluetoothChromeOSTest::ConnectErrorCallback,
-                 base::Unretained(this)));
+  device->Connect(NULL, GetCallback(),
+                  base::Bind(&BluetoothChromeOSTest::ConnectErrorCallback,
+                             base::Unretained(this)));
 
   ASSERT_EQ(1, callback_count_);
   ASSERT_EQ(0, error_callback_count_);
@@ -1726,9 +1607,7 @@ TEST_F(BluetoothChromeOSTest, ForgetUnpairedDevice) {
   // with the device we remove.
   TestObserver observer(adapter_);
 
-  device->Forget(
-      base::Bind(&BluetoothChromeOSTest::ErrorCallback,
-                 base::Unretained(this)));
+  device->Forget(GetErrorCallback());
   EXPECT_EQ(0, error_callback_count_);
 
   EXPECT_EQ(1, observer.device_removed_count_);
@@ -1753,12 +1632,9 @@ TEST_F(BluetoothChromeOSTest, ConnectPairedDevice) {
 
   // Connect without a pairing delegate; since the device is already Paired
   // this should succeed and the device should become connected.
-  device->Connect(
-      NULL,
-      base::Bind(&BluetoothChromeOSTest::Callback,
-                 base::Unretained(this)),
-      base::Bind(&BluetoothChromeOSTest::ConnectErrorCallback,
-                 base::Unretained(this)));
+  device->Connect(NULL, GetCallback(),
+                  base::Bind(&BluetoothChromeOSTest::ConnectErrorCallback,
+                             base::Unretained(this)));
 
   EXPECT_EQ(1, callback_count_);
   EXPECT_EQ(0, error_callback_count_);
@@ -1785,12 +1661,9 @@ TEST_F(BluetoothChromeOSTest, ConnectUnpairableDevice) {
 
   // Connect without a pairing delegate; since the device does not require
   // pairing, this should succeed and the device should become connected.
-  device->Connect(
-      NULL,
-      base::Bind(&BluetoothChromeOSTest::Callback,
-                 base::Unretained(this)),
-      base::Bind(&BluetoothChromeOSTest::ConnectErrorCallback,
-                 base::Unretained(this)));
+  device->Connect(NULL, GetCallback(),
+                  base::Bind(&BluetoothChromeOSTest::ConnectErrorCallback,
+                             base::Unretained(this)));
 
   EXPECT_EQ(1, callback_count_);
   EXPECT_EQ(0, error_callback_count_);
@@ -1824,12 +1697,9 @@ TEST_F(BluetoothChromeOSTest, ConnectConnectedDevice) {
   ASSERT_TRUE(device != NULL);
   ASSERT_TRUE(device->IsPaired());
 
-  device->Connect(
-      NULL,
-      base::Bind(&BluetoothChromeOSTest::Callback,
-                 base::Unretained(this)),
-      base::Bind(&BluetoothChromeOSTest::ConnectErrorCallback,
-                 base::Unretained(this)));
+  device->Connect(NULL, GetCallback(),
+                  base::Bind(&BluetoothChromeOSTest::ConnectErrorCallback,
+                             base::Unretained(this)));
 
   ASSERT_EQ(1, callback_count_);
   ASSERT_EQ(0, error_callback_count_);
@@ -1841,12 +1711,9 @@ TEST_F(BluetoothChromeOSTest, ConnectConnectedDevice) {
   // anything to initiate the connection.
   TestObserver observer(adapter_);
 
-  device->Connect(
-      NULL,
-      base::Bind(&BluetoothChromeOSTest::Callback,
-                 base::Unretained(this)),
-      base::Bind(&BluetoothChromeOSTest::ConnectErrorCallback,
-                 base::Unretained(this)));
+  device->Connect(NULL, GetCallback(),
+                  base::Bind(&BluetoothChromeOSTest::ConnectErrorCallback,
+                             base::Unretained(this)));
 
   EXPECT_EQ(1, callback_count_);
   EXPECT_EQ(0, error_callback_count_);
@@ -1872,12 +1739,9 @@ TEST_F(BluetoothChromeOSTest, ConnectDeviceFails) {
 
   // Connect without a pairing delegate; since the device requires pairing,
   // this should fail with an error.
-  device->Connect(
-      NULL,
-      base::Bind(&BluetoothChromeOSTest::Callback,
-                 base::Unretained(this)),
-      base::Bind(&BluetoothChromeOSTest::ConnectErrorCallback,
-                 base::Unretained(this)));
+  device->Connect(NULL, GetCallback(),
+                  base::Bind(&BluetoothChromeOSTest::ConnectErrorCallback,
+                             base::Unretained(this)));
 
   EXPECT_EQ(0, callback_count_);
   EXPECT_EQ(1, error_callback_count_);
@@ -1897,12 +1761,9 @@ TEST_F(BluetoothChromeOSTest, DisconnectDevice) {
   ASSERT_TRUE(device != NULL);
   ASSERT_TRUE(device->IsPaired());
 
-  device->Connect(
-      NULL,
-      base::Bind(&BluetoothChromeOSTest::Callback,
-                 base::Unretained(this)),
-      base::Bind(&BluetoothChromeOSTest::ConnectErrorCallback,
-                 base::Unretained(this)));
+  device->Connect(NULL, GetCallback(),
+                  base::Bind(&BluetoothChromeOSTest::ConnectErrorCallback,
+                             base::Unretained(this)));
 
   ASSERT_EQ(1, callback_count_);
   ASSERT_EQ(0, error_callback_count_);
@@ -1915,11 +1776,7 @@ TEST_F(BluetoothChromeOSTest, DisconnectDevice) {
   // device get dropped.
   TestObserver observer(adapter_);
 
-  device->Disconnect(
-      base::Bind(&BluetoothChromeOSTest::Callback,
-                 base::Unretained(this)),
-      base::Bind(&BluetoothChromeOSTest::ErrorCallback,
-                 base::Unretained(this)));
+  device->Disconnect(GetCallback(), GetErrorCallback());
 
   EXPECT_EQ(1, callback_count_);
   EXPECT_EQ(0, error_callback_count_);
@@ -1943,11 +1800,7 @@ TEST_F(BluetoothChromeOSTest, DisconnectUnconnectedDevice) {
   // device get dropped.
   TestObserver observer(adapter_);
 
-  device->Disconnect(
-      base::Bind(&BluetoothChromeOSTest::Callback,
-                 base::Unretained(this)),
-      base::Bind(&BluetoothChromeOSTest::ErrorCallback,
-                 base::Unretained(this)));
+  device->Disconnect(GetCallback(), GetErrorCallback());
 
   EXPECT_EQ(0, callback_count_);
   EXPECT_EQ(1, error_callback_count_);
@@ -1973,12 +1826,9 @@ TEST_F(BluetoothChromeOSTest, PairLegacyAutopair) {
   TestObserver observer(adapter_);
 
   TestPairingDelegate pairing_delegate;
-  device->Connect(
-      &pairing_delegate,
-      base::Bind(&BluetoothChromeOSTest::Callback,
-                 base::Unretained(this)),
-      base::Bind(&BluetoothChromeOSTest::ConnectErrorCallback,
-                 base::Unretained(this)));
+  device->Connect(&pairing_delegate, GetCallback(),
+                  base::Bind(&BluetoothChromeOSTest::ConnectErrorCallback,
+                             base::Unretained(this)));
 
   EXPECT_EQ(0, pairing_delegate.call_count_);
   EXPECT_TRUE(device->IsConnecting());
@@ -2027,12 +1877,9 @@ TEST_F(BluetoothChromeOSTest, PairDisplayPinCode) {
   TestObserver observer(adapter_);
 
   TestPairingDelegate pairing_delegate;
-  device->Connect(
-      &pairing_delegate,
-      base::Bind(&BluetoothChromeOSTest::Callback,
-                 base::Unretained(this)),
-      base::Bind(&BluetoothChromeOSTest::ConnectErrorCallback,
-                 base::Unretained(this)));
+  device->Connect(&pairing_delegate, GetCallback(),
+                  base::Bind(&BluetoothChromeOSTest::ConnectErrorCallback,
+                             base::Unretained(this)));
 
   EXPECT_EQ(1, pairing_delegate.call_count_);
   EXPECT_EQ(1, pairing_delegate.display_pincode_count_);
@@ -2084,12 +1931,9 @@ TEST_F(BluetoothChromeOSTest, PairDisplayPasskey) {
   TestObserver observer(adapter_);
 
   TestPairingDelegate pairing_delegate;
-  device->Connect(
-      &pairing_delegate,
-      base::Bind(&BluetoothChromeOSTest::Callback,
-                 base::Unretained(this)),
-      base::Bind(&BluetoothChromeOSTest::ConnectErrorCallback,
-                 base::Unretained(this)));
+  device->Connect(&pairing_delegate, GetCallback(),
+                  base::Bind(&BluetoothChromeOSTest::ConnectErrorCallback,
+                             base::Unretained(this)));
 
   // One call for DisplayPasskey() and one for KeysEntered().
   EXPECT_EQ(2, pairing_delegate.call_count_);
@@ -2161,12 +2005,9 @@ TEST_F(BluetoothChromeOSTest, PairRequestPinCode) {
   TestObserver observer(adapter_);
 
   TestPairingDelegate pairing_delegate;
-  device->Connect(
-      &pairing_delegate,
-      base::Bind(&BluetoothChromeOSTest::Callback,
-                 base::Unretained(this)),
-      base::Bind(&BluetoothChromeOSTest::ConnectErrorCallback,
-                 base::Unretained(this)));
+  device->Connect(&pairing_delegate, GetCallback(),
+                  base::Bind(&BluetoothChromeOSTest::ConnectErrorCallback,
+                             base::Unretained(this)));
 
   EXPECT_EQ(1, pairing_delegate.call_count_);
   EXPECT_EQ(1, pairing_delegate.request_pincode_count_);
@@ -2218,12 +2059,9 @@ TEST_F(BluetoothChromeOSTest, PairConfirmPasskey) {
   TestObserver observer(adapter_);
 
   TestPairingDelegate pairing_delegate;
-  device->Connect(
-      &pairing_delegate,
-      base::Bind(&BluetoothChromeOSTest::Callback,
-                 base::Unretained(this)),
-      base::Bind(&BluetoothChromeOSTest::ConnectErrorCallback,
-                 base::Unretained(this)));
+  device->Connect(&pairing_delegate, GetCallback(),
+                  base::Bind(&BluetoothChromeOSTest::ConnectErrorCallback,
+                             base::Unretained(this)));
 
   EXPECT_EQ(1, pairing_delegate.call_count_);
   EXPECT_EQ(1, pairing_delegate.confirm_passkey_count_);
@@ -2273,12 +2111,9 @@ TEST_F(BluetoothChromeOSTest, PairRequestPasskey) {
   TestObserver observer(adapter_);
 
   TestPairingDelegate pairing_delegate;
-  device->Connect(
-      &pairing_delegate,
-      base::Bind(&BluetoothChromeOSTest::Callback,
-                 base::Unretained(this)),
-      base::Bind(&BluetoothChromeOSTest::ConnectErrorCallback,
-                 base::Unretained(this)));
+  device->Connect(&pairing_delegate, GetCallback(),
+                  base::Bind(&BluetoothChromeOSTest::ConnectErrorCallback,
+                             base::Unretained(this)));
 
   EXPECT_EQ(1, pairing_delegate.call_count_);
   EXPECT_EQ(1, pairing_delegate.request_passkey_count_);
@@ -2327,12 +2162,9 @@ TEST_F(BluetoothChromeOSTest, PairJustWorks) {
   TestObserver observer(adapter_);
 
   TestPairingDelegate pairing_delegate;
-  device->Connect(
-      &pairing_delegate,
-      base::Bind(&BluetoothChromeOSTest::Callback,
-                 base::Unretained(this)),
-      base::Bind(&BluetoothChromeOSTest::ConnectErrorCallback,
-                 base::Unretained(this)));
+  device->Connect(&pairing_delegate, GetCallback(),
+                  base::Bind(&BluetoothChromeOSTest::ConnectErrorCallback,
+                             base::Unretained(this)));
 
   EXPECT_EQ(0, pairing_delegate.call_count_);
 
@@ -2375,12 +2207,9 @@ TEST_F(BluetoothChromeOSTest, PairUnpairableDeviceFails) {
   TestObserver observer(adapter_);
 
   TestPairingDelegate pairing_delegate;
-  device->Connect(
-      &pairing_delegate,
-      base::Bind(&BluetoothChromeOSTest::Callback,
-                 base::Unretained(this)),
-      base::Bind(&BluetoothChromeOSTest::ConnectErrorCallback,
-                 base::Unretained(this)));
+  device->Connect(&pairing_delegate, GetCallback(),
+                  base::Bind(&BluetoothChromeOSTest::ConnectErrorCallback,
+                             base::Unretained(this)));
 
   EXPECT_EQ(0, pairing_delegate.call_count_);
   EXPECT_TRUE(device->IsConnecting());
@@ -2413,12 +2242,9 @@ TEST_F(BluetoothChromeOSTest, PairingFails) {
   TestObserver observer(adapter_);
 
   TestPairingDelegate pairing_delegate;
-  device->Connect(
-      &pairing_delegate,
-      base::Bind(&BluetoothChromeOSTest::Callback,
-                 base::Unretained(this)),
-      base::Bind(&BluetoothChromeOSTest::ConnectErrorCallback,
-                 base::Unretained(this)));
+  device->Connect(&pairing_delegate, GetCallback(),
+                  base::Bind(&BluetoothChromeOSTest::ConnectErrorCallback,
+                             base::Unretained(this)));
 
   EXPECT_EQ(0, pairing_delegate.call_count_);
   EXPECT_TRUE(device->IsConnecting());
@@ -2452,12 +2278,9 @@ TEST_F(BluetoothChromeOSTest, PairingFailsAtConnection) {
   TestObserver observer(adapter_);
 
   TestPairingDelegate pairing_delegate;
-  device->Connect(
-      &pairing_delegate,
-      base::Bind(&BluetoothChromeOSTest::Callback,
-                 base::Unretained(this)),
-      base::Bind(&BluetoothChromeOSTest::ConnectErrorCallback,
-                 base::Unretained(this)));
+  device->Connect(&pairing_delegate, GetCallback(),
+                  base::Bind(&BluetoothChromeOSTest::ConnectErrorCallback,
+                             base::Unretained(this)));
 
   EXPECT_EQ(0, pairing_delegate.call_count_);
   EXPECT_TRUE(device->IsConnecting());
@@ -2502,12 +2325,9 @@ TEST_F(BluetoothChromeOSTest, PairingRejectedAtPinCode) {
   TestObserver observer(adapter_);
 
   TestPairingDelegate pairing_delegate;
-  device->Connect(
-      &pairing_delegate,
-      base::Bind(&BluetoothChromeOSTest::Callback,
-                 base::Unretained(this)),
-      base::Bind(&BluetoothChromeOSTest::ConnectErrorCallback,
-                 base::Unretained(this)));
+  device->Connect(&pairing_delegate, GetCallback(),
+                  base::Bind(&BluetoothChromeOSTest::ConnectErrorCallback,
+                             base::Unretained(this)));
 
   EXPECT_EQ(1, pairing_delegate.call_count_);
   EXPECT_EQ(1, pairing_delegate.request_pincode_count_);
@@ -2543,12 +2363,9 @@ TEST_F(BluetoothChromeOSTest, PairingCancelledAtPinCode) {
   TestObserver observer(adapter_);
 
   TestPairingDelegate pairing_delegate;
-  device->Connect(
-      &pairing_delegate,
-      base::Bind(&BluetoothChromeOSTest::Callback,
-                 base::Unretained(this)),
-      base::Bind(&BluetoothChromeOSTest::ConnectErrorCallback,
-                 base::Unretained(this)));
+  device->Connect(&pairing_delegate, GetCallback(),
+                  base::Bind(&BluetoothChromeOSTest::ConnectErrorCallback,
+                             base::Unretained(this)));
 
   EXPECT_EQ(1, pairing_delegate.call_count_);
   EXPECT_EQ(1, pairing_delegate.request_pincode_count_);
@@ -2584,12 +2401,9 @@ TEST_F(BluetoothChromeOSTest, PairingRejectedAtPasskey) {
   TestObserver observer(adapter_);
 
   TestPairingDelegate pairing_delegate;
-  device->Connect(
-      &pairing_delegate,
-      base::Bind(&BluetoothChromeOSTest::Callback,
-                 base::Unretained(this)),
-      base::Bind(&BluetoothChromeOSTest::ConnectErrorCallback,
-                 base::Unretained(this)));
+  device->Connect(&pairing_delegate, GetCallback(),
+                  base::Bind(&BluetoothChromeOSTest::ConnectErrorCallback,
+                             base::Unretained(this)));
 
   EXPECT_EQ(1, pairing_delegate.call_count_);
   EXPECT_EQ(1, pairing_delegate.request_passkey_count_);
@@ -2625,12 +2439,9 @@ TEST_F(BluetoothChromeOSTest, PairingCancelledAtPasskey) {
   TestObserver observer(adapter_);
 
   TestPairingDelegate pairing_delegate;
-  device->Connect(
-      &pairing_delegate,
-      base::Bind(&BluetoothChromeOSTest::Callback,
-                 base::Unretained(this)),
-      base::Bind(&BluetoothChromeOSTest::ConnectErrorCallback,
-                 base::Unretained(this)));
+  device->Connect(&pairing_delegate, GetCallback(),
+                  base::Bind(&BluetoothChromeOSTest::ConnectErrorCallback,
+                             base::Unretained(this)));
 
   EXPECT_EQ(1, pairing_delegate.call_count_);
   EXPECT_EQ(1, pairing_delegate.request_passkey_count_);
@@ -2666,12 +2477,9 @@ TEST_F(BluetoothChromeOSTest, PairingRejectedAtConfirmation) {
   TestObserver observer(adapter_);
 
   TestPairingDelegate pairing_delegate;
-  device->Connect(
-      &pairing_delegate,
-      base::Bind(&BluetoothChromeOSTest::Callback,
-                 base::Unretained(this)),
-      base::Bind(&BluetoothChromeOSTest::ConnectErrorCallback,
-                 base::Unretained(this)));
+  device->Connect(&pairing_delegate, GetCallback(),
+                  base::Bind(&BluetoothChromeOSTest::ConnectErrorCallback,
+                             base::Unretained(this)));
 
   EXPECT_EQ(1, pairing_delegate.call_count_);
   EXPECT_EQ(1, pairing_delegate.confirm_passkey_count_);
@@ -2707,12 +2515,9 @@ TEST_F(BluetoothChromeOSTest, PairingCancelledAtConfirmation) {
   TestObserver observer(adapter_);
 
   TestPairingDelegate pairing_delegate;
-  device->Connect(
-      &pairing_delegate,
-      base::Bind(&BluetoothChromeOSTest::Callback,
-                 base::Unretained(this)),
-      base::Bind(&BluetoothChromeOSTest::ConnectErrorCallback,
-                 base::Unretained(this)));
+  device->Connect(&pairing_delegate, GetCallback(),
+                  base::Bind(&BluetoothChromeOSTest::ConnectErrorCallback,
+                             base::Unretained(this)));
 
   EXPECT_EQ(1, pairing_delegate.call_count_);
   EXPECT_EQ(1, pairing_delegate.confirm_passkey_count_);
@@ -2748,12 +2553,9 @@ TEST_F(BluetoothChromeOSTest, PairingCancelledInFlight) {
   TestObserver observer(adapter_);
 
   TestPairingDelegate pairing_delegate;
-  device->Connect(
-      &pairing_delegate,
-      base::Bind(&BluetoothChromeOSTest::Callback,
-                 base::Unretained(this)),
-      base::Bind(&BluetoothChromeOSTest::ConnectErrorCallback,
-                 base::Unretained(this)));
+  device->Connect(&pairing_delegate, GetCallback(),
+                  base::Bind(&BluetoothChromeOSTest::ConnectErrorCallback,
+                             base::Unretained(this)));
 
   EXPECT_EQ(0, pairing_delegate.call_count_);
   EXPECT_TRUE(device->IsConnecting());
@@ -2795,12 +2597,9 @@ TEST_F(BluetoothChromeOSTest, IncomingPairRequestPinCode) {
   TestObserver observer(adapter_);
 
   fake_bluetooth_device_client_->SimulatePairing(
-      dbus::ObjectPath(FakeBluetoothDeviceClient::kRequestPinCodePath),
-      true,
-      base::Bind(&BluetoothChromeOSTest::Callback,
-                 base::Unretained(this)),
-      base::Bind(&BluetoothChromeOSTest::DBusErrorCallback,
-                 base::Unretained(this)));
+      dbus::ObjectPath(FakeBluetoothDeviceClient::kRequestPinCodePath), true,
+      GetCallback(), base::Bind(&BluetoothChromeOSTest::DBusErrorCallback,
+                                base::Unretained(this)));
 
   EXPECT_EQ(1, pairing_delegate.call_count_);
   EXPECT_EQ(1, pairing_delegate.request_pincode_count_);
@@ -2852,12 +2651,9 @@ TEST_F(BluetoothChromeOSTest, IncomingPairConfirmPasskey) {
   TestObserver observer(adapter_);
 
   fake_bluetooth_device_client_->SimulatePairing(
-      dbus::ObjectPath(FakeBluetoothDeviceClient::kConfirmPasskeyPath),
-      true,
-      base::Bind(&BluetoothChromeOSTest::Callback,
-                 base::Unretained(this)),
-      base::Bind(&BluetoothChromeOSTest::DBusErrorCallback,
-                 base::Unretained(this)));
+      dbus::ObjectPath(FakeBluetoothDeviceClient::kConfirmPasskeyPath), true,
+      GetCallback(), base::Bind(&BluetoothChromeOSTest::DBusErrorCallback,
+                                base::Unretained(this)));
 
   EXPECT_EQ(1, pairing_delegate.call_count_);
   EXPECT_EQ(1, pairing_delegate.confirm_passkey_count_);
@@ -2910,12 +2706,9 @@ TEST_F(BluetoothChromeOSTest, IncomingPairRequestPasskey) {
   TestObserver observer(adapter_);
 
   fake_bluetooth_device_client_->SimulatePairing(
-      dbus::ObjectPath(FakeBluetoothDeviceClient::kRequestPasskeyPath),
-      true,
-      base::Bind(&BluetoothChromeOSTest::Callback,
-                 base::Unretained(this)),
-      base::Bind(&BluetoothChromeOSTest::DBusErrorCallback,
-                 base::Unretained(this)));
+      dbus::ObjectPath(FakeBluetoothDeviceClient::kRequestPasskeyPath), true,
+      GetCallback(), base::Bind(&BluetoothChromeOSTest::DBusErrorCallback,
+                                base::Unretained(this)));
 
   EXPECT_EQ(1, pairing_delegate.call_count_);
   EXPECT_EQ(1, pairing_delegate.request_passkey_count_);
@@ -2968,12 +2761,9 @@ TEST_F(BluetoothChromeOSTest, IncomingPairJustWorks) {
   TestObserver observer(adapter_);
 
   fake_bluetooth_device_client_->SimulatePairing(
-      dbus::ObjectPath(FakeBluetoothDeviceClient::kJustWorksPath),
-      true,
-      base::Bind(&BluetoothChromeOSTest::Callback,
-                 base::Unretained(this)),
-      base::Bind(&BluetoothChromeOSTest::DBusErrorCallback,
-                 base::Unretained(this)));
+      dbus::ObjectPath(FakeBluetoothDeviceClient::kJustWorksPath), true,
+      GetCallback(), base::Bind(&BluetoothChromeOSTest::DBusErrorCallback,
+                                base::Unretained(this)));
 
   EXPECT_EQ(1, pairing_delegate.call_count_);
   EXPECT_EQ(1, pairing_delegate.authorize_pairing_count_);
@@ -3021,12 +2811,9 @@ TEST_F(BluetoothChromeOSTest, IncomingPairRequestPinCodeWithoutDelegate) {
   TestObserver observer(adapter_);
 
   fake_bluetooth_device_client_->SimulatePairing(
-      dbus::ObjectPath(FakeBluetoothDeviceClient::kRequestPinCodePath),
-      true,
-      base::Bind(&BluetoothChromeOSTest::Callback,
-                 base::Unretained(this)),
-      base::Bind(&BluetoothChromeOSTest::DBusErrorCallback,
-                 base::Unretained(this)));
+      dbus::ObjectPath(FakeBluetoothDeviceClient::kRequestPinCodePath), true,
+      GetCallback(), base::Bind(&BluetoothChromeOSTest::DBusErrorCallback,
+                                base::Unretained(this)));
 
   message_loop_.Run();
 
@@ -3063,12 +2850,9 @@ TEST_F(BluetoothChromeOSTest, IncomingPairConfirmPasskeyWithoutDelegate) {
   TestObserver observer(adapter_);
 
   fake_bluetooth_device_client_->SimulatePairing(
-      dbus::ObjectPath(FakeBluetoothDeviceClient::kConfirmPasskeyPath),
-      true,
-      base::Bind(&BluetoothChromeOSTest::Callback,
-                 base::Unretained(this)),
-      base::Bind(&BluetoothChromeOSTest::DBusErrorCallback,
-                 base::Unretained(this)));
+      dbus::ObjectPath(FakeBluetoothDeviceClient::kConfirmPasskeyPath), true,
+      GetCallback(), base::Bind(&BluetoothChromeOSTest::DBusErrorCallback,
+                                base::Unretained(this)));
 
   message_loop_.Run();
 
@@ -3105,12 +2889,9 @@ TEST_F(BluetoothChromeOSTest, IncomingPairRequestPasskeyWithoutDelegate) {
   TestObserver observer(adapter_);
 
   fake_bluetooth_device_client_->SimulatePairing(
-      dbus::ObjectPath(FakeBluetoothDeviceClient::kRequestPasskeyPath),
-      true,
-      base::Bind(&BluetoothChromeOSTest::Callback,
-                 base::Unretained(this)),
-      base::Bind(&BluetoothChromeOSTest::DBusErrorCallback,
-                 base::Unretained(this)));
+      dbus::ObjectPath(FakeBluetoothDeviceClient::kRequestPasskeyPath), true,
+      GetCallback(), base::Bind(&BluetoothChromeOSTest::DBusErrorCallback,
+                                base::Unretained(this)));
 
   message_loop_.Run();
 
@@ -3147,12 +2928,9 @@ TEST_F(BluetoothChromeOSTest, IncomingPairJustWorksWithoutDelegate) {
   TestObserver observer(adapter_);
 
   fake_bluetooth_device_client_->SimulatePairing(
-      dbus::ObjectPath(FakeBluetoothDeviceClient::kJustWorksPath),
-      true,
-      base::Bind(&BluetoothChromeOSTest::Callback,
-                 base::Unretained(this)),
-      base::Bind(&BluetoothChromeOSTest::DBusErrorCallback,
-                 base::Unretained(this)));
+      dbus::ObjectPath(FakeBluetoothDeviceClient::kJustWorksPath), true,
+      GetCallback(), base::Bind(&BluetoothChromeOSTest::DBusErrorCallback,
+                                base::Unretained(this)));
 
   message_loop_.Run();
 
@@ -3193,12 +2971,9 @@ TEST_F(BluetoothChromeOSTest, RemovePairingDelegateDuringPairing) {
   TestObserver observer(adapter_);
 
   fake_bluetooth_device_client_->SimulatePairing(
-      dbus::ObjectPath(FakeBluetoothDeviceClient::kRequestPasskeyPath),
-      true,
-      base::Bind(&BluetoothChromeOSTest::Callback,
-                 base::Unretained(this)),
-      base::Bind(&BluetoothChromeOSTest::DBusErrorCallback,
-                 base::Unretained(this)));
+      dbus::ObjectPath(FakeBluetoothDeviceClient::kRequestPasskeyPath), true,
+      GetCallback(), base::Bind(&BluetoothChromeOSTest::DBusErrorCallback,
+                                base::Unretained(this)));
 
   EXPECT_EQ(1, pairing_delegate.call_count_);
   EXPECT_EQ(1, pairing_delegate.request_passkey_count_);
@@ -3300,12 +3075,9 @@ TEST_F(BluetoothChromeOSTest, GetConnectionInfoForConnectedDevice) {
   BluetoothDevice* device =
       adapter_->GetDevice(FakeBluetoothDeviceClient::kPairedDeviceAddress);
 
-  device->Connect(
-      NULL,
-      base::Bind(&BluetoothChromeOSTest::Callback,
-                 base::Unretained(this)),
-      base::Bind(&BluetoothChromeOSTest::ConnectErrorCallback,
-                 base::Unretained(this)));
+  device->Connect(NULL, GetCallback(),
+                  base::Bind(&BluetoothChromeOSTest::ConnectErrorCallback,
+                             base::Unretained(this)));
   EXPECT_TRUE(device->IsConnected());
 
   // Calling GetConnectionInfo for a connected device should return valid
@@ -3316,6 +3088,318 @@ TEST_F(BluetoothChromeOSTest, GetConnectionInfoForConnectedDevice) {
   EXPECT_EQ(-10, conn_info.rssi);
   EXPECT_EQ(3, conn_info.transmit_power);
   EXPECT_EQ(4, conn_info.max_transmit_power);
+}
+
+// Verifies Shutdown shuts down the adapter as expected.
+TEST_F(BluetoothChromeOSTest, Shutdown) {
+  // Set up adapter. Set powered & discoverable, start discovery.
+  GetAdapter();
+  adapter_->SetPowered(true, GetCallback(), GetErrorCallback());
+  adapter_->SetDiscoverable(true, GetCallback(), GetErrorCallback());
+  adapter_->StartDiscoverySession(
+      base::Bind(&BluetoothChromeOSTest::DiscoverySessionCallback,
+                 base::Unretained(this)),
+      GetErrorCallback());
+  base::MessageLoop::current()->Run();
+  ASSERT_EQ(3, callback_count_);
+  ASSERT_EQ(0, error_callback_count_);
+  callback_count_ = 0;
+
+  TestPairingDelegate pairing_delegate;
+  adapter_->AddPairingDelegate(
+      &pairing_delegate, BluetoothAdapter::PAIRING_DELEGATE_PRIORITY_HIGH);
+
+  // Validate running adapter state.
+  EXPECT_NE("", adapter_->GetAddress());
+  EXPECT_NE("", adapter_->GetName());
+  EXPECT_TRUE(adapter_->IsInitialized());
+  EXPECT_TRUE(adapter_->IsPresent());
+  EXPECT_TRUE(adapter_->IsPowered());
+  EXPECT_TRUE(adapter_->IsDiscoverable());
+  EXPECT_TRUE(adapter_->IsDiscovering());
+  EXPECT_EQ(2U, adapter_->GetDevices().size());
+  EXPECT_NE(nullptr, adapter_->GetDevice(
+                         FakeBluetoothDeviceClient::kPairedDeviceAddress));
+  EXPECT_NE(dbus::ObjectPath(""), static_cast<BluetoothAdapterChromeOS*>(
+                                      adapter_.get())->object_path());
+
+  // Shutdown
+  adapter_->Shutdown();
+
+  // Validate post shutdown state by calling all BluetoothAdapterChromeOS
+  // members, in declaration order:
+
+  adapter_->Shutdown();
+  // DeleteOnCorrectThread omitted as we don't want to delete in this test.
+  {
+    TestObserver observer(adapter_);  // Calls AddObserver
+  }  // TestObserver::~TestObserver calls RemoveObserver.
+  EXPECT_EQ("", adapter_->GetAddress());
+  EXPECT_EQ("", adapter_->GetName());
+
+  adapter_->SetName("", GetCallback(), GetErrorCallback());
+  EXPECT_EQ(0, callback_count_);
+  EXPECT_EQ(1, error_callback_count_--) << "SetName error";
+
+  EXPECT_TRUE(adapter_->IsInitialized());
+  EXPECT_FALSE(adapter_->IsPresent());
+  EXPECT_FALSE(adapter_->IsPowered());
+
+  adapter_->SetPowered(true, GetCallback(), GetErrorCallback());
+  EXPECT_EQ(0, callback_count_);
+  EXPECT_EQ(1, error_callback_count_--) << "SetPowered error";
+
+  EXPECT_FALSE(adapter_->IsDiscoverable());
+
+  adapter_->SetDiscoverable(true, GetCallback(), GetErrorCallback());
+  EXPECT_EQ(0, callback_count_);
+  EXPECT_EQ(1, error_callback_count_--) << "SetDiscoverable error";
+
+  EXPECT_FALSE(adapter_->IsDiscovering());
+  // CreateRfcommService will DCHECK after Shutdown().
+  // CreateL2capService will DCHECK after Shutdown().
+
+  BluetoothAudioSink::Options audio_sink_options;
+  adapter_->RegisterAudioSink(
+      audio_sink_options,
+      base::Bind(&BluetoothChromeOSTest::AudioSinkAcquiredCallback,
+                 base::Unretained(this)),
+      base::Bind(&BluetoothChromeOSTest::AudioSinkErrorCallback,
+                 base::Unretained(this)));
+  EXPECT_EQ(0, callback_count_);
+  EXPECT_EQ(1, error_callback_count_--) << "RegisterAudioSink error";
+
+  BluetoothAdapterChromeOS* adapter_chrome_os =
+      static_cast<BluetoothAdapterChromeOS*>(adapter_.get());
+  EXPECT_EQ(NULL, adapter_chrome_os->GetDeviceWithPath(dbus::ObjectPath("")));
+
+  // Notify methods presume objects exist that are owned by the adapter and
+  // destroyed in Shutdown(). Mocks are not attempted here that won't exist,
+  // as verified below by EXPECT_EQ(0U, adapter_->GetDevices().size());
+  // NotifyDeviceChanged
+  // NotifyGattServiceAdded
+  // NotifyGattServiceRemoved
+  // NotifyGattServiceChanged
+  // NotifyGattDiscoveryComplete
+  // NotifyGattCharacteristicAdded
+  // NotifyGattCharacteristicRemoved
+  // NotifyGattDescriptorAdded
+  // NotifyGattDescriptorRemoved
+  // NotifyGattCharacteristicValueChanged
+  // NotifyGattDescriptorValueChanged
+
+  EXPECT_EQ(dbus::ObjectPath(""), adapter_chrome_os->object_path());
+
+  adapter_profile_ = NULL;
+
+  FakeBluetoothProfileServiceProviderDelegate profile_delegate;
+  adapter_chrome_os->UseProfile(
+      BluetoothUUID(), dbus::ObjectPath(""),
+      BluetoothProfileManagerClient::Options(), &profile_delegate,
+      base::Bind(&BluetoothChromeOSTest::ProfileRegisteredCallback,
+                 base::Unretained(this)),
+      base::Bind(&BluetoothChromeOSTest::ErrorCompletionCallback,
+                 base::Unretained(this)));
+
+  EXPECT_FALSE(adapter_profile_) << "UseProfile error";
+  EXPECT_EQ(0, callback_count_) << "UseProfile error";
+  EXPECT_EQ(1, error_callback_count_--) << "UseProfile error";
+
+  // Protected and private methods:
+
+  adapter_chrome_os->RemovePairingDelegateInternal(&pairing_delegate);
+  // AdapterAdded() invalid post Shutdown because it calls SetAdapter.
+  adapter_chrome_os->AdapterRemoved(dbus::ObjectPath("x"));
+  adapter_chrome_os->AdapterPropertyChanged(dbus::ObjectPath("x"), "");
+  adapter_chrome_os->DeviceAdded(dbus::ObjectPath(""));
+  adapter_chrome_os->DeviceRemoved(dbus::ObjectPath(""));
+  adapter_chrome_os->DevicePropertyChanged(dbus::ObjectPath(""), "");
+  adapter_chrome_os->InputPropertyChanged(dbus::ObjectPath(""), "");
+  // BluetoothAgentServiceProvider::Delegate omitted, dbus will be shutdown,
+  //   with the exception of Released.
+  adapter_chrome_os->Released();
+
+  adapter_chrome_os->OnRegisterAgent();
+  adapter_chrome_os->OnRegisterAgentError("", "");
+  adapter_chrome_os->OnRequestDefaultAgent();
+  adapter_chrome_os->OnRequestDefaultAgentError("", "");
+
+  adapter_chrome_os->OnRegisterAudioSink(
+      base::Bind(&BluetoothChromeOSTest::AudioSinkAcquiredCallback,
+                 base::Unretained(this)),
+      base::Bind(&BluetoothChromeOSTest::AudioSinkErrorCallback,
+                 base::Unretained(this)),
+      scoped_refptr<device::BluetoothAudioSink>());
+  EXPECT_EQ(0, callback_count_);
+  EXPECT_EQ(1, error_callback_count_--) << "RegisterAudioSink error";
+
+  // GetPairing will DCHECK after Shutdown().
+  // SetAdapter will DCHECK after Shutdown().
+  // SetDefaultAdapterName will DCHECK after Shutdown().
+  // RemoveAdapter will DCHECK after Shutdown().
+  adapter_chrome_os->PoweredChanged(false);
+  adapter_chrome_os->DiscoverableChanged(false);
+  adapter_chrome_os->DiscoveringChanged(false);
+  adapter_chrome_os->PresentChanged(false);
+
+  adapter_chrome_os->OnSetDiscoverable(GetCallback(), GetErrorCallback(), true);
+  EXPECT_EQ(0, callback_count_) << "OnSetDiscoverable error";
+  EXPECT_EQ(1, error_callback_count_--) << "OnSetDiscoverable error";
+
+  adapter_chrome_os->OnPropertyChangeCompleted(GetCallback(),
+                                               GetErrorCallback(), true);
+  EXPECT_EQ(0, callback_count_) << "OnPropertyChangeCompleted error";
+  EXPECT_EQ(1, error_callback_count_--) << "OnPropertyChangeCompleted error";
+
+  adapter_chrome_os->AddDiscoverySession(GetCallback(), GetErrorCallback());
+  EXPECT_EQ(0, callback_count_) << "AddDiscoverySession error";
+  EXPECT_EQ(1, error_callback_count_--) << "AddDiscoverySession error";
+
+  adapter_chrome_os->RemoveDiscoverySession(GetCallback(), GetErrorCallback());
+  EXPECT_EQ(0, callback_count_) << "RemoveDiscoverySession error";
+  EXPECT_EQ(1, error_callback_count_--) << "RemoveDiscoverySession error";
+
+  // OnStartDiscovery tested in Shutdown_OnStartDiscovery
+  // OnStartDiscoveryError tested in Shutdown_OnStartDiscoveryError
+  // OnStopDiscovery tested in Shutdown_OnStopDiscovery
+  // OnStopDiscoveryError tested in Shutdown_OnStopDiscoveryError
+
+  adapter_profile_ = NULL;
+
+  // OnRegisterProfile SetProfileDelegate, OnRegisterProfileError, require
+  // UseProfile to be set first, do so again here just before calling them.
+  adapter_chrome_os->UseProfile(
+      BluetoothUUID(), dbus::ObjectPath(""),
+      BluetoothProfileManagerClient::Options(), &profile_delegate,
+      base::Bind(&BluetoothChromeOSTest::ProfileRegisteredCallback,
+                 base::Unretained(this)),
+      base::Bind(&BluetoothChromeOSTest::ErrorCompletionCallback,
+                 base::Unretained(this)));
+
+  EXPECT_FALSE(adapter_profile_) << "UseProfile error";
+  EXPECT_EQ(0, callback_count_) << "UseProfile error";
+  EXPECT_EQ(1, error_callback_count_--) << "UseProfile error";
+
+  adapter_chrome_os->SetProfileDelegate(
+      BluetoothUUID(), dbus::ObjectPath(""), &profile_delegate,
+      base::Bind(&BluetoothChromeOSTest::ProfileRegisteredCallback,
+                 base::Unretained(this)),
+      base::Bind(&BluetoothChromeOSTest::ErrorCompletionCallback,
+                 base::Unretained(this)));
+  EXPECT_EQ(0, callback_count_) << "SetProfileDelegate error";
+  EXPECT_EQ(1, error_callback_count_--) << "SetProfileDelegate error";
+
+  adapter_chrome_os->OnRegisterProfileError(BluetoothUUID(), "", "");
+  EXPECT_EQ(0, callback_count_) << "OnRegisterProfileError error";
+  EXPECT_EQ(0, error_callback_count_) << "OnRegisterProfileError error";
+
+  adapter_chrome_os->ProcessQueuedDiscoveryRequests();
+
+  // From BluetoothAdapater:
+
+  adapter_->StartDiscoverySession(
+      base::Bind(&BluetoothChromeOSTest::DiscoverySessionCallback,
+                 base::Unretained(this)),
+      GetErrorCallback());
+  EXPECT_EQ(0, callback_count_) << "StartDiscoverySession error";
+  EXPECT_EQ(1, error_callback_count_--) << "StartDiscoverySession error";
+
+  EXPECT_EQ(0U, adapter_->GetDevices().size());
+  EXPECT_EQ(nullptr, adapter_->GetDevice(
+                         FakeBluetoothDeviceClient::kPairedDeviceAddress));
+  TestPairingDelegate pairing_delegate2;
+  adapter_->AddPairingDelegate(
+      &pairing_delegate2, BluetoothAdapter::PAIRING_DELEGATE_PRIORITY_HIGH);
+  adapter_->RemovePairingDelegate(&pairing_delegate2);
+}
+
+// Verifies post-Shutdown of discovery sessions and OnStartDiscovery.
+TEST_F(BluetoothChromeOSTest, Shutdown_OnStartDiscovery) {
+  const int kNumberOfDiscoverySessions = 10;
+  GetAdapter();
+  BluetoothAdapterChromeOS* adapter_chrome_os =
+      static_cast<BluetoothAdapterChromeOS*>(adapter_.get());
+
+  for (int i = 0; i < kNumberOfDiscoverySessions; i++) {
+    adapter_chrome_os->AddDiscoverySession(GetCallback(), GetErrorCallback());
+  }
+  adapter_->Shutdown();
+  adapter_chrome_os->OnStartDiscovery(GetCallback(), GetErrorCallback());
+
+  EXPECT_EQ(0, callback_count_);
+  EXPECT_EQ(kNumberOfDiscoverySessions, error_callback_count_);
+}
+
+// Verifies post-Shutdown of discovery sessions and OnStartDiscoveryError.
+TEST_F(BluetoothChromeOSTest, Shutdown_OnStartDiscoveryError) {
+  const int kNumberOfDiscoverySessions = 10;
+  GetAdapter();
+  BluetoothAdapterChromeOS* adapter_chrome_os =
+      static_cast<BluetoothAdapterChromeOS*>(adapter_.get());
+
+  for (int i = 0; i < kNumberOfDiscoverySessions; i++) {
+    adapter_chrome_os->AddDiscoverySession(GetCallback(), GetErrorCallback());
+  }
+  adapter_->Shutdown();
+  adapter_chrome_os->OnStartDiscoveryError(GetCallback(), GetErrorCallback(),
+                                           "", "");
+
+  EXPECT_EQ(0, callback_count_);
+  EXPECT_EQ(kNumberOfDiscoverySessions, error_callback_count_);
+}
+
+// Verifies post-Shutdown of discovery sessions and OnStartDiscovery.
+TEST_F(BluetoothChromeOSTest, Shutdown_OnStopDiscovery) {
+  const int kNumberOfDiscoverySessions = 10;
+  GetAdapter();
+  BluetoothAdapterChromeOS* adapter_chrome_os =
+      static_cast<BluetoothAdapterChromeOS*>(adapter_.get());
+
+  // In order to queue up discovery sessions before an OnStopDiscovery call
+  // RemoveDiscoverySession must be called, so Add, Start, and Remove:
+  adapter_chrome_os->AddDiscoverySession(GetCallback(), GetErrorCallback());
+  adapter_chrome_os->OnStartDiscovery(GetCallback(), GetErrorCallback());
+  adapter_chrome_os->RemoveDiscoverySession(GetCallback(), GetErrorCallback());
+  callback_count_ = 0;
+  error_callback_count_ = 0;
+  // Can now queue discovery sessions while waiting for OnStopDiscovery.
+  for (int i = 0; i < kNumberOfDiscoverySessions; i++) {
+    adapter_chrome_os->AddDiscoverySession(GetCallback(), GetErrorCallback());
+  }
+  adapter_->Shutdown();
+  adapter_chrome_os->OnStopDiscovery(GetCallback());
+
+  // 1 successful stopped discovery from RemoveDiscoverySession, and
+  // kNumberOfDiscoverySessions errors from AddDiscoverySession/OnStopDiscovery.
+  EXPECT_EQ(1, callback_count_);
+  EXPECT_EQ(kNumberOfDiscoverySessions, error_callback_count_);
+}
+
+// Verifies post-Shutdown of discovery sessions and OnStopDiscoveryError.
+TEST_F(BluetoothChromeOSTest, Shutdown_OnStopDiscoveryError) {
+  const int kNumberOfDiscoverySessions = 10;
+  GetAdapter();
+  BluetoothAdapterChromeOS* adapter_chrome_os =
+      static_cast<BluetoothAdapterChromeOS*>(adapter_.get());
+
+  // In order to queue up discovery sessions before an OnStopDiscoveryError call
+  // RemoveDiscoverySession must be called, so Add, Start, and Remove:
+  adapter_chrome_os->AddDiscoverySession(GetCallback(), GetErrorCallback());
+  adapter_chrome_os->OnStartDiscovery(GetCallback(), GetErrorCallback());
+  adapter_chrome_os->RemoveDiscoverySession(GetCallback(), GetErrorCallback());
+  callback_count_ = 0;
+  error_callback_count_ = 0;
+  // Can now queue discovery sessions while waiting for OnStopDiscoveryError.
+  for (int i = 0; i < kNumberOfDiscoverySessions; i++) {
+    adapter_chrome_os->AddDiscoverySession(GetCallback(), GetErrorCallback());
+  }
+  adapter_->Shutdown();
+  adapter_chrome_os->OnStopDiscoveryError(GetErrorCallback(), "", "");
+
+  // 1 error reported to RemoveDiscoverySession because of OnStopDiscoveryError,
+  // and kNumberOfDiscoverySessions errors queued with AddDiscoverySession.
+  EXPECT_EQ(0, callback_count_);
+  EXPECT_EQ(1 + kNumberOfDiscoverySessions, error_callback_count_);
 }
 
 }  // namespace chromeos

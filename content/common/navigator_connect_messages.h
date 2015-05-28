@@ -4,13 +4,14 @@
 
 // IPC messages for navigator.connect
 
-#include "content/common/navigator_connect_types.h"
+#include "content/public/common/message_port_types.h"
+#include "content/public/common/navigator_connect_client.h"
 #include "ipc/ipc_message_macros.h"
 #include "url/gurl.h"
 
 #define IPC_MESSAGE_START NavigatorConnectMsgStart
 
-IPC_STRUCT_TRAITS_BEGIN(content::CrossOriginServiceWorkerClient)
+IPC_STRUCT_TRAITS_BEGIN(content::NavigatorConnectClient)
   IPC_STRUCT_TRAITS_MEMBER(target_url)
   IPC_STRUCT_TRAITS_MEMBER(origin)
   IPC_STRUCT_TRAITS_MEMBER(message_port_id)
@@ -20,10 +21,12 @@ IPC_STRUCT_TRAITS_END()
 IPC_MESSAGE_CONTROL3(NavigatorConnectHostMsg_Connect,
                      int /* thread_id */,
                      int /* request_id */,
-                     content::CrossOriginServiceWorkerClient /* client */)
+                     content::NavigatorConnectClient /* client */)
 
 // Messages sent from the browser to the child process.
-IPC_MESSAGE_CONTROL3(NavigatorConnectMsg_ConnectResult,
+IPC_MESSAGE_CONTROL5(NavigatorConnectMsg_ConnectResult,
                      int /* thread_id */,
                      int /* request_id */,
+                     content::TransferredMessagePort /* message_port */,
+                     int /* message_port_route_id */,
                      bool /* allow_connect */)

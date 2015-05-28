@@ -15,7 +15,7 @@ var hostId = '@pending';
  * @type {string} The network stats at the time the feedback consent dialog
  *     was shown.
  */
-var connectionStats = null;
+var connectionStats = '';
 
 /**
  * @type {string} "no" => user did not request a VM reset; "yes" => VM was
@@ -102,8 +102,8 @@ function showError() {
  */
 function generateId() {
   var idArray = new Uint8Array(20);
-  crypto.getRandomValues(idArray);
-  return btoa(String.fromCharCode.apply(null, idArray));
+  window.crypto.getRandomValues(idArray);
+  return window.btoa(String.fromCharCode.apply(null, idArray));
 }
 
 /**
@@ -111,7 +111,8 @@ function generateId() {
  */
 function onToken(token) {
   var getUserInfo = function() {
-    remoting.OAuth2Api.getUserInfo(
+    var oauth2Api = new remoting.OAuth2ApiImpl();
+    oauth2Api.getUserInfo(
         onUserInfo, onUserInfo.bind(null, 'unknown', 'unknown'), token);
   };
   if (!token) {
@@ -122,23 +123,23 @@ function onToken(token) {
         'abandonHost': 'true',
         'crashServiceReportId': crashServiceReportId
       };
-      var headers = {
-        'Authorization': 'OAuth ' + token,
-        'Content-type': 'application/json'
-      };
       var uri = remoting.settings.APP_REMOTING_API_BASE_URL +
           '/applications/' + remoting.settings.getAppRemotingApplicationId() +
           '/hosts/'  + hostId +
           '/reportIssue';
-      /** @param {XMLHttpRequest} xhr */
-      var onDone = function(xhr) {
-        if (xhr.status >= 200 && xhr.status < 300) {
+      var onDone = function(/** !remoting.Xhr.Response */ response) {
+        if (response.status >= 200 && response.status < 300) {
           getUserInfo();
         } else {
           showError();
         }
       };
-      remoting.xhr.post(uri, onDone, JSON.stringify(body), headers);
+      new remoting.Xhr({
+        method: 'POST',
+        url: uri,
+        jsonContent: body,
+        oauthToken: token
+      }).start().then(onDone);
     } else {
       getUserInfo();
     }
@@ -183,6 +184,7 @@ function onToggleLogs() {
   }
 }
 
+/** @param {Event} event */
 function onLearnMore(event) {
   event.preventDefault();  // Clicking the link should not tick the checkbox.
   var learnMoreLink = document.getElementById('learn-more');

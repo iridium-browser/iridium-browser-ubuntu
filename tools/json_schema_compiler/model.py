@@ -304,8 +304,8 @@ class Function(object):
     def GeneratePropertyFromParam(p):
       return Property(self, p['name'], p, namespace, origin)
 
-    self.filters = [GeneratePropertyFromParam(filter)
-                    for filter in json.get('filters', [])]
+    self.filters = [GeneratePropertyFromParam(filter_instance)
+                    for filter_instance in json.get('filters', [])]
     callback_param = None
     for param in json.get('parameters', []):
       if param.get('type') == 'function':
@@ -456,6 +456,8 @@ class _PropertyTypeInfo(_Enum):
     _Enum.__init__(self, name)
     self.is_fundamental = is_fundamental
 
+  def __repr__(self):
+    return self.name
 
 class PropertyType(object):
   """Enum of different types of properties/parameters.

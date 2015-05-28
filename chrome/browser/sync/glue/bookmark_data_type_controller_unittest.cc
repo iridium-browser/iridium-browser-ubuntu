@@ -14,7 +14,6 @@
 #include "chrome/browser/bookmarks/chrome_bookmark_client.h"
 #include "chrome/browser/bookmarks/chrome_bookmark_client_factory.h"
 #include "chrome/browser/chrome_notification_types.h"
-#include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/profile_sync_components_factory_mock.h"
@@ -23,6 +22,7 @@
 #include "chrome/test/base/profile_mock.h"
 #include "components/bookmarks/browser/bookmark_model.h"
 #include "components/bookmarks/test/bookmark_test_helpers.h"
+#include "components/history/core/browser/history_service.h"
 #include "components/keyed_service/core/refcounted_keyed_service.h"
 #include "components/sync_driver/change_processor_mock.h"
 #include "components/sync_driver/data_type_controller_mock.h"
@@ -34,6 +34,7 @@
 #include "testing/gmock/include/gmock/gmock.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
+using bookmarks::BookmarkModel;
 using browser_sync::BookmarkDataTypeController;
 using sync_driver::ChangeProcessorMock;
 using sync_driver::DataTypeController;
@@ -48,14 +49,13 @@ using testing::SetArgumentPointee;
 
 namespace {
 
-class HistoryMock : public HistoryService {
+class HistoryMock : public history::HistoryService {
  public:
-  explicit HistoryMock(history::HistoryClient* client, Profile* profile)
-      : HistoryService(client, profile) {}
+  HistoryMock() : history::HistoryService() {}
   MOCK_METHOD0(BackendLoaded, bool(void));
 
  protected:
-  virtual ~HistoryMock() {}
+  ~HistoryMock() override {}
 };
 
 KeyedService* BuildChromeBookmarkClient(content::BrowserContext* context) {
@@ -86,7 +86,7 @@ KeyedService* BuildBookmarkModel(content::BrowserContext* context) {
 }
 
 KeyedService* BuildHistoryService(content::BrowserContext* profile) {
-  return new HistoryMock(NULL, static_cast<Profile*>(profile));
+  return new HistoryMock;
 }
 
 }  // namespace
@@ -161,6 +161,7 @@ class SyncBookmarkDataTypeControllerTest : public testing::Test {
     bookmark_dtc_->StartAssociating(
         base::Bind(&StartCallbackMock::Run,
                    base::Unretained(&start_callback_)));
+     base::MessageLoop::current()->RunUntilIdle();
   }
 
   void NotifyHistoryServiceLoaded() {
@@ -215,6 +216,8 @@ TEST_F(SyncBookmarkDataTypeControllerTest, StartBookmarkModelNotReady) {
   bookmark_dtc_->StartAssociating(
       base::Bind(&StartCallbackMock::Run,
                  base::Unretained(&start_callback_)));
+  base::MessageLoop::current()->RunUntilIdle();
+
 
   EXPECT_EQ(DataTypeController::RUNNING, bookmark_dtc_->state());
 }

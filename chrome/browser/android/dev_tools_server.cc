@@ -20,10 +20,11 @@
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/android/tab_android.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/history/top_sites.h"
+#include "chrome/browser/history/top_sites_factory.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/android/tab_model/tab_model.h"
 #include "chrome/browser/ui/android/tab_model/tab_model_list.h"
+#include "components/history/core/browser/top_sites.h"
 #include "content/public/browser/android/devtools_auth.h"
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/devtools_agent_host.h"
@@ -82,10 +83,7 @@ bool AuthorizeSocketAccessWithDebugPermission(
 // instance of this gets created each time devtools is enabled.
 class DevToolsServerDelegate : public content::DevToolsHttpHandlerDelegate {
  public:
-  explicit DevToolsServerDelegate(
-      const net::UnixDomainServerSocket::AuthCallback& auth_callback)
-      : last_tethering_socket_(0),
-        auth_callback_(auth_callback) {
+  DevToolsServerDelegate() {
   }
 
   std::string GetDiscoveryPageHTML() override {
@@ -107,29 +105,15 @@ class DevToolsServerDelegate : public content::DevToolsHttpHandlerDelegate {
     return base::FilePath();
   }
 
-  scoped_ptr<net::ServerSocket>
-  CreateSocketForTethering(std::string* name) override {
-    *name = base::StringPrintf(
-        kTetheringSocketName, getpid(), ++last_tethering_socket_);
-    scoped_ptr<net::UnixDomainServerSocket> socket(
-        new net::UnixDomainServerSocket(auth_callback_, true));
-    if (socket->ListenWithAddressAndPort(*name, 0, kBackLog) != net::OK)
-      return scoped_ptr<net::ServerSocket>();
-
-    return socket.Pass();
-  }
-
  private:
   static void PopulatePageThumbnails() {
     Profile* profile =
         ProfileManager::GetLastUsedProfile()->GetOriginalProfile();
-    history::TopSites* top_sites = profile->GetTopSites();
+    scoped_refptr<history::TopSites> top_sites =
+        TopSitesFactory::GetForProfile(profile);
     if (top_sites)
       top_sites->SyncWithHistory();
   }
-
-  int last_tethering_socket_;
-  const net::UnixDomainServerSocket::AuthCallback auth_callback_;
 
   DISALLOW_COPY_AND_ASSIGN(DevToolsServerDelegate);
 };
@@ -142,37 +126,44 @@ class UnixDomainServerSocketFactory
   UnixDomainServerSocketFactory(
       const std::string& socket_name,
       const net::UnixDomainServerSocket::AuthCallback& auth_callback)
-      : content::DevToolsHttpHandler::ServerSocketFactory(socket_name, 0, 1),
+      : socket_name_(socket_name),
+        last_tethering_socket_(0),
         auth_callback_(auth_callback) {
   }
 
  private:
-  // content::DevToolsHttpHandler::ServerSocketFactory.
-  virtual scoped_ptr<net::ServerSocket> Create() const override {
-    return scoped_ptr<net::ServerSocket>(
+  scoped_ptr<net::ServerSocket> CreateForHttpServer() override {
+    scoped_ptr<net::ServerSocket> socket(
         new net::UnixDomainServerSocket(auth_callback_,
                                         true /* use_abstract_namespace */));
-  }
 
-  virtual scoped_ptr<net::ServerSocket> CreateAndListen() const override {
-    scoped_ptr<net::ServerSocket> socket = Create();
-    if (!socket)
-      return scoped_ptr<net::ServerSocket>();
-
-    if (socket->ListenWithAddressAndPort(address_, port_, backlog_) == net::OK)
+    if (socket->ListenWithAddressAndPort(socket_name_, 0, kBackLog) == net::OK)
       return socket.Pass();
 
     // Try a fallback socket name.
     const std::string fallback_address(
-        base::StringPrintf("%s_%d", address_.c_str(), getpid()));
-    if (socket->ListenWithAddressAndPort(fallback_address, port_, backlog_)
+        base::StringPrintf("%s_%d", socket_name_.c_str(), getpid()));
+    if (socket->ListenWithAddressAndPort(fallback_address, 0, kBackLog)
         == net::OK)
       return socket.Pass();
 
     return scoped_ptr<net::ServerSocket>();
   }
 
-  const net::UnixDomainServerSocket::AuthCallback auth_callback_;
+  scoped_ptr<net::ServerSocket> CreateForTethering(std::string* name) override {
+    *name = base::StringPrintf(
+        kTetheringSocketName, getpid(), ++last_tethering_socket_);
+    scoped_ptr<net::UnixDomainServerSocket> socket(
+        new net::UnixDomainServerSocket(auth_callback_, true));
+    if (socket->ListenWithAddressAndPort(*name, 0, kBackLog) != net::OK)
+      return scoped_ptr<net::ServerSocket>();
+
+    return socket.Pass();
+  }
+
+  std::string socket_name_;
+  int last_tethering_socket_;
+  net::UnixDomainServerSocket::AuthCallback auth_callback_;
 
   DISALLOW_COPY_AND_ASSIGN(UnixDomainServerSocketFactory);
 };
@@ -208,7 +199,7 @@ void DevToolsServer::Start(bool allow_debug_permission) {
   protocol_handler_.reset(content::DevToolsHttpHandler::Start(
       factory.Pass(),
       base::StringPrintf(kFrontEndURL, content::GetWebKitRevision().c_str()),
-      new DevToolsServerDelegate(auth_callback),
+      new DevToolsServerDelegate(),
       base::FilePath()));
 }
 

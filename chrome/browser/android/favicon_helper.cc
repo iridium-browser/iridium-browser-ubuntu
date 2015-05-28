@@ -13,7 +13,6 @@
 #include "base/bind.h"
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
-#include "chrome/browser/favicon/favicon_service.h"
 #include "chrome/browser/favicon/favicon_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/profiles/profile_android.h"
@@ -21,6 +20,7 @@
 #include "chrome/browser/sync/profile_sync_service.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
 #include "chrome/browser/sync/profile_sync_service_factory.h"
+#include "components/favicon/core/favicon_service.h"
 #include "jni/FaviconHelper_jni.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/gfx/android/java_bitmap.h"
@@ -115,8 +115,9 @@ jboolean FaviconHelper::GetLocalFaviconImageForURL(
   if (!profile)
     return false;
 
-  FaviconService* favicon_service = FaviconServiceFactory::GetForProfile(
-      profile, Profile::EXPLICIT_ACCESS);
+  favicon::FaviconService* favicon_service =
+      FaviconServiceFactory::GetForProfile(profile,
+                                           ServiceAccessType::EXPLICIT_ACCESS);
   DCHECK(favicon_service);
   if (!favicon_service)
     return false;
@@ -151,8 +152,9 @@ void FaviconHelper::GetLargestRawFaviconForUrl(
   if (!profile)
     return;
 
-  FaviconService* favicon_service = FaviconServiceFactory::GetForProfile(
-      profile, Profile::EXPLICIT_ACCESS);
+  favicon::FaviconService* favicon_service =
+      FaviconServiceFactory::GetForProfile(profile,
+                                           ServiceAccessType::EXPLICIT_ACCESS);
   DCHECK(favicon_service);
   if (!favicon_service)
     return;

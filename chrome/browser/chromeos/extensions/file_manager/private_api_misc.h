@@ -10,7 +10,7 @@
 
 #include "chrome/browser/chromeos/extensions/file_manager/private_api_base.h"
 #include "chrome/common/extensions/webstore_install_result.h"
-#include "google_apis/drive/gdata_errorcode.h"
+#include "google_apis/drive/drive_api_error_codes.h"
 
 namespace google_apis {
 class AuthServiceInterface;
@@ -27,10 +27,10 @@ class FileManagerPrivateLogoutUserForReauthenticationFunction
                              FILEMANAGERPRIVATE_LOGOUTUSERFORREAUTHENTICATION)
 
  protected:
-  virtual ~FileManagerPrivateLogoutUserForReauthenticationFunction() {}
+  ~FileManagerPrivateLogoutUserForReauthenticationFunction() override {}
 
   // SyncExtensionFunction overrides.
-  virtual bool RunSync() override;
+  bool RunSync() override;
 };
 
 // Implements the chrome.fileManagerPrivate.getPreferences method.
@@ -42,9 +42,9 @@ class FileManagerPrivateGetPreferencesFunction
                              FILEMANAGERPRIVATE_GETPREFERENCES)
 
  protected:
-  virtual ~FileManagerPrivateGetPreferencesFunction() {}
+  ~FileManagerPrivateGetPreferencesFunction() override {}
 
-  virtual bool RunSync() override;
+  bool RunSync() override;
 };
 
 // Implements the chrome.fileManagerPrivate.setPreferences method.
@@ -56,9 +56,9 @@ class FileManagerPrivateSetPreferencesFunction
                              FILEMANAGERPRIVATE_SETPREFERENCES)
 
  protected:
-  virtual ~FileManagerPrivateSetPreferencesFunction() {}
+  ~FileManagerPrivateSetPreferencesFunction() override {}
 
-  virtual bool RunSync() override;
+  bool RunSync() override;
 };
 
 // Implements the chrome.fileManagerPrivate.zipSelection method.
@@ -72,10 +72,10 @@ class FileManagerPrivateZipSelectionFunction
   FileManagerPrivateZipSelectionFunction();
 
  protected:
-  virtual ~FileManagerPrivateZipSelectionFunction();
+  ~FileManagerPrivateZipSelectionFunction() override;
 
   // AsyncExtensionFunction overrides.
-  virtual bool RunAsync() override;
+  bool RunAsync() override;
 
   // Receives the result from ZipFileCreator.
   void OnZipDone(bool success);
@@ -91,10 +91,10 @@ class FileManagerPrivateZoomFunction : public ChromeSyncExtensionFunction {
                              FILEMANAGERPRIVATE_ZOOM);
 
  protected:
-  virtual ~FileManagerPrivateZoomFunction() {}
+  ~FileManagerPrivateZoomFunction() override {}
 
   // AsyncExtensionFunction overrides.
-  virtual bool RunSync() override;
+  bool RunSync() override;
 };
 
 // Implements the chrome.fileManagerPrivate.installWebstoreItem method.
@@ -105,10 +105,10 @@ class FileManagerPrivateInstallWebstoreItemFunction
                              FILEMANAGERPRIVATE_INSTALLWEBSTOREITEM);
 
  protected:
-  virtual ~FileManagerPrivateInstallWebstoreItemFunction() {}
+  ~FileManagerPrivateInstallWebstoreItemFunction() override {}
 
   // AsyncExtensionFunction overrides.
-  virtual bool RunAsync() override;
+  bool RunAsync() override;
   void OnInstallComplete(bool success,
                          const std::string& error,
                          extensions::webstore_install::Result result);
@@ -126,13 +126,13 @@ class FileManagerPrivateRequestWebStoreAccessTokenFunction
   FileManagerPrivateRequestWebStoreAccessTokenFunction();
 
  protected:
-  virtual ~FileManagerPrivateRequestWebStoreAccessTokenFunction();
-  virtual bool RunAsync() override;
+  ~FileManagerPrivateRequestWebStoreAccessTokenFunction() override;
+  bool RunAsync() override;
 
  private:
   scoped_ptr<google_apis::AuthServiceInterface> auth_service_;
 
-  void OnAccessTokenFetched(google_apis::GDataErrorCode code,
+  void OnAccessTokenFetched(google_apis::DriveApiErrorCode code,
                             const std::string& access_token);
 
 };
@@ -144,23 +144,10 @@ class FileManagerPrivateGetProfilesFunction
                              FILEMANAGERPRIVATE_GETPROFILES);
 
  protected:
-  virtual ~FileManagerPrivateGetProfilesFunction() {}
+  ~FileManagerPrivateGetProfilesFunction() override {}
 
   // AsyncExtensionFunction overrides.
-  virtual bool RunSync() override;
-};
-
-class FileManagerPrivateVisitDesktopFunction
-    : public ChromeSyncExtensionFunction {
- public:
-  DECLARE_EXTENSION_FUNCTION("fileManagerPrivate.visitDesktop",
-                             FILEMANAGERPRIVATE_VISITDESKTOP);
-
- protected:
-  virtual ~FileManagerPrivateVisitDesktopFunction() {}
-
-  // AsyncExtensionFunction overrides.
-  virtual bool RunSync() override;
+  bool RunSync() override;
 };
 
 // Implements the chrome.fileManagerPrivate.openInspector method.
@@ -171,9 +158,9 @@ class FileManagerPrivateOpenInspectorFunction
                              FILEMANAGERPRIVATE_OPENINSPECTOR);
 
  protected:
-  virtual ~FileManagerPrivateOpenInspectorFunction() {}
+  ~FileManagerPrivateOpenInspectorFunction() override {}
 
-  virtual bool RunSync() override;
+  bool RunSync() override;
 };
 
 // Implements the chrome.fileManagerPrivate.getMimeType method.
@@ -186,12 +173,27 @@ class FileManagerPrivateGetMimeTypeFunction
   FileManagerPrivateGetMimeTypeFunction();
 
  protected:
-  virtual ~FileManagerPrivateGetMimeTypeFunction();
+  ~FileManagerPrivateGetMimeTypeFunction() override;
 
   // AsyncExtensionFunction overrides.
-  virtual bool RunAsync() override;
+  bool RunAsync() override;
 
   void OnGetMimeType(const std::string& mimeType);
+};
+
+// Implements the chrome.fileManagerPrivate.isPiexLoaderEnabled method.
+class FileManagerPrivateIsPiexLoaderEnabledFunction
+    : public UIThreadExtensionFunction {
+ public:
+  FileManagerPrivateIsPiexLoaderEnabledFunction() {}
+  DECLARE_EXTENSION_FUNCTION("fileManagerPrivate.isPiexLoaderEnabled",
+                             FILEMANAGERPRIVATE_ISPIEXLOADERENABLED)
+ protected:
+  ~FileManagerPrivateIsPiexLoaderEnabledFunction() override {}
+
+ private:
+  ResponseAction Run() override;
+  DISALLOW_COPY_AND_ASSIGN(FileManagerPrivateIsPiexLoaderEnabledFunction);
 };
 
 }  // namespace extensions

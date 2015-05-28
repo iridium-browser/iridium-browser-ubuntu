@@ -6,6 +6,8 @@
 
 #include <string>
 
+#include "ash/session/session_state_delegate.h"
+#include "ash/shell.h"
 #include "base/bind.h"
 #include "base/prefs/pref_change_registrar.h"
 #include "base/strings/string_number_conversions.h"
@@ -30,11 +32,6 @@
 #include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_ui.h"
 #include "ui/base/l10n/l10n_util.h"
-
-#if !defined(USE_ATHENA)
-#include "ash/session/session_state_delegate.h"
-#include "ash/shell.h"
-#endif
 
 namespace chromeos {
 namespace options {
@@ -102,7 +99,8 @@ base::Value* CreateUsersWhitelist(const base::Value *pref_value) {
 // Checks whether this is a secondary user in a multi-profile session.
 bool IsSecondaryUser(Profile* profile) {
   user_manager::UserManager* user_manager = user_manager::UserManager::Get();
-  user_manager::User* user = ProfileHelper::Get()->GetUserByProfile(profile);
+  const user_manager::User* user =
+      ProfileHelper::Get()->GetUserByProfile(profile);
   return user && user->email() != user_manager->GetPrimaryUser()->email();
 }
 
@@ -130,7 +128,7 @@ void CoreChromeOSOptionsHandler::RegisterMessages() {
 void CoreChromeOSOptionsHandler::InitializeHandler() {
   // This function is both called on the initial page load and on each reload.
   // For the latter case, forget the last selected network.
-  proxy_config_service_.SetCurrentNetwork(std::string());
+  proxy_config_service_.SetCurrentNetworkGuid("");
   // And clear the cached configuration.
   proxy_config_service_.UpdateFromPrefs();
 
@@ -284,11 +282,6 @@ void CoreChromeOSOptionsHandler::StopObservingPref(const std::string& path) {
 base::Value* CoreChromeOSOptionsHandler::CreateValueForPref(
     const std::string& pref_name,
     const std::string& controlling_pref_name) {
-  // Athena doesn't have ash::Shell and its session_state_delegate, so the
-  // following code will cause crash.
-  // TODO(mukai|antrim): re-enable this after having session_state_delegate.
-  // http://crbug.com/370175
-#if !defined(USE_ATHENA)
   // The screen lock setting is shared if multiple users are logged in and at
   // least one has chosen to require passwords.
   if (pref_name == prefs::kEnableAutoScreenLock &&
@@ -316,7 +309,6 @@ base::Value* CoreChromeOSOptionsHandler::CreateValueForPref(
       }
     }
   }
-#endif
 
   return CoreOptionsHandler::CreateValueForPref(pref_name,
                                                 controlling_pref_name);
@@ -376,13 +368,12 @@ void CoreChromeOSOptionsHandler::GetLocalizedValues(
 
 void CoreChromeOSOptionsHandler::SelectNetworkCallback(
     const base::ListValue* args) {
-  std::string service_path;
-  if (args->GetSize() != 1 ||
-      !args->GetString(0, &service_path)) {
+  std::string guid;
+  if (args->GetSize() != 1 || !args->GetString(0, &guid)) {
     NOTREACHED();
     return;
   }
-  proxy_config_service_.SetCurrentNetwork(service_path);
+  proxy_config_service_.SetCurrentNetworkGuid(guid);
   NotifyProxyPrefsChanged();
 }
 

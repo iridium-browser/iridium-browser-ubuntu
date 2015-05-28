@@ -12,7 +12,6 @@
 
 #include "testing/gtest/include/gtest/gtest.h"
 #include "webrtc/common_audio/wav_header.h"
-#include "webrtc/system_wrappers/interface/compile_assert.h"
 
 namespace webrtc {
 
@@ -266,7 +265,7 @@ TEST(WavHeaderTest, WriteAndReadWavHeader) {
     0x99, 0xd0, 0x5b, 0x07,  // size of payload: 123457689
     0xa4, 0xa4, 0xa4, 0xa4,  // untouched bytes after header
   };
-  COMPILE_ASSERT(sizeof(kExpectedBuf) == kSize, buf_size);
+  static_assert(sizeof(kExpectedBuf) == kSize, "buffer size");
   EXPECT_EQ(0, memcmp(kExpectedBuf, buf, kSize));
 
   int num_channels = 0;

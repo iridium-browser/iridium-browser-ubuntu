@@ -29,7 +29,9 @@ class AlgorithmRegistry {
         rsa_oaep_(CreatePlatformRsaOaepImplementation()),
         rsa_pss_(CreatePlatformRsaPssImplementation()),
         ecdsa_(CreatePlatformEcdsaImplementation()),
-        ecdh_(CreatePlatformEcdhImplementation()) {
+        ecdh_(CreatePlatformEcdhImplementation()),
+        hkdf_(CreatePlatformHkdfImplementation()),
+        pbkdf2_(CreatePlatformPbkdf2Implementation()) {
     PlatformInit();
   }
 
@@ -61,6 +63,10 @@ class AlgorithmRegistry {
         return ecdsa_.get();
       case blink::WebCryptoAlgorithmIdEcdh:
         return ecdh_.get();
+      case blink::WebCryptoAlgorithmIdHkdf:
+        return hkdf_.get();
+      case blink::WebCryptoAlgorithmIdPbkdf2:
+        return pbkdf2_.get();
       default:
         return NULL;
     }
@@ -78,6 +84,8 @@ class AlgorithmRegistry {
   const scoped_ptr<AlgorithmImplementation> rsa_pss_;
   const scoped_ptr<AlgorithmImplementation> ecdsa_;
   const scoped_ptr<AlgorithmImplementation> ecdh_;
+  const scoped_ptr<AlgorithmImplementation> hkdf_;
+  const scoped_ptr<AlgorithmImplementation> pbkdf2_;
 };
 
 }  // namespace

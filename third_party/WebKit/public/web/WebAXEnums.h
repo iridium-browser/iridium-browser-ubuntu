@@ -52,6 +52,7 @@ enum WebAXEvent {
     WebAXEventLoadComplete,
     WebAXEventLocationChanged,
     WebAXEventMenuListItemSelected,
+    WebAXEventMenuListItemUnselected,
     WebAXEventMenuListValueChanged,
     WebAXEventRowCollapsed,
     WebAXEventRowCountChanged,
@@ -161,6 +162,7 @@ enum WebAXRole {
     WebAXRoleScrollBar,
     WebAXRoleSeamlessWebArea,
     WebAXRoleSearch,
+    WebAXRoleSearchBox,
     WebAXRoleSlider,
     WebAXRoleSliderThumb,
     WebAXRoleSpinButtonPart,
@@ -168,6 +170,7 @@ enum WebAXRole {
     WebAXRoleSplitter,
     WebAXRoleStaticText,
     WebAXRoleStatus,
+    WebAXRoleSwitch,
     WebAXRoleTabGroup,
     WebAXRoleTabList,
     WebAXRoleTabPanel,
@@ -220,6 +223,16 @@ enum WebAXTextDirection {
     WebAXTextDirectionRL,
     WebAXTextDirectionTB,
     WebAXTextDirectionBT
+};
+
+// Sort direction, only used for roles = WebAXRoleRowHeader and
+// WebAXRoleColumnHeader.
+enum WebAXSortDirection {
+    WebAXSortDirectionUndefined = 0,
+    WebAXSortDirectionNone,
+    WebAXSortDirectionAscending,
+    WebAXSortDirectionDescending,
+    WebAXSortDirectionOther
 };
 
 // Expanded State.

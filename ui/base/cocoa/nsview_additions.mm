@@ -60,6 +60,12 @@
       colorWithAlphaComponent:0.5 / [self cr_lineWidth]];
 }
 
+- (void)cr_recursivelyInvokeBlock:(void (^)(id view))block {
+  block(self);
+  for (NSView* subview in [self subviews])
+    [subview cr_recursivelyInvokeBlock:block];
+}
+
 - (void)cr_recursivelySetNeedsDisplay:(BOOL)flag {
   [self setNeedsDisplay:YES];
   for (NSView* child in [self subviews])
@@ -69,7 +75,7 @@
 static NSView* g_ancestorBeingDrawnFrom = nil;
 static NSView* g_childBeingDrawnTo = nil;
 
-- (void)cr_drawUsingAncestor:(NSView*)ancestorView inRect:(NSRect)rect {
+- (void)cr_drawUsingAncestor:(NSView*)ancestorView inRect:(NSRect)dirtyRect {
   gfx::ScopedNSGraphicsContextSaveGState scopedGSState;
   NSRect frame = [self convertRect:[self bounds] toView:ancestorView];
   NSAffineTransform* transform = [NSAffineTransform transform];
@@ -85,7 +91,9 @@ static NSView* g_childBeingDrawnTo = nil;
   DCHECK(!g_ancestorBeingDrawnFrom && !g_childBeingDrawnTo);
   g_ancestorBeingDrawnFrom = ancestorView;
   g_childBeingDrawnTo = self;
-  [ancestorView drawRect:[ancestorView bounds]];
+  [ancestorView drawRect:NSIntersectionRect(
+                             [ancestorView bounds],
+                             [self convertRect:dirtyRect toView:ancestorView])];
   g_childBeingDrawnTo = nil;
   g_ancestorBeingDrawnFrom = nil;
 }

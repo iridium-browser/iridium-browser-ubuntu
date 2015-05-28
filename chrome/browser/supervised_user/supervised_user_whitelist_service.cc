@@ -8,6 +8,8 @@
 
 #include "base/files/file_path.h"
 #include "base/metrics/histogram.h"
+#include "base/metrics/user_metrics.h"
+#include "base/metrics/user_metrics_action.h"
 #include "base/prefs/pref_service.h"
 #include "base/prefs/scoped_user_pref_update.h"
 #include "base/values.h"
@@ -26,12 +28,13 @@ const char kName[] = "name";
 
 SupervisedUserWhitelistService::SupervisedUserWhitelistService(
     PrefService* prefs,
-    scoped_ptr<component_updater::SupervisedUserWhitelistInstaller> installer)
+    component_updater::SupervisedUserWhitelistInstaller* installer,
+    const std::string& client_id)
     : prefs_(prefs),
-      installer_(installer.Pass()),
+      installer_(installer),
+      client_id_(client_id),
       weak_ptr_factory_(this) {
   DCHECK(prefs);
-  DCHECK(installer_);
 }
 
 SupervisedUserWhitelistService::~SupervisedUserWhitelistService() {
@@ -50,20 +53,26 @@ void SupervisedUserWhitelistService::Init() {
       prefs_->GetDictionary(prefs::kSupervisedUserWhitelists);
   for (base::DictionaryValue::Iterator it(*whitelists); !it.IsAtEnd();
        it.Advance()) {
-    const base::DictionaryValue* dict = nullptr;
-    it.value().GetAsDictionary(&dict);
-    std::string name;
-    bool result = dict->GetString(kName, &name);
-    DCHECK(result);
-    bool new_installation = false;
-    RegisterWhitelist(it.key(), name, new_installation);
+    registered_whitelists_.insert(it.key());
   }
+  UMA_HISTOGRAM_COUNTS_100("ManagedUsers.Whitelist.Count", whitelists->size());
+
+  // The installer can be null in some unit tests.
+  if (!installer_)
+    return;
+
+  installer_->Subscribe(
+      base::Bind(&SupervisedUserWhitelistService::OnWhitelistReady,
+                 weak_ptr_factory_.GetWeakPtr()));
 }
 
 void SupervisedUserWhitelistService::AddSiteListsChangedCallback(
     const SiteListsChangedCallback& callback) {
   site_lists_changed_callbacks_.push_back(callback);
-  NotifyWhitelistsChanged();
+
+  std::vector<scoped_refptr<SupervisedUserSiteList>> whitelists;
+  GetLoadedWhitelists(&whitelists);
+  callback.Run(whitelists);
 }
 
 void SupervisedUserWhitelistService::LoadWhitelistForTesting(
@@ -231,6 +240,8 @@ syncer::SyncError SupervisedUserWhitelistService::ProcessSyncChanges(
 void SupervisedUserWhitelistService::AddNewWhitelist(
     base::DictionaryValue* pref_dict,
     const sync_pb::ManagedUserWhitelistSpecifics& whitelist) {
+  base::RecordAction(base::UserMetricsAction("ManagedUsers_Whitelist_Added"));
+
   bool new_installation = true;
   RegisterWhitelist(whitelist.id(), whitelist.name(), new_installation);
   scoped_ptr<base::DictionaryValue> dict(new base::DictionaryValue);
@@ -247,8 +258,10 @@ void SupervisedUserWhitelistService::SetWhitelistProperties(
 void SupervisedUserWhitelistService::RemoveWhitelist(
     base::DictionaryValue* pref_dict,
     const std::string& id) {
+  base::RecordAction(base::UserMetricsAction("ManagedUsers_Whitelist_Removed"));
+
   pref_dict->RemoveWithoutPathExpansion(id, NULL);
-  installer_->UnregisterWhitelist(id);
+  installer_->UnregisterWhitelist(client_id_, id);
   UnloadWhitelist(id);
 }
 
@@ -258,16 +271,18 @@ void SupervisedUserWhitelistService::RegisterWhitelist(const std::string& id,
   bool result = registered_whitelists_.insert(id).second;
   DCHECK(result);
 
-  installer_->RegisterWhitelist(
-      id, name, new_installation,
-      base::Bind(&SupervisedUserWhitelistService::OnWhitelistReady,
-                 weak_ptr_factory_.GetWeakPtr(), id));
+  installer_->RegisterWhitelist(client_id_, id, name);
+}
+
+void SupervisedUserWhitelistService::GetLoadedWhitelists(
+    std::vector<scoped_refptr<SupervisedUserSiteList>>* whitelists) {
+  for (const auto& whitelist : loaded_whitelists_)
+    whitelists->push_back(whitelist.second);
 }
 
 void SupervisedUserWhitelistService::NotifyWhitelistsChanged() {
-  std::vector<scoped_refptr<SupervisedUserSiteList> > whitelists;
-  for (const auto& whitelist : loaded_whitelists_)
-    whitelists.push_back(whitelist.second);
+  std::vector<scoped_refptr<SupervisedUserSiteList>> whitelists;
+  GetLoadedWhitelists(&whitelists);
 
   for (const auto& callback : site_lists_changed_callbacks_)
     callback.Run(whitelists);
@@ -276,7 +291,8 @@ void SupervisedUserWhitelistService::NotifyWhitelistsChanged() {
 void SupervisedUserWhitelistService::OnWhitelistReady(
     const std::string& id,
     const base::FilePath& whitelist_path) {
-  // If the whitelist has been unregistered in the mean time, ignore it.
+  // If we did not register the whitelist or it has been unregistered in the
+  // mean time, ignore it.
   if (registered_whitelists_.count(id) == 0u)
     return;
 

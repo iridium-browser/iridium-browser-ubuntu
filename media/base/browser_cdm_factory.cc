@@ -23,11 +23,12 @@ void SetBrowserCdmFactory(BrowserCdmFactory* factory) {
 
 scoped_ptr<BrowserCdm> CreateBrowserCdm(
     const std::string& key_system,
-    const BrowserCdm::SessionCreatedCB& session_created_cb,
-    const BrowserCdm::SessionMessageCB& session_message_cb,
-    const BrowserCdm::SessionReadyCB& session_ready_cb,
-    const BrowserCdm::SessionClosedCB& session_closed_cb,
-    const BrowserCdm::SessionErrorCB& session_error_cb) {
+    bool use_secure_surface,
+    const SessionMessageCB& session_message_cb,
+    const SessionClosedCB& session_closed_cb,
+    const LegacySessionErrorCB& legacy_session_error_cb,
+    const SessionKeysChangeCB& session_keys_change_cb,
+    const SessionExpirationUpdateCB& session_expiration_update_cb) {
   if (!g_cdm_factory) {
 #if defined(OS_ANDROID)
     SetBrowserCdmFactory(new BrowserCdmFactoryAndroid);
@@ -37,12 +38,10 @@ scoped_ptr<BrowserCdm> CreateBrowserCdm(
 #endif
   }
 
-  return g_cdm_factory->CreateBrowserCdm(key_system,
-                                         session_created_cb,
-                                         session_message_cb,
-                                         session_ready_cb,
-                                         session_closed_cb,
-                                         session_error_cb);
+  return g_cdm_factory->CreateBrowserCdm(
+      key_system, use_secure_surface, session_message_cb, session_closed_cb,
+      legacy_session_error_cb, session_keys_change_cb,
+      session_expiration_update_cb);
 }
 
 }  // namespace media

@@ -37,21 +37,18 @@
 #include "wtf/RefCounted.h"
 
 namespace blink {
-class WebThreadedDataReceiver;
-}
-
-namespace blink {
 
 class Resource;
 class KURL;
 class ResourceError;
 class ResourceLoaderHost;
+class ThreadedDataReceiver;
 
 class ResourceLoader final : public RefCountedWillBeGarbageCollectedFinalized<ResourceLoader>, protected WebURLLoaderClient {
 public:
     static PassRefPtrWillBeRawPtr<ResourceLoader> create(ResourceLoaderHost*, Resource*, const ResourceRequest&, const ResourceLoaderOptions&);
     virtual ~ResourceLoader();
-    void trace(Visitor*);
+    DECLARE_TRACE();
 
     void start();
     void changeToSynchronous();
@@ -66,7 +63,7 @@ public:
     void setDefersLoading(bool);
     bool defersLoading() const { return m_defersLoading; }
 
-    void attachThreadedDataReceiver(PassOwnPtr<blink::WebThreadedDataReceiver>);
+    void attachThreadedDataReceiver(PassRefPtrWillBeRawPtr<ThreadedDataReceiver>);
 
     void releaseResources();
 
@@ -88,6 +85,7 @@ public:
 
     bool reachedTerminalState() const { return m_state == Terminated; }
     const ResourceRequest& request() const { return m_request; }
+    ResourceLoaderHost* host() const { return m_host.get(); }
 
 private:
     ResourceLoader(ResourceLoaderHost*, Resource*, const ResourceLoaderOptions&);

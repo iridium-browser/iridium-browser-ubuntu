@@ -1,4 +1,3 @@
-#!/usr/bin/python
 # Copyright (c) 2012 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -10,9 +9,6 @@ from __future__ import print_function
 import datetime
 import operator
 import os
-
-import fixup_path
-fixup_path.FixupPath()
 
 from chromite.lib import cros_test_lib
 from chromite.lib.paygen import utils
@@ -31,12 +27,12 @@ class TestUtils(cros_test_lib.TempDirTestCase):
   def testCreateTmpRaiseException(self):
     """Test that we raise an exception when we do not have enough space."""
     self.assertRaises(utils.UnableToCreateTmpDir, utils.CreateTmpDir,
-                      minimum_size=2**50)
+                      minimum_size=2 ** 50)
 
   def testCreateTempFileWithContents(self):
     """Verify that we create a temp file with the right message in it."""
 
-    message = "Test Message With Rocks In"
+    message = 'Test Message With Rocks In'
 
     # Create the temp file.
     with utils.CreateTempFileWithContents(message) as temp_file:
@@ -153,7 +149,3 @@ class TestUtils(cros_test_lib.TempDirTestCase):
     self.assertEquals(
         utils.TimeDeltaToString(c, force_seconds=True, subsecond_precision=7),
         '5d3h15m33.012037s')
-
-
-if __name__ == '__main__':
-  cros_test_lib.main()

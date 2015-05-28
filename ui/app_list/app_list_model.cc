@@ -20,7 +20,8 @@ AppListModel::AppListModel()
       status_(STATUS_NORMAL),
       state_(INVALID_STATE),
       folders_enabled_(false),
-      custom_launcher_page_enabled_(true) {
+      custom_launcher_page_enabled_(true),
+      search_engine_is_google_(false) {
   top_level_item_list_->AddObserver(this);
 }
 
@@ -279,6 +280,22 @@ void AppListModel::DeleteItem(const std::string& id) {
   FOR_EACH_OBSERVER(AppListModelObserver, observers_, OnAppListItemDeleted());
 }
 
+void AppListModel::DeleteUninstalledItem(const std::string& id) {
+  AppListItem* item = FindItem(id);
+  if (!item)
+    return;
+  const std::string folder_id = item->folder_id();
+  DeleteItem(id);
+
+  // crbug.com/368111: Upon uninstall of 2nd-to-last folder item, reparent last
+  // item to top; this will remove the folder.
+  AppListFolderItem* folder = FindFolderItem(folder_id);
+  if (folder && folder->ChildItemCount() == 1u) {
+    AppListItem* last_item = folder->item_list()->item_at(0);
+    MoveItemToFolderAt(last_item, "", folder->position());
+  }
+}
+
 void AppListModel::NotifyExtensionPreferenceChanged() {
   for (size_t i = 0; i < top_level_item_list_->item_count(); ++i)
     top_level_item_list_->item_at(i)->OnExtensionPreferenceChanged();
@@ -345,6 +362,12 @@ bool AppListModel::PopCustomLauncherPageSubpage() {
 
 void AppListModel::ClearCustomLauncherPageSubpages() {
   custom_launcher_page_subpage_depth_ = 0;
+}
+
+void AppListModel::SetSearchEngineIsGoogle(bool is_google) {
+  search_engine_is_google_ = is_google;
+  FOR_EACH_OBSERVER(AppListModelObserver, observers_,
+                    OnSearchEngineIsGoogleChanged(is_google));
 }
 
 // Private methods

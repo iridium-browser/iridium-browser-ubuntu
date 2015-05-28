@@ -23,9 +23,7 @@
  */
 
 #include "config.h"
-
 #if ENABLE(WEB_AUDIO)
-
 #include "modules/webaudio/AudioNodeOutput.h"
 
 #include "modules/webaudio/AudioContext.h"
@@ -34,8 +32,8 @@
 
 namespace blink {
 
-inline AudioNodeOutput::AudioNodeOutput(AudioNode* node, unsigned numberOfChannels)
-    : m_node(node)
+inline AudioNodeOutput::AudioNodeOutput(AudioHandler* handler, unsigned numberOfChannels)
+    : m_handler(*handler)
     , m_numberOfChannels(numberOfChannels)
     , m_desiredNumberOfChannels(numberOfChannels)
     , m_isInPlace(false)
@@ -48,19 +46,12 @@ inline AudioNodeOutput::AudioNodeOutput(AudioNode* node, unsigned numberOfChanne
 {
     ASSERT(numberOfChannels <= AudioContext::maxNumberOfChannels());
 
-    m_internalBus = AudioBus::create(numberOfChannels, AudioNode::ProcessingSizeInFrames);
+    m_internalBus = AudioBus::create(numberOfChannels, AudioHandler::ProcessingSizeInFrames);
 }
 
-AudioNodeOutput* AudioNodeOutput::create(AudioNode* node, unsigned numberOfChannels)
+PassOwnPtr<AudioNodeOutput> AudioNodeOutput::create(AudioHandler* handler, unsigned numberOfChannels)
 {
-    return new AudioNodeOutput(node, numberOfChannels);
-}
-
-void AudioNodeOutput::trace(Visitor* visitor)
-{
-    visitor->trace(m_node);
-    visitor->trace(m_inputs);
-    visitor->trace(m_params);
+    return adoptPtr(new AudioNodeOutput(handler, numberOfChannels));
 }
 
 void AudioNodeOutput::dispose()
@@ -68,7 +59,10 @@ void AudioNodeOutput::dispose()
 #if ENABLE_ASSERT
     m_didCallDispose = true;
 #endif
-    context()->removeMarkedAudioNodeOutput(this);
+    context()->handler().removeMarkedAudioNodeOutput(this);
+    disconnectAll();
+    ASSERT(m_inputs.isEmpty());
+    ASSERT(m_params.isEmpty());
 }
 
 void AudioNodeOutput::setNumberOfChannels(unsigned numberOfChannels)
@@ -84,7 +78,7 @@ void AudioNodeOutput::setNumberOfChannels(unsigned numberOfChannels)
     } else {
         ASSERT(!m_didCallDispose);
         // Let the context take care of it in the audio thread in the pre and post render tasks.
-        context()->markAudioNodeOutputDirty(this);
+        context()->handler().markAudioNodeOutputDirty(this);
     }
 }
 
@@ -93,7 +87,7 @@ void AudioNodeOutput::updateInternalBus()
     if (numberOfChannels() == m_internalBus->numberOfChannels())
         return;
 
-    m_internalBus = AudioBus::create(numberOfChannels(), AudioNode::ProcessingSizeInFrames);
+    m_internalBus = AudioBus::create(numberOfChannels(), AudioHandler::ProcessingSizeInFrames);
 }
 
 void AudioNodeOutput::updateRenderingState()
@@ -105,7 +99,8 @@ void AudioNodeOutput::updateRenderingState()
 
 void AudioNodeOutput::updateNumberOfChannels()
 {
-    ASSERT(context()->isAudioThread() && context()->isGraphOwner());
+    ASSERT(context()->isAudioThread());
+    ASSERT(context()->isGraphOwner());
 
     if (m_numberOfChannels != m_desiredNumberOfChannels) {
         m_numberOfChannels = m_desiredNumberOfChannels;
@@ -116,12 +111,13 @@ void AudioNodeOutput::updateNumberOfChannels()
 
 void AudioNodeOutput::propagateChannelCount()
 {
-    ASSERT(context()->isAudioThread() && context()->isGraphOwner());
+    ASSERT(context()->isAudioThread());
+    ASSERT(context()->isGraphOwner());
 
     if (isChannelCountKnown()) {
         // Announce to any nodes we're connected to that we changed our channel count for its input.
-        for (InputsIterator i = m_inputs.begin(); i != m_inputs.end(); ++i)
-            i->value->checkNumberOfChannelsForInput(i->key);
+        for (AudioNodeInput* i : m_inputs)
+            i->node().checkNumberOfChannelsForInput(i);
     }
 }
 
@@ -170,7 +166,7 @@ unsigned AudioNodeOutput::renderingFanOutCount() const
 void AudioNodeOutput::addInput(AudioNodeInput& input)
 {
     ASSERT(context()->isGraphOwner());
-    m_inputs.add(&input, &input.node());
+    m_inputs.add(&input);
     input.node().makeConnection();
 }
 
@@ -187,16 +183,28 @@ void AudioNodeOutput::disconnectAllInputs()
 
     // AudioNodeInput::disconnect() changes m_inputs by calling removeInput().
     while (!m_inputs.isEmpty())
-        m_inputs.begin()->key->disconnect(*this);
+        (*m_inputs.begin())->disconnect(*this);
 }
 
-void AudioNodeOutput::addParam(AudioParam& param)
+void AudioNodeOutput::disconnectInput(AudioNodeInput& input)
+{
+    ASSERT(context()->isGraphOwner() && isConnectedToInput(input));
+    input.disconnect(*this);
+}
+
+void AudioNodeOutput::disconnectAudioParam(AudioParamHandler& param)
+{
+    ASSERT(context()->isGraphOwner() && isConnectedToAudioParam(param));
+    param.disconnect(*this);
+}
+
+void AudioNodeOutput::addParam(AudioParamHandler& param)
 {
     ASSERT(context()->isGraphOwner());
     m_params.add(&param);
 }
 
-void AudioNodeOutput::removeParam(AudioParam& param)
+void AudioNodeOutput::removeParam(AudioParamHandler& param)
 {
     ASSERT(context()->isGraphOwner());
     m_params.remove(&param);
@@ -217,14 +225,26 @@ void AudioNodeOutput::disconnectAll()
     disconnectAllParams();
 }
 
+bool AudioNodeOutput::isConnectedToInput(AudioNodeInput& input)
+{
+    ASSERT(context()->isGraphOwner());
+    return m_inputs.contains(&input);
+}
+
+bool AudioNodeOutput::isConnectedToAudioParam(AudioParamHandler& param)
+{
+    ASSERT(context()->isGraphOwner());
+    return m_params.contains(&param);
+}
+
 void AudioNodeOutput::disable()
 {
     ASSERT(context()->isGraphOwner());
 
     if (m_isEnabled) {
         m_isEnabled = false;
-        for (InputsIterator i = m_inputs.begin(); i != m_inputs.end(); ++i)
-            i->key->disable(*this);
+        for (AudioNodeInput* i : m_inputs)
+            i->disable(*this);
     }
 }
 
@@ -234,8 +254,8 @@ void AudioNodeOutput::enable()
 
     if (!m_isEnabled) {
         m_isEnabled = true;
-        for (InputsIterator i = m_inputs.begin(); i != m_inputs.end(); ++i)
-            i->key->enable(*this);
+        for (AudioNodeInput* i : m_inputs)
+            i->enable(*this);
     }
 }
 

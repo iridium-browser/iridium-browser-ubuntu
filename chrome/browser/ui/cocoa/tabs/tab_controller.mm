@@ -111,6 +111,8 @@ class MenuDelegate : public ui::SimpleMenuModel::Delegate {
            controller:self
           closeButton:closeButton_]);
     [view setAutoresizingMask:NSViewMaxXMargin | NSViewMinYMargin];
+    [view setPostsFrameChangedNotifications:NO];
+    [view setPostsBoundsChangedNotifications:NO];
     [view addSubview:iconView_];
     [view addSubview:closeButton_];
     [view setTitleFrame:titleFrame];
@@ -217,10 +219,6 @@ class MenuDelegate : public ui::SimpleMenuModel::Delegate {
   [super setTitle:title];
 }
 
-- (void)setToolTip:(NSString*)toolTip {
-  [[self view] setToolTip:toolTip];
-}
-
 - (void)setActive:(BOOL)active {
   if (active != active_) {
     active_ = active;
@@ -278,6 +276,10 @@ class MenuDelegate : public ui::SimpleMenuModel::Delegate {
 
 - (NSString*)toolTip {
   return [[self tabView] toolTipText];
+}
+
+- (void)setToolTip:(NSString*)toolTip {
+  [[self tabView] setToolTipText:toolTip];
 }
 
 // Return a rough approximation of the number of icons we could fit in the

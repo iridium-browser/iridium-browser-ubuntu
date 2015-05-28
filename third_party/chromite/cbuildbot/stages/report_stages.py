@@ -20,7 +20,6 @@ from chromite.cbuildbot import tree_status
 from chromite.cbuildbot.stages import completion_stages
 from chromite.cbuildbot.stages import generic_stages
 from chromite.cbuildbot.stages import sync_stages
-from chromite.lib import alerts
 from chromite.lib import cidb
 from chromite.lib import cros_build_lib
 from chromite.lib import gs
@@ -54,7 +53,7 @@ def WriteBasicMetadata(builder_run):
       # Data for this build.
       'bot-hostname': cros_build_lib.GetHostName(fully_qualified=True),
       'build-number': builder_run.buildnumber,
-      'builder-name': os.environ.get('BUILDBOT_BUILDERNAME', ''),
+      'builder-name': builder_run.GetBuilderName(),
       'buildbot-url': os.environ.get('BUILDBOT_BUILDBOTURL', ''),
       'buildbot-master-name':
           os.environ.get('BUILDBOT_MASTERNAME', ''),
@@ -122,6 +121,10 @@ class BuildStartStage(generic_stages.BuilderStage):
 
   @failures_lib.SetFailureType(failures_lib.InfrastructureFailure)
   def PerformStage(self):
+    if self._run.config['doc']:
+      cros_build_lib.PrintBuildbotLink('Builder documentation',
+                                       self._run.config['doc'])
+
     WriteBasicMetadata(self._run)
     d = self._run.attrs.metadata.GetDict()
 
@@ -269,6 +272,20 @@ class BuildReexecutionFinishedStage(generic_stages.BuilderStage,
       for child_config in self._run.attrs.metadata.GetValue('child-configs'):
         db.InsertChildConfigPerBuild(build_id, child_config['name'])
 
+      # If this build has a master build, ensure that the master full_version
+      # is the same as this build's full_version. This is a sanity check to
+      # avoid bugs in master-slave logic.
+      master_id = self._run.attrs.metadata.GetDict().get('master_build_id')
+      if master_id is not None:
+        master_full_version = db.GetBuildStatus(master_id)['full_version']
+        my_full_version = self._run.attrs.metadata.GetValue('version').get(
+            'full')
+        if master_full_version != my_full_version:
+          raise failures_lib.MasterSlaveVersionMismatchFailure(
+              'Master build id %s has full_version %s, while slave version is '
+              '%s.' % (master_id, master_full_version, my_full_version))
+
+
 
 class ReportStage(generic_stages.BuilderStage,
                   generic_stages.ArchivingStageMixin):
@@ -319,12 +336,11 @@ class ReportStage(generic_stages.BuilderStage,
             -streak_value,
             builder_run.config.health_alert_recipients)
 
-        if not self._run.debug:
-          alerts.SendEmail('%s health alert' % builder_run.config.name,
-                           tree_status.GetHealthAlertRecipients(builder_run),
-                           message=self._HealthAlertMessage(-streak_value),
-                           smtp_server=constants.GOLO_SMTP_SERVER,
-                           extra_fields={'X-cbuildbot-alert': 'cq-health'})
+        subject = '%s health alert' % builder_run.config.name
+        body = self._HealthAlertMessage(-streak_value)
+        extra_fields = {'X-cbuildbot-alert': 'cq-health'}
+        tree_status.SendHealthAlert(builder_run, subject, body,
+                                    extra_fields=extra_fields)
 
   def _UpdateStreakCounter(self, final_status, counter_name,
                            dry_run=False):
@@ -361,6 +377,22 @@ class ReportStage(generic_stages.BuilderStage,
     """Returns the body of a health alert email message."""
     return 'The builder named %s has failed %i consecutive times. See %s' % (
         self._run.config['name'], fail_count, self.ConstructDashboardURL())
+
+  def _SendPreCQInfraAlertMessageIfNeeded(self):
+    """Send alerts on Pre-CQ infra failures."""
+    msg = completion_stages.CreateBuildFailureMessage(
+        self._run.config.overlays,
+        self._run.config.name,
+        self._run.ConstructDashboardURL())
+    pre_cq = self._run.config.pre_cq or self._run.options.pre_cq
+    if pre_cq and msg.HasFailureType(failures_lib.InfrastructureFailure):
+      name = self._run.config.name
+      title = 'pre-cq infra failures'
+      body = ['%s failed on %s' % (name, cros_build_lib.GetHostName()),
+              '%s' % msg]
+      extra_fields = {'X-cbuildbot-alert': 'pre-cq-infra-alert'}
+      tree_status.SendHealthAlert(self._run, title, '\n\n'.join(body),
+                                  extra_fields=extra_fields)
 
   def _UploadMetadataForRun(self, final_status):
     """Upload metadata.json for this entire run.
@@ -495,6 +527,10 @@ class ReportStage(generic_stages.BuilderStage,
     # run only. These aren't needed for the child builder runs.
     self._UploadMetadataForRun(final_status)
     self._UpdateRunStreak(self._run, final_status)
+
+    # Alert if the Pre-CQ has infra failures.
+    if final_status == constants.FINAL_STATUS_FAILED:
+      self._SendPreCQInfraAlertMessageIfNeeded()
 
     # Iterate through each builder run, whether there is just the main one
     # or multiple child builder runs.

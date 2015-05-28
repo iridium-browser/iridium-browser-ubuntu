@@ -61,7 +61,7 @@ const char kChannelIDCert2[] = "cert 2";
 class ProfileAuthDataTest : public testing::Test {
  public:
   // testing::Test:
-  virtual void SetUp() override;
+  void SetUp() override;
 
   void PopulateUserBrowserContext();
 
@@ -128,8 +128,8 @@ void ProfileAuthDataTest::Transfer(
     bool transfer_saml_auth_cookies_on_subsequent_login) {
   base::RunLoop run_loop;
   ProfileAuthData::Transfer(
-      &login_browser_context_,
-      &user_browser_context_,
+      login_browser_context_.GetRequestContext(),
+      user_browser_context_.GetRequestContext(),
       transfer_auth_cookies_and_channel_ids_on_first_login,
       transfer_saml_auth_cookies_on_subsequent_login,
       run_loop.QuitClosure());
@@ -223,28 +223,14 @@ void ProfileAuthDataTest::PopulateBrowserContext(
   run_loop_->Run();
 
   net::CookieList cookie_list;
-  cookie_list.push_back(net::CanonicalCookie(GURL(kGAIACookieURL),
-                                             kCookieName,
-                                             cookie_value,
-                                             kGAIACookieDomain,
-                                             std::string(),
-                                             base::Time(),
-                                             base::Time(),
-                                             base::Time(),
-                                             true,
-                                             false,
-                                             net::COOKIE_PRIORITY_DEFAULT));
-  cookie_list.push_back(net::CanonicalCookie(GURL(kSAMLIdPCookieURL),
-                                             kCookieName,
-                                             cookie_value,
-                                             kSAMLIdPCookieDomain,
-                                             std::string(),
-                                             base::Time(),
-                                             base::Time(),
-                                             base::Time(),
-                                             true,
-                                             false,
-                                             net::COOKIE_PRIORITY_DEFAULT));
+  cookie_list.push_back(net::CanonicalCookie(
+      GURL(kGAIACookieURL), kCookieName, cookie_value, kGAIACookieDomain,
+      std::string(), base::Time(), base::Time(), base::Time(), true, false,
+      false, net::COOKIE_PRIORITY_DEFAULT));
+  cookie_list.push_back(net::CanonicalCookie(
+      GURL(kSAMLIdPCookieURL), kCookieName, cookie_value, kSAMLIdPCookieDomain,
+      std::string(), base::Time(), base::Time(), base::Time(), true, false,
+      false, net::COOKIE_PRIORITY_DEFAULT));
   cookies->ImportCookies(cookie_list);
 
   GetChannelIDs(browser_context)->SetChannelID(kChannelIDServerIdentifier,

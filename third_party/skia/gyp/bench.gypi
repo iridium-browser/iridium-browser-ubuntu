@@ -1,3 +1,7 @@
+# Copyright 2015 Google Inc.
+#
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
 {
   'include_dirs': [
     '../src/core',
@@ -25,6 +29,7 @@
     '../bench/AAClipBench.cpp',
     '../bench/AlternatingColorPatternBench.cpp',
     '../bench/BezierBench.cpp',
+    '../bench/BigPathBench.cpp',
     '../bench/BitmapBench.cpp',
     '../bench/BitmapRectBench.cpp',
     '../bench/BitmapScaleBench.cpp',
@@ -42,7 +47,6 @@
     '../bench/ColorPrivBench.cpp',
     '../bench/CoverageBench.cpp',
     '../bench/DashBench.cpp',
-    '../bench/DecodeBench.cpp',
     '../bench/DeferredSurfaceCopyBench.cpp',
     '../bench/DisplacementBench.cpp',
     '../bench/ETCBitmapBench.cpp',
@@ -57,8 +61,8 @@
     '../bench/GradientBench.cpp',
     '../bench/HairlinePathBench.cpp',
     '../bench/ImageCacheBench.cpp',
-    '../bench/ImageDecodeBench.cpp',
     '../bench/ImageFilterDAGBench.cpp',
+    '../bench/ImageFilterCollapse.cpp',
     '../bench/InterpBench.cpp',
     '../bench/LightingBench.cpp',
     '../bench/LineBench.cpp',
@@ -71,8 +75,10 @@
     '../bench/MemoryBench.cpp',
     '../bench/MemsetBench.cpp',
     '../bench/MergeBench.cpp',
+    '../bench/MipMapBench.cpp',
     '../bench/MorphologyBench.cpp',
     '../bench/MutexBench.cpp',
+    '../bench/PMFloatBench.cpp',
     '../bench/PatchBench.cpp',
     '../bench/PatchGridBench.cpp',
     '../bench/PathBench.cpp',

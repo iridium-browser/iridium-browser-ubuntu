@@ -337,6 +337,48 @@ private:
     const unsigned short m_lengthBits;
 };
 
+class WebCryptoHkdfParams : public WebCryptoAlgorithmParamsWithHash {
+public:
+    WebCryptoHkdfParams(const WebCryptoAlgorithm& hash, const unsigned char* salt, unsigned saltSize, const unsigned char* info, unsigned infoSize)
+        : WebCryptoAlgorithmParamsWithHash(hash)
+        , m_salt(salt, saltSize)
+        , m_info(info, infoSize)
+    {
+    }
+
+    const WebVector<unsigned char>& salt() const { return m_salt; }
+
+    const WebVector<unsigned char>& info() const { return m_info; }
+
+    virtual WebCryptoAlgorithmParamsType type() const
+    {
+        return WebCryptoAlgorithmParamsTypeHkdfParams;
+    }
+
+private:
+    const WebVector<unsigned char> m_salt;
+    const WebVector<unsigned char> m_info;
+};
+
+class WebCryptoPbkdf2Params : public WebCryptoAlgorithmParamsWithHash {
+public:
+    WebCryptoPbkdf2Params(const WebCryptoAlgorithm& hash, const unsigned char* salt, unsigned saltLength, unsigned iterations)
+        : WebCryptoAlgorithmParamsWithHash(hash)
+        , m_salt(salt, saltLength)
+        , m_iterations(iterations)
+    {
+    }
+
+    virtual WebCryptoAlgorithmParamsType type() const { return WebCryptoAlgorithmParamsTypePbkdf2Params; }
+
+    const WebVector<unsigned char>& salt() const { return m_salt; }
+    unsigned iterations() const { return m_iterations; }
+
+private:
+    const WebVector<unsigned char> m_salt;
+    const unsigned m_iterations;
+};
+
 } // namespace blink
 
 #endif

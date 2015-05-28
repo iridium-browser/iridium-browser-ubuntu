@@ -121,7 +121,7 @@ bool BrowserActionTestUtil::ActionButtonWantsToRun(size_t index) {
       [[[controller containerView] window] themeProvider];
   DCHECK(themeProvider);
   NSImage* wantsToRunImage =
-      themeProvider->GetNSImageNamed(IDR_BROWSER_ACTION_H);
+      themeProvider->GetNSImageNamed(IDR_BROWSER_ACTION_R);
   BrowserActionButton* button = [controller buttonWithIndex:index];
   BrowserActionCell* cell =
       base::mac::ObjCCastStrict<BrowserActionCell>([button cell]);
@@ -138,6 +138,10 @@ bool BrowserActionTestUtil::OverflowedActionButtonWantsToRun() {
   WrenchToolbarButtonCell* cell =
       base::mac::ObjCCastStrict<WrenchToolbarButtonCell>([wrenchButton cell]);
   return [cell overflowedToolbarActionWantsToRun];
+}
+
+ToolbarActionsBar* BrowserActionTestUtil::GetToolbarActionsBar() {
+  return [GetController(browser_, bar_delegate_) toolbarActionsBar];
 }
 
 // static

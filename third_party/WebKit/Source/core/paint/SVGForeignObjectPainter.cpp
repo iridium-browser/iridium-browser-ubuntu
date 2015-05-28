@@ -5,14 +5,13 @@
 #include "config.h"
 #include "core/paint/SVGForeignObjectPainter.h"
 
+#include "core/layout/PaintInfo.h"
+#include "core/layout/svg/LayoutSVGForeignObject.h"
+#include "core/layout/svg/SVGLayoutSupport.h"
 #include "core/paint/BlockPainter.h"
 #include "core/paint/FloatClipRecorder.h"
+#include "core/paint/SVGPaintContext.h"
 #include "core/paint/TransformRecorder.h"
-#include "core/rendering/PaintInfo.h"
-#include "core/rendering/svg/RenderSVGForeignObject.h"
-#include "core/rendering/svg/SVGRenderSupport.h"
-#include "core/rendering/svg/SVGRenderingContext.h"
-#include "platform/graphics/GraphicsContextStateSaver.h"
 
 namespace blink {
 
@@ -21,40 +20,37 @@ void SVGForeignObjectPainter::paint(const PaintInfo& paintInfo)
     if (paintInfo.phase != PaintPhaseForeground && paintInfo.phase != PaintPhaseSelection)
         return;
 
-    PaintInfo childPaintInfo(paintInfo);
-    GraphicsContextStateSaver stateSaver(*childPaintInfo.context);
-    TransformRecorder transformRecorder(*childPaintInfo.context, m_renderSVGForeignObject.displayItemClient(), m_renderSVGForeignObject.localTransform());
+    PaintInfo paintInfoBeforeFiltering(paintInfo);
+    TransformRecorder transformRecorder(*paintInfoBeforeFiltering.context, m_renderSVGForeignObject, m_renderSVGForeignObject.localTransform());
 
     // When transitioning from SVG to block painters we need to keep the PaintInfo rect up-to-date
     // because it can be used for clipping.
-    m_renderSVGForeignObject.updatePaintInfoRect(childPaintInfo.rect);
+    m_renderSVGForeignObject.updatePaintInfoRect(paintInfoBeforeFiltering.rect);
 
     OwnPtr<FloatClipRecorder> clipRecorder;
-    if (SVGRenderSupport::isOverflowHidden(&m_renderSVGForeignObject))
-        clipRecorder = adoptPtr(new FloatClipRecorder(*childPaintInfo.context, m_renderSVGForeignObject.displayItemClient(), childPaintInfo.phase, m_renderSVGForeignObject.viewportRect()));
+    if (SVGLayoutSupport::isOverflowHidden(&m_renderSVGForeignObject))
+        clipRecorder = adoptPtr(new FloatClipRecorder(*paintInfoBeforeFiltering.context, m_renderSVGForeignObject, paintInfoBeforeFiltering.phase, m_renderSVGForeignObject.viewportRect()));
 
-    SVGRenderingContext renderingContext;
+    SVGPaintContext paintContext(m_renderSVGForeignObject, paintInfoBeforeFiltering);
     bool continueRendering = true;
-    if (paintInfo.phase == PaintPhaseForeground) {
-        renderingContext.prepareToRenderSVGContent(&m_renderSVGForeignObject, childPaintInfo);
-        continueRendering = renderingContext.isRenderingPrepared();
-    }
+    if (paintContext.paintInfo().phase == PaintPhaseForeground)
+        continueRendering = paintContext.applyClipMaskAndFilterIfNecessary();
 
     if (continueRendering) {
         // Paint all phases of FO elements atomically as though the FO element established its own stacking context.
-        bool preservePhase = paintInfo.phase == PaintPhaseSelection || paintInfo.phase == PaintPhaseTextClip;
+        bool preservePhase = paintContext.paintInfo().phase == PaintPhaseSelection || paintContext.paintInfo().phase == PaintPhaseTextClip;
         const LayoutPoint childPoint = IntPoint();
-        childPaintInfo.phase = preservePhase ? paintInfo.phase : PaintPhaseBlockBackground;
-        BlockPainter(m_renderSVGForeignObject).paint(childPaintInfo, childPoint);
+        paintContext.paintInfo().phase = preservePhase ? paintContext.paintInfo().phase : PaintPhaseBlockBackground;
+        BlockPainter(m_renderSVGForeignObject).paint(paintContext.paintInfo(), childPoint);
         if (!preservePhase) {
-            childPaintInfo.phase = PaintPhaseChildBlockBackgrounds;
-            BlockPainter(m_renderSVGForeignObject).paint(childPaintInfo, childPoint);
-            childPaintInfo.phase = PaintPhaseFloat;
-            BlockPainter(m_renderSVGForeignObject).paint(childPaintInfo, childPoint);
-            childPaintInfo.phase = PaintPhaseForeground;
-            BlockPainter(m_renderSVGForeignObject).paint(childPaintInfo, childPoint);
-            childPaintInfo.phase = PaintPhaseOutline;
-            BlockPainter(m_renderSVGForeignObject).paint(childPaintInfo, childPoint);
+            paintContext.paintInfo().phase = PaintPhaseChildBlockBackgrounds;
+            BlockPainter(m_renderSVGForeignObject).paint(paintContext.paintInfo(), childPoint);
+            paintContext.paintInfo().phase = PaintPhaseFloat;
+            BlockPainter(m_renderSVGForeignObject).paint(paintContext.paintInfo(), childPoint);
+            paintContext.paintInfo().phase = PaintPhaseForeground;
+            BlockPainter(m_renderSVGForeignObject).paint(paintContext.paintInfo(), childPoint);
+            paintContext.paintInfo().phase = PaintPhaseOutline;
+            BlockPainter(m_renderSVGForeignObject).paint(paintContext.paintInfo(), childPoint);
         }
     }
 }

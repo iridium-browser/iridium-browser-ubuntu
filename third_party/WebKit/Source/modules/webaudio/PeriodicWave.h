@@ -40,6 +40,8 @@ namespace blink {
 class PeriodicWave : public GarbageCollectedFinalized<PeriodicWave>, public ScriptWrappable {
     DEFINE_WRAPPERTYPEINFO();
 public:
+    // Maximum array size allowed for creating PeriodicWave's.
+    static const unsigned kMaxPeriodicWaveArraySize;
     static PeriodicWave* createSine(float sampleRate);
     static PeriodicWave* createSquare(float sampleRate);
     static PeriodicWave* createSawtooth(float sampleRate);
@@ -54,14 +56,14 @@ public:
     // at this fundamental frequency. The lower wave is the next range containing fewer partials than the higher wave.
     // Interpolation between these two tables can be made according to tableInterpolationFactor.
     // Where values from 0 -> 1 interpolate between lower -> higher.
-    void waveDataForFundamentalFrequency(float, float* &lowerWaveData, float* &higherWaveData, float& tableInterpolationFactor);
+    void waveDataForFundamentalFrequency(float, float*& lowerWaveData, float*& higherWaveData, float& tableInterpolationFactor);
 
     // Returns the scalar multiplier to the oscillator frequency to calculate wave buffer phase increment.
     float rateScale() const { return m_rateScale; }
 
     unsigned periodicWaveSize() const { return m_periodicWaveSize; }
 
-    void trace(Visitor*) { }
+    DEFINE_INLINE_TRACE() { }
 
 private:
     explicit PeriodicWave(float sampleRate);
@@ -87,7 +89,7 @@ private:
 
     // Creates tables based on numberOfComponents Fourier coefficients.
     void createBandLimitedTables(const float* real, const float* imag, unsigned numberOfComponents);
-    Vector<OwnPtr<AudioFloatArray> > m_bandLimitedTables;
+    Vector<OwnPtr<AudioFloatArray>> m_bandLimitedTables;
 };
 
 } // namespace blink

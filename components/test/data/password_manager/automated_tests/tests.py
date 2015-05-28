@@ -6,25 +6,27 @@
 """Automated tests for many websites"""
 
 import argparse
-import logging
 
 from environment import Environment
 from websitetest import WebsiteTest
 
 
-class TypeOfTestedWebsites:
-  """An enum to specify which groups of tests to run."""
-  # Runs only the disabled tests.
-  DISABLED_TESTS = 0
-  # Runs only the enabled tests.
-  ENABLED_TESTS = 1
-  # Runs all the tests.
-  ALL_TESTS = 2
-  # Runs a specified list of tests.
-  LIST_OF_TESTS = 3
+class Alexa(WebsiteTest):
 
-  def __init__(self):
-    pass
+  def Login(self):
+    self.GoTo("https://www.alexa.com/secure/login")
+    self.FillUsernameInto("#email")
+    self.FillPasswordInto("#pwd")
+    self.Submit("#pwd")
+
+
+class Dropbox(WebsiteTest):
+
+  def Login(self):
+    self.GoTo("https://www.dropbox.com/login")
+    self.FillUsernameInto(".text-input-input[name='login_email']")
+    self.FillPasswordInto(".text-input-input[name='login_password']")
+    self.Submit(".text-input-input[name='login_password']")
 
 
 class Facebook(WebsiteTest):
@@ -36,6 +38,15 @@ class Facebook(WebsiteTest):
     self.Submit("[name='pass']")
 
 
+class Github(WebsiteTest):
+
+  def Login(self):
+    self.GoTo("https://github.com/login")
+    self.FillUsernameInto("[name='login']")
+    self.FillPasswordInto("[name='password']")
+    self.Submit("[name='commit']")
+
+
 class Google(WebsiteTest):
 
   def Login(self):
@@ -43,6 +54,24 @@ class Google(WebsiteTest):
     self.FillUsernameInto("#Email")
     self.FillPasswordInto("#Passwd")
     self.Submit("#Passwd")
+
+
+class Imgur(WebsiteTest):
+
+  def Login(self):
+    self.GoTo("https://imgur.com/signin")
+    self.FillUsernameInto("[name='username']")
+    self.FillPasswordInto("[name='password']")
+    self.Submit("[name='password']")
+
+
+class Liveinternet(WebsiteTest):
+
+  def Login(self):
+    self.GoTo("http://liveinternet.ru/journals.php?s=&action1=login")
+    self.FillUsernameInto("[name='username']")
+    self.FillPasswordInto("[name='password']")
+    self.Submit("[name='password']")
 
 
 class Linkedin(WebsiteTest):
@@ -71,6 +100,13 @@ class Nytimes(WebsiteTest):
     self.FillPasswordInto("#password")
     self.Submit("#password")
 
+class Odnoklassniki(WebsiteTest):
+
+  def Login(self):
+    self.GoTo("https://ok.ru")
+    self.FillUsernameInto("#field_email")
+    self.FillPasswordInto("#field_password")
+    self.Submit("#field_password")
 
 class Pinterest(WebsiteTest):
 
@@ -110,6 +146,25 @@ class Twitter(WebsiteTest):
     self.Submit("#signin-password")
 
 
+class Vkontakte(WebsiteTest):
+
+  def Login(self):
+    self.GoTo("https:///vk.com")
+    self.FillUsernameInto("[name='email']")
+    self.FillPasswordInto("[name='pass']")
+    self.Submit("[name='pass']")
+
+
+class Wikia(WebsiteTest):
+
+  def Login(self):
+    self.GoTo("https://wikia.com");
+    self.Click("#AccountNavigation");
+    self.FillUsernameInto("#usernameInput")
+    self.FillPasswordInto("#passwordInput")
+    self.Submit("input.login-button")
+
+
 class Wikipedia(WebsiteTest):
 
   def Login(self):
@@ -117,6 +172,16 @@ class Wikipedia(WebsiteTest):
     self.FillUsernameInto("#wpName1")
     self.FillPasswordInto("#wpPassword1")
     self.Submit("#wpPassword1")
+
+
+class Wordpress(WebsiteTest):
+
+  def Login(self):
+    self.GoTo("https://de.wordpress.com/wp-login.php")
+    self.FillUsernameInto("[name='log']")
+    self.FillPasswordInto("[name='pwd']")
+    self.Submit("[name='pwd']")
+
 
 
 class Yahoo(WebsiteTest):
@@ -137,7 +202,50 @@ class Yandex(WebsiteTest):
     self.Click(".b-mail-button__button")
 
 
-# Disabled tests.
+# Fails due to test framework issue(?).
+class Aliexpress(WebsiteTest):
+
+  def Login(self):
+    self.GoTo("https://login.aliexpress.com/buyer.htm?return=http%3A%2F%2Fwww.aliexpress.com%2F")
+    self.WaitUntilDisplayed("iframe#alibaba-login-box")
+    frame = self.driver.find_element_by_css_selector("iframe#alibaba-login-box")
+    self.driver.switch_to_frame(frame)
+    self.FillUsernameInto("#fm-login-id")
+    self.FillPasswordInto("#fm-login-password")
+    self.Click("#fm-login-submit")
+
+
+# Fails to save password.
+class Adobe(WebsiteTest):
+
+  def Login(self):
+    self.GoTo("https://adobeid-na1.services.adobe.com/renga-idprovider/pages/l"
+              "ogin?callback=https%3A%2F%2Fims-na1.adobelogin.com%2Fims%2Fadob"
+              "eid%2Fadobedotcom2%2FAdobeID%2Ftoken%3Fredirect_uri%3Dhttps%253"
+              "A%252F%252Fwww.adobe.com%252F%2523from_ims%253Dtrue%2526old_has"
+              "h%253D%2526client_id%253Dadobedotcom2%2526scope%253Dcreative_cl"
+              "oud%25252CAdobeID%25252Copenid%25252Cgnav%25252Cread_organizati"
+              "ons%25252Cadditional_info.projectedProductContext%2526api%253Da"
+              "uthorize&client_id=adobedotcom2&scope=creative_cloud%2CAdobeID%"
+              "2Copenid%2Cgnav%2Cread_organizations%2Cadditional_info.projecte"
+              "dProductContext&display=web_v2&denied_callback=https%3A%2F%2Fim"
+              "s-na1.adobelogin.com%2Fims%2Fdenied%2Fadobedotcom2%3Fredirect_u"
+              "ri%3Dhttps%253A%252F%252Fwww.adobe.com%252F%2523from_ims%253Dtr"
+              "ue%2526old_hash%253D%2526client_id%253Dadobedotcom2%2526scope%2"
+              "53Dcreative_cloud%25252CAdobeID%25252Copenid%25252Cgnav%25252Cr"
+              "ead_organizations%25252Cadditional_info.projectedProductContext"
+              "%2526api%253Dauthorize%26response_type%3Dtoken&relay=afebfef8-e"
+              "2b3-4c0e-9c94-07baf205bae8&locale=en_US&flow_type=token&dc=fals"
+              "e&client_redirect=https%3A%2F%2Fims-na1.adobelogin.com%2Fims%2F"
+              "redirect%2Fadobedotcom2%3Fclient_redirect%3Dhttps%253A%252F%252"
+              "Fwww.adobe.com%252F%2523from_ims%253Dtrue%2526old_hash%253D%252"
+              "6client_id%253Dadobedotcom2%2526scope%253Dcreative_cloud%25252C"
+              "AdobeID%25252Copenid%25252Cgnav%25252Cread_organizations%25252C"
+              "additional_info.projectedProductContext%2526api%253Dauthorize&i"
+              "dp_flow_type=login")
+    self.FillUsernameInto("[name='username']")
+    self.FillPasswordInto("[name='password']")
+    self.Submit("#sign_in")
 
 
 # Bug not reproducible without test.
@@ -194,6 +302,28 @@ class Cnn(WebsiteTest):
     self.Wait(5)
 
 
+# Fails due to "Too many failed logins. Please wait a minute".
+# http://crbug.com/466953
+class Craigslist(WebsiteTest):
+
+  def Login(self):
+    self.GoTo("https://accounts.craigslist.org/login")
+    self.FillUsernameInto("#inputEmailHandle")
+    self.FillPasswordInto("#inputPassword")
+    self.Submit("button")
+
+
+# Crashes.
+class Dailymotion(WebsiteTest):
+
+  def Login(self):
+    self.GoTo("http://www.dailymotion.com/gb")
+    self.Click(".sd_header__login span")
+    self.FillUsernameInto("[name='username']")
+    self.FillPasswordInto("[name='password']")
+    self.Submit("[name='save']")
+
+
 # http://crbug.com/368690
 class Ebay(WebsiteTest):
 
@@ -204,7 +334,7 @@ class Ebay(WebsiteTest):
     self.Submit("[name='pass']")
 
 
-# Iframe, password saved but not autofileld.
+# Iframe, password saved but not autofilled.
 class Espn(WebsiteTest):
 
   def Login(self):
@@ -220,6 +350,31 @@ class Espn(WebsiteTest):
     while self.IsDisplayed("#password"):
       self.ClickIfClickable("#submitBtn")
       self.Wait(1)
+
+
+# Fails due to test framework issue.
+class Flipkart(WebsiteTest):
+
+  def Login(self):
+    self.GoTo("http://www.flipkart.com/")
+    self.Wait(2)
+    self.Click(".header-links .js-login")
+    self.FillUsernameInto("#login_email_id")
+    self.FillPasswordInto("#login_password")
+    self.Submit("#login_password")
+
+
+# Iframe, password saved but not autofilled.
+class Instagram(WebsiteTest):
+
+  def Login(self):
+    self.GoTo("https://instagram.com/accounts/login/")
+    self.Wait(5)
+    frame = self.driver.find_element_by_css_selector(".hiFrame")
+    self.driver.switch_to_frame(frame)
+    self.FillUsernameInto("#lfFieldInputUsername")
+    self.FillPasswordInto("#lfFieldInputPassword")
+    self.Submit(".lfSubmit")
 
 
 # http://crbug.com/367768
@@ -242,6 +397,17 @@ class One63(WebsiteTest):
     self.FillPasswordInto(".ntes-loginframe-label-ipt[type='password']")
     self.Click(".ntes-loginframe-btn")
 
+class StackExchange(WebsiteTest):
+
+  def Login(self):
+    self.GoTo("https://stackexchange.com/users/login#log-in")
+    iframe_selector = "#affiliate-signin-iframe"
+    self.WaitUntilDisplayed(iframe_selector)
+    frame = self.driver.find_element_by_css_selector(iframe_selector)
+    self.driver.switch_to_frame(frame)
+    self.FillUsernameInto("[name='email']")
+    self.FillPasswordInto("[name='password']")
+    self.Submit("[value='Sign In']")
 
 # http://crbug.com/368690
 class Vube(WebsiteTest):
@@ -257,68 +423,59 @@ class Vube(WebsiteTest):
       self.Wait(1)
 
 
-def Tests(environment):
+# Password not saved.
+class Ziddu(WebsiteTest):
+
+  def Login(self):
+    self.GoTo("http://www.ziddu.com/login.php")
+    self.FillUsernameInto("#email")
+    self.FillPasswordInto("#password")
+    self.Click(".login input")
 
 
-  # Working tests.
+all_tests = {
+  "163": One63("163"), # http://crbug.com/368690
+  "adobe": Adobe("adobe"), # Password saving not offered.
+  "alexa": Alexa("alexa"),
+  "aliexpress": Aliexpress("aliexpress"), # Fails due to test framework issue.
+  "amazon": Amazon("amazon"), # Bug not reproducible without test.
+  "ask": Ask("ask"), # Password not saved.
+  "baidu": Baidu("baidu"), # Password not saved.
+  "cnn": Cnn("cnn"), # http://crbug.com/368690
+  "craigslist": Craigslist("craigslist"), # Too many failed logins per time.
+  "dailymotion": Dailymotion("dailymotion"), # Crashes.
+  "dropbox": Dropbox("dropbox"),
+  "ebay": Ebay("ebay"), # http://crbug.com/368690
+  "espn": Espn("espn"), # Iframe, password saved but not autofilled.
+  "facebook": Facebook("facebook"),
+  "flipkart": Flipkart("flipkart"), # Fails due to test framework issue.
+  "github": Github("github"),
+  "google": Google("google"),
+  "imgur": Imgur("imgur"),
+  "instagram": Instagram("instagram"), # Iframe, pw saved but not autofilled.
+  "linkedin": Linkedin("linkedin"),
+  "liveinternet": Liveinternet("liveinternet"),
+  "live": Live("live", username_not_auto=True),  # http://crbug.com/367768
+  "mailru": Mailru("mailru"),
+  "nytimes": Nytimes("nytimes"),
+  "odnoklassniki": Odnoklassniki("odnoklassniki"),
+  "pinterest": Pinterest("pinterest"),
+  "reddit": Reddit("reddit", username_not_auto=True),
+  "stackexchange": StackExchange("stackexchange"), # Iframe, not autofilled.
+  "tumblr": Tumblr("tumblr", username_not_auto=True),
+  "twitter": Twitter("twitter"),
+  "vkontakte": Vkontakte("vkontakte"),
+  "vube": Vube("vube"), # http://crbug.com/368690
+  "wikia": Wikia("wikia"),
+  "wikipedia": Wikipedia("wikipedia", username_not_auto=True),
+  "wordpress": Wordpress("wordpress"),
+  "yahoo": Yahoo("yahoo", username_not_auto=True),
+  "yandex": Yandex("yandex"),
+  "ziddu": Ziddu("ziddu"), # Password not saved.
+}
 
 
-  environment.AddWebsiteTest(Facebook("facebook"))
-
-  environment.AddWebsiteTest(Google("google"))
-
-  environment.AddWebsiteTest(Linkedin("linkedin"))
-
-  environment.AddWebsiteTest(Mailru("mailru"))
-
-  environment.AddWebsiteTest(Nytimes("nytimes"))
-
-  environment.AddWebsiteTest(Pinterest("pinterest"))
-
-  environment.AddWebsiteTest(Reddit("reddit", username_not_auto=True))
-
-  environment.AddWebsiteTest(Tumblr("tumblr", username_not_auto=True))
-
-  environment.AddWebsiteTest(Twitter("twitter"))
-
-  environment.AddWebsiteTest(Wikipedia("wikipedia", username_not_auto=True))
-
-  environment.AddWebsiteTest(Yahoo("yahoo", username_not_auto=True))
-
-  environment.AddWebsiteTest(Yandex("yandex"))
-
-  # Disabled tests.
-
-
-  # Bug not reproducible without test.
-  environment.AddWebsiteTest(Amazon("amazon"), disabled=True)
-
-  # Password not saved.
-  environment.AddWebsiteTest(Ask("ask"), disabled=True)
-
-  # Password not saved.
-  environment.AddWebsiteTest(Baidu("baidu"), disabled=True)
-
-  # http://crbug.com/368690
-  environment.AddWebsiteTest(Cnn("cnn"), disabled=True)
-
-  # http://crbug.com/368690
-  environment.AddWebsiteTest(Ebay("ebay"), disabled=True)
-
-  # Iframe, password saved but not autofileld.
-  environment.AddWebsiteTest(Espn("espn"), disabled=True)
-
-  # http://crbug.com/367768
-  environment.AddWebsiteTest(Live("live", username_not_auto=True),
-                             disabled=True)
-
-  # http://crbug.com/368690
-  environment.AddWebsiteTest(One63("163"), disabled=True)
-
-  # http://crbug.com/368690
-  environment.AddWebsiteTest(Vube("vube"), disabled=True)
-
-def saveResults(environment_tests_results, environment_save_path):
+def SaveResults(environment_tests_results, environment_save_path):
   """Save the test results in an xml file.
 
   Args:
@@ -331,159 +488,92 @@ def saveResults(environment_tests_results, environment_save_path):
   """
   if environment_save_path:
     xml = "<result>"
-    for test_result in environment_tests_results:
-      xml += ("<test name='%s' successful='%s' type='%s'>%s</test>"
-          % (test_result.name, str(test_result.successful),
-          test_result.test_type, test_result.message))
+    for (name, test_type, success, failure_log) in environment_tests_results:
+      xml += (
+          "<test name='{0}' successful='{1}' type='{2}'>{3}</test>".format(
+              name, success, test_type, failure_log))
     xml += "</result>"
     with open(environment_save_path, "w") as save_file:
       save_file.write(xml)
 
-def RunTests(chrome_path, chromedriver_path, profile_path,
-             environment_passwords_path, enable_automatic_password_saving,
-             environment_numeric_level, log_to_console, environment_log_file,
-             environment_tested_websites, tests=None):
-
-  """Runs the the tests
+def RunTest(chrome_path, chromedriver_path, profile_path,
+            environment_passwords_path, website_test_name, test_type):
+  """Runs the test for the specified website.
 
   Args:
     chrome_path: The chrome binary file.
     chromedriver_path: The chromedriver binary file.
     profile_path: The chrome testing profile folder.
     environment_passwords_path: The usernames and passwords file.
-    enable_automatic_password_saving: If True, the passwords are going to be
-        saved without showing the prompt.
-    environment_numeric_level: The log verbosity.
-    log_to_console: If True, the debug logs will be shown on the console.
-    environment_log_file: The file where to store the log. If it's empty, the
-        log is not stored.
-    environment_tested_websites: One of the TypeOfTestedWebsites values,
-        indicating which group of tests to run.
-    tests: Specifies which tests to run. Ignored unless
-       |environment_tested_websites| is equal to LIST_OF_TESTS.
+    website_test_name: Name of the website to test (refer to keys in
+        all_tests above).
 
   Returns:
-    The results of tests as list of TestResults.
+    The results of the test as list of TestResults.
+
   Raises:
-    Exception: An exception is raised if one of the tests fails.
+    Exception: An exception is raised if one of the tests for the website
+        fails, or if the website name is not known.
   """
 
+  enable_automatic_password_saving = (
+      test_type == WebsiteTest.TEST_TYPE_SAVE_AND_AUTOFILL)
   environment = Environment(chrome_path, chromedriver_path, profile_path,
                             environment_passwords_path,
-                            enable_automatic_password_saving,
-                            environment_numeric_level,
-                            log_to_console,
-                            environment_log_file)
+                            enable_automatic_password_saving)
 
-  # Test which care about the save-password prompt need the prompt
-  # to be shown. Automatic password saving results in no prompt.
-  run_prompt_tests = not enable_automatic_password_saving
-
-  Tests(environment)
-
-  if environment_tested_websites == TypeOfTestedWebsites.ALL_TESTS:
-    environment.AllTests(run_prompt_tests)
-  elif environment_tested_websites == TypeOfTestedWebsites.DISABLED_TESTS:
-    environment.DisabledTests(run_prompt_tests)
-  elif environment_tested_websites == TypeOfTestedWebsites.LIST_OF_TESTS:
-    environment.Test(tests, run_prompt_tests)
-  elif environment_tested_websites == TypeOfTestedWebsites.ENABLED_TESTS:
-    environment.WorkingTests(run_prompt_tests)
+  if website_test_name in all_tests:
+    environment.AddWebsiteTest(all_tests[website_test_name])
   else:
-    raise Exception("Error: |environment_tested_websites| has to be one of the"
-        "TypeOfTestedWebsites values")
+    raise Exception("Test name {} is unknown.".format(website_test_name))
 
-
+  environment.RunTestsOnSites(test_type)
   environment.Quit()
   return environment.tests_results
 
-# Tests setup.
-if __name__ == "__main__":
+def main():
   parser = argparse.ArgumentParser(
       description="Password Manager automated tests help.")
 
   parser.add_argument(
       "--chrome-path", action="store", dest="chrome_path",
-      help="Set the chrome path (required).", nargs=1, required=True)
+      help="Set the chrome path (required).", required=True)
   parser.add_argument(
       "--chromedriver-path", action="store", dest="chromedriver_path",
-      help="Set the chromedriver path (required).", nargs=1, required=True)
+      help="Set the chromedriver path (required).", required=True)
   parser.add_argument(
       "--profile-path", action="store", dest="profile_path",
       help="Set the profile path (required). You just need to choose a "
            "temporary empty folder. If the folder is not empty all its content "
            "is going to be removed.",
-      nargs=1, required=True)
+      required=True)
 
   parser.add_argument(
       "--passwords-path", action="store", dest="passwords_path",
-      help="Set the usernames/passwords path (required).", nargs=1,
-      required=True)
-  parser.add_argument("--all", action="store_true", dest="all",
-                      help="Run all tests.")
-  parser.add_argument("--disabled", action="store_true", dest="disabled",
-                      help="Run only disabled tests.")
-  parser.add_argument("--log", action="store", nargs=1, dest="log_level",
-                      help="Set log level.")
-  parser.add_argument("--log-screen", action="store_true", dest="log_screen",
-                      help="Show log on the screen.")
-  parser.add_argument("--log-file", action="store", dest="log_file",
-                      help="Write the log in a file.", nargs=1)
-  parser.add_argument("--save-path", action="store", nargs=1, dest="save_path",
+      help="Set the usernames/passwords path (required).", required=True)
+  parser.add_argument("--save-path", action="store", dest="save_path",
                       help="Write the results in a file.")
-  parser.add_argument("tests", help="Tests to be run.",  nargs="*")
+  parser.add_argument("test", help="Test to be run.")
 
   args = parser.parse_args()
 
-  passwords_path = args.passwords_path[0]
-
-  if args.all:
-    tested_websites = TypeOfTestedWebsites.ALL_TESTS
-  elif args.disabled:
-    tested_websites = TypeOfTestedWebsites.DISABLED_TESTS
-  elif args.tests:
-    tested_websites = TypeOfTestedWebsites.LIST_OF_TESTS
-  else:
-    tested_websites = TypeOfTestedWebsites.ENABLED_TESTS
-
-  numeric_level = None
-  if args.log_level:
-    numeric_level = getattr(logging, args.log_level[0].upper(), None)
-    if not isinstance(numeric_level, int):
-      raise ValueError("Invalid log level: %s" % args.log_level[0])
-
-  log_file = None
-  if args.log_file:
-    log_file = args.log_file[0]
-
   save_path = None
   if args.save_path:
-    save_path = args.save_path[0]
+    save_path = args.save_path
 
-  # Run the test without enable-automatic-password-saving to check whether or
-  # not the prompt is shown in the way we expected.
-  tests_results = RunTests(args.chrome_path[0],
-                           args.chromedriver_path[0],
-                           args.profile_path[0],
-                           passwords_path,
-                           False,
-                           numeric_level,
-                           args.log_screen,
-                           log_file,
-                           tested_websites,
-                           args.tests)
+  tests_results = RunTest(
+      args.chrome_path, args.chromedriver_path, args.profile_path,
+      args.passwords_path, args.test, WebsiteTest.TEST_TYPE_PROMPT_FAIL)
 
-  # Run the test with enable-automatic-password-saving to check whether or not
-  # the passwords is stored in the the way we expected.
-  tests_results += RunTests(args.chrome_path[0],
-                            args.chromedriver_path[0],
-                            args.profile_path[0],
-                            passwords_path,
-                            True,
-                            numeric_level,
-                            args.log_screen,
-                            log_file,
-                            tested_websites,
-                            args.tests)
+  tests_results += RunTest(
+      args.chrome_path, args.chromedriver_path, args.profile_path,
+      args.passwords_path, args.test, WebsiteTest.TEST_TYPE_PROMPT_SUCCESS)
 
-  saveResults(tests_results, save_path)
+  tests_results += RunTest(
+      args.chrome_path, args.chromedriver_path, args.profile_path,
+      args.passwords_path, args.test, WebsiteTest.TEST_TYPE_SAVE_AND_AUTOFILL)
+
+  SaveResults(tests_results, save_path)
+
+if __name__ == "__main__":
+  main()

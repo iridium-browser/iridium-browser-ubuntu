@@ -1,3 +1,7 @@
+# Copyright 2015 Google Inc.
+#
+# Use of this source code is governed by a BSD-style license that can be
+# found in the LICENSE file.
     # GYP file to build various tools.
 #
 # To build on Linux:
@@ -13,7 +17,6 @@
       'target_name': 'tools',
       'type': 'none',
       'dependencies': [
-        'bbh_shootout',
         'bench_pictures',
         'dump_record',
         'filter',
@@ -26,6 +29,7 @@
         'render_pictures',
         'skdiff',
         'skhello',
+        'skp2svg',
         'skpdiff',
         'skpinfo',
         'skpmaker',
@@ -43,22 +47,6 @@
       ],
     },
     {
-      'target_name': 'gm_expectations',
-      'type': 'static_library',
-      'include_dirs' : [ '../src/utils/' ],
-      'sources': [
-        '../gm/gm_expectations.cpp',
-      ],
-      'dependencies': [
-        'jsoncpp.gyp:jsoncpp',
-        'sk_tool_utils',
-        'skia_lib.gyp:skia_lib',
-      ],
-      'direct_dependent_settings': {
-        'include_dirs': [ '../gm/' ],
-      },
-    },
-    {
       'target_name': 'crash_handler',
         'type': 'static_library',
         'sources': [ '../tools/CrashHandler.cpp' ],
@@ -66,6 +54,12 @@
         'direct_dependent_settings': {
           'include_dirs': [ '../tools' ],
         },
+        'conditions': [
+          [ 'skia_is_bot', {
+            'defines': [ 'SK_CRASH_HANDLER' ],
+          }],
+        ],
+
         'all_dependent_settings': {
           'msvs_settings': {
             'VCLinkerTool': {
@@ -248,22 +242,12 @@
       'target_name': 'skhello',
       'type': 'executable',
       'dependencies': [
+        'flags.gyp:flags',
+        'pdf.gyp:pdf',
         'skia_lib.gyp:skia_lib',
       ],
-      'conditions': [
-        [ 'skia_os == "nacl"', {
-          'sources': [
-            '../platform_tools/nacl/src/nacl_hello.cpp',
-          ],
-        }, {
-          'sources': [
-            '../tools/skhello.cpp',
-          ],
-          'dependencies': [
-            'flags.gyp:flags',
-            'pdf.gyp:pdf',
-          ],
-        }],
+      'sources': [
+        '../tools/skhello.cpp',
       ],
     },
     {
@@ -278,6 +262,26 @@
       'dependencies': [
         'flags.gyp:flags',
         'skia_lib.gyp:skia_lib',
+      ],
+    },
+    {
+      # Superseded by dm, should be removed.
+      'target_name': 'skp2svg',
+      'type': 'executable',
+      'sources': [
+        '../src/svg/skp2svg.cpp',
+        '../tools/LazyDecodeBitmap.cpp',
+      ],
+      'include_dirs': [
+        '../src/core/',
+        '../src/lazy/',
+        '../tools/',
+      ],
+      'dependencies': [
+        'flags.gyp:flags',
+        'skia_lib.gyp:skia_lib',
+        'svg.gyp:svg',
+        'xml.gyp:xml',
       ],
     },
     {
@@ -557,26 +561,6 @@
       ],
     },
     {
-      'target_name': 'bbh_shootout',
-      'type': 'executable',
-      'include_dirs': [
-        '../bench',
-        '../tools/'
-      ],
-      'sources': [
-        '../tools/bbh_shootout.cpp',
-
-        # Bench code:
-      ],
-      'dependencies': [
-        'timer',
-        'flags.gyp:flags',
-        'skia_lib.gyp:skia_lib',
-        'tools.gyp:picture_renderer',
-        'tools.gyp:picture_utils',
-      ],
-    },
-    {
       'target_name': 'filter',
       'type': 'executable',
       'include_dirs' : [
@@ -634,16 +618,20 @@
           '<(skia_include_path)/gpu',
           '<(skia_include_path)/images',
           '<(skia_include_path)/pathops',
-          '<(skia_include_path)/pdf',
           '<(skia_include_path)/pipe',
           '<(skia_include_path)/ports',
-          '<(skia_include_path)/svg',
+          '<(skia_include_path)/svg/parser',
           '<(skia_include_path)/utils',
           '<(skia_include_path)/views',
           '<(skia_include_path)/xml',
         ],
         'paths_to_ignore': [
           '<(skia_include_path)/gpu/gl/GrGLConfig_chrome.h',
+          '<(skia_include_path)/ports/SkAtomics_std.h',
+          '<(skia_include_path)/ports/SkAtomics_atomic.h',
+          '<(skia_include_path)/ports/SkAtomics_sync.h',
+          '<(skia_include_path)/ports/SkMutex_pthread.h',
+          '<(skia_include_path)/ports/SkMutex_win.h',
           '<(skia_include_path)/ports/SkTypeface_mac.h',
           '<(skia_include_path)/ports/SkTypeface_win.h',
           '<(skia_include_path)/utils/ios',
@@ -655,7 +643,6 @@
           '<(skia_include_path)/views/SkOSWindow_Android.h',
           '<(skia_include_path)/views/SkOSWindow_iOS.h',
           '<(skia_include_path)/views/SkOSWindow_Mac.h',
-          '<(skia_include_path)/views/SkOSWindow_NaCl.h',
           '<(skia_include_path)/views/SkOSWindow_SDL.h',
           '<(skia_include_path)/views/SkOSWindow_Unix.h',
           '<(skia_include_path)/views/SkOSWindow_Win.h',

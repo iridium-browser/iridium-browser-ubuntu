@@ -83,7 +83,7 @@ function MainWindowComponent(
   this.appStateController_ = appStateController;
 
   /**
-   * @type {TaskController}
+   * @type {!TaskController}
    * @const
    * @private
    */
@@ -185,7 +185,8 @@ MainWindowComponent.prototype.onDetailClick_ = function(event) {
 
   var entry = selection.entries[0];
   if (entry.isDirectory) {
-    this.directoryModel_.changeDirectoryEntry(entry);
+    this.directoryModel_.changeDirectoryEntry(
+        /** @type {!DirectoryEntry} */ (entry));
   } else {
     this.taskController_.dispatchSelectionAction();
   }
@@ -205,7 +206,7 @@ MainWindowComponent.prototype.onToggleViewButtonClick_ = function(event) {
   this.ui_.setCurrentListType(listType);
   this.appStateController_.saveViewOptions();
 
-  event.target.blur();
+  this.ui_.toggleViewButton.blur();
 };
 
 /**
@@ -223,12 +224,6 @@ MainWindowComponent.prototype.onKeyDown_ = function(event) {
   }
 
   switch (util.getKeyModifiers(event) + event.keyIdentifier) {
-    case 'Ctrl-U+00BE':  // Ctrl-. => Toggle filter files.
-      this.fileFilter_.setFilterHidden(
-          !this.fileFilter_.isFilterHiddenOn());
-      event.preventDefault();
-      return;
-
     case 'U+001B':  // Escape => Cancel dialog.
       if (this.dialogType_ != DialogType.FULL_PAGE) {
         // If there is nothing else for ESC to do, then cancel the dialog.
@@ -282,9 +277,10 @@ MainWindowComponent.prototype.onListKeyDown_ = function(event) {
             selection.indexes[0]);
         // If the item is in renaming process, we don't allow to change
         // directory.
-        if (!item.hasAttribute('renaming')) {
+        if (item && !item.hasAttribute('renaming')) {
           event.preventDefault();
-          this.directoryModel_.changeDirectoryEntry(selection.entries[0]);
+          this.directoryModel_.changeDirectoryEntry(
+              /** @type {!DirectoryEntry} */ (selection.entries[0]));
         }
       } else if (this.taskController_.dispatchSelectionAction()) {
         event.preventDefault();

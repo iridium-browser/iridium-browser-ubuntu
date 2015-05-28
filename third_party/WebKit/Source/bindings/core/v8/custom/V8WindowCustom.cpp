@@ -58,9 +58,7 @@
 #include "core/inspector/ScriptCallStack.h"
 #include "core/loader/FrameLoadRequest.h"
 #include "core/loader/FrameLoader.h"
-#include "core/storage/Storage.h"
 #include "platform/PlatformScreen.h"
-#include "platform/graphics/media/MediaPlayer.h"
 #include "wtf/Assertions.h"
 #include "wtf/OwnPtr.h"
 
@@ -125,8 +123,9 @@ void V8Window::frameElementAttributeGetterCustom(const v8::PropertyCallbackInfo<
 
 void V8Window::openerAttributeSetterCustom(v8::Local<v8::Value> value, const v8::PropertyCallbackInfo<void>& info)
 {
+    v8::Isolate* isolate = info.GetIsolate();
     LocalDOMWindow* impl = toLocalDOMWindow(V8Window::toImpl(info.Holder()));
-    ExceptionState exceptionState(ExceptionState::SetterContext, "opener", "Window", info.Holder(), info.GetIsolate());
+    ExceptionState exceptionState(ExceptionState::SetterContext, "opener", "Window", info.Holder(), isolate);
     if (!BindingSecurity::shouldAllowAccessToFrame(info.GetIsolate(), impl->frame(), exceptionState)) {
         exceptionState.throwIfNeeded();
         return;
@@ -143,11 +142,11 @@ void V8Window::openerAttributeSetterCustom(v8::Local<v8::Value> value, const v8:
     }
 
     // Delete the accessor from this object.
-    info.Holder()->Delete(v8AtomicString(info.GetIsolate(), "opener"));
+    info.Holder()->Delete(isolate->GetCurrentContext(), v8AtomicString(isolate, "opener"));
 
     // Put property on the front (this) object.
     if (info.This()->IsObject())
-        v8::Handle<v8::Object>::Cast(info.This())->Set(v8AtomicString(info.GetIsolate(), "opener"), value);
+        v8::Handle<v8::Object>::Cast(info.This())->Set(v8AtomicString(isolate, "opener"), value);
 }
 
 static bool isLegacyTargetOriginDesignation(v8::Handle<v8::Value> value)
@@ -160,6 +159,13 @@ static bool isLegacyTargetOriginDesignation(v8::Handle<v8::Value> value)
 
 void V8Window::postMessageMethodCustom(const v8::FunctionCallbackInfo<v8::Value>& info)
 {
+    ExceptionState exceptionState(ExceptionState::ExecutionContext, "postMessage", "Window", info.Holder(), info.GetIsolate());
+    if (UNLIKELY(info.Length() < 2)) {
+        setMinimumArityTypeError(exceptionState, 2, info.Length());
+        exceptionState.throwIfNeeded();
+        return;
+    }
+
     // None of these need to be RefPtr because info and context are guaranteed
     // to hold on to them.
     DOMWindow* window = V8Window::toImpl(info.Holder());
@@ -167,8 +173,6 @@ void V8Window::postMessageMethodCustom(const v8::FunctionCallbackInfo<v8::Value>
 
     ASSERT(window);
     UseCounter::countIfNotPrivateScript(info.GetIsolate(), window->frame(), UseCounter::WindowPostMessage);
-
-    ExceptionState exceptionState(ExceptionState::ExecutionContext, "postMessage", "Window", info.Holder(), info.GetIsolate());
 
     // If called directly by WebCore we don't have a calling context.
     if (!source) {
@@ -215,79 +219,10 @@ void V8Window::postMessageMethodCustom(const v8::FunctionCallbackInfo<v8::Value>
 void V8Window::toStringMethodCustom(const v8::FunctionCallbackInfo<v8::Value>& info)
 {
     v8::Handle<v8::Object> domWrapper = V8Window::findInstanceInPrototypeChain(info.This(), info.GetIsolate());
-    if (domWrapper.IsEmpty()) {
-        v8SetReturnValue(info, info.This()->ObjectProtoToString());
-        return;
-    }
-    v8SetReturnValue(info, domWrapper->ObjectProtoToString());
-}
-
-class DialogHandler {
-public:
-    explicit DialogHandler(v8::Handle<v8::Value> dialogArguments, ScriptState* scriptState)
-        : m_scriptState(scriptState)
-        , m_dialogArguments(dialogArguments)
-    {
-    }
-
-    void dialogCreated(LocalDOMWindow*);
-    v8::Handle<v8::Value> returnValue() const;
-
-private:
-    RefPtr<ScriptState> m_scriptState;
-    RefPtr<ScriptState> m_scriptStateForDialogFrame;
-    v8::Handle<v8::Value> m_dialogArguments;
-};
-
-void DialogHandler::dialogCreated(LocalDOMWindow* dialogFrame)
-{
-    if (m_dialogArguments.IsEmpty())
-        return;
-    v8::Handle<v8::Context> context = toV8Context(dialogFrame->frame(), m_scriptState->world());
-    if (context.IsEmpty())
-        return;
-    m_scriptStateForDialogFrame = ScriptState::from(context);
-
-    ScriptState::Scope scope(m_scriptStateForDialogFrame.get());
-    m_scriptStateForDialogFrame->context()->Global()->Set(v8AtomicString(m_scriptState->isolate(), "dialogArguments"), m_dialogArguments);
-}
-
-v8::Handle<v8::Value> DialogHandler::returnValue() const
-{
-    if (!m_scriptStateForDialogFrame)
-        return v8Undefined();
-    ASSERT(m_scriptStateForDialogFrame->contextIsValid());
-
-    v8::Isolate* isolate = m_scriptStateForDialogFrame->isolate();
-    v8::EscapableHandleScope handleScope(isolate);
-    ScriptState::Scope scope(m_scriptStateForDialogFrame.get());
-    v8::Local<v8::Value> returnValue = m_scriptStateForDialogFrame->context()->Global()->Get(v8AtomicString(isolate, "returnValue"));
-    if (returnValue.IsEmpty())
-        return v8Undefined();
-    return handleScope.Escape(returnValue);
-}
-
-static void setUpDialog(LocalDOMWindow* dialog, void* handler)
-{
-    static_cast<DialogHandler*>(handler)->dialogCreated(dialog);
-}
-
-void V8Window::showModalDialogMethodCustom(const v8::FunctionCallbackInfo<v8::Value>& info)
-{
-    LocalDOMWindow* impl = toLocalDOMWindow(V8Window::toImpl(info.Holder()));
-    ExceptionState exceptionState(ExceptionState::ExecutionContext, "showModalDialog", "Window", info.Holder(), info.GetIsolate());
-    if (!BindingSecurity::shouldAllowAccessToFrame(info.GetIsolate(), impl->frame(), exceptionState)) {
-        exceptionState.throwIfNeeded();
-        return;
-    }
-
-    TOSTRING_VOID(V8StringResource<TreatNullAndUndefinedAsNullString>, urlString, info[0]);
-    DialogHandler handler(info[1], ScriptState::current(info.GetIsolate()));
-    TOSTRING_VOID(V8StringResource<TreatNullAndUndefinedAsNullString>, dialogFeaturesString, info[2]);
-
-    impl->showModalDialog(urlString, dialogFeaturesString, callingDOMWindow(info.GetIsolate()), enteredDOMWindow(info.GetIsolate()), setUpDialog, &handler);
-
-    v8SetReturnValue(info, handler.returnValue());
+    v8::Local<v8::Object> target = domWrapper.IsEmpty() ? info.This() : domWrapper;
+    v8::Local<v8::String> value;
+    if (target->ObjectProtoToString(info.GetIsolate()->GetCurrentContext()).ToLocal(&value))
+        v8SetReturnValue(info, value);
 }
 
 void V8Window::openMethodCustom(const v8::FunctionCallbackInfo<v8::Value>& info)
@@ -309,7 +244,7 @@ void V8Window::openMethodCustom(const v8::FunctionCallbackInfo<v8::Value>& info)
     }
     TOSTRING_VOID(V8StringResource<TreatNullAndUndefinedAsNullString>, windowFeaturesString, info[2]);
 
-    RefPtrWillBeRawPtr<LocalDOMWindow> openedWindow = impl->open(urlString, frameName, windowFeaturesString, callingDOMWindow(info.GetIsolate()), enteredDOMWindow(info.GetIsolate()));
+    RefPtrWillBeRawPtr<DOMWindow> openedWindow = impl->open(urlString, frameName, windowFeaturesString, callingDOMWindow(info.GetIsolate()), enteredDOMWindow(info.GetIsolate()));
     if (!openedWindow)
         return;
 
@@ -322,16 +257,18 @@ void V8Window::namedPropertyGetterCustom(v8::Local<v8::Name> name, const v8::Pro
         return;
 
     auto nameString = name.As<v8::String>();
-    LocalDOMWindow* window = toLocalDOMWindow(V8Window::toImpl(info.Holder()));
+    DOMWindow* window = V8Window::toImpl(info.Holder());
     if (!window)
         return;
 
-    LocalFrame* frame = window->frame();
+    Frame* frame = window->frame();
     // window is detached from a frame.
     if (!frame)
         return;
 
-    // Search sub-frames.
+    // Note that the spec doesn't allow any cross-origin named access to the window object. However,
+    // UAs have traditionally allowed named access to named child browsing contexts, even across
+    // origins. So first, search child frames for a frame with a matching name.
     AtomicString propName = toCoreAtomicString(nameString);
     Frame* child = frame->tree().scopedChild(propName);
     if (child) {
@@ -340,7 +277,7 @@ void V8Window::namedPropertyGetterCustom(v8::Local<v8::Name> name, const v8::Pro
     }
 
     // Search IDL functions defined in the prototype
-    if (!info.Holder()->GetRealNamedProperty(nameString).IsEmpty())
+    if (!info.Holder()->GetRealNamedProperty(info.GetIsolate()->GetCurrentContext(), nameString).IsEmpty())
         return;
 
     // Frame could have been detached in call to GetRealNamedProperty.
@@ -349,8 +286,12 @@ void V8Window::namedPropertyGetterCustom(v8::Local<v8::Name> name, const v8::Pro
     if (!frame)
         return;
 
+    // If the frame is remote, the caller will never be able to access further named results.
+    if (!frame->isLocalFrame())
+        return;
+
     // Search named items in the document.
-    Document* doc = frame->document();
+    Document* doc = toLocalFrame(frame)->document();
     if (!doc || !doc->isHTMLDocument())
         return;
 

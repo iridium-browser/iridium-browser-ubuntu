@@ -63,14 +63,14 @@ public:
         return SkRef(gLumaEffect);
     }
 
-    virtual const char* name() const SK_OVERRIDE { return "Luminance-to-Alpha"; }
+    const char* name() const override { return "Luminance-to-Alpha"; }
 
     virtual void getGLProcessorKey(const GrGLCaps& caps,
-                                   GrProcessorKeyBuilder* b) const SK_OVERRIDE {
+                                   GrProcessorKeyBuilder* b) const override {
         GLProcessor::GenKey(*this, caps, b);
     }
 
-    virtual GrGLFragmentProcessor* createGLInstance() const SK_OVERRIDE {
+    GrGLFragmentProcessor* createGLInstance() const override {
         return SkNEW_ARGS(GLProcessor, (*this));
     }
 
@@ -85,7 +85,7 @@ public:
                               const char* outputColor,
                               const char* inputColor,
                               const TransformedCoordsArray&,
-                              const TextureSamplerArray&) SK_OVERRIDE {
+                              const TextureSamplerArray&) override {
             if (NULL == inputColor) {
                 inputColor = "vec4(1)";
             }
@@ -110,16 +110,25 @@ private:
         this->initClassID<LumaColorFilterEffect>();
     }
 
-    virtual bool onIsEqual(const GrFragmentProcessor&) const SK_OVERRIDE { return true; }
+    bool onIsEqual(const GrFragmentProcessor&) const override { return true; }
 
-    virtual void onComputeInvariantOutput(GrInvariantOutput* inout) const SK_OVERRIDE {
+    void onComputeInvariantOutput(GrInvariantOutput* inout) const override {
         // The output is always black. The alpha value for the color passed in is arbitrary.
         inout->setToOther(kRGB_GrColorComponentFlags, GrColorPackRGBA(0, 0, 0, 0),
                           GrInvariantOutput::kWill_ReadInput);
     }
 };
 
-GrFragmentProcessor* SkLumaColorFilter::asFragmentProcessor(GrContext*) const {
-    return LumaColorFilterEffect::Create();
+bool SkLumaColorFilter::asFragmentProcessors(GrContext*,
+                                             SkTDArray<GrFragmentProcessor*>* array) const {
+
+    GrFragmentProcessor* frag = LumaColorFilterEffect::Create();
+    if (frag) {
+        if (array) {
+            *array->append() = frag;
+        }
+        return true;
+    }
+    return false;
 }
 #endif

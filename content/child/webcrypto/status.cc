@@ -328,6 +328,31 @@ Status Status::ErrorEcdhLengthTooBig(unsigned int max_length_bits) {
                     max_length_bits));
 }
 
+Status Status::ErrorHkdfLengthTooLong() {
+  return Status(blink::WebCryptoErrorTypeOperation,
+                "The length provided for HKDF is too large.");
+}
+
+Status Status::ErrorHkdfDeriveBitsLengthNotSpecified() {
+  // TODO(nharper): The spec might change so that an OperationError should be
+  // thrown here instead of a TypeError.
+  // (https://www.w3.org/Bugs/Public/show_bug.cgi?id=27771)
+  return Status(blink::WebCryptoErrorTypeType,
+                "No length was specified for the HKDF Derive Bits operation.");
+}
+
+Status Status::ErrorPbkdf2InvalidLength() {
+  return Status(
+      blink::WebCryptoErrorTypeOperation,
+      "Length for PBKDF2 key derivation must be a multiple of 8 bits.");
+}
+
+Status Status::ErrorPbkdf2DeriveBitsLengthNotSpecified() {
+  return Status(
+      blink::WebCryptoErrorTypeOperation,
+      "No length was specified for the PBKDF2 Derive Bits operation.");
+}
+
 Status::Status(blink::WebCryptoErrorType error_type,
                const std::string& error_details_utf8)
     : type_(TYPE_ERROR),

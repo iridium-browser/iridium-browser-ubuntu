@@ -33,6 +33,7 @@
 #include "core/html/FormDataList.h"
 #include "core/html/HTMLOptionElement.h"
 #include "core/html/HTMLSelectElement.h"
+#include "core/layout/LayoutBlockFlow.h"
 #include "platform/text/PlatformLocale.h"
 #include "public/platform/Platform.h"
 #include "public/platform/WebLocalizedString.h"
@@ -52,11 +53,19 @@ HTMLKeygenElement::HTMLKeygenElement(Document& document, HTMLFormElement* form)
 PassRefPtrWillBeRawPtr<HTMLKeygenElement> HTMLKeygenElement::create(Document& document, HTMLFormElement* form)
 {
     RefPtrWillBeRawPtr<HTMLKeygenElement> keygen = adoptRefWillBeNoop(new HTMLKeygenElement(document, form));
-    keygen->ensureUserAgentShadowRoot();
+    keygen->ensureClosedShadowRoot();
     return keygen.release();
 }
 
-void HTMLKeygenElement::didAddUserAgentShadowRoot(ShadowRoot& root)
+LayoutObject* HTMLKeygenElement::createLayoutObject(const ComputedStyle& style)
+{
+    // TODO(mstensho): While it's harmful and meaningless to allow most display types on replaced
+    // content (e.g. table, table-row or flex), it would be useful to honor at least some of
+    // them. Table-cell (and maybe table-caption too), for instance. See crbug.com/335040
+    return new LayoutBlockFlow(this);
+}
+
+void HTMLKeygenElement::didAddClosedShadowRoot(ShadowRoot& root)
 {
     DEFINE_STATIC_LOCAL(AtomicString, keygenSelectPseudoId, ("-webkit-keygen-select", AtomicString::ConstructFromLiteral));
 
@@ -112,7 +121,7 @@ void HTMLKeygenElement::resetImpl()
 
 HTMLSelectElement* HTMLKeygenElement::shadowSelect() const
 {
-    ShadowRoot* root = userAgentShadowRoot();
+    ShadowRoot* root = closedShadowRoot();
     return root ? toHTMLSelectElement(root->firstChild()) : 0;
 }
 

@@ -14,8 +14,13 @@
 #include "base/strings/string_util.h"
 #include "gpu/command_buffer/service/gl_utils.h"
 #include "gpu/command_buffer/service/gpu_switches.h"
+#include "gpu/command_buffer/service/texture_definition.h"
 #include "ui/gl/gl_fence.h"
 #include "ui/gl/gl_implementation.h"
+
+#if !defined(OS_MACOSX)
+#include "ui/gl/gl_fence_egl.h"
+#endif
 
 namespace gpu {
 namespace gles2 {
@@ -40,6 +45,10 @@ class StringSet {
     Init(str);
   }
 
+  StringSet(const std::vector<std::string>& strs) {
+    string_set_.insert(strs.begin(), strs.end());
+  }
+
   void Init(const char* s) {
     std::string str(s ? s : "");
     Init(str);
@@ -57,6 +66,10 @@ class StringSet {
 
   bool Contains(const std::string& s) {
     return string_set_.find(s) != string_set_.end();
+  }
+
+  const std::set<std::string>& GetImpl() {
+    return string_set_;
   }
 
  private:
@@ -128,7 +141,10 @@ FeatureInfo::FeatureFlags::FeatureFlags()
       use_arb_occlusion_query2_for_occlusion_query_boolean(false),
       use_arb_occlusion_query_for_occlusion_query_boolean(false),
       native_vertex_array_object(false),
+      ext_texture_format_atc(false),
       ext_texture_format_bgra8888(false),
+      ext_texture_format_dxt1(false),
+      ext_texture_format_dxt5(false),
       enable_shader_name_hashing(false),
       enable_samplers(false),
       ext_draw_buffers(false),
@@ -265,15 +281,35 @@ bool IsGL_REDSupportedOnFBOs() {
 
 void FeatureInfo::InitializeFeatures() {
   // Figure out what extensions to turn on.
-  StringSet extensions(
-      reinterpret_cast<const char*>(glGetString(GL_EXTENSIONS)));
+  StringSet extensions;
+  // We need to figure out how to query the extension string before we
+  // have a GLVersionInfo available.
+  const char* version_str =
+      reinterpret_cast<const char*>(glGetString(GL_VERSION));
+  unsigned major_version, minor_version;
+  bool is_es, is_es3;
+  gfx::GLVersionInfo::ParseVersionString(
+      version_str, &major_version, &minor_version, &is_es, &is_es3);
+  if (!is_es && major_version >= 3) {
+    std::vector<std::string> exts;
+    GLint num_extensions = 0;
+    glGetIntegerv(GL_NUM_EXTENSIONS, &num_extensions);
+    for (GLint i = 0; i < num_extensions; ++i) {
+      const char* extension = reinterpret_cast<const char*>(
+          glGetStringi(GL_EXTENSIONS, i));
+      DCHECK(extension != NULL);
+      exts.push_back(extension);
+    }
+    extensions = exts;
+  } else {
+    extensions = reinterpret_cast<const char*>(glGetString(GL_EXTENSIONS));
+  }
 
   const char* renderer_str =
       reinterpret_cast<const char*>(glGetString(GL_RENDERER));
-  const char* version_str =
-      reinterpret_cast<const char*>(glGetString(GL_VERSION));
 
-  gl_version_info_.reset(new gfx::GLVersionInfo(version_str, renderer_str));
+  gl_version_info_.reset(new gfx::GLVersionInfo(
+      version_str, renderer_str, extensions.GetImpl()));
 
   AddExtensionString("GL_ANGLE_translated_shader_source");
   AddExtensionString("GL_CHROMIUM_async_pixel_transfers");
@@ -329,6 +365,8 @@ void FeatureInfo::InitializeFeatures() {
   }
 
   if (enable_dxt1) {
+    feature_flags_.ext_texture_format_dxt1 = true;
+
     AddExtensionString("GL_EXT_texture_compression_dxt1");
     validators_.compressed_texture_format.AddValue(
         GL_COMPRESSED_RGB_S3TC_DXT1_EXT);
@@ -346,12 +384,25 @@ void FeatureInfo::InitializeFeatures() {
   }
 
   if (enable_dxt5) {
+    feature_flags_.ext_texture_format_dxt5 = true;
+
     // The difference between GL_EXT_texture_compression_s3tc and
     // GL_CHROMIUM_texture_compression_dxt5 is that the former
     // requires on the fly compression. The latter does not.
     AddExtensionString("GL_CHROMIUM_texture_compression_dxt5");
     validators_.compressed_texture_format.AddValue(
         GL_COMPRESSED_RGBA_S3TC_DXT5_EXT);
+  }
+
+  bool have_atc = extensions.Contains("GL_AMD_compressed_ATC_texture") ||
+                  extensions.Contains("GL_ATI_texture_compression_atitc");
+  if (have_atc) {
+    feature_flags_.ext_texture_format_atc = true;
+
+    AddExtensionString("GL_AMD_compressed_ATC_texture");
+    validators_.compressed_texture_format.AddValue(GL_ATC_RGB_AMD);
+    validators_.compressed_texture_format.AddValue(
+        GL_ATC_RGBA_INTERPOLATED_ALPHA_AMD);
   }
 
   // Check if we should enable GL_EXT_texture_filter_anisotropic.
@@ -380,7 +431,8 @@ void FeatureInfo::InitializeFeatures() {
       (extensions.Contains("GL_ARB_depth_texture") ||
        extensions.Contains("GL_OES_depth_texture") ||
        extensions.Contains("GL_ANGLE_depth_texture") ||
-       gl_version_info_->is_es3)) {
+       gl_version_info_->is_es3 ||
+       gl_version_info_->is_desktop_core_profile)) {
     enable_depth_texture = true;
     feature_flags_.angle_depth_texture =
         extensions.Contains("GL_ANGLE_depth_texture");
@@ -399,7 +451,8 @@ void FeatureInfo::InitializeFeatures() {
 
   if (extensions.Contains("GL_EXT_packed_depth_stencil") ||
       extensions.Contains("GL_OES_packed_depth_stencil") ||
-      gl_version_info_->is_es3) {
+      gl_version_info_->is_es3 ||
+      gl_version_info_->is_desktop_core_profile) {
     AddExtensionString("GL_OES_packed_depth_stencil");
     feature_flags_.packed_depth24_stencil8 = true;
     if (enable_depth_texture) {
@@ -413,6 +466,7 @@ void FeatureInfo::InitializeFeatures() {
   }
 
   if (gl_version_info_->is_es3 ||
+      gl_version_info_->is_desktop_core_profile ||
       extensions.Contains("GL_OES_vertex_array_object") ||
       extensions.Contains("GL_ARB_vertex_array_object") ||
       extensions.Contains("GL_APPLE_vertex_array_object")) {
@@ -467,7 +521,9 @@ void FeatureInfo::InitializeFeatures() {
     enable_texture_format_bgra8888 = true;
   }
 
-  if (extensions.Contains("GL_EXT_bgra")) {
+  // Only desktop GL extension GL_EXT_bgra or ANGLE guarantee that we can
+  // allocate a renderbuffer with this format.
+  if (extensions.Contains("GL_EXT_bgra") || gl_version_info_->is_angle) {
     enable_render_buffer_bgra = true;
   }
 
@@ -502,6 +558,7 @@ void FeatureInfo::InitializeFeatures() {
 
   // Check if we should allow GL_OES_texture_npot
   if (gl_version_info_->is_es3 ||
+      gl_version_info_->is_desktop_core_profile ||
       extensions.Contains("GL_ARB_texture_non_power_of_two") ||
       extensions.Contains("GL_OES_texture_npot")) {
     AddExtensionString("GL_OES_texture_npot");
@@ -517,7 +574,8 @@ void FeatureInfo::InitializeFeatures() {
 
   bool may_enable_chromium_color_buffer_float = false;
 
-  if (extensions.Contains("GL_ARB_texture_float")) {
+  if (extensions.Contains("GL_ARB_texture_float") ||
+      gl_version_info_->is_desktop_core_profile) {
     enable_texture_float = true;
     enable_texture_float_linear = true;
     enable_texture_half_float = true;
@@ -636,15 +694,17 @@ void FeatureInfo::InitializeFeatures() {
   }
 
   // Check for multisample support
-  if (!workarounds_.disable_multisampling) {
+  if (!workarounds_.disable_chromium_framebuffer_multisample) {
     bool ext_has_multisample =
         extensions.Contains("GL_EXT_framebuffer_multisample") ||
-        gl_version_info_->is_es3;
+        gl_version_info_->is_es3 ||
+        gl_version_info_->is_desktop_core_profile;
     if (gl_version_info_->is_angle) {
       ext_has_multisample |=
           extensions.Contains("GL_ANGLE_framebuffer_multisample");
     }
-    feature_flags_.use_core_framebuffer_multisample = gl_version_info_->is_es3;
+    feature_flags_.use_core_framebuffer_multisample =
+        gl_version_info_->is_es3 || gl_version_info_->is_desktop_core_profile;
     if (ext_has_multisample) {
       feature_flags_.chromium_framebuffer_multisample = true;
       validators_.frame_buffer_target.AddValue(GL_READ_FRAMEBUFFER_EXT);
@@ -654,6 +714,9 @@ void FeatureInfo::InitializeFeatures() {
       validators_.render_buffer_parameter.AddValue(GL_RENDERBUFFER_SAMPLES_EXT);
       AddExtensionString("GL_CHROMIUM_framebuffer_multisample");
     }
+  }
+
+  if (!workarounds_.disable_multisampled_render_to_texture) {
     if (extensions.Contains("GL_EXT_multisampled_render_to_texture")) {
       feature_flags_.multisampled_render_to_texture = true;
     } else if (extensions.Contains("GL_IMG_multisampled_render_to_texture")) {
@@ -729,7 +792,8 @@ void FeatureInfo::InitializeFeatures() {
   // applications to start using it; they should use ordinary non-
   // power-of-two textures. However, for unit testing purposes we
   // expose it on all supported platforms.
-  if (extensions.Contains("GL_ARB_texture_rectangle")) {
+  if (extensions.Contains("GL_ARB_texture_rectangle") ||
+      gl_version_info_->is_desktop_core_profile) {
     AddExtensionString("GL_ARB_texture_rectangle");
     feature_flags_.arb_texture_rectangle = true;
     validators_.texture_bind_target.AddValue(GL_TEXTURE_RECTANGLE_ARB);
@@ -779,7 +843,8 @@ void FeatureInfo::InitializeFeatures() {
        !enable_texture_format_bgra8888);
   if (extensions.Contains("GL_EXT_texture_storage") ||
       extensions.Contains("GL_ARB_texture_storage") ||
-      support_texture_storage_on_es3) {
+      support_texture_storage_on_es3 ||
+      gl_version_info_->is_desktop_core_profile) {
     feature_flags_.ext_texture_storage = true;
     AddExtensionString("GL_EXT_texture_storage");
     validators_.texture_parameter.AddValue(GL_TEXTURE_IMMUTABLE_FORMAT_EXT);
@@ -841,7 +906,8 @@ void FeatureInfo::InitializeFeatures() {
   if (!workarounds_.disable_ext_draw_buffers &&
       (vendor_agnostic_draw_buffers ||
        (extensions.Contains("GL_NV_draw_buffers") &&
-        gl_version_info_->is_es3))) {
+        gl_version_info_->is_es3) ||
+       gl_version_info_->is_desktop_core_profile)) {
     AddExtensionString("GL_EXT_draw_buffers");
     feature_flags_.ext_draw_buffers = true;
 
@@ -913,6 +979,7 @@ void FeatureInfo::InitializeFeatures() {
 
   feature_flags_.map_buffer_range =
       gl_version_info_->is_es3 ||
+      gl_version_info_->is_desktop_core_profile ||
       extensions.Contains("GL_ARB_map_buffer_range") ||
       extensions.Contains("GL_EXT_map_buffer_range");
 
@@ -920,6 +987,7 @@ void FeatureInfo::InitializeFeatures() {
   // extension is still advertised.
   bool has_pixel_buffers =
       gl_version_info_->is_es3 ||
+      gl_version_info_->is_desktop_core_profile ||
       extensions.Contains("GL_ARB_pixel_buffer_object") ||
       extensions.Contains("GL_NV_pixel_buffer_object");
 
@@ -938,7 +1006,7 @@ void FeatureInfo::InitializeFeatures() {
 
   if ((gl_version_info_->is_es3 ||
        extensions.Contains("GL_EXT_discard_framebuffer")) &&
-      !workarounds_.disable_ext_discard_framebuffer) {
+      !workarounds_.disable_discard_framebuffer) {
     // DiscardFramebufferEXT is automatically bound to InvalidateFramebuffer.
     AddExtensionString("GL_EXT_discard_framebuffer");
     feature_flags_.ext_discard_framebuffer = true;
@@ -993,7 +1061,8 @@ void FeatureInfo::InitializeFeatures() {
     }
   }
 
-  if ((gl_version_info_->is_es3 || extensions.Contains("GL_EXT_texture_rg") ||
+  if ((gl_version_info_->is_es3 || gl_version_info_->is_desktop_core_profile ||
+       extensions.Contains("GL_EXT_texture_rg") ||
        extensions.Contains("GL_ARB_texture_rg")) &&
       IsGL_REDSupportedOnFBOs()) {
     feature_flags_.ext_texture_rg = true;
@@ -1020,6 +1089,37 @@ void FeatureInfo::InitializeFeatures() {
       texture_format_validators_[GL_RG_EXT].AddValue(GL_HALF_FLOAT_OES);
     }
   }
+
+#if !defined(OS_MACOSX)
+  if (workarounds_.ignore_egl_sync_failures) {
+    gfx::GLFenceEGL::SetIgnoreFailures();
+  }
+#endif
+
+  if (workarounds_.avoid_egl_image_target_texture_reuse) {
+    TextureDefinition::AvoidEGLTargetTextureReuse();
+  }
+}
+
+bool FeatureInfo::IsES3Capable() const {
+  if (gl_version_info_->IsAtLeastGLES(3, 0))
+    return true;
+  // TODO(zmo): For Desktop GL, with anything lower than 4.2, we need to check
+  // the existence of a few extensions to have full WebGL 2 capabilities.
+  if (gl_version_info_->IsAtLeastGL(4, 2))
+    return true;
+#if defined(OS_MACOSX)
+  // TODO(zmo): For experimentation purpose  on MacOSX with core profile,
+  // allow 3.2 or plus for now.
+  if (gl_version_info_->IsAtLeastGL(3, 2))
+    return true;
+#endif
+  return false;
+}
+
+void FeatureInfo::EnableES3Validators() {
+  DCHECK(IsES3Capable());
+  validators_.UpdateValuesES3();
 }
 
 void FeatureInfo::AddExtensionString(const char* s) {

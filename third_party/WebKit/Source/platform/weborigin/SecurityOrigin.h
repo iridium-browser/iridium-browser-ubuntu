@@ -149,6 +149,7 @@ public:
     bool canAccessCookies() const { return !isUnique(); }
     bool canAccessPasswordManager() const { return !isUnique(); }
     bool canAccessFileSystem() const { return !isUnique(); }
+    bool canAccessCacheStorage() const { return !isUnique(); };
     Policy canShowNotifications() const;
 
     // Technically, we should always allow access to sessionStorage, but we
@@ -201,7 +202,7 @@ public:
 
     bool needsDatabaseIdentifierQuirkForFiles() const { return m_needsDatabaseIdentifierQuirkForFiles; }
 
-    static const String& urlWithUniqueSecurityOrigin();
+    static const KURL& urlWithUniqueSecurityOrigin();
 
     // Transfer origin privileges from another security origin.
     // The following privileges are currently copied over:

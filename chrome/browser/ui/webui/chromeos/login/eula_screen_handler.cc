@@ -19,6 +19,7 @@
 #include "chrome/grit/chromium_strings.h"
 #include "chrome/grit/generated_resources.h"
 #include "chrome/grit/locale_settings.h"
+#include "components/login/localized_values_builder.h"
 #include "content/public/browser/web_contents.h"
 #include "ui/base/l10n/l10n_util.h"
 #include "ui/views/widget/widget.h"
@@ -41,7 +42,7 @@ class CreditsWebDialog : public chromeos::LoginWebDialog {
                                  url) {
   }
 
-  virtual void OnLoadingStateChanged(content::WebContents* source) override {
+  void OnLoadingStateChanged(content::WebContents* source) override {
     chromeos::LoginWebDialog::OnLoadingStateChanged(source);
     // Remove visual elements that we can handle in EULA page.
     bool is_loading = source->IsLoading();
@@ -118,7 +119,7 @@ void EulaScreenHandler::Unbind() {
 }
 
 void EulaScreenHandler::DeclareLocalizedValues(
-    LocalizedValuesBuilder* builder) {
+    ::login::LocalizedValuesBuilder* builder) {
   builder->Add("eulaScreenTitle", IDS_EULA_SCREEN_TITLE);
   builder->Add("eulaScreenAccessibleTitle", IDS_EULA_SCREEN_ACCESSIBLE_TITLE);
   builder->Add("checkboxLogging", IDS_EULA_CHECKBOX_ENABLE_LOGGING);

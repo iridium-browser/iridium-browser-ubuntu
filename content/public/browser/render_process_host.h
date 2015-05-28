@@ -5,6 +5,8 @@
 #ifndef CONTENT_PUBLIC_BROWSER_RENDER_PROCESS_HOST_H_
 #define CONTENT_PUBLIC_BROWSER_RENDER_PROCESS_HOST_H_
 
+#include <list>
+
 #include "base/basictypes.h"
 #include "base/id_map.h"
 #include "base/process/kill.h"
@@ -24,6 +26,11 @@ class TimeDelta;
 
 namespace gpu {
 union ValueState;
+}
+
+namespace media {
+class AudioOutputController;
+class BrowserCdm;
 }
 
 namespace content {
@@ -81,8 +88,11 @@ class CONTENT_EXPORT RenderProcessHost : public IPC::Sender,
   virtual void AddObserver(RenderProcessHostObserver* observer) = 0;
   virtual void RemoveObserver(RenderProcessHostObserver* observer) = 0;
 
-  // Called when a received message cannot be decoded.
-  virtual void ReceivedBadMessage() = 0;
+  // Called when a received message cannot be decoded. Terminates the renderer.
+  // Most callers should not call this directly, but instead should call
+  // bad_message::BadMessageReceived() or an equivalent method outside of the
+  // content module.
+  virtual void ShutdownForBadMessage() = 0;
 
   // Track the count of visible widgets. Called by listeners to register and
   // unregister visibility.
@@ -147,8 +157,8 @@ class CONTENT_EXPORT RenderProcessHost : public IPC::Sender,
   // This will never return ChildProcessHost::kInvalidUniqueID.
   virtual int GetID() const = 0;
 
-  // Returns true iff channel_ has been set to non-NULL. Use this for checking
-  // if there is connection or not. Virtual for mocking out for tests.
+  // Returns true iff channel_ has been set to non-nullptr. Use this for
+  // checking if there is connection or not. Virtual for mocking out for tests.
   virtual bool HasConnection() const = 0;
 
   // Call this to allow queueing of IPC messages that are sent before the
@@ -255,6 +265,27 @@ class CONTENT_EXPORT RenderProcessHost : public IPC::Sender,
   virtual void SendUpdateValueState(
       unsigned int target, const gpu::ValueState& state) = 0;
 
+  // Retrieves the list of AudioOutputController objects associated
+  // with this object and passes it to the callback you specify, on
+  // the same thread on which you called the method.
+  typedef std::list<scoped_refptr<media::AudioOutputController>>
+      AudioOutputControllerList;
+  typedef base::Callback<void(const AudioOutputControllerList&)>
+      GetAudioOutputControllersCallback;
+  virtual void GetAudioOutputControllers(
+      const GetAudioOutputControllersCallback& callback) const = 0;
+
+#if defined(ENABLE_BROWSER_CDMS)
+  // Returns the ::media::BrowserCdm instance associated with |render_frame_id|
+  // and |cdm_id|, or nullptr if not found.
+  virtual media::BrowserCdm* GetBrowserCdm(int render_frame_id,
+                                           int cdm_id) const = 0;
+#endif
+
+  // Returns the current number of active views in this process.  Excludes
+  // any RenderViewHosts that are swapped out.
+  int GetActiveViewCount();
+
   // Static management functions -----------------------------------------------
 
   // Flag to run the renderer in process.  This is primarily
@@ -271,10 +302,10 @@ class CONTENT_EXPORT RenderProcessHost : public IPC::Sender,
   static void SetRunRendererInProcess(bool value);
 
   // Allows iteration over all the RenderProcessHosts in the browser. Note
-  // that each host may not be active, and therefore may have NULL channels.
+  // that each host may not be active, and therefore may have nullptr channels.
   static iterator AllHostsIterator();
 
-  // Returns the RenderProcessHost given its ID.  Returns NULL if the ID does
+  // Returns the RenderProcessHost given its ID.  Returns nullptr if the ID does
   // not correspond to a live RenderProcessHost.
   static RenderProcessHost* FromID(int render_process_id);
 
@@ -293,7 +324,7 @@ class CONTENT_EXPORT RenderProcessHost : public IPC::Sender,
   // context, if possible.  The renderer process is chosen randomly from
   // suitable renderers that share the same context and type (determined by the
   // site url).
-  // Returns NULL if no suitable renderer process is available, in which case
+  // Returns nullptr if no suitable renderer process is available, in which case
   // the caller is free to create a new renderer.
   static RenderProcessHost* GetExistingProcessHost(
       content::BrowserContext* browser_context, const GURL& site_url);

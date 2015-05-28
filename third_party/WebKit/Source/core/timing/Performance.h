@@ -32,6 +32,7 @@
 #ifndef Performance_h
 #define Performance_h
 
+#include "core/CoreExport.h"
 #include "core/events/EventTarget.h"
 #include "core/frame/DOMWindowProperty.h"
 #include "core/timing/MemoryInfo.h"
@@ -53,7 +54,7 @@ class UserTiming;
 
 using PerformanceEntryVector = WillBeHeapVector<RefPtrWillBeMember<PerformanceEntry>>;
 
-class Performance final : public EventTargetWithInlineData, public RefCountedWillBeNoBase<Performance>, public DOMWindowProperty {
+class CORE_EXPORT Performance final : public EventTargetWithInlineData, public RefCountedWillBeNoBase<Performance>, public DOMWindowProperty {
     DEFINE_WRAPPERTYPEINFO();
     REFCOUNTED_EVENT_TARGET(Performance);
     WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(Performance);
@@ -89,7 +90,7 @@ public:
     void measure(const String& measureName, const String& startMark, const String& endMark, ExceptionState&);
     void clearMeasures(const String& measureName);
 
-    virtual void trace(Visitor*) override;
+    DECLARE_VIRTUAL_TRACE();
 
 private:
     explicit Performance(LocalFrame*);

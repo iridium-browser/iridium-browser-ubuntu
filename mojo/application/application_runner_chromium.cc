@@ -37,14 +37,13 @@ void ApplicationRunnerChromium::set_message_loop_type(
   message_loop_type_ = type;
 }
 
-MojoResult ApplicationRunnerChromium::Run(MojoHandle shell_handle) {
+MojoResult ApplicationRunnerChromium::Run(
+    MojoHandle application_request_handle) {
   DCHECK(!has_run_);
   has_run_ = true;
 
   base::CommandLine::Init(0, NULL);
-#if !defined(COMPONENT_BUILD)
   base::AtExitManager at_exit;
-#endif
 
 #ifndef NDEBUG
   base::debug::EnableInProcessStackDumping();
@@ -58,7 +57,8 @@ MojoResult ApplicationRunnerChromium::Run(MojoHandle shell_handle) {
       loop.reset(new base::MessageLoop(message_loop_type_));
 
     ApplicationImpl impl(delegate_.get(),
-                         MakeScopedHandle(MessagePipeHandle(shell_handle)));
+                         MakeRequest<Application>(MakeScopedHandle(
+                             MessagePipeHandle(application_request_handle))));
     loop->Run();
   }
   delegate_.reset();

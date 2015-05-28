@@ -75,6 +75,7 @@
 #include "extensions/common/constants.h"
 #include "extensions/common/error_utils.h"
 #include "extensions/common/extension.h"
+#include "extensions/common/host_id.h"
 #include "extensions/common/manifest_constants.h"
 #include "extensions/common/manifest_handlers/default_locale_handler.h"
 #include "extensions/common/message_bundle.h"
@@ -1241,7 +1242,7 @@ bool TabsUpdateFunction::UpdateURL(const std::string &url_string,
     }
 
     TabHelper::FromWebContents(web_contents_)->script_executor()->ExecuteScript(
-        extension_id(),
+        HostID(HostID::EXTENSIONS, extension_id()),
         ScriptExecutor::JAVASCRIPT,
         url.GetContent(),
         ScriptExecutor::TOP_FRAME,
@@ -1731,6 +1732,7 @@ bool ExecuteCodeInTabFunction::Init() {
 
   execute_tab_id_ = tab_id;
   details_ = details.Pass();
+  set_host_id(HostID(HostID::EXTENSIONS, extension()->id()));
   return true;
 }
 
@@ -1852,7 +1854,9 @@ bool TabsSetZoomFunction::RunAsync() {
 
   ZoomController* zoom_controller =
       ZoomController::FromWebContents(web_contents);
-  double zoom_level = content::ZoomFactorToZoomLevel(params->zoom_factor);
+  double zoom_level = params->zoom_factor > 0
+                          ? content::ZoomFactorToZoomLevel(params->zoom_factor)
+                          : zoom_controller->GetDefaultZoomLevel();
 
   scoped_refptr<ExtensionZoomRequestClient> client(
       new ExtensionZoomRequestClient(extension()));
@@ -1951,6 +1955,8 @@ bool TabsGetZoomSettingsFunction::RunAsync() {
   ZoomController::ZoomMode zoom_mode = zoom_controller->zoom_mode();
   api::tabs::ZoomSettings zoom_settings;
   ZoomModeToZoomSettings(zoom_mode, &zoom_settings);
+  zoom_settings.default_zoom_factor.reset(new double(
+      content::ZoomLevelToZoomFactor(zoom_controller->GetDefaultZoomLevel())));
 
   results_ = api::tabs::GetZoomSettings::Results::Create(zoom_settings);
   SendResponse(true);

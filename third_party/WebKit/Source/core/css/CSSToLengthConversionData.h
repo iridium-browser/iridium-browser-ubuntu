@@ -32,12 +32,14 @@
 #define CSSToLengthConversionData_h
 
 #include "wtf/Assertions.h"
+#include "wtf/MathExtras.h"
 #include "wtf/Noncopyable.h"
+#include <limits>
 
 namespace blink {
 
-class RenderStyle;
-class RenderView;
+class ComputedStyle;
+class LayoutView;
 class Font;
 
 class CSSToLengthConversionData {
@@ -47,7 +49,7 @@ public:
     public:
         FontSizes() : m_em(0), m_rem(0), m_font(nullptr) { }
         FontSizes(float em, float rem, const Font*);
-        FontSizes(const RenderStyle*, const RenderStyle* rootStyle);
+        FontSizes(const ComputedStyle*, const ComputedStyle* rootStyle);
 
         float em() const { return m_em; }
         float rem() const { return m_rem; }
@@ -63,7 +65,7 @@ public:
     public:
         ViewportSize() : m_width(0), m_height(0) { }
         ViewportSize(double width, double height) : m_width(width), m_height(height) { }
-        explicit ViewportSize(const RenderView*);
+        explicit ViewportSize(const LayoutView*);
 
         double width() const { return m_width; }
         double height() const { return m_height; }
@@ -73,8 +75,8 @@ public:
     };
 
     CSSToLengthConversionData() { }
-    CSSToLengthConversionData(const RenderStyle*, const FontSizes&, const ViewportSize&, float zoom);
-    CSSToLengthConversionData(const RenderStyle* currStyle, const RenderStyle* rootStyle, const RenderView*, float zoom);
+    CSSToLengthConversionData(const ComputedStyle*, const FontSizes&, const ViewportSize&, float zoom);
+    CSSToLengthConversionData(const ComputedStyle* currStyle, const ComputedStyle* rootStyle, const LayoutView*, float zoom);
 
     float zoom() const { return m_zoom; }
 
@@ -90,7 +92,7 @@ public:
     double viewportMaxPercent() const;
 
     void setFontSizes(const FontSizes& fontSizes) { m_fontSizes = fontSizes; }
-    void setZoom(float zoom) { m_zoom = zoom; }
+    void setZoom(float zoom) { m_zoom = clampTo<float>(zoom, std::numeric_limits<float>::denorm_min()); }
 
     CSSToLengthConversionData copyWithAdjustedZoom(float newZoom) const
     {
@@ -98,7 +100,7 @@ public:
     }
 
 private:
-    const RenderStyle* m_style;
+    const ComputedStyle* m_style;
     FontSizes m_fontSizes;
     ViewportSize m_viewportSize;
     float m_zoom;

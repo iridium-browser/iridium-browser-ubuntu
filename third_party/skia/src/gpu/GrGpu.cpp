@@ -12,8 +12,10 @@
 #include "GrBufferAllocPool.h"
 #include "GrContext.h"
 #include "GrDrawTargetCaps.h"
+#include "GrGpuResourcePriv.h"
 #include "GrIndexBuffer.h"
-#include "GrResourceCache2.h"
+#include "GrResourceCache.h"
+#include "GrRenderTargetPriv.h"
 #include "GrStencilBuffer.h"
 #include "GrVertexBuffer.h"
 
@@ -23,6 +25,7 @@ GrGpu::GrGpu(GrContext* context)
     : fResetTimestamp(kExpiredTimestamp+1)
     , fResetBits(kAll_GrBackendState)
     , fQuadIndexBuffer(NULL)
+    , fGpuTraceMarkerCount(0)
     , fContext(context) {
 }
 
@@ -40,8 +43,8 @@ GrTexture* GrGpu::createTexture(const GrSurfaceDesc& desc, bool budgeted,
         return NULL;
     }
 
-    if ((desc.fFlags & kRenderTarget_GrSurfaceFlag) &&
-        !this->caps()->isConfigRenderable(desc.fConfig, desc.fSampleCnt > 0)) {
+    bool isRT = SkToBool(desc.fFlags & kRenderTarget_GrSurfaceFlag);
+    if (isRT && !this->caps()->isConfigRenderable(desc.fConfig, desc.fSampleCnt > 0)) {
         return NULL;
     }
 
@@ -60,35 +63,43 @@ GrTexture* GrGpu::createTexture(const GrSurfaceDesc& desc, bool budgeted,
     } else {
         this->handleDirtyContext();
         tex = this->onCreateTexture(desc, budgeted, srcData, rowBytes);
-        if (tex &&
-            (kRenderTarget_GrSurfaceFlag & desc.fFlags) &&
-            !(kNoStencil_GrSurfaceFlag & desc.fFlags)) {
-            SkASSERT(tex->asRenderTarget());
-            // TODO: defer this and attach dynamically
-            if (!this->attachStencilBufferToRenderTarget(tex->asRenderTarget())) {
-                tex->unref();
-                return NULL;
-            }
+    }
+    if (!this->caps()->reuseScratchTextures() && !isRT) {
+        tex->resourcePriv().removeScratchKey();
+    }
+    if (tex) {
+        fStats.incTextureCreates();
+        if (srcData) {
+            fStats.incTextureUploads();
         }
     }
     return tex;
 }
 
 bool GrGpu::attachStencilBufferToRenderTarget(GrRenderTarget* rt) {
-    SkASSERT(NULL == rt->getStencilBuffer());
-    GrScratchKey sbKey;
-    GrStencilBuffer::ComputeKey(rt->width(), rt->height(), rt->numSamples(), &sbKey);
-    SkAutoTUnref<GrStencilBuffer> sb(static_cast<GrStencilBuffer*>(
-        this->getContext()->getResourceCache2()->findAndRefScratchResource(sbKey)));
-    if (sb) {
-        rt->setStencilBuffer(sb);
-        bool attached = this->attachStencilBufferToRenderTarget(sb, rt);
-        if (!attached) {
-            rt->setStencilBuffer(NULL);
-        }
-        return attached;
+    SkASSERT(NULL == rt->renderTargetPriv().getStencilBuffer());
+    GrUniqueKey sbKey;
+
+    int width = rt->width();
+    int height = rt->height();
+#if 0
+    if (this->caps()->oversizedStencilSupport()) {
+        width  = SkNextPow2(width);
+        height = SkNextPow2(height);
     }
-    if (this->createStencilBufferForRenderTarget(rt, rt->width(), rt->height())) {
+#endif
+
+    GrStencilBuffer::ComputeSharedStencilBufferKey(width, height, rt->numSamples(), &sbKey);
+    SkAutoTUnref<GrStencilBuffer> sb(static_cast<GrStencilBuffer*>(
+        this->getContext()->getResourceCache()->findAndRefUniqueResource(sbKey)));
+    if (sb) {
+        if (this->attachStencilBufferToRenderTarget(sb, rt)) {
+            rt->renderTargetPriv().didAttachStencilBuffer(sb);
+            return true;
+        }
+        return false;
+    }
+    if (this->createStencilBufferForRenderTarget(rt, width, height)) {
         // Right now we're clearing the stencil buffer here after it is
         // attached to an RT for the first time. When we start matching
         // stencil buffers with smaller color targets this will no longer
@@ -98,6 +109,8 @@ bool GrGpu::attachStencilBufferToRenderTarget(GrRenderTarget* rt) {
         // FBO. But iOS doesn't allow a stencil-only FBO. It reports unsupported
         // FBO status.
         this->clearStencil(rt);
+        GrStencilBuffer* sb = rt->renderTargetPriv().getStencilBuffer();
+        sb->resourcePriv().setUniqueKey(sbKey);
         return true;
     } else {
         return false;
@@ -112,8 +125,7 @@ GrTexture* GrGpu::wrapBackendTexture(const GrBackendTextureDesc& desc) {
     }
     // TODO: defer this and attach dynamically
     GrRenderTarget* tgt = tex->asRenderTarget();
-    if (tgt &&
-        !this->attachStencilBufferToRenderTarget(tgt)) {
+    if (tgt && !this->attachStencilBufferToRenderTarget(tgt)) {
         tex->unref();
         return NULL;
     } else {
@@ -200,8 +212,12 @@ bool GrGpu::writeTexturePixels(GrTexture* texture,
                                GrPixelConfig config, const void* buffer,
                                size_t rowBytes) {
     this->handleDirtyContext();
-    return this->onWriteTexturePixels(texture, left, top, width, height,
-                                      config, buffer, rowBytes);
+    if (this->onWriteTexturePixels(texture, left, top, width, height,
+                                   config, buffer, rowBytes)) {
+        fStats.incTextureUploads();
+        return true;
+    }
+    return false;
 }
 
 void GrGpu::resolveRenderTarget(GrRenderTarget* target) {
@@ -276,9 +292,9 @@ const GrIndexBuffer* GrGpu::getQuadIndexBuffer() const {
 
 ////////////////////////////////////////////////////////////////////////////////
 
-void GrGpu::draw(const GrOptDrawState& ds, const GrDrawTarget::DrawInfo& info) {
+void GrGpu::draw(const DrawArgs& args, const GrDrawTarget::DrawInfo& info) {
     this->handleDirtyContext();
-    this->onDraw(ds, info);
+    this->onDraw(args, info);
 }
 
 void GrGpu::stencilPath(const GrPath* path, const StencilPathState& state) {
@@ -286,14 +302,14 @@ void GrGpu::stencilPath(const GrPath* path, const StencilPathState& state) {
     this->onStencilPath(path, state);
 }
 
-void GrGpu::drawPath(const GrOptDrawState& ds,
+void GrGpu::drawPath(const DrawArgs& args,
                      const GrPath* path,
                      const GrStencilSettings& stencilSettings) {
     this->handleDirtyContext();
-    this->onDrawPath(ds, path, stencilSettings);
+    this->onDrawPath(args, path, stencilSettings);
 }
 
-void GrGpu::drawPaths(const GrOptDrawState& ds,
+void GrGpu::drawPaths(const DrawArgs& args,
                       const GrPathRange* pathRange,
                       const void* indices,
                       GrDrawTarget::PathIndexType indexType,
@@ -303,6 +319,6 @@ void GrGpu::drawPaths(const GrOptDrawState& ds,
                       const GrStencilSettings& stencilSettings) {
     this->handleDirtyContext();
     pathRange->willDrawPaths(indices, indexType, count);
-    this->onDrawPaths(ds, pathRange, indices, indexType, transformValues,
+    this->onDrawPaths(args, pathRange, indices, indexType, transformValues,
                       transformType, count, stencilSettings);
 }

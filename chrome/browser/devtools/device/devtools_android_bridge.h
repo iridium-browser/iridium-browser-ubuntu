@@ -69,21 +69,17 @@ class DevToolsAndroidBridge : public KeyedService {
     const std::string& serial() { return browser_id_.first; }
     const std::string& socket() { return browser_id_.second; }
     const std::string& frontend_url() { return frontend_url_; }
-    bool is_web_view() { return is_web_view_; }
 
    private:
     friend class base::RefCounted<RemotePage>;
     friend class DevToolsAndroidBridge;
 
-    RemotePage(const BrowserId& browser_id,
-               const base::DictionaryValue& dict,
-               bool is_web_view);
+    RemotePage(const BrowserId& browser_id, const base::DictionaryValue& dict);
 
     virtual ~RemotePage();
 
     BrowserId browser_id_;
     std::string frontend_url_;
-    bool is_web_view_;
     scoped_ptr<base::DictionaryValue> dict_;
 
     DISALLOW_COPY_AND_ASSIGN(RemotePage);
@@ -97,11 +93,12 @@ class DevToolsAndroidBridge : public KeyedService {
     const std::string& serial() { return browser_id_.first; }
     const std::string& socket() { return browser_id_.second; }
     const std::string& display_name() { return display_name_; }
+    const std::string& user() { return user_; }
     const std::string& version() { return version_; }
     const RemotePages& pages() { return pages_; }
 
     bool IsChrome();
-    bool IsWebView();
+    std::string GetId();
 
     typedef std::vector<int> ParsedVersion;
     ParsedVersion GetParsedVersion();
@@ -117,6 +114,7 @@ class DevToolsAndroidBridge : public KeyedService {
 
     BrowserId browser_id_;
     std::string display_name_;
+    std::string user_;
     AndroidDeviceManager::BrowserInfo::Type type_;
     std::string version_;
     RemotePages pages_;
@@ -214,11 +212,14 @@ class DevToolsAndroidBridge : public KeyedService {
 
   typedef base::Callback<void(scoped_refptr<RemotePage>)> RemotePageCallback;
   void OpenRemotePage(scoped_refptr<RemoteBrowser> browser,
-                      const std::string& url,
-                      const RemotePageCallback& callback);
+                      const std::string& url);
 
   scoped_refptr<content::DevToolsAgentHost> GetBrowserAgentHost(
       scoped_refptr<RemoteBrowser> browser);
+
+  void SendJsonRequest(const std::string& browser_id_str,
+                       const std::string& url,
+                       const JsonRequestCallback& callback);
 
  private:
   friend struct content::BrowserThread::DeleteOnThread<
@@ -266,23 +267,6 @@ class DevToolsAndroidBridge : public KeyedService {
 
   scoped_refptr<AndroidDeviceManager::Device> FindDevice(
       const std::string& serial);
-
-  void PageCreatedOnUIThread(scoped_refptr<RemoteBrowser> browser,
-                             const RemotePageCallback& callback,
-                             const std::string& url,
-                             int result,
-                             const std::string& response);
-
-  void NavigatePageOnUIThread(scoped_refptr<RemoteBrowser> browser,
-                              const RemotePageCallback& callback,
-                              int result,
-                              const std::string& response,
-                              const std::string& url);
-
-  void RespondToOpenOnUIThread(scoped_refptr<RemoteBrowser> browser,
-                               const RemotePageCallback& callback,
-                               int result,
-                               const std::string& response);
 
   base::WeakPtr<DevToolsAndroidBridge> AsWeakPtr() {
       return weak_factory_.GetWeakPtr();

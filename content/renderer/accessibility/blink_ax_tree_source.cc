@@ -236,6 +236,15 @@ void BlinkAXTreeSource::SerializeNode(blink::WebAXObject src,
     dst->AddIntAttribute(ui::AX_ATTR_COLOR_VALUE_BLUE, b);
   }
 
+  if (src.invalidState()) {
+    dst->AddIntAttribute(ui::AX_ATTR_INVALID_STATE,
+                         AXInvalidStateFromBlink(src.invalidState()));
+  }
+  if (src.invalidState() == blink::WebAXInvalidStateOther) {
+    dst->AddStringAttribute(ui::AX_ATTR_ARIA_INVALID_VALUE,
+                            UTF16ToUTF8(src.ariaInvalidValue()));
+  }
+
   if (dst->role == ui::AX_ROLE_INLINE_TEXT_BOX) {
     dst->AddIntAttribute(ui::AX_ATTR_TEXT_DIRECTION,
                          AXTextDirectionFromBlink(src.textDirection()));
@@ -267,6 +276,7 @@ void BlinkAXTreeSource::SerializeNode(blink::WebAXObject src,
     dst->AddStringAttribute(ui::AX_ATTR_ACCESS_KEY,
     UTF16ToUTF8(src.accessKey()));
   }
+
   if (src.actionVerb().length())
     dst->AddStringAttribute(ui::AX_ATTR_ACTION, UTF16ToUTF8(src.actionVerb()));
   if (src.ariaAutoComplete().length())
@@ -346,7 +356,8 @@ void BlinkAXTreeSource::SerializeNode(blink::WebAXObject src,
       dst->html_attributes.push_back(std::make_pair(name, value));
     }
 
-    if (dst->role == ui::AX_ROLE_TEXT_AREA ||
+    if (!src.isReadOnly() ||
+        dst->role == ui::AX_ROLE_TEXT_AREA ||
         dst->role == ui::AX_ROLE_TEXT_FIELD) {
       dst->AddIntAttribute(ui::AX_ATTR_TEXT_SEL_START, src.selectionStart());
       dst->AddIntAttribute(ui::AX_ATTR_TEXT_SEL_END, src.selectionEnd());
@@ -367,6 +378,12 @@ void BlinkAXTreeSource::SerializeNode(blink::WebAXObject src,
                                 UTF16ToUTF8(src.textInputType()));
       }
     }
+
+    blink::WebAXOptionalBool optionalBool = src.isAriaGrabbed();
+    if (optionalBool == blink::WebAXOptionalBoolFalse)
+      dst->AddBoolAttribute(ui::AX_ATTR_GRABBED, false);
+    else if (optionalBool == blink::WebAXOptionalBoolTrue)
+      dst->AddBoolAttribute(ui::AX_ATTR_GRABBED, true);
 
     // ARIA role.
     if (element.hasAttribute("role")) {
@@ -411,6 +428,7 @@ void BlinkAXTreeSource::SerializeNode(blink::WebAXObject src,
   }
 
   if (dst->role == ui::AX_ROLE_PROGRESS_INDICATOR ||
+      dst->role == ui::AX_ROLE_METER ||
       dst->role == ui::AX_ROLE_SCROLL_BAR ||
       dst->role == ui::AX_ROLE_SLIDER ||
       dst->role == ui::AX_ROLE_SPIN_BUTTON) {
@@ -421,8 +439,7 @@ void BlinkAXTreeSource::SerializeNode(blink::WebAXObject src,
                            src.minValueForRange());
   }
 
-  if (dst->role == ui::AX_ROLE_DOCUMENT ||
-      dst->role == ui::AX_ROLE_WEB_AREA) {
+  if (dst->role == ui::AX_ROLE_WEB_AREA) {
     dst->AddStringAttribute(ui::AX_ATTR_HTML_TAG, "#document");
     const WebDocument& document = src.document();
     if (name.empty())
@@ -529,6 +546,12 @@ void BlinkAXTreeSource::SerializeNode(blink::WebAXObject src,
     dst->AddIntAttribute(ui::AX_ATTR_TABLE_CELL_ROW_SPAN, src.cellRowSpan());
   }
 
+  if ((dst->role == ui::AX_ROLE_ROW_HEADER ||
+      dst->role == ui::AX_ROLE_COLUMN_HEADER) && src.sortDirection()) {
+    dst->AddIntAttribute(ui::AX_ATTR_SORT_DIRECTION,
+                         AXSortDirectionFromBlink(src.sortDirection()));
+  }
+
   dst->AddStringAttribute(ui::AX_ATTR_NAME, name);
 
   // Add the ids of *indirect* children - those who are children of this node,
@@ -556,6 +579,11 @@ void BlinkAXTreeSource::SerializeNode(blink::WebAXObject src,
   if (src.ariaDescribedby(describedby)) {
     AddIntListAttributeFromWebObjects(
         ui::AX_ATTR_DESCRIBEDBY_IDS, describedby, dst);
+  }
+
+  if (src.ariaDropEffect().length()) {
+    dst->AddStringAttribute(ui::AX_ATTR_DROPEFFECT,
+        UTF16ToUTF8(src.ariaDropEffect()));
   }
 
   WebVector<WebAXObject> flowTo;

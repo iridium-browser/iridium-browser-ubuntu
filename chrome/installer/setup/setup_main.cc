@@ -47,7 +47,6 @@
 #include "chrome/installer/util/channel_info.h"
 #include "chrome/installer/util/delete_after_reboot_helper.h"
 #include "chrome/installer/util/delete_tree_work_item.h"
-#include "chrome/installer/util/eula_util.h"
 #include "chrome/installer/util/google_update_constants.h"
 #include "chrome/installer/util/google_update_settings.h"
 #include "chrome/installer/util/google_update_util.h"
@@ -67,6 +66,10 @@
 #include "chrome/installer/util/user_experiment.h"
 
 #include "installer_util_strings.h"  // NOLINT
+
+#if defined(GOOGLE_CHROME_BUILD)
+#include "chrome/installer/util/updating_app_registration_data.h"
+#endif
 
 using installer::InstallerState;
 using installer::InstallationState;
@@ -171,15 +174,15 @@ bool UncompressAndPatchChromeArchive(
   archive_helper->set_patch_source(patch_source);
 
   // Try courgette first. Failing that, try bspatch.
-  if ((installer_state.UpdateStage(installer::ENSEMBLE_PATCHING),
-       !archive_helper->EnsemblePatch()) &&
-      (installer_state.UpdateStage(installer::BINARY_PATCHING),
-       !archive_helper->BinaryPatch())) {
-    *install_status = installer::APPLY_DIFF_PATCH_FAILED;
-    installer_state.WriteInstallerResult(*install_status,
-                                         IDS_INSTALL_UNCOMPRESSION_FAILED_BASE,
-                                         NULL);
-    return false;
+  installer_state.UpdateStage(installer::ENSEMBLE_PATCHING);
+  if (!archive_helper->EnsemblePatch()) {
+    installer_state.UpdateStage(installer::BINARY_PATCHING);
+    if (!archive_helper->BinaryPatch()) {
+      *install_status = installer::APPLY_DIFF_PATCH_FAILED;
+      installer_state.WriteInstallerResult(
+          *install_status, IDS_INSTALL_UNCOMPRESSION_FAILED_BASE, NULL);
+      return false;
+    }
   }
 
   *archive_type = installer::INCREMENTAL_ARCHIVE_TYPE;
@@ -304,8 +307,6 @@ bool CheckMultiInstallConditions(const InstallationState& original_state,
   if (installer_state->is_multi_install()) {
     const Product* chrome =
         installer_state->FindProduct(BrowserDistribution::CHROME_BROWSER);
-    const Product* app_host =
-        installer_state->FindProduct(BrowserDistribution::CHROME_APP_HOST);
     const Product* binaries =
         installer_state->FindProduct(BrowserDistribution::CHROME_BINARIES);
     const ProductState* chrome_state =
@@ -325,39 +326,7 @@ bool CheckMultiInstallConditions(const InstallationState& original_state,
         return false;
       }
     } else {
-      // This will only be hit if --multi-install is given with no products, or
-      // if the app host is being installed and doesn't need the binaries at
-      // user-level.
-      // The former case might be due to a request by an orphaned Application
-      // Host to re-install the binaries. Thus we add them to the installation.
-      // The latter case is fine and we let it be.
-      // If this is not an app host install and the binaries are not already
-      // present, the installation will fail later due to a lack of products to
-      // install.
-      if (app_host && !chrome && !chrome_state) {
-        DCHECK(!system_level);
-        // App Host may use Chrome/Chrome binaries at system-level.
-        if (original_state.GetProductState(
-                true,  // system
-                BrowserDistribution::CHROME_BROWSER) ||
-            original_state.GetProductState(
-                true,  // system
-                BrowserDistribution::CHROME_BINARIES)) {
-          VLOG(1) << "Installing/updating App Launcher without binaries.";
-        } else {
-          // Somehow the binaries were present when the quick-enable app host
-          // command was run, but now they appear to be missing.
-          // Force binaries to be installed/updated.
-          scoped_ptr<Product> binaries_to_add(new Product(
-              BrowserDistribution::GetSpecificDistribution(
-                  BrowserDistribution::CHROME_BINARIES)));
-          binaries_to_add->SetOption(installer::kOptionMultiInstall, true);
-          binaries = installer_state->AddProduct(&binaries_to_add);
-          VLOG(1) <<
-              "Adding binaries for pre-existing App Launcher installation.";
-        }
-      }
-
+      // This will only be hit if --multi-install is given with no products.
       return true;
     }
 
@@ -372,53 +341,7 @@ bool CheckMultiInstallConditions(const InstallationState& original_state,
       chrome = installer_state->AddProduct(&multi_chrome);
       VLOG(1) << "Upgrading existing Chrome browser in multi-install mode.";
     }
-  } else {
-    // This is a non-multi installation.
-
-    // Check for an existing installation of the product.
-    const ProductState* product_state = original_state.GetProductState(
-        system_level, products[0]->distribution()->GetType());
-    if (product_state != NULL) {
-      // Block downgrades from multi-install to single-install.
-      if (product_state->is_multi_install()) {
-        LOG(ERROR) << "Multi-install "
-                   << products[0]->distribution()->GetDisplayName()
-                   << " exists; aborting single install.";
-        *status = installer::MULTI_INSTALLATION_EXISTS;
-        installer_state->WriteInstallerResult(*status,
-            IDS_INSTALL_MULTI_INSTALLATION_EXISTS_BASE, NULL);
-        return false;
-      }
-    }
-  }
-
-  return true;
-}
-
-// Checks app host pre-install conditions, specifically that this is a
-// user-level multi-install.  When the pre-install conditions are not
-// satisfied, the result is written to the registry (via WriteInstallerResult),
-// |status| is set appropriately, and false is returned.
-bool CheckAppHostPreconditions(const InstallationState& original_state,
-                               InstallerState* installer_state,
-                               installer::InstallStatus* status) {
-  if (installer_state->FindProduct(BrowserDistribution::CHROME_APP_HOST)) {
-    if (!installer_state->is_multi_install()) {
-      LOG(DFATAL) << "App Launcher requires multi install";
-      *status = installer::APP_HOST_REQUIRES_MULTI_INSTALL;
-      // No message string since there is nothing a user can do.
-      installer_state->WriteInstallerResult(*status, 0, NULL);
-      return false;
-    }
-
-    if (installer_state->system_install()) {
-      LOG(DFATAL) << "App Launcher may only be installed at user-level.";
-      *status = installer::APP_HOST_REQUIRES_USER_LEVEL;
-      // No message string since there is nothing a user can do.
-      installer_state->WriteInstallerResult(*status, 0, NULL);
-      return false;
-    }
-  }
+  }  // else migrate multi-install Chrome to single-install.
 
   return true;
 }
@@ -435,11 +358,6 @@ bool CheckAppHostPreconditions(const InstallationState& original_state,
 bool CheckPreInstallConditions(const InstallationState& original_state,
                                InstallerState* installer_state,
                                installer::InstallStatus* status) {
-  if (!CheckAppHostPreconditions(original_state, installer_state, status)) {
-    DCHECK_NE(*status, installer::UNKNOWN_STATUS);
-    return false;
-  }
-
   // See what products are already installed in multi mode.  When we do multi
   // installs, we must upgrade all installations since they share the binaries.
   AddExistingMultiInstalls(original_state, installer_state);
@@ -519,18 +437,6 @@ bool CheckPreInstallConditions(const InstallationState& original_state,
         }
         return false;
       }
-    }
-
-  } else {  // System-level install.
-    // --ensure-google-update-present is supported for user-level only.
-    // The flag is generic, but its primary use case involves App Host.
-    if (installer_state->ensure_google_update_present()) {
-      LOG(DFATAL) << "--" << installer::switches::kEnsureGoogleUpdatePresent
-                  << " is supported for user-level only.";
-      *status = installer::APP_HOST_REQUIRES_USER_LEVEL;
-      // No message string since there is nothing a user can do.
-      installer_state->WriteInstallerResult(*status, 0, NULL);
-      return false;
     }
   }
 
@@ -698,6 +604,116 @@ void UninstallBinariesIfUnused(
   }
 }
 
+// This function is a short-term repair for the damage documented in
+// http://crbug.com/456602. Briefly: canaries from 42.0.2293.0 through
+// 42.0.2302.0 (inclusive) contained a bug that broke normal Chrome installed at
+// user-level. This function detects the broken state during a canary update and
+// repairs it by calling on the existing Chrome's installer to fix itself.
+// TODO(grt): Remove this once the majority of impacted canary clients have
+// picked it up.
+void RepairChromeIfBroken(const InstallationState& original_state,
+                          const InstallerState& installer_state) {
+#if !defined(GOOGLE_CHROME_BUILD)
+  // Chromium does not support SxS installation, so there is no work to be done.
+  return;
+#else  // GOOGLE_CHROME_BUILD
+  // Nothing to do if not a per-user SxS install/update.
+  if (!InstallUtil::IsChromeSxSProcess() ||
+      installer_state.system_install() ||
+      installer_state.is_multi_install()) {
+    return;
+  }
+
+  // When running a side-by-side install, BrowserDistribution provides no way
+  // to create or access a GoogleChromeDistribution (by design).
+  static const base::char16 kChromeGuid[] =
+      L"{8A69D345-D564-463c-AFF1-A69D9E530F96}";
+  static const base::char16 kChromeBinariesGuid[] =
+      L"{4DC8B4CA-1BDA-483e-B5FA-D3C12E15B62D}";
+
+  UpdatingAppRegistrationData chrome_reg_data(kChromeGuid);
+  UpdatingAppRegistrationData binaries_reg_data(kChromeBinariesGuid);
+
+  // Nothing to do if the binaries are installed.
+  base::win::RegKey key;
+  base::string16 version_str;
+  if (key.Open(HKEY_CURRENT_USER,
+               binaries_reg_data.GetVersionKey().c_str(),
+               KEY_QUERY_VALUE | KEY_WOW64_32KEY) == ERROR_SUCCESS &&
+      key.ReadValue(google_update::kRegVersionField,
+                    &version_str) == ERROR_SUCCESS) {
+    return;
+  }
+
+  // Nothing to do if Chrome is not installed.
+  if (key.Open(HKEY_CURRENT_USER,
+               chrome_reg_data.GetVersionKey().c_str(),
+               KEY_QUERY_VALUE | KEY_WOW64_32KEY) != ERROR_SUCCESS ||
+      key.ReadValue(google_update::kRegVersionField,
+                    &version_str) != ERROR_SUCCESS) {
+    return;
+  }
+
+  // Nothing to do if Chrome is not multi-install.
+  base::string16 setup_args;
+  if (key.Open(HKEY_CURRENT_USER,
+               chrome_reg_data.GetStateKey().c_str(),
+               KEY_QUERY_VALUE | KEY_WOW64_32KEY) != ERROR_SUCCESS) {
+    LOG(ERROR) << "RepairChrome: Failed to open Chrome's ClientState key.";
+    return;
+  }
+  if (key.ReadValue(installer::kUninstallArgumentsField,
+                    &setup_args) != ERROR_SUCCESS) {
+    LOG(ERROR) << "RepairChrome: Failed to read Chrome's UninstallArguments.";
+    return;
+  }
+  if (setup_args.find(base::UTF8ToUTF16(installer::switches::kMultiInstall)) ==
+      base::string16::npos) {
+    LOG(INFO) << "RepairChrome: Not repairing single-install Chrome.";
+    return;
+  }
+
+  // Generate a command line to run Chrome's installer.
+  base::string16 setup_path;
+  if (key.ReadValue(installer::kUninstallStringField,
+                    &setup_path) != ERROR_SUCCESS) {
+    LOG(ERROR) << "RepairChrome: Failed to read Chrome's UninstallString.";
+    return;
+  }
+
+  // Replace --uninstall with --do-not-launch-chrome to cause chrome to
+  // self-repair.
+  ReplaceFirstSubstringAfterOffset(
+      &setup_args, 0, base::UTF8ToUTF16(installer::switches::kUninstall),
+      base::UTF8ToUTF16(installer::switches::kDoNotLaunchChrome));
+  base::CommandLine setup_command(base::CommandLine::NO_PROGRAM);
+  InstallUtil::ComposeCommandLine(setup_path, setup_args, &setup_command);
+
+  // Run Chrome's installer so that it repairs itself. Break away from any job
+  // in which this operation is running so that Google Update doesn't wait
+  // around for the repair. Retry once without the attempt to break away in case
+  // this process doesn't have JOB_OBJECT_LIMIT_BREAKAWAY_OK.
+  base::LaunchOptions launch_options;
+  launch_options.force_breakaway_from_job_ = true;
+  while (true) {
+    if (base::LaunchProcess(setup_command, launch_options).IsValid()) {
+      LOG(INFO) << "RepairChrome: Launched repair command \""
+                << setup_command.GetCommandLineString() << "\"";
+      break;
+    } else {
+      PLOG(ERROR) << "RepairChrome: Failed launching repair command \""
+                  << setup_command.GetCommandLineString() << "\"";
+      if (launch_options.force_breakaway_from_job_) {
+        LOG(ERROR) << "RepairChrome: Will retry without breakaway.";
+        launch_options.force_breakaway_from_job_ = false;
+      } else {
+        break;
+      }
+    }
+  }
+#endif  // GOOGLE_CHROME_BUILD
+}
+
 installer::InstallStatus InstallProducts(
     const InstallationState& original_state,
     const base::FilePath& setup_exe,
@@ -753,6 +769,8 @@ installer::InstallStatus InstallProducts(
   }
 
   UninstallBinariesIfUnused(original_state, *installer_state, &install_status);
+
+  RepairChromeIfBroken(original_state, *installer_state);
 
   installer_state->UpdateStage(installer::NO_STAGE);
   return install_status;
@@ -1064,8 +1082,6 @@ bool HandleNonInstallCmdLineOptions(const InstallationState& original_state,
       LOG(DFATAL) << "Chrome product not found.";
     }
     *exit_code = InstallUtil::GetInstallReturnCode(status);
-  } else if (cmd_line.HasSwitch(installer::switches::kQueryEULAAcceptance)) {
-    *exit_code = installer::IsEULAAccepted(installer_state->system_install());
   } else if (cmd_line.HasSwitch(installer::switches::kInactiveUserToast)) {
     // Launch the inactive user toast experiment.
     int flavor = -1;
@@ -1252,11 +1268,9 @@ void UninstallMultiChromeFrameIfPresent(const base::CommandLine& cmd_line,
                                         const MasterPreferences& prefs,
                                         InstallationState* original_state,
                                         InstallerState* installer_state) {
-  // Early exit if not installing or updating multi-install product(s).
-  if (installer_state->operation() != InstallerState::MULTI_INSTALL &&
-      installer_state->operation() != InstallerState::MULTI_UPDATE) {
+  // Early exit if not installing or updating.
+  if (installer_state->operation() == InstallerState::UNINSTALL)
     return;
-  }
 
   // Early exit if Chrome Frame is not present as multi-install.
   const ProductState* chrome_frame_state =
@@ -1443,39 +1457,12 @@ InstallStatus InstallProductsHelper(const InstallationState& original_state,
     }
 
     if (higher_products != 0) {
-      COMPILE_ASSERT(BrowserDistribution::NUM_TYPES == 4,
+      COMPILE_ASSERT(BrowserDistribution::NUM_TYPES == 3,
                      add_support_for_new_products_here_);
-      const uint32 kBrowserBit = 1 << BrowserDistribution::CHROME_BROWSER;
-      int message_id = 0;
-
+      int message_id = IDS_INSTALL_HIGHER_VERSION_BASE;
       proceed_with_installation = false;
       install_status = HIGHER_VERSION_EXISTS;
-      switch (higher_products) {
-        case kBrowserBit:
-          message_id = IDS_INSTALL_HIGHER_VERSION_BASE;
-          break;
-        default:
-          message_id = IDS_INSTALL_HIGHER_VERSION_APP_LAUNCHER_BASE;
-          break;
-      }
-
       installer_state.WriteInstallerResult(install_status, message_id, NULL);
-    }
-
-    if (proceed_with_installation) {
-      // If Google Update is absent at user-level, install it using the
-      // Google Update installer from an existing system-level installation.
-      // This is for quick-enable App Host install from a system-level
-      // Chrome Binaries installation.
-      if (!system_install && installer_state.ensure_google_update_present()) {
-        if (!google_update::EnsureUserLevelGoogleUpdatePresent()) {
-          LOG(ERROR) << "Failed to install Google Update";
-          proceed_with_installation = false;
-          install_status = INSTALL_OF_GOOGLE_UPDATE_FAILED;
-          installer_state.WriteInstallerResult(install_status, 0, NULL);
-        }
-      }
-
     }
 
     if (proceed_with_installation) {
@@ -1648,7 +1635,7 @@ int WINAPI wWinMain(HINSTANCE instance, HINSTANCE prev_instance,
   if (InstallUtil::IsChromeSxSProcess()) {
     if (system_install ||
         prefs.is_multi_install() ||
-        cmd_line.HasSwitch(installer::switches::kForceUninstall) ||
+        cmd_line.HasSwitch(installer::switches::kSelfDestruct) ||
         cmd_line.HasSwitch(installer::switches::kMakeChromeDefault) ||
         cmd_line.HasSwitch(installer::switches::kRegisterChromeBrowser) ||
         cmd_line.HasSwitch(installer::switches::kRemoveChromeRegistration) ||

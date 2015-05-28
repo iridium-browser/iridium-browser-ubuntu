@@ -5,37 +5,19 @@
 #ifndef COMPONENTS_PASSWORD_MANAGER_CORE_BROWSER_PASSWORD_STORE_H_
 #define COMPONENTS_PASSWORD_MANAGER_CORE_BROWSER_PASSWORD_STORE_H_
 
-#include <vector>
-
 #include "base/callback.h"
-#include "base/gtest_prod_util.h"
 #include "base/memory/ref_counted.h"
 #include "base/memory/scoped_ptr.h"
+#include "base/memory/scoped_vector.h"
 #include "base/observer_list_threadsafe.h"
-#include "base/threading/thread.h"
-#include "base/threading/thread_checker.h"
+#include "base/single_thread_task_runner.h"
 #include "base/time/time.h"
 #include "components/password_manager/core/browser/password_store_change.h"
 #include "components/password_manager/core/browser/password_store_sync.h"
 #include "sync/api/syncable_service.h"
 
-class Task;
-
 namespace autofill {
 struct PasswordForm;
-}
-
-namespace password_manager {
-class PasswordStore;
-}  // namespace password_manager
-
-namespace passwords_helper {
-void AddLogin(password_manager::PasswordStore* store,
-              const autofill::PasswordForm& form);
-void RemoveLogin(password_manager::PasswordStore* store,
-                 const autofill::PasswordForm& form);
-void UpdateLogin(password_manager::PasswordStore* store,
-                 const autofill::PasswordForm& form);
 }
 
 namespace syncer {
@@ -44,13 +26,18 @@ class SyncableService;
 
 namespace password_manager {
 
-class PasswordManagerClient;
+class AffiliatedMatchHelper;
 class PasswordStoreConsumer;
 class PasswordSyncableService;
 
 // Interface for storing form passwords in a platform-specific secure way.
 // The login request/manipulation API is not threadsafe and must be used
 // from the UI thread.
+// Implementations, however, should carry out most tasks asynchronously on a
+// background thread: the base class provides functionality to facilitate this.
+// I/O heavy initialization should also be performed asynchronously in this
+// manner. If this deferred initialization fails, all subsequent method calls
+// should fail without side effects, return no data, and send no notifications.
 // PasswordStoreSync is a hidden base class because only PasswordSyncableService
 // needs to access these methods.
 class PasswordStore : protected PasswordStoreSync,
@@ -58,50 +45,7 @@ class PasswordStore : protected PasswordStoreSync,
  public:
   // Whether or not it's acceptable for Chrome to request access to locked
   // passwords, which requires prompting the user for permission.
-  enum AuthorizationPromptPolicy {
-    ALLOW_PROMPT,
-    DISALLOW_PROMPT
-  };
-
-  // PasswordForm vector elements are meant to be owned by the
-  // PasswordStoreConsumer. However, if the request is canceled after the
-  // allocation, then the request must take care of the deletion.
-  class GetLoginsRequest {
-   public:
-    explicit GetLoginsRequest(PasswordStoreConsumer* consumer);
-    virtual ~GetLoginsRequest();
-
-    void set_ignore_logins_cutoff(base::Time cutoff) {
-      ignore_logins_cutoff_ = cutoff;
-    }
-
-    // Removes any logins in the result list that were saved before the cutoff.
-    void ApplyIgnoreLoginsCutoff();
-
-    // Forward the result to the consumer on the original message loop.
-    void ForwardResult();
-
-    std::vector<autofill::PasswordForm*>* result() const {
-      return result_.get();
-    }
-
-   private:
-    // See GetLogins(). Logins older than this will be removed from the reply.
-    base::Time ignore_logins_cutoff_;
-
-    base::WeakPtr<PasswordStoreConsumer> consumer_weak_;
-
-    // The result of the request. It is filled in on the PasswordStore's task
-    // thread and consumed on the UI thread.
-    // TODO(dubroy): Remove this, and instead pass the vector directly to the
-    // backend methods.
-    scoped_ptr< std::vector<autofill::PasswordForm*> > result_;
-
-    base::ThreadChecker thread_checker_;
-    scoped_refptr<base::MessageLoopProxy> origin_loop_;
-
-    DISALLOW_COPY_AND_ASSIGN(GetLoginsRequest);
-  };
+  enum AuthorizationPromptPolicy { ALLOW_PROMPT, DISALLOW_PROMPT };
 
   // An interface used to notify clients (observers) of this object that data in
   // the password store has changed. Register the observer via
@@ -116,12 +60,22 @@ class PasswordStore : protected PasswordStoreSync,
     virtual ~Observer() {}
   };
 
-  PasswordStore(
-      scoped_refptr<base::SingleThreadTaskRunner> main_thread_runner,
-      scoped_refptr<base::SingleThreadTaskRunner> db_thread_runner);
+  PasswordStore(scoped_refptr<base::SingleThreadTaskRunner> main_thread_runner,
+                scoped_refptr<base::SingleThreadTaskRunner> db_thread_runner);
 
   // Reimplement this to add custom initialization. Always call this too.
   virtual bool Init(const syncer::SyncableService::StartSyncFlare& flare);
+
+  // Sets the affiliation-based match |helper| that will be used by subsequent
+  // GetLogins() calls to return credentials stored not only for the requested
+  // sign-on realm, but also for affiliated Android applications. If |helper| is
+  // null, clears the the currently set helper if any. Unless a helper is set,
+  // affiliation-based matching is disabled. The passed |helper| must already be
+  // initialized if it is non-null.
+  void SetAffiliatedMatchHelper(scoped_ptr<AffiliatedMatchHelper> helper);
+
+  // Returns whether or not an affiliation-based match helper is set.
+  bool HasAffiliatedMatchHelper() const;
 
   // Adds the given PasswordForm to the secure password store asynchronously.
   virtual void AddLogin(const autofill::PasswordForm& form);
@@ -147,10 +101,9 @@ class PasswordStore : protected PasswordStoreSync,
   // platforms that support prompting the user for access (such as Mac OS).
   // NOTE: This means that this method can return different results depending
   // on the value of |prompt_policy|.
-  virtual void GetLogins(
-      const autofill::PasswordForm& form,
-      AuthorizationPromptPolicy prompt_policy,
-      PasswordStoreConsumer* consumer);
+  virtual void GetLogins(const autofill::PasswordForm& form,
+                         AuthorizationPromptPolicy prompt_policy,
+                         PasswordStoreConsumer* consumer);
 
   // Gets the complete list of PasswordForms that are not blacklist entries--and
   // are thus auto-fillable. |consumer| will be notified on completion.
@@ -181,15 +134,40 @@ class PasswordStore : protected PasswordStoreSync,
   // needs to shut itself down.
   virtual void Shutdown();
 
-#if defined(PASSWORD_MANAGER_ENABLE_SYNC)
   base::WeakPtr<syncer::SyncableService> GetPasswordSyncableService();
-#endif
 
  protected:
   friend class base::RefCountedThreadSafe<PasswordStore>;
-  FRIEND_TEST_ALL_PREFIXES(PasswordStoreTest, IgnoreOldWwwGoogleLogins);
 
   typedef base::Callback<PasswordStoreChangeList(void)> ModificationTask;
+
+  // Represents a single GetLogins() request. Implements functionality to filter
+  // results and send them to the consumer on the consumer's message loop.
+  class GetLoginsRequest {
+   public:
+    explicit GetLoginsRequest(PasswordStoreConsumer* consumer);
+    ~GetLoginsRequest();
+
+    // Removes any credentials in |results| that were saved before the cutoff,
+    // then notifies the consumer with the remaining results.
+    // Note that if this method is not called before destruction, the consumer
+    // will not be notified.
+    void NotifyConsumerWithResults(
+        ScopedVector<autofill::PasswordForm> results);
+
+    void set_ignore_logins_cutoff(base::Time cutoff) {
+      ignore_logins_cutoff_ = cutoff;
+    }
+
+   private:
+    // See GetLogins(). Logins older than this will be removed from the reply.
+    base::Time ignore_logins_cutoff_;
+
+    scoped_refptr<base::MessageLoopProxy> origin_loop_;
+    base::WeakPtr<PasswordStoreConsumer> consumer_weak_;
+
+    DISALLOW_COPY_AND_ASSIGN(GetLoginsRequest);
+  };
 
   ~PasswordStore() override;
 
@@ -223,26 +201,28 @@ class PasswordStore : protected PasswordStoreSync,
       base::Time delete_begin,
       base::Time delete_end) = 0;
 
-  typedef base::Callback<void(const std::vector<autofill::PasswordForm*>&)>
-      ConsumerCallbackRunner;  // Owns all PasswordForms in the vector.
+  // Finds all PasswordForms with a signon_realm that is equal to, or is a
+  // PSL-match to that of |form|, and takes care of notifying the consumer with
+  // the results when done.
+  // Note: subclasses should implement FillMatchingLogins() instead. This needs
+  // to be virtual only because asynchronous behavior in PasswordStoreWin.
+  // TODO(engedy): Make this non-virtual once https://crbug.com/78830 is fixed.
+  virtual void GetLoginsImpl(const autofill::PasswordForm& form,
+                             AuthorizationPromptPolicy prompt_policy,
+                             scoped_ptr<GetLoginsRequest> request);
 
-  // Should find all PasswordForms with the same signon_realm. The results
-  // will then be scored by the PasswordFormManager. Once they are found
-  // (or not), the consumer should be notified.
-  virtual void GetLoginsImpl(
+  // Finds and returns all PasswordForms with the same signon_realm as |form|,
+  // or with a signon_realm that is a PSL-match to that of |form|.
+  virtual ScopedVector<autofill::PasswordForm> FillMatchingLogins(
       const autofill::PasswordForm& form,
-      AuthorizationPromptPolicy prompt_policy,
-      const ConsumerCallbackRunner& callback_runner) = 0;
+      AuthorizationPromptPolicy prompt_policy) = 0;
 
   // Finds all non-blacklist PasswordForms, and notifies the consumer.
-  virtual void GetAutofillableLoginsImpl(GetLoginsRequest* request) = 0;
+  virtual void GetAutofillableLoginsImpl(
+      scoped_ptr<GetLoginsRequest> request) = 0;
 
   // Finds all blacklist PasswordForms, and notifies the consumer.
-  virtual void GetBlacklistLoginsImpl(GetLoginsRequest* request) = 0;
-
-  // Dispatches the result to the PasswordStoreConsumer on the original caller's
-  // thread so the callback can be executed there. This should be the UI thread.
-  virtual void ForwardLoginsResult(GetLoginsRequest* request);
+  virtual void GetBlacklistLoginsImpl(scoped_ptr<GetLoginsRequest> request) = 0;
 
   // Log UMA stats for number of bulk deletions.
   void LogStatsForBulkDeletion(int num_deletions);
@@ -267,37 +247,57 @@ class PasswordStore : protected PasswordStoreSync,
  private:
   // Schedule the given |func| to be run in the PasswordStore's own thread with
   // responses delivered to |consumer| on the current thread.
-  template<typename BackendFunc>
-  void Schedule(BackendFunc func, PasswordStoreConsumer* consumer);
+  void Schedule(void (PasswordStore::*func)(scoped_ptr<GetLoginsRequest>),
+                PasswordStoreConsumer* consumer);
 
   // Wrapper method called on the destination thread (DB for non-mac) that
   // invokes |task| and then calls back into the source thread to notify
   // observers that the password store may have been modified via
   // NotifyLoginsChanged(). Note that there is no guarantee that the called
   // method will actually modify the password store data.
-  virtual void WrapModificationTask(ModificationTask task);
+  void WrapModificationTask(ModificationTask task);
 
-  // Copies |matched_forms| into the request's result vector, then calls
-  // |ForwardLoginsResult|. Temporarily used as an adapter between the API of
-  // |GetLoginsImpl| and |PasswordStoreConsumer|.
-  // TODO(dubroy): Get rid of this.
-  void CopyAndForwardLoginsResult(
-      PasswordStore::GetLoginsRequest* request,
-      const std::vector<autofill::PasswordForm*>& matched_forms);
+  // Temporary specializations of WrapModificationTask for a better stack trace.
+  void AddLoginInternal(const autofill::PasswordForm& form);
+  void UpdateLoginInternal(const autofill::PasswordForm& form);
+  void RemoveLoginInternal(const autofill::PasswordForm& form);
+  void RemoveLoginsCreatedBetweenInternal(base::Time delete_begin,
+                                          base::Time delete_end);
+  void RemoveLoginsSyncedBetweenInternal(base::Time delete_begin,
+                                         base::Time delete_end);
 
-#if defined(PASSWORD_MANAGER_ENABLE_SYNC)
+  // Extended version of GetLoginsImpl that also returns credentials stored for
+  // the specified affiliated Android applications. That is, it finds all
+  // PasswordForms with a signon_realm that is either:
+  //  * equal to that of |form|,
+  //  * is a PSL-match to the realm of |form|,
+  //  * is one of those in |additional_android_realms|,
+  // and takes care of notifying the consumer with the results when done.
+  void GetLoginsWithAffiliationsImpl(
+      const autofill::PasswordForm& form,
+      AuthorizationPromptPolicy prompt_policy,
+      scoped_ptr<GetLoginsRequest> request,
+      const std::vector<std::string>& additional_android_realms);
+
+  // Schedules GetLoginsWithAffiliationsImpl() to be run on the DB thread.
+  void ScheduleGetLoginsWithAffiliations(
+      const autofill::PasswordForm& form,
+      AuthorizationPromptPolicy prompt_policy,
+      scoped_ptr<GetLoginsRequest> request,
+      const std::vector<std::string>& additional_android_realms);
+
   // Creates PasswordSyncableService instance on the background thread.
   void InitSyncableService(
       const syncer::SyncableService::StartSyncFlare& flare);
 
   // Deletes PasswordSyncableService instance on the background thread.
   void DestroySyncableService();
-#endif
 
   // The observers.
-  scoped_refptr<ObserverListThreadSafe<Observer> > observers_;
+  scoped_refptr<ObserverListThreadSafe<Observer>> observers_;
 
   scoped_ptr<PasswordSyncableService> syncable_service_;
+  scoped_ptr<AffiliatedMatchHelper> affiliated_match_helper_;
 
   bool shutdown_called_;
 

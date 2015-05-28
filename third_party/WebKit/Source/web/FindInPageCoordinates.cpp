@@ -34,34 +34,34 @@
 #include "core/dom/Node.h"
 #include "core/dom/Range.h"
 #include "core/frame/LocalFrame.h"
-#include "core/rendering/RenderBlock.h"
-#include "core/rendering/RenderBox.h"
-#include "core/rendering/RenderObject.h"
-#include "core/rendering/RenderPart.h"
-#include "core/rendering/RenderView.h"
-#include "core/rendering/style/RenderStyle.h"
+#include "core/layout/LayoutBlock.h"
+#include "core/layout/LayoutBox.h"
+#include "core/layout/LayoutObject.h"
+#include "core/layout/LayoutPart.h"
+#include "core/layout/LayoutView.h"
+#include "core/style/ComputedStyle.h"
 #include "platform/geometry/FloatPoint.h"
 #include "platform/geometry/FloatQuad.h"
 #include "platform/geometry/IntPoint.h"
 
 namespace blink {
 
-static const RenderBlock* enclosingScrollableAncestor(const RenderObject* renderer)
+static const LayoutBlock* enclosingScrollableAncestor(const LayoutObject* renderer)
 {
-    ASSERT(!renderer->isRenderView());
+    ASSERT(!renderer->isLayoutView());
 
     // Trace up the containingBlocks until we reach either the render view or a scrollable object.
-    const RenderBlock* container = renderer->containingBlock();
-    while (!container->hasOverflowClip() && !container->isRenderView())
+    const LayoutBlock* container = renderer->containingBlock();
+    while (!container->hasOverflowClip() && !container->isLayoutView())
         container = container->containingBlock();
     return container;
 }
 
-static FloatRect toNormalizedRect(const FloatRect& absoluteRect, const RenderObject* renderer, const RenderBlock* container)
+static FloatRect toNormalizedRect(const FloatRect& absoluteRect, const LayoutObject* renderer, const LayoutBlock* container)
 {
     ASSERT(renderer);
 
-    ASSERT(container || renderer->isRenderView());
+    ASSERT(container || renderer->isLayoutView());
     if (!container)
         return FloatRect();
 
@@ -86,28 +86,28 @@ static FloatRect toNormalizedRect(const FloatRect& absoluteRect, const RenderObj
 
     // Fixed positions do not make sense in this coordinate system, but need to leave consistent tickmarks.
     // So, use their position when the view is not scrolled, like an absolute position.
-    if (renderer->style()->position() == FixedPosition && container->isRenderView())
-        normalizedRect.move(-toRenderView(container)->frameView()->scrollOffsetForViewportConstrainedObjects());
+    if (renderer->style()->position() == FixedPosition && container->isLayoutView())
+        normalizedRect.move(-toLayoutView(container)->frameView()->scrollOffsetForViewportConstrainedObjects());
 
     normalizedRect.scale(1 / containerRect.width(), 1 / containerRect.height());
     return normalizedRect;
 }
 
-FloatRect findInPageRectFromAbsoluteRect(const FloatRect& inputRect, const RenderObject* baseRenderer)
+FloatRect findInPageRectFromAbsoluteRect(const FloatRect& inputRect, const LayoutObject* baseRenderer)
 {
     if (!baseRenderer || inputRect.isEmpty())
         return FloatRect();
 
     // Normalize the input rect to its container block.
-    const RenderBlock* baseContainer = enclosingScrollableAncestor(baseRenderer);
+    const LayoutBlock* baseContainer = enclosingScrollableAncestor(baseRenderer);
     FloatRect normalizedRect = toNormalizedRect(inputRect, baseRenderer, baseContainer);
 
     // Go up across frames.
-    for (const RenderBox* renderer = baseContainer; renderer; ) {
+    for (const LayoutBox* renderer = baseContainer; renderer; ) {
 
-        // Go up the render tree until we reach the root of the current frame (the RenderView).
-        while (!renderer->isRenderView()) {
-            const RenderBlock* container = enclosingScrollableAncestor(renderer);
+        // Go up the layout tree until we reach the root of the current frame (the LayoutView).
+        while (!renderer->isLayoutView()) {
+            const LayoutBlock* container = enclosingScrollableAncestor(renderer);
 
             // Compose the normalized rects.
             FloatRect normalizedBoxRect = toNormalizedRect(renderer->absoluteBoundingBoxRect(), renderer, container);
@@ -117,10 +117,10 @@ FloatRect findInPageRectFromAbsoluteRect(const FloatRect& inputRect, const Rende
             renderer = container;
         }
 
-        ASSERT(renderer->isRenderView());
+        ASSERT(renderer->isLayoutView());
 
         // Jump to the renderer owning the frame, if any.
-        renderer = renderer->frame() ? renderer->frame()->ownerRenderer() : 0;
+        renderer = renderer->frame() ? renderer->frame()->ownerLayoutObject() : 0;
     }
 
     return normalizedRect;
@@ -131,7 +131,7 @@ FloatRect findInPageRectFromRange(Range* range)
     if (!range || !range->firstNode())
         return FloatRect();
 
-    return findInPageRectFromAbsoluteRect(RenderObject::absoluteBoundingBoxRectForRange(range), range->firstNode()->renderer());
+    return findInPageRectFromAbsoluteRect(LayoutObject::absoluteBoundingBoxRectForRange(range), range->firstNode()->layoutObject());
 }
 
 } // namespace blink

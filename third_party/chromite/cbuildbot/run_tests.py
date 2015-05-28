@@ -27,6 +27,7 @@ from chromite.lib import commandline
 from chromite.lib import cros_build_lib
 from chromite.lib import namespaces
 from chromite.lib import osutils
+from chromite.lib import proctitle
 from chromite.lib import timeout_util
 
 
@@ -54,42 +55,42 @@ SKIP = 'skip'
 # List all exceptions, with a token describing what's odd here.
 SPECIAL_TESTS = {
     # Tests that need to run inside the chroot.
-    'cbuildbot/stages/test_stages_unittest.py': INSIDE,
-    'cros/commands/cros_build_unittest.py': INSIDE,
-    # TODO: This should be INSIDE; needs upgraded pylint first.
-    'cros/commands/lint_unittest.py': SKIP,
-    'lib/filetype_unittest.py': INSIDE,
-    'lib/upgrade_table_unittest.py': INSIDE,
-    'scripts/cros_install_debug_syms_unittest.py': INSIDE,
-    'scripts/cros_list_modified_packages_unittest.py': INSIDE,
-    'scripts/cros_mark_as_stable_unittest.py': INSIDE,
-    'scripts/cros_mark_chrome_as_stable_unittest.py': INSIDE,
-    'scripts/cros_mark_mojo_as_stable_unittest.py': INSIDE,
-    'scripts/sync_package_status_unittest.py': INSIDE,
-    'scripts/cros_portage_upgrade_unittest.py': INSIDE,
-    'scripts/dep_tracker_unittest.py': INSIDE,
-    'scripts/test_image_unittest.py': INSIDE,
-    'scripts/upload_package_status_unittest.py': INSIDE,
+    'cbuildbot/stages/test_stages_unittest': INSIDE,
+    'cros/commands/cros_build_unittest': INSIDE,
+    'cros/commands/cros_deploy_unittest': INSIDE,
+    'cros/commands/lint_unittest': INSIDE,
+    'lib/filetype_unittest': INSIDE,
+    'lib/upgrade_table_unittest': INSIDE,
+    'scripts/cros_install_debug_syms_unittest': INSIDE,
+    'scripts/cros_list_modified_packages_unittest': INSIDE,
+    'scripts/cros_mark_as_stable_unittest': INSIDE,
+    'scripts/cros_mark_chrome_as_stable_unittest': INSIDE,
+    'scripts/cros_mark_mojo_as_stable_unittest': INSIDE,
+    'scripts/sync_package_status_unittest': INSIDE,
+    'scripts/cros_portage_upgrade_unittest': INSIDE,
+    'scripts/dep_tracker_unittest': INSIDE,
+    'scripts/test_image_unittest': INSIDE,
+    'scripts/upload_package_status_unittest': INSIDE,
 
     # Tests that need to run outside the chroot.
-    'lib/cgroups_unittest.py': OUTSIDE,
+    'lib/cgroups_unittest': OUTSIDE,
 
     # Tests that take >2 minutes to run.  All the slow tests are
     # disabled atm though ...
-    #'scripts/cros_portage_upgrade_unittest.py': SKIP,
+    #'scripts/cros_portage_upgrade_unittest': SKIP,
 }
 
 SLOW_TESTS = {
     # Tests that require network can be really slow.
-    'buildbot/manifest_version_unittest.py': SKIP,
-    'buildbot/repository_unittest.py': SKIP,
-    'buildbot/remote_try_unittest.py': SKIP,
-    'lib/cros_build_lib_unittest.py': SKIP,
-    'lib/gerrit_unittest.py': SKIP,
-    'lib/patch_unittest.py': SKIP,
+    'buildbot/manifest_version_unittest': SKIP,
+    'buildbot/repository_unittest': SKIP,
+    'buildbot/remote_try_unittest': SKIP,
+    'lib/cros_build_lib_unittest': SKIP,
+    'lib/gerrit_unittest': SKIP,
+    'lib/patch_unittest': SKIP,
 
     # cgroups_unittest runs cros_sdk a lot, so is slow.
-    'lib/cgroups_unittest.py': SKIP,
+    'lib/cgroups_unittest': SKIP,
 }
 
 
@@ -187,7 +188,8 @@ def BuildTestSets(tests, chroot_available, network):
   return testsets
 
 
-def RunTests(tests, jobs=1, chroot_available=True, network=False, dryrun=False):
+def RunTests(tests, jobs=1, chroot_available=True, network=False, dryrun=False,
+             failfast=False):
   """Execute |paths| with |jobs| in parallel (including |network| tests).
 
   Args:
@@ -196,6 +198,7 @@ def RunTests(tests, jobs=1, chroot_available=True, network=False, dryrun=False):
     chroot_available: Whether we can run tests inside the sdk.
     network: Whether to run network based tests.
     dryrun: Do everything but execute the test.
+    failfast: Stop on first failure
 
   Returns:
     True if all tests pass, else False.
@@ -217,11 +220,16 @@ def RunTests(tests, jobs=1, chroot_available=True, network=False, dryrun=False):
 
     # Fork each test and add it to the list.
     for test, cmd, tmpfile in testsets:
+      if failed and failfast:
+        cros_build_lib.Error('failure detected; stopping new tests')
+        break
+
       if len(pids) >= jobs:
         if WaitOne():
           failed = True
       pid = os.fork()
       if pid == 0:
+        proctitle.settitle(test)
         ret = 1
         try:
           if dryrun:
@@ -335,7 +343,7 @@ def FindTests(search_paths=('.',)):
 
       for path in files:
         test = os.path.join(os.path.relpath(root, search_path), path)
-        if test.endswith('_unittest.py'):
+        if test.endswith('_unittest'):
           yield test
 
 
@@ -359,8 +367,7 @@ def _ReExecuteIfNeeded(argv, network):
     os.execvp(cmd[0], cmd)
   else:
     cgroups.Cgroup.InitSystem()
-    # Using a pid ns would be good, but CTRL+C does not play well yet.
-    namespaces.SimpleUnshare(net=not network, pid=False)
+    namespaces.SimpleUnshare(net=not network, pid=True)
     # We got our namespaces, so switch back to the user to run the tests.
     gid = int(os.environ.pop('SUDO_GID'))
     uid = int(os.environ.pop('SUDO_UID'))
@@ -371,6 +378,8 @@ def _ReExecuteIfNeeded(argv, network):
 
 def GetParser():
   parser = commandline.ArgumentParser(description=__doc__)
+  parser.add_argument('-f', '--failfast', default=False, action='store_true',
+                      help='Stop on first failure')
   parser.add_argument('-q', '--quick', default=False, action='store_true',
                       help='Only run the really quick tests')
   parser.add_argument('-n', '--dry-run', default=False, action='store_true',
@@ -416,10 +425,15 @@ def main(argv):
     stack.Add(osutils.TempDir, prefix='chromite.run_tests.', set_global=True,
               sudo_rm=True)
 
-    if RunTests(tests, jobs=jobs, chroot_available=ChrootAvailable(),
-                network=opts.network, dryrun=opts.dryrun):
-      cros_build_lib.Info('All tests succeeded!')
-    else:
+    def _Finished(_log_level, _log_msg, result, delta):
+      if result:
+        cros_build_lib.Info('All tests succeeded! (%s total)', delta)
+
+    ret = cros_build_lib.TimedCommand(
+        RunTests, tests, jobs=jobs, chroot_available=ChrootAvailable(),
+        network=opts.network, dryrun=opts.dryrun, failfast=opts.failfast,
+        timed_log_callback=_Finished)
+    if not ret:
       return 1
 
   if not opts.network:

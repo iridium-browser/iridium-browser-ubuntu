@@ -8,13 +8,19 @@
 // See http://code.google.com/p/googletest/issues/detail?id=371
 #include "testing/gtest/include/gtest/gtest.h"
 
+#include "base/at_exit.h"
 #include "base/bind.h"
 #include "base/command_line.h"
 #include "base/files/file_util.h"
 #include "base/logging.h"
+#include "base/message_loop/message_loop.h"
 #include "content/common/gpu/media/vaapi_h264_decoder.h"
 #include "media/base/video_decoder_config.h"
 #include "third_party/libyuv/include/libyuv.h"
+
+#if defined(USE_OZONE)
+#include "ui/ozone/public/ozone_platform.h"
+#endif
 
 // This program is run like this:
 // DISPLAY=:0 ./vaapi_h264_decoder_unittest --input_file input.h264
@@ -111,8 +117,8 @@ bool VaapiH264DecoderLoop::Initialize(base::FilePath input_file,
   media::VideoCodecProfile profile = media::H264PROFILE_BASELINE;
   base::Closure report_error_cb =
       base::Bind(&LogOnError, VaapiH264Decoder::VAAPI_ERROR);
-  wrapper_ =
-      VaapiWrapper::Create(VaapiWrapper::kDecode, profile, report_error_cb);
+  wrapper_ = VaapiWrapper::CreateForVideoCodec(VaapiWrapper::kDecode, profile,
+                                               report_error_cb);
   if (!wrapper_.get()) {
     LOG(ERROR) << "Can't create vaapi wrapper";
     return false;
@@ -247,14 +253,14 @@ void VaapiH264DecoderLoop::OutputPicture(
   VAImage image;
   void* mem;
 
-  if (!wrapper_->GetVaImageForTesting(va_surface->id(), &image, &mem)) {
+  if (!wrapper_->GetDerivedVaImage(va_surface->id(), &image, &mem)) {
     LOG(ERROR) << "Cannot get VAImage.";
     return;
   }
 
   if (image.format.fourcc != VA_FOURCC_NV12) {
     LOG(ERROR) << "Unexpected image format: " << image.format.fourcc;
-    wrapper_->ReturnVaImageForTesting(&image);
+    wrapper_->ReturnVaImage(&image);
     return;
   }
 
@@ -269,7 +275,7 @@ void VaapiH264DecoderLoop::OutputPicture(
     LOG(ERROR) << "Cannot convert image to I420.";
   }
 
-  wrapper_->ReturnVaImageForTesting(&image);
+  wrapper_->ReturnVaImage(&image);
 }
 
 void VaapiH264DecoderLoop::RecycleSurface(VASurfaceID va_surface_id) {
@@ -335,6 +341,8 @@ int main(int argc, char** argv) {
   testing::InitGoogleTest(&argc, argv);  // Removes gtest-specific args.
   base::CommandLine::Init(argc, argv);
 
+  base::ShadowingAtExitManager at_exit_manager;
+
   // Needed to enable DVLOG through --vmodule.
   logging::LoggingSettings settings;
   settings.logging_dest = logging::LOG_TO_SYSTEM_DEBUG_LOG;
@@ -362,8 +370,16 @@ int main(int argc, char** argv) {
     }
     if (it->first == "v" || it->first == "vmodule")
       continue;
+    if (it->first == "ozone-platform")
+      continue;
     LOG(FATAL) << "Unexpected switch: " << it->first << ":" << it->second;
   }
+
+#if defined(USE_OZONE)
+  base::MessageLoopForUI main_loop;
+  ui::OzonePlatform::InitializeForUI();
+  ui::OzonePlatform::InitializeForGPU();
+#endif
 
   return RUN_ALL_TESTS();
 }

@@ -13,7 +13,8 @@
       'target_name': 'rtc_p2p',
       'type': 'static_library',
       'dependencies': [
-        '<(webrtc_root)/base/base.gyp:webrtc_base',
+        '<(webrtc_root)/base/base.gyp:rtc_base',
+        '<(webrtc_root)/common.gyp:webrtc_common',
       ],
       'cflags_cc!': [
         '-Wnon-virtual-dtor',
@@ -113,4 +114,4 @@
       ],
     }],
 }
-  
+

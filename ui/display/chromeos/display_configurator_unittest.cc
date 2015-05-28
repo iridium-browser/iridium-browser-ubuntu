@@ -23,7 +23,7 @@ class TestObserver : public DisplayConfigurator::Observer {
     Reset();
     configurator_->AddObserver(this);
   }
-  virtual ~TestObserver() { configurator_->RemoveObserver(this); }
+  ~TestObserver() override { configurator_->RemoveObserver(this); }
 
   int num_changes() const { return num_changes_; }
   int num_failures() const { return num_failures_; }
@@ -42,14 +42,15 @@ class TestObserver : public DisplayConfigurator::Observer {
   }
 
   // DisplayConfigurator::Observer overrides:
-  virtual void OnDisplayModeChanged(
+  void OnDisplayModeChanged(
       const DisplayConfigurator::DisplayStateList& outputs) override {
     num_changes_++;
     latest_outputs_ = outputs;
   }
 
-  virtual void OnDisplayModeChangeFailed(MultipleDisplayState failed_new_state)
-      override {
+  void OnDisplayModeChangeFailed(
+      const DisplayConfigurator::DisplayStateList& outputs,
+      MultipleDisplayState failed_new_state) override {
     num_failures_++;
     latest_failed_state_ = failed_new_state;
   }
@@ -71,17 +72,17 @@ class TestObserver : public DisplayConfigurator::Observer {
 class TestStateController : public DisplayConfigurator::StateController {
  public:
   TestStateController() : state_(MULTIPLE_DISPLAY_STATE_DUAL_EXTENDED) {}
-  virtual ~TestStateController() {}
+  ~TestStateController() override {}
 
   void set_state(MultipleDisplayState state) { state_ = state; }
 
   // DisplayConfigurator::StateController overrides:
-  virtual MultipleDisplayState GetStateForDisplayIds(
+  MultipleDisplayState GetStateForDisplayIds(
       const std::vector<int64_t>& outputs) const override {
     return state_;
   }
-  virtual bool GetResolutionForDisplayId(int64_t display_id,
-                                         gfx::Size* size) const override {
+  bool GetResolutionForDisplayId(int64_t display_id,
+                                 gfx::Size* size) const override {
     return false;
   }
 
@@ -95,13 +96,13 @@ class TestMirroringController
     : public DisplayConfigurator::SoftwareMirroringController {
  public:
   TestMirroringController() : software_mirroring_enabled_(false) {}
-  virtual ~TestMirroringController() {}
+  ~TestMirroringController() override {}
 
-  virtual void SetSoftwareMirroring(bool enabled) override {
+  void SetSoftwareMirroring(bool enabled) override {
     software_mirroring_enabled_ = enabled;
   }
 
-  virtual bool SoftwareMirroringEnabled() const override {
+  bool SoftwareMirroringEnabled() const override {
     return software_mirroring_enabled_;
   }
 
@@ -127,7 +128,7 @@ class DisplayConfiguratorTest : public testing::Test {
         callback_result_(CALLBACK_NOT_CALLED) {}
   ~DisplayConfiguratorTest() override {}
 
-  virtual void SetUp() override {
+  void SetUp() override {
     log_.reset(new ActionLogger());
 
     native_display_delegate_ = new TestNativeDisplayDelegate(log_.get());
@@ -384,6 +385,8 @@ TEST_F(DisplayConfiguratorTest, ConnectSecondOutput) {
           NULL),
       log_->GetActionsAndClear());
   EXPECT_FALSE(mirroring_controller_.SoftwareMirroringEnabled());
+  const gfx::Size framebuffer_size = configurator_.framebuffer_size();
+  DCHECK(!framebuffer_size.IsEmpty());
 
   observer_.Reset();
   configurator_.SetDisplayMode(MULTIPLE_DISPLAY_STATE_DUAL_MIRROR);
@@ -391,6 +394,9 @@ TEST_F(DisplayConfiguratorTest, ConnectSecondOutput) {
   EXPECT_EQ(MULTIPLE_DISPLAY_STATE_DUAL_EXTENDED,
             configurator_.display_state());
   EXPECT_TRUE(mirroring_controller_.SoftwareMirroringEnabled());
+  EXPECT_EQ(framebuffer_size.ToString(),
+            configurator_.framebuffer_size().ToString());
+
   EXPECT_EQ(1, observer_.num_changes());
 
   // Setting MULTIPLE_DISPLAY_STATE_DUAL_MIRROR should try to reconfigure.
@@ -631,7 +637,13 @@ TEST_F(DisplayConfiguratorTest, SuspendAndResume) {
   // No preparation is needed before suspending when the display is already
   // on.  The configurator should still reprobe on resume in case a display
   // was connected while suspended.
-  configurator_.SuspendDisplays();
+  const gfx::Size framebuffer_size = configurator_.framebuffer_size();
+  DCHECK(!framebuffer_size.IsEmpty());
+  configurator_.SuspendDisplays(base::Bind(
+      &DisplayConfiguratorTest::OnConfiguredCallback, base::Unretained(this)));
+  EXPECT_EQ(CALLBACK_SUCCESS, PopCallbackResult());
+  EXPECT_EQ(framebuffer_size.ToString(),
+            configurator_.framebuffer_size().ToString());
   EXPECT_EQ(kNoActions, log_->GetActionsAndClear());
   configurator_.ResumeDisplays();
   EXPECT_TRUE(test_api_.TriggerConfigureTimeout());
@@ -662,7 +674,9 @@ TEST_F(DisplayConfiguratorTest, SuspendAndResume) {
           NULL),
       log_->GetActionsAndClear());
 
-  configurator_.SuspendDisplays();
+  configurator_.SuspendDisplays(base::Bind(
+      &DisplayConfiguratorTest::OnConfiguredCallback, base::Unretained(this)));
+  EXPECT_EQ(CALLBACK_SUCCESS, PopCallbackResult());
   EXPECT_EQ(
       JoinActions(
           kGrab,
@@ -717,7 +731,9 @@ TEST_F(DisplayConfiguratorTest, SuspendAndResume) {
                   NULL),
       log_->GetActionsAndClear());
 
-  configurator_.SuspendDisplays();
+  configurator_.SuspendDisplays(base::Bind(
+      &DisplayConfiguratorTest::OnConfiguredCallback, base::Unretained(this)));
+  EXPECT_EQ(CALLBACK_SUCCESS, PopCallbackResult());
   EXPECT_EQ(JoinActions(kGrab, kUngrab, kSync, NULL),
             log_->GetActionsAndClear());
 
@@ -778,6 +794,13 @@ TEST_F(DisplayConfiguratorTest, Headless) {
           kUngrab,
           NULL),
       log_->GetActionsAndClear());
+  const gfx::Size framebuffer_size = configurator_.framebuffer_size();
+  DCHECK(!framebuffer_size.IsEmpty());
+
+  UpdateOutputs(0, true);
+  EXPECT_EQ(JoinActions(kGrab, kUngrab, NULL), log_->GetActionsAndClear());
+  EXPECT_EQ(framebuffer_size.ToString(),
+            configurator_.framebuffer_size().ToString());
 }
 
 TEST_F(DisplayConfiguratorTest, StartWithTwoOutputs) {
@@ -853,7 +876,7 @@ TEST_F(DisplayConfiguratorTest, UpdateCachedOutputsEvenAfterFailure) {
   const DisplayConfigurator::DisplayStateList* cached =
       &configurator_.cached_displays();
   ASSERT_EQ(static_cast<size_t>(1), cached->size());
-  EXPECT_EQ(outputs_[0].current_mode(), (*cached)[0].display->current_mode());
+  EXPECT_EQ(outputs_[0].current_mode(), (*cached)[0]->current_mode());
 
   // After connecting a second output, check that it shows up in
   // |cached_displays_| even if an invalid state is requested.
@@ -861,8 +884,8 @@ TEST_F(DisplayConfiguratorTest, UpdateCachedOutputsEvenAfterFailure) {
   UpdateOutputs(2, true);
   cached = &configurator_.cached_displays();
   ASSERT_EQ(static_cast<size_t>(2), cached->size());
-  EXPECT_EQ(outputs_[0].current_mode(), (*cached)[0].display->current_mode());
-  EXPECT_EQ(outputs_[1].current_mode(), (*cached)[1].display->current_mode());
+  EXPECT_EQ(outputs_[0].current_mode(), (*cached)[0]->current_mode());
+  EXPECT_EQ(outputs_[1].current_mode(), (*cached)[1]->current_mode());
 }
 
 TEST_F(DisplayConfiguratorTest, PanelFitting) {
@@ -897,21 +920,15 @@ TEST_F(DisplayConfiguratorTest, PanelFitting) {
   // Both outputs should be using the small mode.
   ASSERT_EQ(1, observer_.num_changes());
   ASSERT_EQ(static_cast<size_t>(2), observer_.latest_outputs().size());
-  EXPECT_EQ(&small_mode_, observer_.latest_outputs()[0].mirror_mode);
-  EXPECT_EQ(&small_mode_,
-            observer_.latest_outputs()[0].display->current_mode());
-  EXPECT_EQ(&small_mode_, observer_.latest_outputs()[1].mirror_mode);
-  EXPECT_EQ(&small_mode_,
-            observer_.latest_outputs()[1].display->current_mode());
+  EXPECT_EQ(&small_mode_, observer_.latest_outputs()[0]->current_mode());
+  EXPECT_EQ(&small_mode_, observer_.latest_outputs()[1]->current_mode());
 
   // Also check that the newly-added small mode is present in the internal
   // snapshot that was passed to the observer (http://crbug.com/289159).
-  const DisplayConfigurator::DisplayState& state =
-      observer_.latest_outputs()[0];
-  ASSERT_NE(state.display->modes().end(),
-            std::find(state.display->modes().begin(),
-                      state.display->modes().end(),
-                      &small_mode_));
+  DisplaySnapshot* state = observer_.latest_outputs()[0];
+  ASSERT_NE(
+      state->modes().end(),
+      std::find(state->modes().begin(), state->modes().end(), &small_mode_));
 }
 
 TEST_F(DisplayConfiguratorTest, ContentProtection) {
@@ -972,7 +989,9 @@ TEST_F(DisplayConfiguratorTest, DoNotConfigureWithSuspendedDisplays) {
   // after the displays have been suspended.  This event should be ignored since
   // the DisplayConfigurator will force a probe and reconfiguration of displays
   // at resume time.
-  configurator_.SuspendDisplays();
+  configurator_.SuspendDisplays(base::Bind(
+      &DisplayConfiguratorTest::OnConfiguredCallback, base::Unretained(this)));
+  EXPECT_EQ(CALLBACK_SUCCESS, PopCallbackResult());
   EXPECT_EQ(kNoActions, log_->GetActionsAndClear());
 
   // The configuration timer should not be started when the displays
@@ -1043,7 +1062,9 @@ TEST_F(DisplayConfiguratorTest, DoNotConfigureWithSuspendedDisplays) {
   // If a configuration task is pending when the displays are suspended, that
   // task should not run either and the timer should be stopped.
   configurator_.OnConfigurationChanged();
-  configurator_.SuspendDisplays();
+  configurator_.SuspendDisplays(base::Bind(
+      &DisplayConfiguratorTest::OnConfiguredCallback, base::Unretained(this)));
+  EXPECT_EQ(CALLBACK_SUCCESS, PopCallbackResult());
   EXPECT_EQ(kNoActions, log_->GetActionsAndClear());
 
   EXPECT_FALSE(test_api_.TriggerConfigureTimeout());
@@ -1293,7 +1314,9 @@ TEST_F(DisplayConfiguratorTest, DontRestoreStalePowerStateAfterResume) {
 
   // Suspend and resume the system. Resuming should post a task to restore the
   // previous power state, additionally forcing a probe.
-  configurator_.SuspendDisplays();
+  configurator_.SuspendDisplays(base::Bind(
+      &DisplayConfiguratorTest::OnConfiguredCallback, base::Unretained(this)));
+  EXPECT_EQ(CALLBACK_SUCCESS, PopCallbackResult());
   configurator_.ResumeDisplays();
 
   // Before the task runs, exit docked mode.

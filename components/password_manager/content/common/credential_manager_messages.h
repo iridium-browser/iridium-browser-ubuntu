@@ -8,7 +8,7 @@
 #include <vector>
 
 #include "base/strings/string16.h"
-#include "components/password_manager/content/common/credential_manager_types.h"
+#include "components/password_manager/core/common/credential_manager_types.h"
 #include "content/public/common/common_param_traits.h"
 #include "content/public/common/common_param_traits_macros.h"
 #include "ipc/ipc_message_macros.h"
@@ -18,8 +18,9 @@
 
 #define IPC_MESSAGE_START CredentialManagerMsgStart
 
-IPC_ENUM_TRAITS_MAX_VALUE(password_manager::CredentialType,
-                          password_manager::CREDENTIAL_TYPE_LAST)
+IPC_ENUM_TRAITS_MAX_VALUE(
+    password_manager::CredentialType,
+    password_manager::CredentialType::CREDENTIAL_TYPE_LAST)
 
 IPC_ENUM_TRAITS_MAX_VALUE(blink::WebCredentialManagerError::ErrorType,
                           blink::WebCredentialManagerError::ErrorTypeLast)

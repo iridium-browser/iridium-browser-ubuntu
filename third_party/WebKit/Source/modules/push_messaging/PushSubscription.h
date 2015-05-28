@@ -6,6 +6,7 @@
 #define PushSubscription_h
 
 #include "bindings/core/v8/ScriptPromise.h"
+#include "bindings/core/v8/ScriptValue.h"
 #include "bindings/core/v8/ScriptWrappable.h"
 #include "platform/heap/Handle.h"
 #include "wtf/text/WTFString.h"
@@ -29,7 +30,9 @@ public:
     const String& subscriptionId() const { return m_subscriptionId; }
     ScriptPromise unsubscribe(ScriptState*);
 
-    void trace(Visitor*);
+    ScriptValue toJSONForBinding(ScriptState*);
+
+    DECLARE_TRACE();
 
 private:
     PushSubscription(const String& endpoint, const String& subscriptionId, ServiceWorkerRegistration*);

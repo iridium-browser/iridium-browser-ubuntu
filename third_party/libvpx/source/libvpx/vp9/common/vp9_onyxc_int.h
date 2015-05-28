@@ -20,6 +20,7 @@
 #include "vp9/common/vp9_entropymode.h"
 #include "vp9/common/vp9_frame_buffers.h"
 #include "vp9/common/vp9_quant_common.h"
+#include "vp9/common/vp9_thread.h"
 #include "vp9/common/vp9_tile_common.h"
 
 #if CONFIG_VP9_POSTPROC
@@ -35,13 +36,18 @@ extern "C" {
 #define REF_FRAMES_LOG2 3
 #define REF_FRAMES (1 << REF_FRAMES_LOG2)
 
-// 1 scratch frame for the new frame, 3 for scaled references on the encoder
+// 4 scratch frames for the new frames to support a maximum of 4 cores decoding
+// in parallel, 3 for scaled references on the encoder.
+// TODO(hkuang): Add ondemand frame buffers instead of hardcoding the number
+// of framebuffers.
 // TODO(jkoleszar): These 3 extra references could probably come from the
 // normal reference pool.
-#define FRAME_BUFFERS (REF_FRAMES + 4)
+#define FRAME_BUFFERS (REF_FRAMES + 7)
 
 #define FRAME_CONTEXTS_LOG2 2
 #define FRAME_CONTEXTS (1 << FRAME_CONTEXTS_LOG2)
+
+#define NUM_PING_PONG_BUFFERS 2
 
 extern const struct {
   PARTITION_CONTEXT above;
@@ -68,16 +74,43 @@ typedef struct {
   int mi_cols;
   vpx_codec_frame_buffer_t raw_frame_buffer;
   YV12_BUFFER_CONFIG buf;
+
+  // The Following variables will only be used in frame parallel decode.
+
+  // frame_worker_owner indicates which FrameWorker owns this buffer. NULL means
+  // that no FrameWorker owns, or is decoding, this buffer.
+  VP9Worker *frame_worker_owner;
+
+  // row and col indicate which position frame has been decoded to in real
+  // pixel unit. They are reset to -1 when decoding begins and set to INT_MAX
+  // when the frame is fully decoded.
+  int row;
+  int col;
 } RefCntBuffer;
+
+typedef struct {
+  // Protect BufferPool from being accessed by several FrameWorkers at
+  // the same time during frame parallel decode.
+  // TODO(hkuang): Try to use atomic variable instead of locking the whole pool.
+#if CONFIG_MULTITHREAD
+  pthread_mutex_t pool_mutex;
+#endif
+
+  // Private data associated with the frame buffer callbacks.
+  void *cb_priv;
+
+  vpx_get_frame_buffer_cb_fn_t get_fb_cb;
+  vpx_release_frame_buffer_cb_fn_t release_fb_cb;
+
+  RefCntBuffer frame_bufs[FRAME_BUFFERS];
+
+  // Frame buffers allocated internally by the codec.
+  InternalFrameBufferList int_frame_buffers;
+} BufferPool;
 
 typedef struct VP9Common {
   struct vpx_internal_error_info  error;
-
-  DECLARE_ALIGNED(16, int16_t, y_dequant[QINDEX_RANGE][8]);
-  DECLARE_ALIGNED(16, int16_t, uv_dequant[QINDEX_RANGE][8]);
-
-  COLOR_SPACE color_space;
-
+  vpx_color_space_t color_space;
   int width;
   int height;
   int display_width;
@@ -96,13 +129,16 @@ typedef struct VP9Common {
 #endif
 
   YV12_BUFFER_CONFIG *frame_to_show;
-  RefCntBuffer frame_bufs[FRAME_BUFFERS];
   RefCntBuffer *prev_frame;
 
   // TODO(hkuang): Combine this with cur_buf in macroblockd.
   RefCntBuffer *cur_frame;
 
   int ref_frame_map[REF_FRAMES]; /* maps fb_idx to reference slot */
+
+  // Prepare ref_frame_map for the next frame.
+  // Only used in frame parallel decode.
+  int next_ref_frame_map[REF_FRAMES];
 
   // TODO(jkoleszar): could expand active_ref_idx to 4, with 0 as intra, and
   // roll new_fb_idx into it.
@@ -112,7 +148,10 @@ typedef struct VP9Common {
 
   int new_fb_idx;
 
+#if CONFIG_VP9_POSTPROC
   YV12_BUFFER_CONFIG post_proc_buffer;
+  YV12_BUFFER_CONFIG post_proc_buffer_int;
+#endif
 
   FRAME_TYPE last_frame_type;  /* last frame's frame type for motion search.*/
   FRAME_TYPE frame_type;
@@ -167,7 +206,12 @@ typedef struct VP9Common {
   int use_prev_frame_mvs;
 
   // Persistent mb segment id map used in prediction.
-  unsigned char *last_frame_seg_map;
+  int seg_map_idx;
+  int prev_seg_map_idx;
+
+  uint8_t *seg_map_array[NUM_PING_PONG_BUFFERS];
+  uint8_t *last_frame_seg_map;
+  uint8_t *current_frame_seg_map;
 
   INTERP_FILTER interp_filter;
 
@@ -180,8 +224,11 @@ typedef struct VP9Common {
   struct loopfilter lf;
   struct segmentation seg;
 
+  // TODO(hkuang): Remove this as it is the same as frame_parallel_decode
+  // in pbi.
+  int frame_parallel_decode;  // frame-based threading.
+
   // Context probabilities for reference frame prediction
-  int allow_comp_inter_inter;
   MV_REFERENCE_FRAME comp_fixed_ref;
   MV_REFERENCE_FRAME comp_var_ref[2];
   REFERENCE_MODE reference_mode;
@@ -206,6 +253,7 @@ typedef struct VP9Common {
   int frame_parallel_decoding_mode;
 
   int log2_tile_cols, log2_tile_rows;
+  int byte_alignment;
 
   // Private data associated with the frame buffer callbacks.
   void *cb_priv;
@@ -215,9 +263,17 @@ typedef struct VP9Common {
   // Handles memory for the codec.
   InternalFrameBufferList int_frame_buffers;
 
+  // External BufferPool passed from outside.
+  BufferPool *buffer_pool;
+
   PARTITION_CONTEXT *above_seg_context;
   ENTROPY_CONTEXT *above_context;
 } VP9_COMMON;
+
+// TODO(hkuang): Don't need to lock the whole pool after implementing atomic
+// frame reference count.
+void lock_buffer_pool(BufferPool *const pool);
+void unlock_buffer_pool(BufferPool *const pool);
 
 static INLINE YV12_BUFFER_CONFIG *get_ref_frame(VP9_COMMON *cm, int index) {
   if (index < 0 || index >= REF_FRAMES)
@@ -225,21 +281,25 @@ static INLINE YV12_BUFFER_CONFIG *get_ref_frame(VP9_COMMON *cm, int index) {
   if (cm->ref_frame_map[index] < 0)
     return NULL;
   assert(cm->ref_frame_map[index] < FRAME_BUFFERS);
-  return &cm->frame_bufs[cm->ref_frame_map[index]].buf;
+  return &cm->buffer_pool->frame_bufs[cm->ref_frame_map[index]].buf;
 }
 
 static INLINE YV12_BUFFER_CONFIG *get_frame_new_buffer(VP9_COMMON *cm) {
-  return &cm->frame_bufs[cm->new_fb_idx].buf;
+  return &cm->buffer_pool->frame_bufs[cm->new_fb_idx].buf;
 }
 
 static INLINE int get_free_fb(VP9_COMMON *cm) {
+  RefCntBuffer *const frame_bufs = cm->buffer_pool->frame_bufs;
   int i;
-  for (i = 0; i < FRAME_BUFFERS; i++)
-    if (cm->frame_bufs[i].ref_count == 0)
+
+  lock_buffer_pool(cm->buffer_pool);
+  for (i = 0; i < FRAME_BUFFERS; ++i)
+    if (frame_bufs[i].ref_count == 0)
       break;
 
   assert(i < FRAME_BUFFERS);
-  cm->frame_bufs[i].ref_count = 1;
+  frame_bufs[i].ref_count = 1;
+  unlock_buffer_pool(cm->buffer_pool);
   return i;
 }
 
@@ -262,13 +322,14 @@ static INLINE void init_macroblockd(VP9_COMMON *cm, MACROBLOCKD *xd) {
   int i;
 
   for (i = 0; i < MAX_MB_PLANE; ++i) {
-    xd->plane[i].dqcoeff = xd->dqcoeff[i];
+    xd->plane[i].dqcoeff = xd->dqcoeff;
     xd->above_context[i] = cm->above_context +
         i * sizeof(*cm->above_context) * 2 * mi_cols_aligned_to_sb(cm->mi_cols);
   }
 
   xd->above_seg_context = cm->above_seg_context;
   xd->mi_stride = cm->mi_stride;
+  xd->error_info = &cm->error;
 }
 
 static INLINE int frame_is_intra_only(const VP9_COMMON *const cm) {
@@ -309,17 +370,21 @@ static INLINE void set_mi_row_col(MACROBLOCKD *xd, const TileInfo *const tile,
   // Are edges available for intra prediction?
   xd->up_available    = (mi_row != 0);
   xd->left_available  = (mi_col > tile->mi_col_start);
-}
+  if (xd->up_available) {
+    xd->above_mi = xd->mi[-xd->mi_stride].src_mi;
+    xd->above_mbmi = xd->above_mi ? &xd->above_mi->mbmi : NULL;
+  } else {
+    xd->above_mi = NULL;
+    xd->above_mbmi = NULL;
+  }
 
-static INLINE void set_prev_mi(VP9_COMMON *cm) {
-  const int use_prev_in_find_mv_refs = cm->width == cm->last_width &&
-                                       cm->height == cm->last_height &&
-                                       !cm->intra_only &&
-                                       cm->last_show_frame;
-  // Special case: set prev_mi to NULL when the previous mode info
-  // context cannot be used.
-  cm->prev_mi = use_prev_in_find_mv_refs ?
-                  cm->prev_mip + cm->mi_stride + 1 : NULL;
+  if (xd->left_available) {
+    xd->left_mi = xd->mi[-1].src_mi;
+    xd->left_mbmi = xd->left_mi ? &xd->left_mi->mbmi : NULL;
+  } else {
+    xd->left_mi = NULL;
+    xd->left_mbmi = NULL;
+  }
 }
 
 static INLINE void update_partition_context(MACROBLOCKD *xd,

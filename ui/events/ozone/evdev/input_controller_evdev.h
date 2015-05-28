@@ -9,33 +9,30 @@
 
 #include "base/basictypes.h"
 #include "base/memory/weak_ptr.h"
-#include "ui/events/ozone/evdev/event_device_info.h"
 #include "ui/events/ozone/evdev/events_ozone_evdev_export.h"
 #include "ui/events/ozone/evdev/input_device_settings_evdev.h"
 #include "ui/ozone/public/input_controller.h"
 
 namespace ui {
 
-class EventFactoryEvdev;
+class InputDeviceFactoryEvdevProxy;
 class KeyboardEvdev;
 class MouseButtonMapEvdev;
-
-#if defined(USE_EVDEV_GESTURES)
-class GesturePropertyProvider;
-#endif
 
 // Ozone InputController implementation for the Linux input subsystem ("evdev").
 class EVENTS_OZONE_EVDEV_EXPORT InputControllerEvdev : public InputController {
  public:
-  InputControllerEvdev(EventFactoryEvdev* event_factory,
-                       KeyboardEvdev* keyboard,
-                       MouseButtonMapEvdev* button_map
-#if defined(USE_EVDEV_GESTURES)
-                       ,
-                       GesturePropertyProvider* gesture_property_provider
-#endif
-                       );
+  InputControllerEvdev(KeyboardEvdev* keyboard,
+                       MouseButtonMapEvdev* button_map);
   ~InputControllerEvdev() override;
+
+  // Initialize device factory. This would be in the constructor if it was
+  // built early enough for that to be possible.
+  void SetInputDeviceFactory(
+      InputDeviceFactoryEvdevProxy* input_device_factory);
+
+  void set_has_mouse(bool has_mouse);
+  void set_has_touchpad(bool has_touchpad);
 
   // InputController:
   bool HasMouse() override;
@@ -57,21 +54,24 @@ class EVENTS_OZONE_EVDEV_EXPORT InputControllerEvdev : public InputController {
   void SetMouseSensitivity(int value) override;
   void SetPrimaryButtonRight(bool right) override;
   void SetTapToClickPaused(bool state) override;
+  void GetTouchDeviceStatus(const GetTouchDeviceStatusReply& reply) override;
+  void GetTouchEventLog(const base::FilePath& out_dir,
+                        const GetTouchEventLogReply& reply) override;
+  void DisableInternalTouchpad() override;
+  void EnableInternalTouchpad() override;
+  void DisableInternalKeyboardExceptKeys(
+      scoped_ptr<std::set<DomCode>> excepted_keys) override;
+  void EnableInternalKeyboard() override;
+
+ private:
+  // Post task to update settings.
+  void ScheduleUpdateDeviceSettings();
 
   // Send settings update to input_device_factory_.
   void UpdateDeviceSettings();
 
- private:
-  // Set a property value for all devices of one type.
-  void SetIntPropertyForOneType(const EventDeviceType type,
-                                const std::string& name,
-                                int value);
-  void SetBoolPropertyForOneType(const EventDeviceType type,
-                                 const std::string& name,
-                                 bool value);
-
-  // Post task to update settings.
-  void ScheduleUpdateDeviceSettings();
+  // Send caps lock update to input_device_factory_.
+  void UpdateCapsLockLed();
 
   // Configuration that needs to be passed on to InputDeviceFactory.
   InputDeviceSettingsEvdev input_device_settings_;
@@ -79,8 +79,8 @@ class EVENTS_OZONE_EVDEV_EXPORT InputControllerEvdev : public InputController {
   // Task to update config from input_device_settings_ is pending.
   bool settings_update_pending_;
 
-  // Event factory object which manages device event converters.
-  EventFactoryEvdev* event_factory_;
+  // Factory for devices. Needed to update device config.
+  InputDeviceFactoryEvdevProxy* input_device_factory_;
 
   // Keyboard state.
   KeyboardEvdev* keyboard_;
@@ -88,10 +88,12 @@ class EVENTS_OZONE_EVDEV_EXPORT InputControllerEvdev : public InputController {
   // Mouse button map.
   MouseButtonMapEvdev* button_map_;
 
-#if defined(USE_EVDEV_GESTURES)
-  // Gesture library property provider.
-  GesturePropertyProvider* gesture_property_provider_;
-#endif
+  // Device presence.
+  bool has_mouse_;
+  bool has_touchpad_;
+
+  // LED state.
+  bool caps_lock_led_state_;
 
   base::WeakPtrFactory<InputControllerEvdev> weak_ptr_factory_;
 

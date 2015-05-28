@@ -2,8 +2,10 @@
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
 
-from metrics import startup_metric
 from telemetry.page import page_test
+
+from metrics import keychain_metric
+from metrics import startup_metric
 
 
 class Startup(page_test.PageTest):
@@ -15,26 +17,24 @@ class Startup(page_test.PageTest):
   repeat the page set to ensure it's cached.
   """
 
-  def __init__(self, cold=False, action_name_to_run=''):
-    super(Startup, self).__init__(needs_browser_restart_after_each_page=True,
-                                  action_name_to_run=action_name_to_run)
+  def __init__(self, cold=False):
+    super(Startup, self).__init__(needs_browser_restart_after_each_page=True)
     self._cold = cold
 
   def CustomizeBrowserOptions(self, options):
     if self._cold:
       options.clear_sytem_cache_for_browser_and_profile_on_start = True
-    else:
-      self.discard_first_result = True
-
     options.AppendExtraBrowserArgs([
         '--enable-stats-collection-bindings'
     ])
+    keychain_metric.KeychainMetric.CustomizeBrowserOptions(options)
 
   def RunNavigateSteps(self, page, tab):
     # Overriden so that no page navigation occurs - startup to the NTP.
     pass
 
   def ValidateAndMeasurePage(self, page, tab, results):
+    keychain_metric.KeychainMetric().AddResults(tab, results)
     startup_metric.StartupMetric().AddResults(tab, results)
 
 
@@ -51,5 +51,4 @@ class StartWithUrl(Startup):
   """
 
   def __init__(self, cold=False):
-    super(StartWithUrl, self).__init__(cold=cold,
-                                       action_name_to_run='RunPageInteractions')
+    super(StartWithUrl, self).__init__(cold=cold)

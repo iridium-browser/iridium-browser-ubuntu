@@ -7,8 +7,6 @@
 #include <list>
 
 #include "base/bind.h"
-#include "base/debug/trace_event.h"
-#include "base/debug/trace_event_synthetic_delay.h"
 #include "base/lazy_instance.h"
 #include "base/logging.h"
 #include "base/memory/ref_counted.h"
@@ -18,6 +16,8 @@
 #include "base/synchronization/waitable_event.h"
 #include "base/threading/thread.h"
 #include "base/threading/thread_checker.h"
+#include "base/trace_event/trace_event.h"
+#include "base/trace_event/trace_event_synthetic_delay.h"
 #include "gpu/command_buffer/service/async_pixel_transfer_delegate.h"
 #include "ui/gl/gl_bindings.h"
 #include "ui/gl/gl_context.h"
@@ -47,7 +47,7 @@ class TransferThread : public base::Thread {
         initialized_(false) {
     Start();
 #if defined(OS_ANDROID) || defined(OS_LINUX)
-    SetPriority(base::kThreadPriority_Background);
+    SetPriority(base::ThreadPriority::BACKGROUND);
 #endif
   }
 
@@ -293,7 +293,7 @@ class TransferStateInternal
 
     base::TimeTicks begin_time;
     if (texture_upload_stats.get())
-      begin_time = base::TimeTicks::HighResNow();
+      begin_time = base::TimeTicks::Now();
 
     void* data = mem_params.GetDataAddress();
 
@@ -312,8 +312,7 @@ class TransferStateInternal
     }
 
     if (texture_upload_stats.get()) {
-      texture_upload_stats->AddUpload(base::TimeTicks::HighResNow() -
-                                      begin_time);
+      texture_upload_stats->AddUpload(base::TimeTicks::Now() - begin_time);
     }
   }
 
@@ -331,7 +330,7 @@ class TransferStateInternal
 
     base::TimeTicks begin_time;
     if (texture_upload_stats.get())
-      begin_time = base::TimeTicks::HighResNow();
+      begin_time = base::TimeTicks::Now();
 
     void* data = mem_params.GetDataAddress();
     {
@@ -349,8 +348,7 @@ class TransferStateInternal
     }
 
     if (texture_upload_stats.get()) {
-      texture_upload_stats->AddUpload(base::TimeTicks::HighResNow() -
-                                      begin_time);
+      texture_upload_stats->AddUpload(base::TimeTicks::Now() - begin_time);
     }
   }
 

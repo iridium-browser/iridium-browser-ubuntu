@@ -55,7 +55,7 @@ public:
     static PassOwnPtrWillBeRawPtr<WindowProxy> create(Frame*, DOMWrapperWorld&, v8::Isolate*);
 
     ~WindowProxy();
-    void trace(Visitor*);
+    DECLARE_TRACE();
 
     v8::Local<v8::Context> context() const { return m_scriptState ? m_scriptState->context() : v8::Local<v8::Context>(); }
     ScriptState* scriptState() const { return m_scriptState.get(); }
@@ -79,6 +79,8 @@ public:
     void clearForNavigation();
     void clearForClose();
 
+    void takeGlobalFrom(WindowProxy*);
+
     DOMWrapperWorld& world() { return *m_world; }
 
 private:
@@ -95,10 +97,8 @@ private:
 
     // The JavaScript wrapper for the document object is cached on the global
     // object for fast access. UpdateDocumentProperty sets the wrapper
-    // for the current document on the global object. ClearDocumentProperty
-    // deletes the document wrapper from the global object.
+    // for the current document on the global object.
     void updateDocumentProperty();
-    void clearDocumentProperty();
 
     // Updates Activity Logger for the current context.
     void updateActivityLogger();

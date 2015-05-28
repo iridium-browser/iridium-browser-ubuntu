@@ -23,7 +23,26 @@ using device::HidService;
 using device::HidUsageAndPage;
 using net::IOBuffer;
 
+#if defined(OS_MACOSX)
+const uint64_t kTestDeviceIds[] = {1, 2, 3, 4, 5};
+#else
+const char* kTestDeviceIds[] = {"A", "B", "C", "D", "E"};
+#endif
+
 namespace device {
+
+// These report descriptors define two devices with 8-byte input, output and
+// feature reports. The first implements usage page 0xFF00 and has a single
+// report without and ID. The second implements usage page 0xFF01 and has a
+// single report with ID 1.
+const uint8 kReportDescriptor[] = {0x06, 0x00, 0xFF, 0x08, 0xA1, 0x01, 0x15,
+                                   0x00, 0x26, 0xFF, 0x00, 0x75, 0x08, 0x95,
+                                   0x08, 0x08, 0x81, 0x02, 0x08, 0x91, 0x02,
+                                   0x08, 0xB1, 0x02, 0xC0};
+const uint8 kReportDescriptorWithIDs[] = {
+    0x06, 0x01, 0xFF, 0x08, 0xA1, 0x01, 0x15, 0x00, 0x26,
+    0xFF, 0x00, 0x85, 0x01, 0x75, 0x08, 0x95, 0x08, 0x08,
+    0x81, 0x02, 0x08, 0x91, 0x02, 0x08, 0xB1, 0x02, 0xC0};
 
 class MockHidConnection : public HidConnection {
  public:
@@ -45,7 +64,7 @@ class MockHidConnection : public HidConnection {
   void PlatformWrite(scoped_refptr<net::IOBuffer> buffer,
                      size_t size,
                      const WriteCallback& callback) override {
-    const char kExpected[] = "This is a HID output report.";
+    const char kExpected[] = "o-report";  // 8 bytes
     bool result = false;
     if (size == sizeof(kExpected)) {
       uint8_t report_id = buffer->data()[0];
@@ -118,37 +137,31 @@ class MockHidService : public HidService {
   }
 
   void LazyFirstEnumeration() {
-    AddDevice("A", 0x18D1, 0x58F0, false);
-    AddDevice("B", 0x18D1, 0x58F0, true);
-    AddDevice("C", 0x18D1, 0x58F1, false);
+    AddDevice(kTestDeviceIds[0], 0x18D1, 0x58F0, false);
+    AddDevice(kTestDeviceIds[1], 0x18D1, 0x58F0, true);
+    AddDevice(kTestDeviceIds[2], 0x18D1, 0x58F1, false);
     FirstEnumerationComplete();
   }
 
-  void AddDevice(const std::string& device_id,
+  void AddDevice(const HidDeviceId& device_id,
                  int vendor_id,
                  int product_id,
                  bool report_id) {
-    scoped_refptr<HidDeviceInfo> device_info(new HidDeviceInfo());
-    device_info->device_id_ = device_id;
-    device_info->vendor_id_ = vendor_id;
-    device_info->product_id_ = product_id;
-    device_info->max_input_report_size_ = 128;
-    device_info->max_output_report_size_ = 128;
-    device_info->max_feature_report_size_ = 128;
-    {
-      HidCollectionInfo collection_info;
-      if (report_id) {
-        collection_info.usage =
-            HidUsageAndPage(0, HidUsageAndPage::kPageVendor);
-        collection_info.report_ids.insert(1);
-        device_info->has_report_id_ = true;
-      }
-      device_info->collections_.push_back(collection_info);
+    std::vector<uint8> report_descriptor;
+    if (report_id) {
+      report_descriptor.insert(
+          report_descriptor.begin(), kReportDescriptorWithIDs,
+          kReportDescriptorWithIDs + sizeof(kReportDescriptorWithIDs));
+    } else {
+      report_descriptor.insert(report_descriptor.begin(), kReportDescriptor,
+                               kReportDescriptor + sizeof(kReportDescriptor));
     }
-    HidService::AddDevice(device_info);
+    HidService::AddDevice(new HidDeviceInfo(device_id, vendor_id, product_id,
+                                            "", "", kHIDBusTypeUSB,
+                                            report_descriptor));
   }
 
-  void RemoveDevice(const std::string& device_id) {
+  void RemoveDevice(const HidDeviceId& device_id) {
     HidService::RemoveDevice(device_id);
   }
 };
@@ -183,8 +196,8 @@ IN_PROC_BROWSER_TEST_F(HidApiTest, OnDeviceAdded) {
 
   // Add a blocked device first so that the test will fail if a notification is
   // received.
-  hid_service_->AddDevice("D", 0x18D1, 0x58F1, false);
-  hid_service_->AddDevice("E", 0x18D1, 0x58F0, false);
+  hid_service_->AddDevice(kTestDeviceIds[3], 0x18D1, 0x58F1, false);
+  hid_service_->AddDevice(kTestDeviceIds[4], 0x18D1, 0x58F0, false);
   ASSERT_TRUE(result_listener.WaitUntilSatisfied());
   EXPECT_EQ("success", result_listener.message());
 }
@@ -197,11 +210,11 @@ IN_PROC_BROWSER_TEST_F(HidApiTest, OnDeviceRemoved) {
   ASSERT_TRUE(LoadApp("api_test/hid/remove_event"));
   ASSERT_TRUE(load_listener.WaitUntilSatisfied());
 
-  // Device C was not returned by chrome.usb.getDevices, the app will not get
+  // Device C was not returned by chrome.hid.getDevices, the app will not get
   // a notification.
-  hid_service_->RemoveDevice("C");
+  hid_service_->RemoveDevice(kTestDeviceIds[2]);
   // Device A was returned, the app will get a notification.
-  hid_service_->RemoveDevice("A");
+  hid_service_->RemoveDevice(kTestDeviceIds[0]);
   ASSERT_TRUE(result_listener.WaitUntilSatisfied());
   EXPECT_EQ("success", result_listener.message());
 }

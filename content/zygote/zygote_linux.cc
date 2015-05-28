@@ -11,7 +11,6 @@
 #include <sys/wait.h>
 
 #include "base/command_line.h"
-#include "base/debug/trace_event.h"
 #include "base/files/file_util.h"
 #include "base/linux_util.h"
 #include "base/logging.h"
@@ -22,6 +21,10 @@
 #include "base/posix/global_descriptors.h"
 #include "base/posix/unix_domain_socket_linux.h"
 #include "base/process/kill.h"
+#include "base/process/launch.h"
+#include "base/process/process.h"
+#include "base/process/process_handle.h"
+#include "base/trace_event/trace_event.h"
 #include "content/common/child_process_sandbox_support_impl_linux.h"
 #include "content/common/sandbox_linux/sandbox_linux.h"
 #include "content/common/set_process_title.h"
@@ -33,11 +36,6 @@
 #include "content/public/common/zygote_fork_delegate_linux.h"
 #include "ipc/ipc_channel.h"
 #include "ipc/ipc_switches.h"
-#include "sandbox/linux/services/syscall_wrappers.h"
-
-#if defined(ADDRESS_SANITIZER)
-#include <sanitizer/asan_interface.h>
-#endif
 
 // See http://code.google.com/p/chromium/wiki/LinuxZygote
 
@@ -108,7 +106,7 @@ bool Zygote::ProcessRequests() {
   action.sa_handler = &SIGCHLDHandler;
   CHECK(sigaction(SIGCHLD, &action, NULL) == 0);
 
-  if (UsingSUIDSandbox()) {
+  if (UsingSUIDSandbox() || UsingNSSandbox()) {
     // Let the ZygoteHost know we are ready to go.
     // The receiving code is in content/browser/zygote_host_linux.cc.
     bool r = UnixDomainSocket::SendMsg(kZygoteSocketPairFd,
@@ -149,6 +147,10 @@ bool Zygote::UsingSUIDSandbox() const {
   return sandbox_flags_ & kSandboxLinuxSUID;
 }
 
+bool Zygote::UsingNSSandbox() const {
+  return sandbox_flags_ & kSandboxLinuxUserNS;
+}
+
 bool Zygote::HandleRequestFromBrowser(int fd) {
   ScopedVector<base::ScopedFD> fds;
   char buf[kZygoteMaxMessageLength];
@@ -163,8 +165,9 @@ bool Zygote::HandleRequestFromBrowser(int fd) {
          it < extra_fds_.end(); ++it) {
       PCHECK(0 == IGNORE_EINTR(close(*it)));
     }
-#if !defined(ADDRESS_SANITIZER)
-    // TODO(earthdok): add watchdog thread before using this in non-ASAN builds.
+#if !defined(SANITIZER_COVERAGE)
+    // TODO(earthdok): add watchdog thread before using this in builds not
+    // using sanitizer coverage.
     CHECK(extra_children_.empty());
 #endif
     for (std::vector<base::ProcessHandle>::iterator it =
@@ -374,7 +377,7 @@ int Zygote::ForkWithRealPid(const std::string& process_type,
     CreatePipe(&read_pipe, &write_pipe);
     // This is roughly equivalent to a fork(). We are using ForkWithFlags mainly
     // to give it some more diverse test coverage.
-    pid = sandbox::ForkWithFlags(SIGCHLD, nullptr, nullptr);
+    pid = base::ForkWithFlags(SIGCHLD, nullptr, nullptr);
   }
 
   if (pid == 0) {
@@ -400,7 +403,7 @@ int Zygote::ForkWithRealPid(const std::string& process_type,
     IPC::Channel::SetGlobalPid(real_pid);
     // Force the real PID so chrome event data have a PID that corresponds
     // to system trace event data.
-    base::debug::TraceLog::GetInstance()->SetProcessID(
+    base::trace_event::TraceLog::GetInstance()->SetProcessID(
         static_cast<int>(real_pid));
 #endif
     return 0;

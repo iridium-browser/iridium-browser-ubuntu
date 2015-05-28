@@ -20,6 +20,7 @@
 #include "base/logging.h"
 #include "base/process/kill.h"
 #include "base/process/launch.h"
+#include "base/process/process.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_util.h"
 #include "base/strings/stringprintf.h"
@@ -53,6 +54,7 @@
 #include <sys/types.h>
 #elif defined(OS_WIN)
 #include "base/win/scoped_handle.h"
+#include "chrome/test/chromedriver/keycode_text_conversion.h"
 #endif
 
 namespace {
@@ -344,6 +346,10 @@ Status LaunchDesktopChrome(
   options.stderr_handle = out_write;
   options.stdin_handle = GetStdHandle(STD_INPUT_HANDLE);
   options.inherit_handles = true;
+
+  if (!SwitchToUSKeyboardLayout())
+    VLOG(0) << "Can not set to US keyboard layout - Some keycodes may be"
+        "interpreted incorrectly";
 #endif
 
 #if defined(OS_WIN)
@@ -387,7 +393,7 @@ Status LaunchDesktopChrome(
       return Status(kUnknownError,
                     "Chrome failed to start: " + termination_reason);
     }
-    if (!base::KillProcess(process.Handle(), 0, true)) {
+    if (!process.Terminate(0, true)) {
       int exit_code;
       if (base::GetTerminationStatus(process.Handle(), &exit_code) ==
           base::TERMINATION_STATUS_STILL_RUNNING)

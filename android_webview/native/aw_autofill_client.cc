@@ -66,8 +66,16 @@ PrefService* AwAutofillClient::GetPrefs() {
       AwContentBrowserClient::GetAwBrowserContext());
 }
 
+IdentityProvider* AwAutofillClient::GetIdentityProvider() {
+  return nullptr;
+}
+
+rappor::RapporService* AwAutofillClient::GetRapporService() {
+  return nullptr;
+}
+
 autofill::PersonalDataManager* AwAutofillClient::GetPersonalDataManager() {
-  return NULL;
+  return nullptr;
 }
 
 scoped_refptr<autofill::AutofillWebDataService>
@@ -152,7 +160,7 @@ bool AwAutofillClient::IsAutocompleteEnabled() {
   return GetSaveFormData();
 }
 
-void AwAutofillClient::DetectAccountCreationForms(
+void AwAutofillClient::PropagateAutofillPredictions(
     content::RenderFrameHost* rfh,
     const std::vector<autofill::FormStructure*>& forms) {
 
@@ -164,6 +172,11 @@ void AwAutofillClient::DidFillOrPreviewField(
 }
 
 void AwAutofillClient::OnFirstUserGestureObserved() {
+  NOTIMPLEMENTED();
+}
+
+void AwAutofillClient::LinkClicked(const GURL& url,
+                                   WindowOpenDisposition disposition) {
   NOTIMPLEMENTED();
 }
 
@@ -190,7 +203,7 @@ void AwAutofillClient::ShowUnmaskPrompt(
   NOTIMPLEMENTED();
 }
 
-void AwAutofillClient::OnUnmaskVerificationResult(bool success) {
+void AwAutofillClient::OnUnmaskVerificationResult(GetRealPanResult result) {
   NOTIMPLEMENTED();
 }
 

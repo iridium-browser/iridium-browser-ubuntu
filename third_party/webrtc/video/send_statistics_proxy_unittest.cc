@@ -49,15 +49,14 @@ class SendStatisticsProxyTest : public ::testing::Test {
     EXPECT_EQ(one.suspended, other.suspended);
 
     EXPECT_EQ(one.substreams.size(), other.substreams.size());
-    for (std::map<uint32_t, SsrcStats>::const_iterator it =
+    for (std::map<uint32_t, VideoSendStream::StreamStats>::const_iterator it =
              one.substreams.begin();
-         it != one.substreams.end();
-         ++it) {
-      std::map<uint32_t, SsrcStats>::const_iterator corresponding_it =
-          other.substreams.find(it->first);
+         it != one.substreams.end(); ++it) {
+      std::map<uint32_t, VideoSendStream::StreamStats>::const_iterator
+          corresponding_it = other.substreams.find(it->first);
       ASSERT_TRUE(corresponding_it != other.substreams.end());
-      const SsrcStats& a = it->second;
-      const SsrcStats& b = corresponding_it->second;
+      const VideoSendStream::StreamStats& a = it->second;
+      const VideoSendStream::StreamStats& b = corresponding_it->second;
 
       EXPECT_EQ(a.frame_counts.key_frames, b.frame_counts.key_frames);
       EXPECT_EQ(a.frame_counts.delta_frames, b.frame_counts.delta_frames);
@@ -65,13 +64,17 @@ class SendStatisticsProxyTest : public ::testing::Test {
       EXPECT_EQ(a.avg_delay_ms, b.avg_delay_ms);
       EXPECT_EQ(a.max_delay_ms, b.max_delay_ms);
 
-      EXPECT_EQ(a.rtp_stats.bytes, b.rtp_stats.bytes);
-      EXPECT_EQ(a.rtp_stats.header_bytes, b.rtp_stats.header_bytes);
-      EXPECT_EQ(a.rtp_stats.padding_bytes, b.rtp_stats.padding_bytes);
-      EXPECT_EQ(a.rtp_stats.packets, b.rtp_stats.packets);
-      EXPECT_EQ(a.rtp_stats.retransmitted_packets,
-                b.rtp_stats.retransmitted_packets);
-      EXPECT_EQ(a.rtp_stats.fec_packets, b.rtp_stats.fec_packets);
+      EXPECT_EQ(a.rtp_stats.transmitted.payload_bytes,
+                b.rtp_stats.transmitted.payload_bytes);
+      EXPECT_EQ(a.rtp_stats.transmitted.header_bytes,
+                b.rtp_stats.transmitted.header_bytes);
+      EXPECT_EQ(a.rtp_stats.transmitted.padding_bytes,
+                b.rtp_stats.transmitted.padding_bytes);
+      EXPECT_EQ(a.rtp_stats.transmitted.packets,
+                b.rtp_stats.transmitted.packets);
+      EXPECT_EQ(a.rtp_stats.retransmitted.packets,
+                b.rtp_stats.retransmitted.packets);
+      EXPECT_EQ(a.rtp_stats.fec.packets, b.rtp_stats.fec.packets);
 
       EXPECT_EQ(a.rtcp_stats.fraction_lost, b.rtcp_stats.fraction_lost);
       EXPECT_EQ(a.rtcp_stats.cumulative_lost, b.rtcp_stats.cumulative_lost);
@@ -81,13 +84,14 @@ class SendStatisticsProxyTest : public ::testing::Test {
     }
   }
 
-  scoped_ptr<SendStatisticsProxy> statistics_proxy_;
+  rtc::scoped_ptr<SendStatisticsProxy> statistics_proxy_;
   SimulatedClock fake_clock_;
   VideoSendStream::Config config_;
   int avg_delay_ms_;
   int max_delay_ms_;
   VideoSendStream::Stats expected_;
-  typedef std::map<uint32_t, SsrcStats>::const_iterator StreamIterator;
+  typedef std::map<uint32_t, VideoSendStream::StreamStats>::const_iterator
+      StreamIterator;
 };
 
 TEST_F(SendStatisticsProxyTest, RtcpStatistics) {
@@ -96,7 +100,7 @@ TEST_F(SendStatisticsProxyTest, RtcpStatistics) {
        it != config_.rtp.ssrcs.end();
        ++it) {
     const uint32_t ssrc = *it;
-    SsrcStats& ssrc_stats = expected_.substreams[ssrc];
+    VideoSendStream::StreamStats& ssrc_stats = expected_.substreams[ssrc];
 
     // Add statistics with some arbitrary, but unique, numbers.
     uint32_t offset = ssrc * sizeof(RtcpStatistics);
@@ -110,7 +114,7 @@ TEST_F(SendStatisticsProxyTest, RtcpStatistics) {
        it != config_.rtp.rtx.ssrcs.end();
        ++it) {
     const uint32_t ssrc = *it;
-    SsrcStats& ssrc_stats = expected_.substreams[ssrc];
+    VideoSendStream::StreamStats& ssrc_stats = expected_.substreams[ssrc];
 
     // Add statistics with some arbitrary, but unique, numbers.
     uint32_t offset = ssrc * sizeof(RtcpStatistics);
@@ -122,16 +126,6 @@ TEST_F(SendStatisticsProxyTest, RtcpStatistics) {
   }
   VideoSendStream::Stats stats = statistics_proxy_->GetStats();
   ExpectEqual(expected_, stats);
-}
-
-TEST_F(SendStatisticsProxyTest, CaptureFramerate) {
-  const int capture_fps = 31;
-
-  ViECaptureObserver* capture_observer = statistics_proxy_.get();
-  capture_observer->CapturedFrameRate(0, capture_fps);
-
-  VideoSendStream::Stats stats = statistics_proxy_->GetStats();
-  EXPECT_EQ(capture_fps, stats.input_frame_rate);
 }
 
 TEST_F(SendStatisticsProxyTest, EncodedBitrateAndFramerate) {
@@ -167,8 +161,8 @@ TEST_F(SendStatisticsProxyTest, FrameCounts) {
        ++it) {
     const uint32_t ssrc = *it;
     // Add statistics with some arbitrary, but unique, numbers.
-    SsrcStats& stats = expected_.substreams[ssrc];
-    uint32_t offset = ssrc * sizeof(SsrcStats);
+    VideoSendStream::StreamStats& stats = expected_.substreams[ssrc];
+    uint32_t offset = ssrc * sizeof(VideoSendStream::StreamStats);
     FrameCounts frame_counts;
     frame_counts.key_frames = offset;
     frame_counts.delta_frames = offset + 1;
@@ -180,8 +174,8 @@ TEST_F(SendStatisticsProxyTest, FrameCounts) {
        ++it) {
     const uint32_t ssrc = *it;
     // Add statistics with some arbitrary, but unique, numbers.
-    SsrcStats& stats = expected_.substreams[ssrc];
-    uint32_t offset = ssrc * sizeof(SsrcStats);
+    VideoSendStream::StreamStats& stats = expected_.substreams[ssrc];
+    uint32_t offset = ssrc * sizeof(VideoSendStream::StreamStats);
     FrameCounts frame_counts;
     frame_counts.key_frames = offset;
     frame_counts.delta_frames = offset + 1;
@@ -203,12 +197,12 @@ TEST_F(SendStatisticsProxyTest, DataCounters) {
     // Add statistics with some arbitrary, but unique, numbers.
     size_t offset = ssrc * sizeof(StreamDataCounters);
     uint32_t offset_uint32 = static_cast<uint32_t>(offset);
-    counters.bytes = offset;
-    counters.header_bytes = offset + 1;
-    counters.fec_packets = offset_uint32 + 2;
-    counters.padding_bytes = offset + 3;
-    counters.retransmitted_packets = offset_uint32 + 4;
-    counters.packets = offset_uint32 + 5;
+    counters.transmitted.payload_bytes = offset;
+    counters.transmitted.header_bytes = offset + 1;
+    counters.fec.packets = offset_uint32 + 2;
+    counters.transmitted.padding_bytes = offset + 3;
+    counters.retransmitted.packets = offset_uint32 + 4;
+    counters.transmitted.packets = offset_uint32 + 5;
     callback->DataCountersUpdated(counters, ssrc);
   }
   for (std::vector<uint32_t>::const_iterator it = config_.rtp.rtx.ssrcs.begin();
@@ -219,12 +213,12 @@ TEST_F(SendStatisticsProxyTest, DataCounters) {
     // Add statistics with some arbitrary, but unique, numbers.
     size_t offset = ssrc * sizeof(StreamDataCounters);
     uint32_t offset_uint32 = static_cast<uint32_t>(offset);
-    counters.bytes = offset;
-    counters.header_bytes = offset + 1;
-    counters.fec_packets = offset_uint32 + 2;
-    counters.padding_bytes = offset + 3;
-    counters.retransmitted_packets = offset_uint32 + 4;
-    counters.packets = offset_uint32 + 5;
+    counters.transmitted.payload_bytes = offset;
+    counters.transmitted.header_bytes = offset + 1;
+    counters.fec.packets = offset_uint32 + 2;
+    counters.transmitted.padding_bytes = offset + 3;
+    counters.retransmitted.packets = offset_uint32 + 4;
+    counters.transmitted.packets = offset_uint32 + 5;
     callback->DataCountersUpdated(counters, ssrc);
   }
 
@@ -296,7 +290,7 @@ TEST_F(SendStatisticsProxyTest, SendSideDelay) {
 }
 
 TEST_F(SendStatisticsProxyTest, NoSubstreams) {
-  uint32_t exluded_ssrc =
+  uint32_t excluded_ssrc =
       std::max(
           *std::max_element(config_.rtp.ssrcs.begin(), config_.rtp.ssrcs.end()),
           *std::max_element(config_.rtp.rtx.ssrcs.begin(),
@@ -305,24 +299,19 @@ TEST_F(SendStatisticsProxyTest, NoSubstreams) {
   // From RtcpStatisticsCallback.
   RtcpStatistics rtcp_stats;
   RtcpStatisticsCallback* rtcp_callback = statistics_proxy_.get();
-  rtcp_callback->StatisticsUpdated(rtcp_stats, exluded_ssrc);
-
-  // From StreamDataCountersCallback.
-  StreamDataCounters rtp_stats;
-  StreamDataCountersCallback* rtp_callback = statistics_proxy_.get();
-  rtp_callback->DataCountersUpdated(rtp_stats, exluded_ssrc);
+  rtcp_callback->StatisticsUpdated(rtcp_stats, excluded_ssrc);
 
   // From BitrateStatisticsObserver.
   BitrateStatistics total;
   BitrateStatistics retransmit;
   BitrateStatisticsObserver* bitrate_observer = statistics_proxy_.get();
-  bitrate_observer->Notify(total, retransmit, exluded_ssrc);
+  bitrate_observer->Notify(total, retransmit, excluded_ssrc);
 
   // From FrameCountObserver.
   FrameCountObserver* fps_observer = statistics_proxy_.get();
   FrameCounts frame_counts;
   frame_counts.key_frames = 1;
-  fps_observer->FrameCountUpdated(frame_counts, exluded_ssrc);
+  fps_observer->FrameCountUpdated(frame_counts, excluded_ssrc);
 
   VideoSendStream::Stats stats = statistics_proxy_->GetStats();
   EXPECT_TRUE(stats.substreams.empty());
@@ -343,16 +332,16 @@ TEST_F(SendStatisticsProxyTest, EncodedResolutionTimesOut) {
   statistics_proxy_->OnSendEncodedImage(encoded_image, &rtp_video_header);
 
   VideoSendStream::Stats stats = statistics_proxy_->GetStats();
-  EXPECT_EQ(kEncodedWidth, stats.substreams[config_.rtp.ssrcs[0]].sent_width);
-  EXPECT_EQ(kEncodedHeight, stats.substreams[config_.rtp.ssrcs[0]].sent_height);
-  EXPECT_EQ(kEncodedWidth, stats.substreams[config_.rtp.ssrcs[1]].sent_width);
-  EXPECT_EQ(kEncodedHeight, stats.substreams[config_.rtp.ssrcs[1]].sent_height);
+  EXPECT_EQ(kEncodedWidth, stats.substreams[config_.rtp.ssrcs[0]].width);
+  EXPECT_EQ(kEncodedHeight, stats.substreams[config_.rtp.ssrcs[0]].height);
+  EXPECT_EQ(kEncodedWidth, stats.substreams[config_.rtp.ssrcs[1]].width);
+  EXPECT_EQ(kEncodedHeight, stats.substreams[config_.rtp.ssrcs[1]].height);
 
   // Forward almost to timeout, this should not have removed stats.
   fake_clock_.AdvanceTimeMilliseconds(SendStatisticsProxy::kStatsTimeoutMs - 1);
   stats = statistics_proxy_->GetStats();
-  EXPECT_EQ(kEncodedWidth, stats.substreams[config_.rtp.ssrcs[0]].sent_width);
-  EXPECT_EQ(kEncodedHeight, stats.substreams[config_.rtp.ssrcs[0]].sent_height);
+  EXPECT_EQ(kEncodedWidth, stats.substreams[config_.rtp.ssrcs[0]].width);
+  EXPECT_EQ(kEncodedHeight, stats.substreams[config_.rtp.ssrcs[0]].height);
 
   // Update the first SSRC with bogus RTCP stats to make sure that encoded
   // resolution still times out (no global timeout for all stats).
@@ -369,10 +358,10 @@ TEST_F(SendStatisticsProxyTest, EncodedResolutionTimesOut) {
   // reported, but substream 1 should.
   fake_clock_.AdvanceTimeMilliseconds(1);
   stats = statistics_proxy_->GetStats();
-  EXPECT_EQ(0, stats.substreams[config_.rtp.ssrcs[0]].sent_width);
-  EXPECT_EQ(0, stats.substreams[config_.rtp.ssrcs[0]].sent_height);
-  EXPECT_EQ(kEncodedWidth, stats.substreams[config_.rtp.ssrcs[1]].sent_width);
-  EXPECT_EQ(kEncodedHeight, stats.substreams[config_.rtp.ssrcs[1]].sent_height);
+  EXPECT_EQ(0, stats.substreams[config_.rtp.ssrcs[0]].width);
+  EXPECT_EQ(0, stats.substreams[config_.rtp.ssrcs[0]].height);
+  EXPECT_EQ(kEncodedWidth, stats.substreams[config_.rtp.ssrcs[1]].width);
+  EXPECT_EQ(kEncodedHeight, stats.substreams[config_.rtp.ssrcs[1]].height);
 }
 
 }  // namespace webrtc

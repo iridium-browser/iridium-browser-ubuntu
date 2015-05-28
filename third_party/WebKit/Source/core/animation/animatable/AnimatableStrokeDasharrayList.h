@@ -32,7 +32,7 @@
 #define AnimatableStrokeDasharrayList_h
 
 #include "core/animation/animatable/AnimatableRepeatable.h"
-#include "core/svg/SVGLengthList.h"
+#include "core/style/SVGComputedStyleDefs.h"
 
 namespace blink {
 
@@ -40,23 +40,23 @@ class AnimatableStrokeDasharrayList final : public AnimatableRepeatable {
 public:
     virtual ~AnimatableStrokeDasharrayList() { }
 
-    static PassRefPtrWillBeRawPtr<AnimatableStrokeDasharrayList> create(PassRefPtrWillBeRawPtr<SVGLengthList> lengths)
+    static PassRefPtrWillBeRawPtr<AnimatableStrokeDasharrayList> create(PassRefPtr<SVGDashArray> lengths, float zoom)
     {
-        return adoptRefWillBeNoop(new AnimatableStrokeDasharrayList(lengths));
+        return adoptRefWillBeNoop(new AnimatableStrokeDasharrayList(lengths, zoom));
     }
 
-    PassRefPtrWillBeRawPtr<SVGLengthList> toSVGLengthList() const;
+    PassRefPtr<SVGDashArray> toSVGDashArray(float zoom) const;
 
-    virtual void trace(Visitor*) override;
+    DECLARE_VIRTUAL_TRACE();
 
 protected:
     virtual PassRefPtrWillBeRawPtr<AnimatableValue> interpolateTo(const AnimatableValue*, double fraction) const override;
     virtual bool usesDefaultInterpolationWith(const AnimatableValue*) const override;
 
 private:
-    explicit AnimatableStrokeDasharrayList(PassRefPtrWillBeRawPtr<SVGLengthList>);
+    AnimatableStrokeDasharrayList(PassRefPtr<SVGDashArray>, float zoom);
     // This will consume the vector passed into it.
-    AnimatableStrokeDasharrayList(WillBeHeapVector<RefPtrWillBeMember<AnimatableValue> >& values)
+    AnimatableStrokeDasharrayList(WillBeHeapVector<RefPtrWillBeMember<AnimatableValue>>& values)
         : AnimatableRepeatable(values)
     {
     }

@@ -7,6 +7,8 @@
 
 #include "build/build_config.h"
 
+#include <vector>
+
 #include "base/files/file.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util_proxy.h"
@@ -19,7 +21,6 @@
 #include "content/public/browser/browser_child_process_host_delegate.h"
 #include "content/public/browser/browser_child_process_host_iterator.h"
 #include "ipc/ipc_channel_handle.h"
-#include "native_client/src/public/nacl_file_info.h"
 #include "net/socket/socket_descriptor.h"
 #include "ppapi/shared_impl/ppapi_permissions.h"
 #include "url/gurl.h"
@@ -34,6 +35,17 @@ class ChannelProxy;
 }
 
 namespace nacl {
+
+// NaClFileToken is a single-use nonce that the NaCl loader process can use
+// to query the browser process for trusted information about a file.  This
+// helps establish that the file is known by the browser to be immutable
+// and suitable for file-identity-based validation caching.  lo == 0 && hi
+// == 0 indicates the token is invalid and no additional information is
+// available.
+struct NaClFileToken {
+  uint64_t lo;
+  uint64_t hi;
+};
 
 class NaClHostMessageFilter;
 void* AllocateAddressSpaceASLR(base::ProcessHandle process, size_t size);
@@ -50,6 +62,7 @@ class NaClProcessHost : public content::BrowserChildProcessHostDelegate {
   // executed.
   // nexe_file: A file that corresponds to the nexe module to be loaded.
   // nexe_token: A cache validation token for nexe_file.
+  // prefetched_resource_files_info: An array of resource files prefetched.
   // permissions: PPAPI permissions, to control access to private APIs.
   // render_view_id: RenderView routing id, to control access to private APIs.
   // permission_bits: controls which interfaces the NaCl plugin can use.
@@ -57,16 +70,19 @@ class NaClProcessHost : public content::BrowserChildProcessHostDelegate {
   // off_the_record: was the process launched from an incognito renderer?
   // process_type: the type of NaCl process.
   // profile_directory: is the path of current profile directory.
-  NaClProcessHost(const GURL& manifest_url,
-                  base::File nexe_file,
-                  const NaClFileToken& nexe_token,
-                  ppapi::PpapiPermissions permissions,
-                  int render_view_id,
-                  uint32 permission_bits,
-                  bool uses_nonsfi_mode,
-                  bool off_the_record,
-                  NaClAppProcessType process_type,
-                  const base::FilePath& profile_directory);
+  NaClProcessHost(
+      const GURL& manifest_url,
+      base::File nexe_file,
+      const NaClFileToken& nexe_token,
+      const std::vector<
+        nacl::NaClResourceFileInfo>& prefetched_resource_files_info,
+      ppapi::PpapiPermissions permissions,
+      int render_view_id,
+      uint32 permission_bits,
+      bool uses_nonsfi_mode,
+      bool off_the_record,
+      NaClAppProcessType process_type,
+      const base::FilePath& profile_directory);
   ~NaClProcessHost() override;
 
   void OnProcessCrashed(int exit_status) override;
@@ -182,6 +198,7 @@ class NaClProcessHost : public content::BrowserChildProcessHostDelegate {
   GURL manifest_url_;
   base::File nexe_file_;
   NaClFileToken nexe_token_;
+  std::vector<nacl::NaClResourceFileInfo> prefetched_resource_files_info_;
 
   ppapi::PpapiPermissions permissions_;
 

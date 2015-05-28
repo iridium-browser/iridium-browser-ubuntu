@@ -10,10 +10,11 @@
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/android/tab_android.h"
 #include "chrome/browser/browser_process.h"
-#include "chrome/browser/history/top_sites.h"
+#include "chrome/browser/history/top_sites_factory.h"
 #include "chrome/browser/profiles/profile_manager.h"
 #include "chrome/browser/ui/android/tab_model/tab_model.h"
 #include "chrome/browser/ui/android/tab_model/tab_model_list.h"
+#include "components/history/core/browser/top_sites.h"
 #include "content/public/browser/devtools_agent_host.h"
 #include "content/public/browser/devtools_target.h"
 #include "content/public/browser/favicon_status.h"
@@ -54,17 +55,17 @@ base::TimeTicks GetLastActiveTimeForAgentHost(
 class TargetBase : public content::DevToolsTarget {
  public:
   // content::DevToolsTarget implementation:
-  virtual std::string GetParentId() const override { return std::string(); }
+  std::string GetParentId() const override { return std::string(); }
 
-  virtual std::string GetTitle() const override { return title_; }
+  std::string GetTitle() const override { return title_; }
 
-  virtual std::string GetDescription() const override { return std::string(); }
+  std::string GetDescription() const override { return std::string(); }
 
-  virtual GURL GetURL() const override { return url_; }
+  GURL GetURL() const override { return url_; }
 
-  virtual GURL GetFaviconURL() const override { return favicon_url_; }
+  GURL GetFaviconURL() const override { return favicon_url_; }
 
-  virtual base::TimeTicks GetLastActivityTime() const override {
+  base::TimeTicks GetLastActivityTime() const override {
     return last_activity_time_;
   }
 
@@ -109,15 +110,11 @@ class TabTarget : public TargetBase {
   }
 
   // content::DevToolsTarget implementation:
-  virtual std::string GetId() const override {
-    return base::IntToString(tab_id_);
-  }
+  std::string GetId() const override { return base::IntToString(tab_id_); }
 
-  virtual std::string GetType() const override {
-    return kTargetTypePage;
-  }
+  std::string GetType() const override { return kTargetTypePage; }
 
-  virtual bool IsAttached() const override {
+  bool IsAttached() const override {
     TabModel* model;
     int index;
     if (!FindTab(&model, &index))
@@ -128,7 +125,7 @@ class TabTarget : public TargetBase {
     return DevToolsAgentHost::IsDebuggerAttached(web_contents);
   }
 
-  virtual scoped_refptr<DevToolsAgentHost> GetAgentHost() const override {
+  scoped_refptr<DevToolsAgentHost> GetAgentHost() const override {
     TabModel* model;
     int index;
     if (!FindTab(&model, &index))
@@ -150,7 +147,7 @@ class TabTarget : public TargetBase {
     return DevToolsAgentHost::GetOrCreateFor(web_contents);
   }
 
-  virtual bool Activate() const override {
+  bool Activate() const override {
     TabModel* model;
     int index;
     if (!FindTab(&model, &index))
@@ -159,7 +156,7 @@ class TabTarget : public TargetBase {
     return true;
   }
 
-  virtual bool Close() const override {
+  bool Close() const override {
     TabModel* model;
     int index;
     if (!FindTab(&model, &index))
@@ -206,11 +203,9 @@ class NonTabTarget : public TargetBase {
   }
 
   // content::DevToolsTarget implementation:
-  virtual std::string GetId() const override {
-    return agent_host_->GetId();
-  }
+  std::string GetId() const override { return agent_host_->GetId(); }
 
-  virtual std::string GetType() const override {
+  std::string GetType() const override {
     switch (agent_host_->GetType()) {
       case DevToolsAgentHost::TYPE_WEB_CONTENTS:
         if (TabModelList::begin() == TabModelList::end()) {
@@ -227,21 +222,15 @@ class NonTabTarget : public TargetBase {
     return kTargetTypeOther;
   }
 
-  virtual bool IsAttached() const override {
-    return agent_host_->IsAttached();
-  }
+  bool IsAttached() const override { return agent_host_->IsAttached(); }
 
-  virtual scoped_refptr<DevToolsAgentHost> GetAgentHost() const override {
+  scoped_refptr<DevToolsAgentHost> GetAgentHost() const override {
     return agent_host_;
   }
 
-  virtual bool Activate() const override {
-    return agent_host_->Activate();
-  }
+  bool Activate() const override { return agent_host_->Activate(); }
 
-  virtual bool Close() const override {
-    return agent_host_->Close();
-  }
+  bool Close() const override { return agent_host_->Close(); }
 
  private:
   scoped_refptr<DevToolsAgentHost> agent_host_;
@@ -337,7 +326,8 @@ void DevToolsManagerDelegateAndroid::EnumerateTargets(TargetCallback callback) {
 std::string DevToolsManagerDelegateAndroid::GetPageThumbnailData(
     const GURL& url) {
   Profile* profile = ProfileManager::GetLastUsedProfile()->GetOriginalProfile();
-  history::TopSites* top_sites = profile->GetTopSites();
+  scoped_refptr<history::TopSites> top_sites =
+      TopSitesFactory::GetForProfile(profile);
   if (top_sites) {
     scoped_refptr<base::RefCountedMemory> data;
     if (top_sites->GetPageThumbnail(url, false, &data))

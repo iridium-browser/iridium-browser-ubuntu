@@ -4,6 +4,8 @@
 
 import("//build/config/features.gni")
 import("//build/config/ui.gni")
+import("//testing/test.gni")
+import("//tools/grit/repack.gni")
 
 # Collection of all components. You wouldn't link to this, but this is rather
 # to reference the files so they can be compiled by the build system.
@@ -18,6 +20,7 @@ group("all_components") {
     "//components/autofill/content/renderer",
     "//components/bookmarks/browser",
     "//components/bookmarks/common",
+    "//components/bookmarks/managed",
     "//components/bookmarks/test",
     "//components/captive_portal",
     "//components/cdm/browser",
@@ -27,12 +30,12 @@ group("all_components") {
     "//components/component_updater",
     "//components/content_settings/core/browser",
     "//components/content_settings/core/common",
-    "//components/copresence_endpoints",
     "//components/crash/app",
     "//components/crash/browser",
     "//components/crx_file",
     "//components/data_reduction_proxy/core/browser",
     "//components/data_reduction_proxy/core/common",
+    "//components/device_event_log",
     "//components/dom_distiller/core",
     "//components/domain_reliability",
     "//components/enhanced_bookmarks",
@@ -41,6 +44,7 @@ group("all_components") {
     "//components/feedback",
     "//components/gcm_driver",
     "//components/google/core/browser",
+    "//components/history/content/browser",
     "//components/history/core/browser",
     "//components/history/core/common",
     "//components/history/core/test",
@@ -107,11 +111,16 @@ group("all_components") {
     "//components/web_cache/common",
     "//components/web_cache/renderer",
     "//components/web_modal",
-    "//components/webdata/common",
     "//components/web_resource",
+    "//components/webdata/common",
+    "//components/webui_generator",
     "//components/wifi",
     "//components/wifi_sync",
   ]
+
+  if (!enable_configuration_policy) {
+    deps -= [ "//components/policy" ]
+  }
 
   if (!is_win && !is_mac) {
     deps -= [ "//components/wifi" ]
@@ -124,8 +133,9 @@ group("all_components") {
   }
   if (is_ios) {
     deps -= [
+      "//components/history/content/browser",
       "//components/keyed_service/content",
-      "//components/copresence_endpoints",
+      "//components/webui_generator",
     ]
   }
 
@@ -153,8 +163,8 @@ group("all_components") {
       "//components/data_reduction_proxy/core/common",  # Should work, needs checking.
       "//components/dom_distiller/core",  # Blocked on content.
       "//components/domain_reliability",  # Blocked on content.
-      "//components/favicon_base",  # Should work, needs checking.
       "//components/favicon/core",  # Blocked on keyed service.
+      "//components/favicon_base",  # Should work, needs checking.
       "//components/feedback",  # Blocked on content.
       "//components/gcm_driver",  # Should work, needs checking.
       "//components/google/core/browser",  # Should work, needs checking.
@@ -202,7 +212,10 @@ group("all_components") {
   }
 
   if (!is_ios) {
-    deps += [ "//components/app_modal" ]
+    deps += [
+      "//components/app_modal",
+      "//components/browsing_data",
+    ]
   }
 
   if (toolkit_views) {
@@ -228,23 +241,28 @@ test("components_unittests") {
     "//components/autofill/core/browser:unit_tests",
     "//components/autofill/core/common:unit_tests",
     "//components/bookmarks/browser:unit_tests",
+    "//components/bookmarks/managed:unit_tests",
     "//components/captive_portal:unit_tests",
     "//components/cloud_devices/common:unit_tests",
-    "//components/component_updater:unit_tests",
     "//components/content_settings/core/browser:unit_tests",
     "//components/content_settings/core/common:unit_tests",
     "//components/crx_file:unit_tests",
+    "//components/data_reduction_proxy/content/browser:unit_tests",
     "//components/data_reduction_proxy/core/browser:unit_tests",
     "//components/data_reduction_proxy/core/common:unit_tests",
+    "//components/device_event_log:unit_tests",
     "//components/dom_distiller/core:unit_tests",
     "//components/domain_reliability:unit_tests",
+    "//components/favicon_base:unit_tests",
     "//components/google/core/browser:unit_tests",
+    "//components/invalidation:unittests",
     "//components/login:unit_tests",
     "//components/metrics:unit_tests",
     "//components/omnibox:unit_tests",
     "//components/ownership:unit_tests",
     "//components/packed_ct_ev_whitelist:unit_tests",
     "//components/proximity_auth:unit_tests",
+    "//components/update_client:unit_tests",
     "//components/variations:unit_tests",
     "//components/web_resource:unit_tests",
     "//components/webdata/common:unit_tests",
@@ -255,6 +273,7 @@ test("components_unittests") {
     "//content/test:test_support",
     "//ui/base",
   ]
+  data_deps = [ ":components_tests_pak" ]
 
   # TODO(GYP) need this target.
   #'breakpad/app/crash_keys_win_unittest.cc',
@@ -266,4 +285,93 @@ test("components_unittests") {
     # TODO(GYP) enable this as above.
     #deps += [ "//components/constrained_window:unit_tests" ]
   }
+  if (is_win) {
+    deps += [ "//components/browser_watcher:unit_tests" ]
+  }
+}
+
+repack("components_tests_pak") {
+  sources = [
+    "$root_gen_dir/components/components_resources.pak",
+    "$root_gen_dir/components/strings/components_strings_en-US.pak",
+    "$root_gen_dir/ui/resources/ui_resources_100_percent.pak",
+    "$root_gen_dir/ui/resources/webui_resources.pak",
+    "$root_gen_dir/ui/strings/app_locale_settings_en-US.pak",
+    "$root_gen_dir/ui/strings/ui_strings_en-US.pak",
+  ]
+
+  output = "$root_out_dir/components_tests_resources.pak"
+
+  deps = [
+    "//components/resources",
+    "//components/strings",
+    "//ui/resources",
+    "//ui/strings",
+  ]
+}
+
+test("components_browsertests") {
+  sources = [
+    "autofill/content/browser/risk/fingerprint_browsertest.cc",
+    "autofill/content/renderer/password_form_conversion_utils_browsertest.cc",
+    "dom_distiller/content/distillable_page_utils_browsertest.cc",
+    "dom_distiller/content/distiller_page_web_contents_browsertest.cc",
+    "password_manager/content/renderer/credential_manager_client_browsertest.cc",
+  ]
+
+  defines = [ "HAS_OUT_OF_PROC_TEST_RUNNER" ]
+
+  deps = [
+    "autofill/content/browser",
+    "autofill/content/renderer",
+    "content_settings/core/common",
+    "dom_distiller/content",
+    "dom_distiller/core",
+    "dom_distiller/core:test_support",
+    "password_manager/content/browser",
+    "password_manager/content/common",
+    "password_manager/content/renderer",
+    "strings",
+    "//base",
+    "//base/test:test_support",
+    "//content/test:browsertest_support",
+    "//content/test:test_support",
+
+    "//testing/gmock",
+    "//testing/gtest",
+    "//ui/base",
+  ]
+
+  data_deps = [ ":components_tests_pak" ]
+
+  if (is_android) {
+    sources -= [ "autofill/content/browser/risk/fingerprint_browsertest.cc" ]
+  }
+
+  if (is_linux) {
+    # content_extractor_browsertest is a standalone content extraction tool built as
+    # a MANUAL component_browsertest.
+    sources += [ "dom_distiller/standalone/content_extractor_browsertest.cc" ]
+    deps += [
+      "pref_registry:test_support",
+      "//base:prefs_test_support",
+    ]
+  }
+}
+
+test("components_perftests") {
+  sources = [
+    "visitedlink/test/visitedlink_perftest.cc",
+  ]
+
+  # TODO(jschuh): crbug.com/167187 fix size_t to int truncations.
+  configs += [ "//build/config/compiler:no_size_t_to_int_warning" ]
+
+  deps = [
+    "//base",
+    "//base/test:test_support_perf",
+    "//testing/gtest",
+    "//content/test:test_support",
+    "//components/visitedlink/browser",
+  ]
 }

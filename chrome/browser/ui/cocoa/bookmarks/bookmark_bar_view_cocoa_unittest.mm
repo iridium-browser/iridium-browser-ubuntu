@@ -22,11 +22,16 @@
 #include "testing/platform_test.h"
 #import "third_party/mozilla/NSPasteboard+Utils.h"
 
+using bookmarks::BookmarkModel;
+using bookmarks::BookmarkNode;
+
 namespace {
+
 // Some values used for mocks and fakes.
 const CGFloat kFakeIndicatorPos = 7.0;
 const NSPoint kPoint = {10, 10};
-};
+
+}  // namespace
 
 // Fake DraggingInfo, fake BookmarkBarController, fake NSPasteboard...
 @interface FakeBookmarkDraggingInfo : NSObject {

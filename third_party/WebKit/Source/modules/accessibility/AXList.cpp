@@ -30,15 +30,15 @@
 #include "modules/accessibility/AXList.h"
 
 #include "core/html/HTMLUListElement.h"
-#include "core/rendering/RenderObject.h"
+#include "core/layout/LayoutObject.h"
 #include "modules/accessibility/AXObjectCacheImpl.h"
 
 namespace blink {
 
 using namespace HTMLNames;
 
-AXList::AXList(RenderObject* renderer, AXObjectCacheImpl* axObjectCache)
-    : AXRenderObject(renderer, axObjectCache)
+AXList::AXList(LayoutObject* layoutObject, AXObjectCacheImpl* axObjectCache)
+    : AXLayoutObject(layoutObject, axObjectCache)
 {
 }
 
@@ -46,9 +46,9 @@ AXList::~AXList()
 {
 }
 
-PassRefPtr<AXList> AXList::create(RenderObject* renderer, AXObjectCacheImpl* axObjectCache)
+PassRefPtr<AXList> AXList::create(LayoutObject* layoutObject, AXObjectCacheImpl* axObjectCache)
 {
-    return adoptRef(new AXList(renderer, axObjectCache));
+    return adoptRef(new AXList(layoutObject, axObjectCache));
 }
 
 bool AXList::computeAccessibilityIsIgnored() const
@@ -58,10 +58,10 @@ bool AXList::computeAccessibilityIsIgnored() const
 
 bool AXList::isDescriptionList() const
 {
-    if (!m_renderer)
+    if (!m_layoutObject)
         return false;
 
-    Node* node = m_renderer->node();
+    Node* node = m_layoutObject->node();
     return node && node->hasTagName(dlTag);
 }
 

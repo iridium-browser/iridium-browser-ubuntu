@@ -39,7 +39,7 @@ class TestWindowDelegate : public aura::test::TestWindowDelegate {
  public:
   TestWindowDelegate() {
   }
-  virtual ~TestWindowDelegate() {}
+  ~TestWindowDelegate() override {}
 
   void set_min_size(const gfx::Size& size) {
     min_size_ = size;
@@ -51,13 +51,9 @@ class TestWindowDelegate : public aura::test::TestWindowDelegate {
 
  private:
   // Overridden from aura::Test::TestWindowDelegate:
-  virtual gfx::Size GetMinimumSize() const override {
-    return min_size_;
-  }
+  gfx::Size GetMinimumSize() const override { return min_size_; }
 
-  virtual gfx::Size GetMaximumSize() const override {
-    return max_size_;
-  }
+  gfx::Size GetMaximumSize() const override { return max_size_; }
 
   gfx::Size min_size_;
   gfx::Size max_size_;
@@ -70,9 +66,9 @@ class TestWindowDelegate : public aura::test::TestWindowDelegate {
 class WorkspaceWindowResizerTest : public test::AshTestBase {
  public:
   WorkspaceWindowResizerTest() : workspace_resizer_(NULL) {}
-  virtual ~WorkspaceWindowResizerTest() {}
+  ~WorkspaceWindowResizerTest() override {}
 
-  virtual void SetUp() override {
+  void SetUp() override {
     AshTestBase::SetUp();
     UpdateDisplay(base::StringPrintf("800x%d", kRootHeight));
     // Ignore the touch slop region.
@@ -90,30 +86,30 @@ class WorkspaceWindowResizerTest : public test::AshTestBase {
     Shell::GetInstance()->SetDisplayWorkAreaInsets(root, gfx::Insets());
     window_.reset(new aura::Window(&delegate_));
     window_->SetType(ui::wm::WINDOW_TYPE_NORMAL);
-    window_->Init(aura::WINDOW_LAYER_NOT_DRAWN);
+    window_->Init(ui::LAYER_NOT_DRAWN);
     ParentWindowInPrimaryRootWindow(window_.get());
     window_->set_id(1);
 
     window2_.reset(new aura::Window(&delegate2_));
     window2_->SetType(ui::wm::WINDOW_TYPE_NORMAL);
-    window2_->Init(aura::WINDOW_LAYER_NOT_DRAWN);
+    window2_->Init(ui::LAYER_NOT_DRAWN);
     ParentWindowInPrimaryRootWindow(window2_.get());
     window2_->set_id(2);
 
     window3_.reset(new aura::Window(&delegate3_));
     window3_->SetType(ui::wm::WINDOW_TYPE_NORMAL);
-    window3_->Init(aura::WINDOW_LAYER_NOT_DRAWN);
+    window3_->Init(ui::LAYER_NOT_DRAWN);
     ParentWindowInPrimaryRootWindow(window3_.get());
     window3_->set_id(3);
 
     window4_.reset(new aura::Window(&delegate4_));
     window4_->SetType(ui::wm::WINDOW_TYPE_NORMAL);
-    window4_->Init(aura::WINDOW_LAYER_NOT_DRAWN);
+    window4_->Init(ui::LAYER_NOT_DRAWN);
     ParentWindowInPrimaryRootWindow(window4_.get());
     window4_->set_id(4);
   }
 
-  virtual void TearDown() override {
+  void TearDown() override {
     window_.reset();
     window2_.reset();
     window3_.reset();

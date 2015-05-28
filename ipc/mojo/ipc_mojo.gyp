@@ -17,14 +17,14 @@
       'defines': [
         'IPC_MOJO_IMPLEMENTATION',
       ],
-      'includes': [ '../../mojo/mojom_bindings_generator.gypi' ],
+      'includes': [ '../../third_party/mojo/mojom_bindings_generator.gypi' ],
       'dependencies': [
         '../ipc.gyp:ipc',
         '../../base/base.gyp:base',
         '../../base/third_party/dynamic_annotations/dynamic_annotations.gyp:dynamic_annotations',
         '../../mojo/mojo_base.gyp:mojo_environment_chromium',
-        '../../mojo/mojo_edk.gyp:mojo_system_impl',
-        '../../mojo/mojo_public.gyp:mojo_cpp_bindings',
+        '../../third_party/mojo/mojo_edk.gyp:mojo_system_impl',
+        '../../third_party/mojo/mojo_public.gyp:mojo_cpp_bindings',
       ],
       'sources': [
         'client_channel.mojom',
@@ -36,8 +36,16 @@
         'ipc_channel_mojo_host.h',
         'ipc_mojo_bootstrap.cc',
         'ipc_mojo_bootstrap.h',
+        'ipc_mojo_handle_attachment.cc',
+        'ipc_mojo_handle_attachment.h',
+        'ipc_mojo_message_helper.cc',
+        'ipc_mojo_message_helper.h',
+        'ipc_mojo_param_traits.cc',
+        'ipc_mojo_param_traits.h',
         'ipc_message_pipe_reader.cc',
         'ipc_message_pipe_reader.h',
+        'scoped_ipc_support.cc',
+        'scoped_ipc_support.h',
       ],
       # TODO(gregoryd): direct_dependent_settings should be shared with the
       # 64-bit target, but it doesn't work due to a bug in gyp
@@ -57,9 +65,9 @@
         '../../base/base.gyp:base_i18n',
         '../../base/base.gyp:test_support_base',
         '../../mojo/mojo_base.gyp:mojo_environment_chromium',
-        '../../mojo/mojo_edk.gyp:mojo_system_impl',
-        '../../mojo/mojo_public.gyp:mojo_cpp_bindings',
         '../../testing/gtest.gyp:gtest',
+        '../../third_party/mojo/mojo_edk.gyp:mojo_system_impl',
+        '../../third_party/mojo/mojo_public.gyp:mojo_cpp_bindings',
         'ipc_mojo',
       ],
       'include_dirs': [
@@ -85,9 +93,9 @@
         '../../base/base.gyp:test_support_base',
         '../../base/base.gyp:test_support_perf',
         '../../mojo/mojo_base.gyp:mojo_environment_chromium',
-        '../../mojo/mojo_edk.gyp:mojo_system_impl',
-        '../../mojo/mojo_public.gyp:mojo_cpp_bindings',
         '../../testing/gtest.gyp:gtest',
+        '../../third_party/mojo/mojo_edk.gyp:mojo_system_impl',
+        '../../third_party/mojo/mojo_public.gyp:mojo_cpp_bindings',
         'ipc_mojo',
       ],
       'include_dirs': [

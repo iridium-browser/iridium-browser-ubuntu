@@ -95,23 +95,19 @@ found in the LICENSE file.
         shadowRoot.querySelector('#thread-name').textContent = cpuSlice.title;
       }
       shadowRoot.querySelector('#start').textContent =
-          tv.c.analysis.tsRound(cpuSlice.start) + 'ms';
+          tv.c.analysis.tsString(cpuSlice.start);
 
       shadowRoot.querySelector('#duration').textContent =
-          tv.c.analysis.tsRound(cpuSlice.duration) + 'ms';
+          tv.c.analysis.tsString(cpuSlice.duration);
       var runningThreadEl = shadowRoot.querySelector('#running-thread');
 
       var timeSlice = cpuSlice.getAssociatedTimeslice();
       if (!timeSlice) {
         runningThreadEl.parentElement.style.display = 'none';
       } else {
-        var threadLink = new tv.c.analysis.AnalysisLink();
+        var threadLink = document.createElement('tv-c-analysis-link');
+        threadLink.selection = new tv.c.Selection(timeSlice);
         threadLink.textContent = 'Click to select';
-        threadLink.selectionGenerator = function() {
-          var selection = new tv.c.Selection();
-          selection.push(timeSlice);
-          return selection;
-        }.bind(this);
         runningThreadEl.parentElement.style.display = '';
         runningThreadEl.textContent = '';
         runningThreadEl.appendChild(threadLink);

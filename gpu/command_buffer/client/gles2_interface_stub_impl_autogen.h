@@ -27,6 +27,12 @@ void GLES2InterfaceStub::BindBufferBase(GLenum /* target */,
                                         GLuint /* index */,
                                         GLuint /* buffer */) {
 }
+void GLES2InterfaceStub::BindBufferRange(GLenum /* target */,
+                                         GLuint /* index */,
+                                         GLuint /* buffer */,
+                                         GLintptr /* offset */,
+                                         GLsizeiptr /* size */) {
+}
 void GLES2InterfaceStub::BindFramebuffer(GLenum /* target */,
                                          GLuint /* framebuffer */) {
 }
@@ -73,6 +79,23 @@ GLenum GLES2InterfaceStub::CheckFramebufferStatus(GLenum /* target */) {
 }
 void GLES2InterfaceStub::Clear(GLbitfield /* mask */) {
 }
+void GLES2InterfaceStub::ClearBufferfi(GLenum /* buffer */,
+                                       GLint /* drawbuffers */,
+                                       GLfloat /* depth */,
+                                       GLint /* stencil */) {
+}
+void GLES2InterfaceStub::ClearBufferfv(GLenum /* buffer */,
+                                       GLint /* drawbuffers */,
+                                       const GLfloat* /* value */) {
+}
+void GLES2InterfaceStub::ClearBufferiv(GLenum /* buffer */,
+                                       GLint /* drawbuffers */,
+                                       const GLint* /* value */) {
+}
+void GLES2InterfaceStub::ClearBufferuiv(GLenum /* buffer */,
+                                        GLint /* drawbuffers */,
+                                        const GLuint* /* value */) {
+}
 void GLES2InterfaceStub::ClearColor(GLclampf /* red */,
                                     GLclampf /* green */,
                                     GLclampf /* blue */,
@@ -81,6 +104,11 @@ void GLES2InterfaceStub::ClearColor(GLclampf /* red */,
 void GLES2InterfaceStub::ClearDepthf(GLclampf /* depth */) {
 }
 void GLES2InterfaceStub::ClearStencil(GLint /* s */) {
+}
+GLenum GLES2InterfaceStub::ClientWaitSync(GLsync /* sync */,
+                                          GLbitfield /* flags */,
+                                          GLuint64 /* timeout */) {
+  return 0;
 }
 void GLES2InterfaceStub::ColorMask(GLboolean /* red */,
                                    GLboolean /* green */,
@@ -132,6 +160,16 @@ void GLES2InterfaceStub::CopyTexSubImage2D(GLenum /* target */,
                                            GLsizei /* width */,
                                            GLsizei /* height */) {
 }
+void GLES2InterfaceStub::CopyTexSubImage3D(GLenum /* target */,
+                                           GLint /* level */,
+                                           GLint /* xoffset */,
+                                           GLint /* yoffset */,
+                                           GLint /* zoffset */,
+                                           GLint /* x */,
+                                           GLint /* y */,
+                                           GLsizei /* width */,
+                                           GLsizei /* height */) {
+}
 GLuint GLES2InterfaceStub::CreateProgram() {
   return 0;
 }
@@ -154,6 +192,8 @@ void GLES2InterfaceStub::DeleteRenderbuffers(
 }
 void GLES2InterfaceStub::DeleteSamplers(GLsizei /* n */,
                                         const GLuint* /* samplers */) {
+}
+void GLES2InterfaceStub::DeleteSync(GLsync /* sync */) {
 }
 void GLES2InterfaceStub::DeleteShader(GLuint /* shader */) {
 }
@@ -186,9 +226,20 @@ void GLES2InterfaceStub::DrawElements(GLenum /* mode */,
                                       GLenum /* type */,
                                       const void* /* indices */) {
 }
+void GLES2InterfaceStub::DrawRangeElements(GLenum /* mode */,
+                                           GLuint /* start */,
+                                           GLuint /* end */,
+                                           GLsizei /* count */,
+                                           GLenum /* type */,
+                                           const void* /* indices */) {
+}
 void GLES2InterfaceStub::Enable(GLenum /* cap */) {
 }
 void GLES2InterfaceStub::EnableVertexAttribArray(GLuint /* index */) {
+}
+GLsync GLES2InterfaceStub::FenceSync(GLenum /* condition */,
+                                     GLbitfield /* flags */) {
+  return 0;
 }
 void GLES2InterfaceStub::Finish() {
 }
@@ -247,6 +298,23 @@ void GLES2InterfaceStub::GetActiveUniform(GLuint /* program */,
                                           GLenum* /* type */,
                                           char* /* name */) {
 }
+void GLES2InterfaceStub::GetActiveUniformBlockiv(GLuint /* program */,
+                                                 GLuint /* index */,
+                                                 GLenum /* pname */,
+                                                 GLint* /* params */) {
+}
+void GLES2InterfaceStub::GetActiveUniformBlockName(GLuint /* program */,
+                                                   GLuint /* index */,
+                                                   GLsizei /* bufsize */,
+                                                   GLsizei* /* length */,
+                                                   char* /* name */) {
+}
+void GLES2InterfaceStub::GetActiveUniformsiv(GLuint /* program */,
+                                             GLsizei /* count */,
+                                             const GLuint* /* indices */,
+                                             GLenum /* pname */,
+                                             GLint* /* params */) {
+}
 void GLES2InterfaceStub::GetAttachedShaders(GLuint /* program */,
                                             GLsizei /* maxcount */,
                                             GLsizei* /* count */,
@@ -267,6 +335,10 @@ GLenum GLES2InterfaceStub::GetError() {
   return 0;
 }
 void GLES2InterfaceStub::GetFloatv(GLenum /* pname */, GLfloat* /* params */) {
+}
+GLint GLES2InterfaceStub::GetFragDataLocation(GLuint /* program */,
+                                              const char* /* name */) {
+  return 0;
 }
 void GLES2InterfaceStub::GetFramebufferAttachmentParameteriv(
     GLenum /* target */,
@@ -325,6 +397,12 @@ void GLES2InterfaceStub::GetShaderSource(GLuint /* shader */,
 const GLubyte* GLES2InterfaceStub::GetString(GLenum /* name */) {
   return 0;
 }
+void GLES2InterfaceStub::GetSynciv(GLsync /* sync */,
+                                   GLenum /* pname */,
+                                   GLsizei /* bufsize */,
+                                   GLsizei* /* length */,
+                                   GLint* /* values */) {
+}
 void GLES2InterfaceStub::GetTexParameterfv(GLenum /* target */,
                                            GLenum /* pname */,
                                            GLfloat* /* params */) {
@@ -333,6 +411,18 @@ void GLES2InterfaceStub::GetTexParameteriv(GLenum /* target */,
                                            GLenum /* pname */,
                                            GLint* /* params */) {
 }
+void GLES2InterfaceStub::GetTransformFeedbackVarying(GLuint /* program */,
+                                                     GLuint /* index */,
+                                                     GLsizei /* bufsize */,
+                                                     GLsizei* /* length */,
+                                                     GLsizei* /* size */,
+                                                     GLenum* /* type */,
+                                                     char* /* name */) {
+}
+GLuint GLES2InterfaceStub::GetUniformBlockIndex(GLuint /* program */,
+                                                const char* /* name */) {
+  return 0;
+}
 void GLES2InterfaceStub::GetUniformfv(GLuint /* program */,
                                       GLint /* location */,
                                       GLfloat* /* params */) {
@@ -340,6 +430,11 @@ void GLES2InterfaceStub::GetUniformfv(GLuint /* program */,
 void GLES2InterfaceStub::GetUniformiv(GLuint /* program */,
                                       GLint /* location */,
                                       GLint* /* params */) {
+}
+void GLES2InterfaceStub::GetUniformIndices(GLuint /* program */,
+                                           GLsizei /* count */,
+                                           const char* const* /* names */,
+                                           GLuint* /* indices */) {
 }
 GLint GLES2InterfaceStub::GetUniformLocation(GLuint /* program */,
                                              const char* /* name */) {
@@ -392,6 +487,9 @@ GLboolean GLES2InterfaceStub::IsSampler(GLuint /* sampler */) {
   return 0;
 }
 GLboolean GLES2InterfaceStub::IsShader(GLuint /* shader */) {
+  return 0;
+}
+GLboolean GLES2InterfaceStub::IsSync(GLsync /* sync */) {
   return 0;
 }
 GLboolean GLES2InterfaceStub::IsTexture(GLuint /* texture */) {
@@ -469,6 +567,8 @@ void GLES2InterfaceStub::ShaderSource(GLuint /* shader */,
 void GLES2InterfaceStub::ShallowFinishCHROMIUM() {
 }
 void GLES2InterfaceStub::ShallowFlushCHROMIUM() {
+}
+void GLES2InterfaceStub::OrderingBarrierCHROMIUM() {
 }
 void GLES2InterfaceStub::StencilFunc(GLenum /* func */,
                                      GLint /* ref */,
@@ -558,6 +658,12 @@ void GLES2InterfaceStub::TexSubImage3D(GLenum /* target */,
                                        GLenum /* format */,
                                        GLenum /* type */,
                                        const void* /* pixels */) {
+}
+void GLES2InterfaceStub::TransformFeedbackVaryings(
+    GLuint /* program */,
+    GLsizei /* count */,
+    const char* const* /* varyings */,
+    GLenum /* buffermode */) {
 }
 void GLES2InterfaceStub::Uniform1f(GLint /* location */, GLfloat /* x */) {
 }
@@ -657,6 +763,10 @@ void GLES2InterfaceStub::Uniform4ui(GLint /* location */,
 void GLES2InterfaceStub::Uniform4uiv(GLint /* location */,
                                      GLsizei /* count */,
                                      const GLuint* /* v */) {
+}
+void GLES2InterfaceStub::UniformBlockBinding(GLuint /* program */,
+                                             GLuint /* index */,
+                                             GLuint /* binding */) {
 }
 void GLES2InterfaceStub::UniformMatrix2fv(GLint /* location */,
                                           GLsizei /* count */,
@@ -772,6 +882,10 @@ void GLES2InterfaceStub::Viewport(GLint /* x */,
                                   GLsizei /* width */,
                                   GLsizei /* height */) {
 }
+void GLES2InterfaceStub::WaitSync(GLsync /* sync */,
+                                  GLbitfield /* flags */,
+                                  GLuint64 /* timeout */) {
+}
 void GLES2InterfaceStub::BlitFramebufferCHROMIUM(GLint /* srcX0 */,
                                                  GLint /* srcY0 */,
                                                  GLint /* srcX1 */,
@@ -880,6 +994,15 @@ void* GLES2InterfaceStub::MapBufferSubDataCHROMIUM(GLuint /* target */,
 }
 void GLES2InterfaceStub::UnmapBufferSubDataCHROMIUM(const void* /* mem */) {
 }
+void* GLES2InterfaceStub::MapBufferRange(GLenum /* target */,
+                                         GLintptr /* offset */,
+                                         GLsizeiptr /* size */,
+                                         GLbitfield /* access */) {
+  return 0;
+}
+GLboolean GLES2InterfaceStub::UnmapBuffer(GLenum /* target */) {
+  return 0;
+}
 void* GLES2InterfaceStub::MapTexSubImage2DCHROMIUM(GLenum /* target */,
                                                    GLint /* level */,
                                                    GLint /* xoffset */,
@@ -905,6 +1028,22 @@ void GLES2InterfaceStub::RequestExtensionCHROMIUM(const char* /* extension */) {
 void GLES2InterfaceStub::RateLimitOffscreenContextCHROMIUM() {
 }
 void GLES2InterfaceStub::GetProgramInfoCHROMIUM(GLuint /* program */,
+                                                GLsizei /* bufsize */,
+                                                GLsizei* /* size */,
+                                                void* /* info */) {
+}
+void GLES2InterfaceStub::GetUniformBlocksCHROMIUM(GLuint /* program */,
+                                                  GLsizei /* bufsize */,
+                                                  GLsizei* /* size */,
+                                                  void* /* info */) {
+}
+void GLES2InterfaceStub::GetTransformFeedbackVaryingsCHROMIUM(
+    GLuint /* program */,
+    GLsizei /* bufsize */,
+    GLsizei* /* size */,
+    void* /* info */) {
+}
+void GLES2InterfaceStub::GetUniformsES3CHROMIUM(GLuint /* program */,
                                                 GLsizei /* bufsize */,
                                                 GLsizei* /* size */,
                                                 void* /* info */) {
@@ -946,9 +1085,14 @@ void GLES2InterfaceStub::TexImageIOSurface2DCHROMIUM(GLenum /* target */,
 void GLES2InterfaceStub::CopyTextureCHROMIUM(GLenum /* target */,
                                              GLenum /* source_id */,
                                              GLenum /* dest_id */,
-                                             GLint /* level */,
                                              GLint /* internalformat */,
                                              GLenum /* dest_type */) {
+}
+void GLES2InterfaceStub::CopySubTextureCHROMIUM(GLenum /* target */,
+                                                GLenum /* source_id */,
+                                                GLenum /* dest_id */,
+                                                GLint /* xoffset */,
+                                                GLint /* yoffset */) {
 }
 void GLES2InterfaceStub::DrawArraysInstancedANGLE(GLenum /* mode */,
                                                   GLint /* first */,

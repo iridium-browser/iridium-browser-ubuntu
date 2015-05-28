@@ -9,7 +9,6 @@
 #include "media/base/cdm_context.h"
 #include "media/base/media_log.h"
 #include "media/base/test_data_util.h"
-#include "media/filters/audio_renderer_impl.h"
 #include "media/filters/chunk_demuxer.h"
 #if !defined(MEDIA_DISABLE_FFMPEG)
 #include "media/filters/ffmpeg_audio_decoder.h"
@@ -18,7 +17,8 @@
 #endif
 #include "media/filters/file_data_source.h"
 #include "media/filters/opus_audio_decoder.h"
-#include "media/filters/renderer_impl.h"
+#include "media/renderers/audio_renderer_impl.h"
+#include "media/renderers/renderer_impl.h"
 #if !defined(MEDIA_DISABLE_LIBVPX)
 #include "media/filters/vpx_video_decoder.h"
 #endif
@@ -66,7 +66,7 @@ void PipelineIntegrationTestBase::OnStatusCallback(
 }
 
 void PipelineIntegrationTestBase::DemuxerEncryptedMediaInitDataCB(
-    const std::string& type,
+    EmeInitDataType type,
     const std::vector<uint8>& init_data) {
   DCHECK(!init_data.empty());
   CHECK(!encrypted_media_init_data_cb_.is_null());
@@ -121,6 +121,10 @@ PipelineStatus PipelineIntegrationTestBase::Start(const std::string& filename,
                                 base::Unretained(this)));
   }
 
+  // Should never be called as the required decryption keys for the encrypted
+  // media files are provided in advance.
+  EXPECT_CALL(*this, OnWaitingForDecryptionKey()).Times(0);
+
   pipeline_->Start(
       demuxer_.get(), CreateRenderer(),
       base::Bind(&PipelineIntegrationTestBase::OnEnded, base::Unretained(this)),
@@ -134,7 +138,9 @@ PipelineStatus PipelineIntegrationTestBase::Start(const std::string& filename,
       base::Bind(&PipelineIntegrationTestBase::OnVideoFramePaint,
                  base::Unretained(this)),
       base::Closure(), base::Bind(&PipelineIntegrationTestBase::OnAddTextTrack,
-                                  base::Unretained(this)));
+                                  base::Unretained(this)),
+      base::Bind(&PipelineIntegrationTestBase::OnWaitingForDecryptionKey,
+                 base::Unretained(this)));
   message_loop_.Run();
   return pipeline_status_;
 }

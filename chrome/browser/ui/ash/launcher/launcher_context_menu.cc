@@ -106,13 +106,12 @@ void LauncherContextMenu::Init() {
       if (!controller_->IsPlatformApp(item_.id) &&
           item_.type != ash::TYPE_WINDOWED_APP) {
         AddSeparator(ui::NORMAL_SEPARATOR);
-        if (extensions::util::IsStreamlinedHostedAppsEnabled()) {
-          // Streamlined hosted apps launch in a window by default. This menu
-          // item is re-interpreted as a single, toggle-able option to launch
-          // the hosted app as a tab.
-          AddCheckItemWithStringId(
-              LAUNCH_TYPE_REGULAR_TAB,
-              IDS_APP_CONTEXT_MENU_OPEN_TAB);
+        if (extensions::util::IsNewBookmarkAppsEnabled()) {
+          // With bookmark apps enabled, hosted apps launch in a window by
+          // default. This menu item is re-interpreted as a single, toggle-able
+          // option to launch the hosted app as a tab.
+          AddCheckItemWithStringId(LAUNCH_TYPE_WINDOW,
+                                   IDS_APP_CONTEXT_MENU_OPEN_WINDOW);
         } else {
           AddCheckItemWithStringId(
               LAUNCH_TYPE_REGULAR_TAB,
@@ -184,8 +183,10 @@ void LauncherContextMenu::Init() {
                            &shelf_alignment_menu_);
   }
 #if defined(OS_CHROMEOS)
-  AddItem(MENU_CHANGE_WALLPAPER,
-       l10n_util::GetStringUTF16(IDS_AURA_SET_DESKTOP_WALLPAPER));
+  if (!controller_->IsLoggedInAsGuest()) {
+    AddItem(MENU_CHANGE_WALLPAPER,
+         l10n_util::GetStringUTF16(IDS_AURA_SET_DESKTOP_WALLPAPER));
+  }
 #endif
 }
 
@@ -308,23 +309,22 @@ void LauncherContextMenu::ExecuteCommand(int command_id, int event_flags) {
     case LAUNCH_TYPE_PINNED_TAB:
       controller_->SetLaunchType(item_.id, extensions::LAUNCH_TYPE_PINNED);
       break;
-    case LAUNCH_TYPE_REGULAR_TAB: {
-      extensions::LaunchType launch_type =
-          extensions::LAUNCH_TYPE_REGULAR;
-      // Streamlined hosted apps can only toggle between LAUNCH_WINDOW and
-      // LAUNCH_REGULAR.
-      if (extensions::util::IsStreamlinedHostedAppsEnabled()) {
+    case LAUNCH_TYPE_REGULAR_TAB:
+      controller_->SetLaunchType(item_.id, extensions::LAUNCH_TYPE_REGULAR);
+      break;
+    case LAUNCH_TYPE_WINDOW: {
+      extensions::LaunchType launch_type = extensions::LAUNCH_TYPE_WINDOW;
+      // With bookmark apps enabled, hosted apps can only toggle between
+      // LAUNCH_WINDOW and LAUNCH_REGULAR.
+      if (extensions::util::IsNewBookmarkAppsEnabled()) {
         launch_type = controller_->GetLaunchType(item_.id) ==
-                    extensions::LAUNCH_TYPE_REGULAR
-                ? extensions::LAUNCH_TYPE_WINDOW
-                : extensions::LAUNCH_TYPE_REGULAR;
+                              extensions::LAUNCH_TYPE_WINDOW
+                          ? extensions::LAUNCH_TYPE_REGULAR
+                          : extensions::LAUNCH_TYPE_WINDOW;
       }
       controller_->SetLaunchType(item_.id, launch_type);
       break;
     }
-    case LAUNCH_TYPE_WINDOW:
-      controller_->SetLaunchType(item_.id, extensions::LAUNCH_TYPE_WINDOW);
-      break;
     case LAUNCH_TYPE_FULLSCREEN:
       controller_->SetLaunchType(item_.id, extensions::LAUNCH_TYPE_FULLSCREEN);
       break;

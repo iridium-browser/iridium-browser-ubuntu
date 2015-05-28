@@ -3,15 +3,20 @@
 # found in the LICENSE file.
 {
   'conditions': [
-    ['OS=="linux" or OS=="mac" or OS=="win"', {
+    ['use_x11==0', {
       'variables': {
-        'files': [
+        'command': [
           '../../testing/test_env.py',
           '<(PRODUCT_DIR)/events_unittests<(EXECUTABLE_SUFFIX)',
+          '--brave-new-test-launcher',
+          '--test-launcher-bot-mode',
+          '--asan=<(asan)',
+          '--msan=<(msan)',
+          '--tsan=<(tsan)',
         ],
       },
     }],
-    ['OS=="linux"', {
+    ['use_x11==1', {
       'variables': {
         'command': [
           '../../testing/xvfb.py',
@@ -20,18 +25,27 @@
           '--brave-new-test-launcher',
           '--test-launcher-bot-mode',
           '--asan=<(asan)',
-          '--lsan=<(lsan)',
+          '--msan=<(msan)',
+          '--tsan=<(tsan)',
         ],
         'files': [
           '../../testing/xvfb.py',
-          '<(PRODUCT_DIR)/libosmesa.so',
+          '<(PRODUCT_DIR)/xdisplaycheck<(EXECUTABLE_SUFFIX)',
+        ],
+      },
+    }],
+    ['OS=="linux" or OS=="mac" or OS=="win"', {
+      'variables': {
+        'files': [
+          '../../testing/test_env.py',
+          '<(PRODUCT_DIR)/events_unittests<(EXECUTABLE_SUFFIX)',
         ],
       },
     }],
     ['OS=="linux" and use_ozone==0', {
       'variables': {
         'files': [
-          '<(PRODUCT_DIR)/xdisplaycheck<(EXECUTABLE_SUFFIX)',
+          '<(PRODUCT_DIR)/libosmesa.so',
         ],
       },
     }],
@@ -49,15 +63,11 @@
         ],
       },
     }],
-    ['OS=="mac" or OS=="win"', {
+    ['OS=="mac" and asan==1 and fastbuild==0', {
       'variables': {
-        'command': [
-          '../../testing/test_env.py',
-          '<(PRODUCT_DIR)/events_unittests<(EXECUTABLE_SUFFIX)',
-          '--brave-new-test-launcher',
-          '--test-launcher-bot-mode',
-          '--asan=<(asan)',
-          '--lsan=<(lsan)',
+        'files': [
+          '<(PRODUCT_DIR)/events_unittests.dSYM/',
+          '<(PRODUCT_DIR)/osmesa.so.dSYM/',
         ],
       },
     }],

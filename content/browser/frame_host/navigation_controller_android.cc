@@ -49,7 +49,8 @@ static base::android::ScopedJavaLocalRef<jobject> CreateJavaNavigationEntry(
       j_virtual_url.obj(),
       j_original_url.obj(),
       j_title.obj(),
-      j_bitmap.obj());
+      j_bitmap.obj(),
+      entry->GetTransitionType());
 }
 
 static void AddNavigationEntryToHistory(JNIEnv* env,
@@ -303,6 +304,18 @@ void NavigationControllerAndroid::SetUseDesktopUserAgent(
     // navigation IPC message.
     navigation_controller_->ReloadOriginalRequestURL(false);
   }
+}
+
+base::android::ScopedJavaLocalRef<jobject>
+NavigationControllerAndroid::GetEntryAtIndex(JNIEnv* env,
+                                             jobject obj,
+                                             int index) {
+  if (index < 0 || index >= navigation_controller_->GetEntryCount())
+    return base::android::ScopedJavaLocalRef<jobject>();
+
+  content::NavigationEntry* entry =
+      navigation_controller_->GetEntryAtIndex(index);
+  return CreateJavaNavigationEntry(env, entry, index);
 }
 
 base::android::ScopedJavaLocalRef<jobject>

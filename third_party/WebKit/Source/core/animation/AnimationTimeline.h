@@ -37,6 +37,7 @@
 #include "core/dom/Element.h"
 #include "platform/Timer.h"
 #include "platform/heap/Handle.h"
+#include "public/platform/WebCompositorAnimationTimeline.h"
 #include "wtf/RefCounted.h"
 #include "wtf/RefPtr.h"
 #include "wtf/Vector.h"
@@ -58,7 +59,7 @@ public:
         virtual void cancelWake() = 0;
         virtual void serviceOnNextFrame() = 0;
         virtual ~PlatformTiming() { }
-        virtual void trace(Visitor*) { }
+        DEFINE_INLINE_VIRTUAL_TRACE() { }
     };
 
     static PassRefPtrWillBeRawPtr<AnimationTimeline> create(Document*, PassOwnPtrWillBeRawPtr<PlatformTiming> = nullptr);
@@ -67,11 +68,10 @@ public:
     void serviceAnimations(TimingUpdateReason);
     void scheduleNextService();
 
-    // Creates a player attached to this timeline, but without a start time.
-    AnimationPlayer* createAnimationPlayer(AnimationNode*);
     AnimationPlayer* play(AnimationNode*);
     WillBeHeapVector<RefPtrWillBeMember<AnimationPlayer>> getAnimationPlayers();
 
+    void playerAttached(AnimationPlayer&);
 #if !ENABLE(OILPAN)
     void playerDestroyed(AnimationPlayer* player)
     {
@@ -98,13 +98,15 @@ public:
     void setPlaybackRate(double);
     double playbackRate() const;
 
+    WebCompositorAnimationTimeline* compositorTimeline() const { return m_compositorTimeline.get(); }
+
     Document* document() { return m_document.get(); }
 #if !ENABLE(OILPAN)
     void detachFromDocument();
 #endif
     void wake();
 
-    void trace(Visitor*);
+    DECLARE_TRACE();
 
 protected:
     AnimationTimeline(Document*, PassOwnPtrWillBeRawPtr<PlatformTiming>);
@@ -112,13 +114,12 @@ protected:
 private:
     RawPtrWillBeMember<Document> m_document;
     double m_zeroTime;
+    bool m_zeroTimeInitialized;
     // AnimationPlayers which will be updated on the next frame
     // i.e. current, in effect, or had timing changed
     WillBeHeapHashSet<RefPtrWillBeMember<AnimationPlayer>> m_playersNeedingUpdate;
     WillBeHeapHashSet<RawPtrWillBeWeakMember<AnimationPlayer>> m_players;
 
-    double m_documentCurrentTimeSnapshot;
-    double m_zeroTimeOffset;
     double m_playbackRate;
 
     friend class SMILTimeContainer;
@@ -126,6 +127,8 @@ private:
 
     OwnPtrWillBeMember<PlatformTiming> m_timing;
     double m_lastCurrentTimeInternal;
+
+    OwnPtr<WebCompositorAnimationTimeline> m_compositorTimeline;
 
     class AnimationTimelineTiming final : public PlatformTiming {
     public:
@@ -142,7 +145,7 @@ private:
 
         void timerFired(Timer<AnimationTimelineTiming>*) { m_timeline->wake(); }
 
-        virtual void trace(Visitor*) override;
+        DECLARE_VIRTUAL_TRACE();
 
     private:
         RawPtrWillBeMember<AnimationTimeline> m_timeline;

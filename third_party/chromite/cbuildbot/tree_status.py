@@ -16,6 +16,8 @@ import urllib
 import urllib2
 
 from chromite.cbuildbot import constants
+from chromite.lib import alerts
+from chromite.lib import cros_build_lib
 from chromite.lib import osutils
 from chromite.lib import timeout_util
 
@@ -328,8 +330,6 @@ def GetSheriffEmailAddresses(sheriff_type):
     sheriff_type: Type of the sheriff to look for. See the keys in
     constants.SHERIFF_TYPE_TO_URL.
       - 'tree': tree sheriffs
-      - 'build': build deputy
-      - 'lab' : lab sheriff
       - 'chrome': chrome gardener
 
   Returns:
@@ -363,6 +363,30 @@ def GetHealthAlertRecipients(builder_run):
       recipients.extend(GetSheriffEmailAddresses(entry))
 
   return recipients
+
+
+def SendHealthAlert(builder_run, subject, body, extra_fields=None):
+  """Send a health alert.
+
+  Health alerts are only sent for regular buildbots and Pre-CQ buildbots.
+
+  Args:
+    builder_run: BuilderRun for the main cbuildbot run.
+    subject: The subject of the health alert email.
+    body: The body of the health alert email.
+    extra_fields: (optional) A dictionary of additional message header fields
+                  to be added to the message. Custom field names should begin
+                  with the prefix 'X-'.
+  """
+  # TODO(davidjames): Implement the ability to send emails in GCE.
+  # https://cloud.google.com/compute/docs/sending-mail
+  in_golo = cros_build_lib.HostIsCIBuilder(golo_only=True)
+  if in_golo and builder_run.InProduction():
+    alerts.SendEmail(subject,
+                     GetHealthAlertRecipients(builder_run),
+                     message=body,
+                     smtp_server=constants.GOLO_SMTP_SERVER,
+                     extra_fields=extra_fields)
 
 
 def ConstructDashboardURL(waterfall, builder_name, build_number, stage=None):

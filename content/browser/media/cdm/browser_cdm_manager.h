@@ -17,8 +17,10 @@
 #include "content/common/content_export.h"
 #include "content/common/media/cdm_messages_enums.h"
 #include "content/public/browser/browser_message_filter.h"
+#include "content/public/common/permission_status.mojom.h"
 #include "ipc/ipc_message.h"
-// TODO(xhwang): Drop this when KeyError is moved to a common header.
+#include "media/base/cdm_promise.h"
+#include "media/base/eme_constants.h"
 #include "media/base/media_keys.h"
 #include "url/gurl.h"
 
@@ -50,13 +52,26 @@ class CONTENT_EXPORT BrowserCdmManager : public BrowserMessageFilter {
       const IPC::Message& message) override;
   bool OnMessageReceived(const IPC::Message& message) override;
 
-  media::BrowserCdm* GetCdm(int render_frame_id, int cdm_id);
+  media::BrowserCdm* GetCdm(int render_frame_id, int cdm_id) const;
 
   // Notifies that the render frame has been deleted so that all CDMs belongs
   // to this render frame needs to be destroyed as well. This is needed because
   // in some cases (e.g. fast termination of the renderer), the message to
   // destroy the CDM will not be received.
   void RenderFrameDeleted(int render_frame_id);
+
+  // Promise handlers.
+  void ResolvePromise(int render_frame_id, int cdm_id, uint32_t promise_id);
+  void ResolvePromiseWithSession(int render_frame_id,
+                                 int cdm_id,
+                                 uint32_t promise_id,
+                                 const std::string& session_id);
+  void RejectPromise(int render_frame_id,
+                     int cdm_id,
+                     uint32_t promise_id,
+                     media::MediaKeys::Exception exception,
+                     uint32_t system_code,
+                     const std::string& error_message);
 
  protected:
   friend class base::RefCountedThreadSafe<BrowserCdmManager>;
@@ -65,42 +80,56 @@ class CONTENT_EXPORT BrowserCdmManager : public BrowserMessageFilter {
 
  private:
   // CDM callbacks.
-  void OnSessionCreated(int render_frame_id,
-                        int cdm_id,
-                        uint32 session_id,
-                        const std::string& web_session_id);
   void OnSessionMessage(int render_frame_id,
                         int cdm_id,
-                        uint32 session_id,
+                        const std::string& session_id,
+                        media::MediaKeys::MessageType message_type,
                         const std::vector<uint8>& message,
-                        const GURL& destination_url);
-  void OnSessionReady(int render_frame_id, int cdm_id, uint32 session_id);
-  void OnSessionClosed(int render_frame_id, int cdm_id, uint32 session_id);
-  void OnSessionError(int render_frame_id,
-                      int cdm_id,
-                      uint32 session_id,
-                      media::MediaKeys::KeyError error_code,
-                      uint32 system_code);
+                        const GURL& legacy_destination_url);
+  void OnSessionClosed(int render_frame_id,
+                       int cdm_id,
+                       const std::string& session_id);
+  void OnLegacySessionError(int render_frame_id,
+                            int cdm_id,
+                            const std::string& session_id,
+                            media::MediaKeys::Exception exception_code,
+                            uint32_t system_code,
+                            const std::string& error_message);
+  void OnSessionKeysChange(int render_frame_id,
+                           int cdm_id,
+                           const std::string& session_id,
+                           bool has_additional_usable_key,
+                           media::CdmKeysInfo keys_info);
+  void OnSessionExpirationUpdate(int render_frame_id,
+                                 int cdm_id,
+                                 const std::string& session_id,
+                                 const base::Time& new_expiry_time);
 
   // Message handlers.
   void OnInitializeCdm(int render_frame_id,
                        int cdm_id,
                        const std::string& key_system,
                        const GURL& frame_url);
-  void OnCreateSession(int render_frame_id,
-                       int cdm_id,
-                       uint32 session_id,
-                       CdmHostMsg_CreateSession_ContentType content_type,
-                       const std::vector<uint8>& init_data);
+  void OnSetServerCertificate(int render_frame_id,
+                              int cdm_id,
+                              uint32_t promise_id,
+                              const std::vector<uint8_t>& certificate);
+  void OnCreateSessionAndGenerateRequest(
+      int render_frame_id,
+      int cdm_id,
+      uint32_t promise_id,
+      CdmHostMsg_CreateSession_InitDataType init_data_type,
+      const std::vector<uint8>& init_data);
   void OnUpdateSession(int render_frame_id,
                        int cdm_id,
-                       uint32 session_id,
+                       uint32_t promise_id,
+                       const std::string& session_id,
                        const std::vector<uint8>& response);
-  void OnReleaseSession(int render_frame_id,
-                        int cdm_id, uint32 session_id);
+  void OnCloseSession(int render_frame_id,
+                      int cdm_id,
+                      uint32_t promise_id,
+                      const std::string& session_id);
   void OnDestroyCdm(int render_frame_id, int cdm_id);
-
-  void SendSessionError(int render_frame_id, int cdm_id, uint32 session_id);
 
   // Adds a new CDM identified by |cdm_id| for the given |key_system| and
   // |security_origin|.
@@ -115,25 +144,30 @@ class CONTENT_EXPORT BrowserCdmManager : public BrowserMessageFilter {
   // Removes the CDM with the specified id.
   void RemoveCdm(uint64 id);
 
-  // Requests permission for the given protected-media session (infobar).
-  void RequestSessionPermission(int render_frame_id,
-                                const GURL& security_origin,
-                                int cdm_id,
-                                uint32 session_id,
-                                const std::string& content_type,
-                                const std::vector<uint8>& init_data);
+  using PermissionStatusCB = base::Callback<void(bool)>;
 
-  // If |permitted| is false, it does nothing but send
-  // |CdmMsg_SessionError| IPC message.
-  // The primary use case is infobar permission callback, i.e., when infobar
-  // can decide user's intention either from interacting with the actual info
-  // bar or from the saved preference.
-  void CreateSessionIfPermitted(int render_frame_id,
-                                int cdm_id,
-                                uint32 session_id,
-                                const std::string& content_type,
-                                const std::vector<uint8>& init_data,
-                                bool permitted);
+  // Checks protected media identifier permission for the given
+  // |render_frame_id| and |cdm_id|.
+  void CheckPermissionStatus(int render_frame_id,
+                             int cdm_id,
+                             const PermissionStatusCB& permission_status_cb);
+
+  // Checks permission status on Browser UI thread. Runs |permission_status_cb|
+  // on the |task_runner_| with the permission status.
+  void CheckPermissionStatusOnUIThread(
+      int render_frame_id,
+      const GURL& security_origin,
+      const PermissionStatusCB& permission_status_cb);
+
+  // Calls CreateSessionAndGenerateRequest() on the CDM if
+  // |permission_was_allowed| is true. Otherwise rejects the |promise|.
+  void CreateSessionAndGenerateRequestIfPermitted(
+      int render_frame_id,
+      int cdm_id,
+      media::EmeInitDataType init_data_type,
+      const std::vector<uint8>& init_data,
+      scoped_ptr<media::NewSessionCdmPromise> promise,
+      bool permission_was_allowed);
 
   const int render_process_id_;
 
@@ -150,9 +184,6 @@ class CONTENT_EXPORT BrowserCdmManager : public BrowserMessageFilter {
 
   // Map of CDM's security origin.
   std::map<uint64, GURL> cdm_security_origin_map_;
-
-  // Map of callbacks to cancel the permission request.
-  std::map<uint64, base::Closure> cdm_cancel_permission_map_;
 
   base::WeakPtrFactory<BrowserCdmManager> weak_ptr_factory_;
 

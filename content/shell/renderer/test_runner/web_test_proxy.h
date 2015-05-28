@@ -13,6 +13,7 @@
 #include "base/callback.h"
 #include "base/memory/scoped_ptr.h"
 #include "content/shell/renderer/test_runner/web_task.h"
+#include "third_party/WebKit/public/platform/WebImage.h"
 #include "third_party/WebKit/public/platform/WebRect.h"
 #include "third_party/WebKit/public/platform/WebScreenInfo.h"
 #include "third_party/WebKit/public/platform/WebURLError.h"
@@ -44,7 +45,6 @@ class WebDataSource;
 class WebDragData;
 class WebFileChooserCompletion;
 class WebFrame;
-class WebImage;
 class WebLocalFrame;
 class WebMIDIAccessor;
 class WebMIDIAccessorClient;
@@ -187,7 +187,8 @@ class WebTestProxyBase {
   void DidStartProvisionalLoad(blink::WebLocalFrame*);
   void DidReceiveServerRedirectForProvisionalLoad(blink::WebLocalFrame* frame);
   bool DidFailProvisionalLoad(blink::WebLocalFrame* frame,
-                              const blink::WebURLError& error);
+                              const blink::WebURLError& error,
+                              blink::WebHistoryCommitType commit_type);
   void DidCommitProvisionalLoad(blink::WebLocalFrame* frame,
                                 const blink::WebHistoryItem& history_item,
                                 blink::WebHistoryCommitType history_type);
@@ -199,7 +200,8 @@ class WebTestProxyBase {
   void DidFinishDocumentLoad(blink::WebLocalFrame* frame);
   void DidHandleOnloadEvents(blink::WebLocalFrame* frame);
   void DidFailLoad(blink::WebLocalFrame* frame,
-                   const blink::WebURLError& error);
+                   const blink::WebURLError& error,
+                   blink::WebHistoryCommitType commit_type);
   void DidFinishLoad(blink::WebLocalFrame* frame);
   void DidChangeLocationWithinPage(blink::WebLocalFrame* frame);
   void DidDetectXSS(blink::WebLocalFrame* frame,
@@ -253,6 +255,8 @@ class WebTestProxyBase {
   blink::WebWidget* web_widget_;
 
   WebTaskList task_list_;
+
+  blink::WebImage drag_image_;
 
   scoped_ptr<SpellCheckClient> spellcheck_;
   scoped_ptr<MockWebUserMediaClient> user_media_client_;

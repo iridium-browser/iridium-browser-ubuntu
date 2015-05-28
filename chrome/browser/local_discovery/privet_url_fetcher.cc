@@ -15,6 +15,7 @@
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/local_discovery/privet_constants.h"
 #include "content/public/browser/browser_thread.h"
+#include "net/base/load_flags.h"
 #include "net/http/http_status_code.h"
 #include "net/url_request/url_request_status.h"
 
@@ -34,7 +35,7 @@ struct TokenMapHolder {
 };
 
 const char kXPrivetTokenHeaderPrefix[] = "X-Privet-Token: ";
-const char kXPrivetAuthTokenHeaderPrefix[] = "X-Privet-Auth: ";
+const char kPrivetV3AuthTokenHeaderPrefix[] = "Authorization: ";
 const char kRangeHeaderFormat[] = "Range: bytes=%d-%d";
 const char kXPrivetEmptyToken[] = "\"\"";
 const char kPrivetAuthTokenUnknown[] = "Unknown";
@@ -148,13 +149,16 @@ void PrivetURLFetcher::Try() {
 
 
     url_fetcher_.reset(net::URLFetcher::Create(url_, request_type_, this));
+    // Privet requests are relevant to hosts on local network only.
+    url_fetcher_->SetLoadFlags(url_fetcher_->GetLoadFlags() |
+                               net::LOAD_BYPASS_PROXY |
+                               net::LOAD_DISABLE_CACHE);
     url_fetcher_->SetRequestContext(request_context_.get());
 
     if (v3_mode_) {
-      std::string auth_token = delegate_->GetAuthToken();
-
       url_fetcher_->AddExtraRequestHeader(
-          std::string(kXPrivetAuthTokenHeaderPrefix) + auth_token);
+          std::string(kPrivetV3AuthTokenHeaderPrefix) +
+          delegate_->GetAuthToken());
     } else {
       std::string token = GetPrivetAccessToken();
 
@@ -228,7 +232,8 @@ void PrivetURLFetcher::SetUploadFilePath(
 }
 
 void PrivetURLFetcher::OnURLFetchComplete(const net::URLFetcher* source) {
-  if (source->GetResponseCode() == net::HTTP_SERVICE_UNAVAILABLE) {
+  if (source->GetResponseCode() == net::HTTP_SERVICE_UNAVAILABLE ||
+      source->GetResponseCode() == net::URLFetcher::RESPONSE_CODE_INVALID) {
     ScheduleRetry(kPrivetTimeoutOnError);
     return;
   }
@@ -255,7 +260,8 @@ bool PrivetURLFetcher::OnURLFetchCompleteDoNotParseData(
   }
 
   if (source->GetResponseCode() != net::HTTP_OK &&
-      source->GetResponseCode() != net::HTTP_PARTIAL_CONTENT) {
+      source->GetResponseCode() != net::HTTP_PARTIAL_CONTENT &&
+      source->GetResponseCode() != net::HTTP_BAD_REQUEST) {
     delegate_->OnError(this, RESPONSE_CODE_ERROR);
     return true;
   }

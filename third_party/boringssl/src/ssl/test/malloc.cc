@@ -12,13 +12,26 @@
  * OF CONTRACT, NEGLIGENCE OR OTHER TORTIOUS ACTION, ARISING OUT OF OR IN
  * CONNECTION WITH THE USE OR PERFORMANCE OF THIS SOFTWARE. */
 
-#if defined(__linux__)
+#include <openssl/base.h>
+
+#if defined(__has_feature)
+#if __has_feature(address_sanitizer)
+#define OPENSSL_ASAN
+#endif
+#endif
+
+// This file isn't built on ARM or Aarch64 because we link statically in those
+// builds and trying to override malloc in a static link doesn't work. It's also
+// disabled on ASan builds as this interferes with ASan's malloc interceptor.
+//
+// TODO(davidben): See if this and ASan's interceptors can be made to coexist.
+#if defined(__linux__) && !defined(OPENSSL_ARM) && \
+    !defined(OPENSSL_AARCH64) && !defined(OPENSSL_ASAN)
 
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <unistd.h>
-#include <unistd.h>
-#include <stdio.h>
 
 #include <new>
 
@@ -123,4 +136,4 @@ void *realloc(void *ptr, size_t size) {
 
 }  // extern "C"
 
-#endif  /* defined(linux) */
+#endif  /* defined(linux) && !ARM && !AARCH64 && !ASAN */

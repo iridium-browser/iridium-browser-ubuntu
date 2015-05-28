@@ -4,6 +4,9 @@
 
 #include "chrome/browser/sync/test/integration/bookmarks_helper.h"
 
+#include <set>
+#include <vector>
+
 #include "base/bind.h"
 #include "base/compiler_specific.h"
 #include "base/files/file_util.h"
@@ -18,9 +21,7 @@
 #include "chrome/browser/bookmarks/bookmark_model_factory.h"
 #include "chrome/browser/bookmarks/chrome_bookmark_client.h"
 #include "chrome/browser/bookmarks/chrome_bookmark_client_factory.h"
-#include "chrome/browser/favicon/favicon_service.h"
 #include "chrome/browser/favicon/favicon_service_factory.h"
-#include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/sync/glue/bookmark_change_processor.h"
@@ -33,14 +34,19 @@
 #include "components/bookmarks/browser/bookmark_model.h"
 #include "components/bookmarks/browser/bookmark_model_observer.h"
 #include "components/bookmarks/browser/bookmark_utils.h"
+#include "components/favicon/core/favicon_service.h"
 #include "components/favicon_base/favicon_util.h"
 #include "components/history/core/browser/history_db_task.h"
+#include "components/history/core/browser/history_service.h"
 #include "components/history/core/browser/history_types.h"
 #include "content/public/test/test_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "third_party/skia/include/core/SkBitmap.h"
 #include "ui/base/models/tree_node_iterator.h"
 #include "ui/gfx/image/image_skia.h"
+
+using bookmarks::BookmarkModel;
+using bookmarks::BookmarkNode;
 
 namespace {
 
@@ -152,6 +158,20 @@ int CountNodesWithTitlesMatching(BookmarkModel* model,
   return count;
 }
 
+// Returns the number of nodes of node type |node_type| in |model|.
+int CountNodes(BookmarkModel* model, BookmarkNode::Type node_type) {
+  ui::TreeNodeIterator<const BookmarkNode> iterator(model->root_node());
+  // Walk through the model tree looking for bookmark nodes of node type
+  // |node_type|.
+  int count = 0;
+  while (iterator.has_next()) {
+    const BookmarkNode* node = iterator.Next();
+    if (node->type() == node_type)
+      ++count;
+  }
+  return count;
+}
+
 // Checks if the favicon data in |bitmap_a| and |bitmap_b| are equivalent.
 // Returns true if they match.
 bool FaviconRawBitmapsMatch(const SkBitmap& bitmap_a,
@@ -230,9 +250,9 @@ void SetFaviconImpl(Profile* profile,
     BookmarkModel* model = BookmarkModelFactory::GetForProfile(profile);
 
     FaviconChangeObserver observer(model, node);
-    FaviconService* favicon_service =
-        FaviconServiceFactory::GetForProfile(profile,
-                                             Profile::EXPLICIT_ACCESS);
+    favicon::FaviconService* favicon_service =
+        FaviconServiceFactory::GetForProfile(
+            profile, ServiceAccessType::EXPLICIT_ACCESS);
     if (favicon_source == bookmarks_helper::FROM_UI) {
       favicon_service->SetFavicons(
           node->url(), icon_url, favicon_base::FAVICON, image);
@@ -266,7 +286,7 @@ void WaitForHistoryToProcessPendingTasks() {
 
   for (size_t i = 0; i < profiles_which_need_to_wait.size(); ++i) {
     Profile* profile = profiles_which_need_to_wait[i];
-    HistoryService* history_service =
+    history::HistoryService* history_service =
         HistoryServiceFactory::GetForProfileWithoutCreating(profile);
     base::WaitableEvent done(false, false);
     base::CancelableTaskTracker task_tracker;
@@ -771,6 +791,10 @@ const BookmarkNode* GetUniqueNodeByURL(int profile, const GURL& url) {
   if (nodes.empty())
     return NULL;
   return nodes[0];
+}
+
+int CountAllBookmarks(int profile) {
+  return CountNodes(GetBookmarkModel(profile), BookmarkNode::URL);
 }
 
 int CountBookmarksWithTitlesMatching(int profile, const std::string& title) {

@@ -12,6 +12,7 @@
 #include "content/public/browser/browser_thread.h"
 #include "content/public/browser/resource_controller.h"
 #include "content/public/browser/resource_request_info.h"
+#include "net/url_request/redirect_info.h"
 #include "net/url_request/url_request.h"
 #include "ui/base/page_transition_types.h"
 
@@ -47,14 +48,9 @@ int GetHistogramValueForFilteringBehavior(
     SupervisedUserURLFilter::FilteringBehavior behavior,
     SupervisedUserURLFilter::FilteringBehaviorReason reason,
     bool uncertain) {
-  // Since we're only interested in statistics about the blacklist and
-  // SafeSites, count everything that got through to the default fallback
-  // behavior as ALLOW (made it through all the filters!).
-  if (reason == SupervisedUserURLFilter::DEFAULT)
-    behavior = SupervisedUserURLFilter::ALLOW;
-
   switch (behavior) {
     case SupervisedUserURLFilter::ALLOW:
+    case SupervisedUserURLFilter::WARN:
       return uncertain ? FILTERING_BEHAVIOR_ALLOW_UNCERTAIN
                        : FILTERING_BEHAVIOR_ALLOW;
     case SupervisedUserURLFilter::BLOCK:
@@ -83,7 +79,8 @@ void RecordFilterResultEvent(
     SupervisedUserURLFilter::FilteringBehaviorReason reason,
     bool uncertain,
     ui::PageTransition transition_type) {
-  DCHECK(reason != SupervisedUserURLFilter::MANUAL);
+  DCHECK(reason == SupervisedUserURLFilter::ASYNC_CHECKER ||
+         reason == SupervisedUserURLFilter::BLACKLIST);
   int value =
       GetHistogramValueForFilteringBehavior(behavior, reason, uncertain) *
           kHistogramFilteringBehaviorSpacing +
@@ -147,9 +144,10 @@ void SupervisedUserResourceThrottle::WillStartRequest(bool* defer) {
   ShowInterstitialIfNeeded(false, request_->url(), defer);
 }
 
-void SupervisedUserResourceThrottle::WillRedirectRequest(const GURL& new_url,
-                                                         bool* defer) {
-  ShowInterstitialIfNeeded(true, new_url, defer);
+void SupervisedUserResourceThrottle::WillRedirectRequest(
+    const net::RedirectInfo& redirect_info,
+    bool* defer) {
+  ShowInterstitialIfNeeded(true, redirect_info.new_url, defer);
 }
 
 const char* SupervisedUserResourceThrottle::GetNameForLogging() const {
@@ -168,7 +166,8 @@ void SupervisedUserResourceThrottle::OnCheckDone(
 
   // If both the static blacklist and SafeSites are enabled, record UMA events.
   if (url_filter_->HasBlacklist() && url_filter_->HasAsyncURLChecker() &&
-      reason < SupervisedUserURLFilter::MANUAL) {
+      (reason == SupervisedUserURLFilter::ASYNC_CHECKER ||
+       reason == SupervisedUserURLFilter::BLACKLIST)) {
     const content::ResourceRequestInfo* info =
         content::ResourceRequestInfo::ForRequest(request_);
     RecordFilterResultEvent(behavior, reason, uncertain,

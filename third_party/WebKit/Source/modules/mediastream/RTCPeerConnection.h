@@ -145,7 +145,7 @@ public:
         return !m_closed && !m_stopped;
     }
 
-    virtual void trace(Visitor*) override;
+    DECLARE_VIRTUAL_TRACE();
 
 private:
     RTCPeerConnection(ExecutionContext*, RTCConfiguration*, WebMediaConstraints, ExceptionState&);
@@ -171,12 +171,12 @@ private:
     MediaStreamVector m_localStreams;
     MediaStreamVector m_remoteStreams;
 
-    HeapVector<Member<RTCDataChannel> > m_dataChannels;
+    HeapVector<Member<RTCDataChannel>> m_dataChannels;
 
     OwnPtr<WebRTCPeerConnectionHandler> m_peerHandler;
 
     AsyncMethodRunner<RTCPeerConnection> m_dispatchScheduledEventRunner;
-    WillBeHeapVector<RefPtrWillBeMember<Event> > m_scheduledEvents;
+    WillBeHeapVector<RefPtrWillBeMember<Event>> m_scheduledEvents;
 
     bool m_stopped;
     bool m_closed;

@@ -41,7 +41,7 @@ struct RuleFeature {
 public:
     RuleFeature(StyleRule* rule, unsigned selectorIndex, bool hasDocumentSecurityOrigin);
 
-    void trace(Visitor*);
+    DECLARE_TRACE();
 
     RawPtrWillBeMember<StyleRule> rule;
     unsigned selectorIndex;
@@ -61,6 +61,7 @@ public:
 
     bool usesSiblingRules() const { return !siblingRules.isEmpty(); }
     bool usesFirstLineRules() const { return m_metadata.usesFirstLineRules; }
+    bool usesWindowInactiveSelector() const { return m_metadata.usesWindowInactiveSelector; }
 
     unsigned maxDirectAdjacentSelectors() const { return m_metadata.maxDirectAdjacentSelectors; }
     void setMaxDirectAdjacentSelectors(unsigned value)  { m_metadata.maxDirectAdjacentSelectors = std::max(value, m_metadata.maxDirectAdjacentSelectors); }
@@ -93,7 +94,7 @@ public:
 
     StyleInvalidator& styleInvalidator();
 
-    void trace(Visitor*);
+    DECLARE_TRACE();
 
     WillBeHeapVector<RuleFeature> siblingRules;
     WillBeHeapVector<RuleFeature> uncommonAttributeRules;
@@ -102,12 +103,13 @@ protected:
     DescendantInvalidationSet* invalidationSetForSelector(const CSSSelector&);
 
 private:
-    typedef WillBeHeapHashMap<AtomicString, RefPtrWillBeMember<DescendantInvalidationSet> > InvalidationSetMap;
-    typedef WillBeHeapHashMap<CSSSelector::PseudoType, RefPtrWillBeMember<DescendantInvalidationSet>, WTF::IntHash<unsigned>, WTF::UnsignedWithZeroKeyHashTraits<unsigned> > PseudoTypeInvalidationSetMap;
+    typedef WillBeHeapHashMap<AtomicString, RefPtrWillBeMember<DescendantInvalidationSet>> InvalidationSetMap;
+    typedef WillBeHeapHashMap<CSSSelector::PseudoType, RefPtrWillBeMember<DescendantInvalidationSet>, WTF::IntHash<unsigned>, WTF::UnsignedWithZeroKeyHashTraits<unsigned>> PseudoTypeInvalidationSetMap;
 
     struct FeatureMetadata {
         FeatureMetadata()
             : usesFirstLineRules(false)
+            , usesWindowInactiveSelector(false)
             , foundSiblingSelector(false)
             , maxDirectAdjacentSelectors(0)
         { }
@@ -115,6 +117,7 @@ private:
         void clear();
 
         bool usesFirstLineRules;
+        bool usesWindowInactiveSelector;
         bool foundSiblingSelector;
         unsigned maxDirectAdjacentSelectors;
     };

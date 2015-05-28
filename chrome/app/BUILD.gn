@@ -304,6 +304,7 @@ source_set("test_support") {
   deps = [
     "//base",
     "//chrome/browser",
+    "//chrome/child",
     "//chrome/common",
     "//chrome/plugin",
     "//chrome/renderer",
@@ -314,16 +315,12 @@ source_set("test_support") {
   ]
 
   if (is_mac) {
-    sources += [
-      "chrome_breakpad_client.cc",
-      "chrome_breakpad_client_mac.mm",
-      "chrome_main_mac.mm",
-    ]
+    sources += [ "chrome_main_mac.mm" ]
   }
 
-  # TODO(gyp) if (enable_plugins and enable_nacl) {
-  #  deps += [ "'<(DEPTH)/ppapi/native_client/src/trusted/plugin/plugin.gyp:nacl_trusted_plugin'," ]
-  # }
+  if (enable_plugins && enable_nacl) {
+    deps += [ "//components/nacl/renderer/plugin:nacl_trusted_plugin" ]
+  }
 
   if (enable_remoting) {
     deps += [ "//remoting/client/plugin" ]

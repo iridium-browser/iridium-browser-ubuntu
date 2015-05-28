@@ -5,13 +5,16 @@
 {
   'targets': [
     {
+      # GN version: //content/common:mojo_bindings
       'target_name': 'content_common_mojo_bindings_mojom',
       'type': 'none',
       'variables': {
         'mojom_files': [
           # NOTE: Sources duplicated in //content/common/BUILD.gn:mojo_bindings.
+          'common/application_setup.mojom',
           'common/geolocation_service.mojom',
           'common/permission_service.mojom',
+          'common/presentation/presentation_service.mojom',
           'common/render_frame_setup.mojom',
 
           # NOTE: Sources duplicated in
@@ -20,7 +23,7 @@
           'public/common/permission_status.mojom',
         ],
       },
-      'includes': [ '../mojo/mojom_bindings_generator_explicit.gypi' ],
+      'includes': [ '../third_party/mojo/mojom_bindings_generator_explicit.gypi' ],
     },
     {
       'target_name': 'content_common_mojo_bindings',
@@ -29,8 +32,8 @@
       'dependencies': [
         'content_common_mojo_bindings_mojom',
         '../mojo/mojo_base.gyp:mojo_environment_chromium',
-        '../mojo/mojo_public.gyp:mojo_application_bindings',
-        '../mojo/mojo_public.gyp:mojo_cpp_bindings',
+        '../third_party/mojo/mojo_public.gyp:mojo_application_bindings',
+        '../third_party/mojo/mojo_public.gyp:mojo_cpp_bindings',
       ]
     },
   ]

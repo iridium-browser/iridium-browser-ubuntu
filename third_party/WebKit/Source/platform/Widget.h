@@ -32,6 +32,7 @@
 #include "platform/geometry/FloatPoint.h"
 #include "platform/geometry/IntRect.h"
 #include "platform/heap/Handle.h"
+#include "public/platform/WebFocusType.h"
 #include "wtf/Forward.h"
 #include "wtf/RefCounted.h"
 
@@ -67,11 +68,14 @@ public:
     void move(int x, int y) { setFrameRect(IntRect(x, y, width(), height())); }
     void move(const IntPoint& p) { setFrameRect(IntRect(p, size())); }
 
+    // layoutWidgetIfPossible is only supported by plugins, and not the various ...View
+    // classes that also inherit from Widget.
+    virtual void layoutWidgetIfPossible() { }
     virtual void paint(GraphicsContext*, const IntRect&) { }
     void invalidate() { invalidateRect(boundsRect()); }
     virtual void invalidateRect(const IntRect&) = 0;
 
-    virtual void setFocus(bool) { }
+    virtual void setFocus(bool, WebFocusType) { }
 
     virtual void show() { }
     virtual void hide() { }
@@ -124,7 +128,7 @@ public:
     // Notifies this widget that it will no longer be receiving events.
     virtual void eventListenersRemoved() { }
 
-    virtual void trace(Visitor*);
+    DECLARE_VIRTUAL_TRACE();
     virtual void dispose() { }
 
 private:

@@ -71,7 +71,9 @@ function DialogFooter(dialogType, container, filenameInput) {
 
 DialogFooter.prototype = {
   /**
-   * @return {number} Selected filter index.
+   * @return {number} Selected filter index. The index is 1 based and 0 means
+   *     'any file types'. Keep the meaniing consistent with the index passed to
+   *     chrome.fileManagerPrivate.selectFile.
    */
   get selectedFilterIndex() {
     return ~~this.fileTypeSelector.value;
@@ -85,13 +87,9 @@ DialogFooter.prototype = {
  * @return {!DialogFooter} Dialog footer created with the found element.
  */
 DialogFooter.findDialogFooter = function(dialogType, document) {
-  // If the footer panel exists, the buttons are placed there. Otherwise,
-  // the buttons are on the preview panel.
-  var hasFooterPanel = dialogType == DialogType.SELECT_SAVEAS_FILE;
   return new DialogFooter(
       dialogType,
-      queryRequiredElement(
-          document, hasFooterPanel ? '.dialog-footer' : '.preview-panel'),
+      queryRequiredElement(document, '.dialog-footer'),
       queryRequiredElement(document, '#filename-input-box input'));
 };
 
@@ -129,13 +127,6 @@ DialogFooter.getOKButtonLabel_ = function(dialogType) {
  */
 DialogFooter.prototype.initFileTypeFilter = function(
     fileTypes, includeAllFiles) {
-  if (includeAllFiles) {
-    var option = document.createElement('option');
-    option.innerText = str('ALL_FILES_FILTER');
-    option.value = 0;
-    this.fileTypeSelector.appendChild(option);
-  }
-
   for (var i = 0; i < fileTypes.length; i++) {
     var fileType = fileTypes[i];
     var option = document.createElement('option');
@@ -143,7 +134,7 @@ DialogFooter.prototype.initFileTypeFilter = function(
     if (!description) {
       // See if all the extensions in the group have the same description.
       for (var j = 0; j !== fileType.extensions.length; j++) {
-        var currentDescription = FileType.typeToString(
+        var currentDescription = FileListModel.getFileTypeString(
             FileType.getTypeForName('.' + fileType.extensions[j]));
         if (!description)  {
           // Set the first time.
@@ -168,6 +159,13 @@ DialogFooter.prototype.initFileTypeFilter = function(
     if (fileType.selected)
       option.selected = true;
 
+    this.fileTypeSelector.appendChild(option);
+  }
+
+  if (includeAllFiles) {
+    var option = document.createElement('option');
+    option.innerText = str('ALL_FILES_FILTER');
+    option.value = 0;
     this.fileTypeSelector.appendChild(option);
   }
 

@@ -4,6 +4,7 @@
 
 package org.chromium.content.browser.accessibility;
 
+import android.annotation.TargetApi;
 import android.content.Context;
 import android.graphics.Rect;
 import android.os.Build;
@@ -38,6 +39,7 @@ import java.util.Locale;
  * accessibility.
  */
 @JNINamespace("content")
+@TargetApi(Build.VERSION_CODES.JELLY_BEAN)
 public class BrowserAccessibilityManager {
     private static final String TAG = "BrowserAccessibilityManager";
 
@@ -50,7 +52,6 @@ public class BrowserAccessibilityManager {
     private final AccessibilityManager mAccessibilityManager;
     private final RenderCoordinates mRenderCoordinates;
     private long mNativeObj;
-    private int mAccessibilityFocusId;
     private Rect mAccessibilityFocusRect;
     private boolean mIsHovering;
     private int mLastHoverId = View.NO_ID;
@@ -63,7 +64,8 @@ public class BrowserAccessibilityManager {
     private int mSelectionGranularity;
     private int mSelectionStartIndex;
     private int mSelectionEndIndex;
-    private boolean mVisible = true;
+    protected int mAccessibilityFocusId;
+    protected boolean mVisible = true;
 
     /**
      * Create a BrowserAccessibilityManager object, which is owned by the C++
@@ -75,13 +77,10 @@ public class BrowserAccessibilityManager {
     @CalledByNative
     private static BrowserAccessibilityManager create(long nativeBrowserAccessibilityManagerAndroid,
             ContentViewCore contentViewCore) {
-        // A bug in the KitKat framework prevents us from using these new APIs.
-        // http://crbug.com/348088/
-        // if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
-        //     return new KitKatBrowserAccessibilityManager(
-        //             nativeBrowserAccessibilityManagerAndroid, contentViewCore);
-
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN) {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
+            return new LollipopBrowserAccessibilityManager(
+                    nativeBrowserAccessibilityManagerAndroid, contentViewCore);
+        } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN) {
             return new JellyBeanBrowserAccessibilityManager(
                     nativeBrowserAccessibilityManagerAndroid, contentViewCore);
         } else {
@@ -211,9 +210,11 @@ public class BrowserAccessibilityManager {
                 }
                 return true;
             case AccessibilityNodeInfo.ACTION_CLEAR_ACCESSIBILITY_FOCUS:
+                // ALWAYS respond with TYPE_VIEW_ACCESSIBILITY_FOCUS_CLEARED whether we thought
+                // it had focus or not, so that the Android framework cache is correct.
+                sendAccessibilityEvent(virtualViewId,
+                        AccessibilityEvent.TYPE_VIEW_ACCESSIBILITY_FOCUS_CLEARED);
                 if (mAccessibilityFocusId == virtualViewId) {
-                    sendAccessibilityEvent(mAccessibilityFocusId,
-                            AccessibilityEvent.TYPE_VIEW_ACCESSIBILITY_FOCUS_CLEARED);
                     mAccessibilityFocusId = View.NO_ID;
                     mAccessibilityFocusRect = null;
                 }
@@ -407,10 +408,11 @@ public class BrowserAccessibilityManager {
 
         // Update the cursor or selection based on the traversal. If it's an editable
         // text node, set the real editing cursor too.
-        if (forwards)
+        if (forwards) {
             mSelectionEndIndex = itemEndIndex;
-        else
+        } else {
             mSelectionEndIndex = itemStartIndex;
+        }
         if (!extendSelection) {
             mSelectionStartIndex = mSelectionEndIndex;
         }
@@ -458,10 +460,11 @@ public class BrowserAccessibilityManager {
         // this node and its subtree. If accessibility focus is on anything other than
         // the root, do it - otherwise set it to -1 so we don't load inline text boxes
         // for the whole subtree of the root.
-        if (mAccessibilityFocusId == mCurrentRootId)
+        if (mAccessibilityFocusId == mCurrentRootId) {
             nativeSetAccessibilityFocus(mNativeObj, -1);
-        else
+        } else {
             nativeSetAccessibilityFocus(mNativeObj, mAccessibilityFocusId);
+        }
 
         sendAccessibilityEvent(mAccessibilityFocusId,
                 AccessibilityEvent.TYPE_VIEW_ACCESSIBILITY_FOCUSED);
@@ -668,8 +671,8 @@ public class BrowserAccessibilityManager {
 
     @CalledByNative
     private void setAccessibilityNodeInfoBooleanAttributes(AccessibilityNodeInfo node,
-            int virtualViewId, boolean canScrollForward, boolean canScrollBackward,
-            boolean checkable, boolean checked, boolean clickable, boolean editableText,
+            int virtualViewId,
+            boolean checkable, boolean checked, boolean clickable,
             boolean enabled, boolean focusable, boolean focused, boolean password,
             boolean scrollable, boolean selected, boolean visibleToUser) {
         node.setCheckable(checkable);
@@ -683,14 +686,29 @@ public class BrowserAccessibilityManager {
         node.setSelected(selected);
         node.setVisibleToUser(visibleToUser && mVisible);
 
-        node.addAction(AccessibilityNodeInfo.ACTION_NEXT_HTML_ELEMENT);
-        node.addAction(AccessibilityNodeInfo.ACTION_PREVIOUS_HTML_ELEMENT);
-        node.addAction(AccessibilityNodeInfo.ACTION_NEXT_AT_MOVEMENT_GRANULARITY);
-        node.addAction(AccessibilityNodeInfo.ACTION_PREVIOUS_AT_MOVEMENT_GRANULARITY);
         node.setMovementGranularities(
                 AccessibilityNodeInfo.MOVEMENT_GRANULARITY_CHARACTER
                 | AccessibilityNodeInfo.MOVEMENT_GRANULARITY_WORD
                 | AccessibilityNodeInfo.MOVEMENT_GRANULARITY_LINE);
+
+        if (mAccessibilityFocusId == virtualViewId) {
+            node.setAccessibilityFocused(true);
+        } else if (mVisible) {
+            node.setAccessibilityFocused(false);
+        }
+    }
+
+    // LollipopBrowserAccessibilityManager overrides this with the non-deprecated APIs.
+    @SuppressWarnings("deprecation")
+    @CalledByNative
+    protected void addAccessibilityNodeInfoActions(AccessibilityNodeInfo node,
+            int virtualViewId, boolean canScrollForward, boolean canScrollBackward,
+            boolean clickable, boolean editableText, boolean enabled, boolean focusable,
+            boolean focused) {
+        node.addAction(AccessibilityNodeInfo.ACTION_NEXT_HTML_ELEMENT);
+        node.addAction(AccessibilityNodeInfo.ACTION_PREVIOUS_HTML_ELEMENT);
+        node.addAction(AccessibilityNodeInfo.ACTION_NEXT_AT_MOVEMENT_GRANULARITY);
+        node.addAction(AccessibilityNodeInfo.ACTION_PREVIOUS_AT_MOVEMENT_GRANULARITY);
 
         if (editableText && enabled) {
             node.addAction(ACTION_SET_TEXT);
@@ -714,10 +732,8 @@ public class BrowserAccessibilityManager {
         }
 
         if (mAccessibilityFocusId == virtualViewId) {
-            node.setAccessibilityFocused(true);
             node.addAction(AccessibilityNodeInfo.ACTION_CLEAR_ACCESSIBILITY_FOCUS);
         } else if (mVisible) {
-            node.setAccessibilityFocused(false);
             node.addAction(AccessibilityNodeInfo.ACTION_ACCESSIBILITY_FOCUS);
         }
 
@@ -798,32 +814,32 @@ public class BrowserAccessibilityManager {
     }
 
     @CalledByNative
-    protected void setAccessibilityNodeInfoKitKatAttributes(AccessibilityNodeInfo node,
+    protected void setAccessibilityNodeInfoLollipopAttributes(AccessibilityNodeInfo node,
             boolean canOpenPopup,
             boolean contentInvalid,
             boolean dismissable,
             boolean multiLine,
             int inputType,
             int liveRegion) {
-        // Requires KitKat or higher.
+        // Requires Lollipop or higher.
     }
 
     @CalledByNative
     protected void setAccessibilityNodeInfoCollectionInfo(AccessibilityNodeInfo node,
             int rowCount, int columnCount, boolean hierarchical) {
-        // Requires KitKat or higher.
+        // Requires Lollipop or higher.
     }
 
     @CalledByNative
     protected void setAccessibilityNodeInfoCollectionItemInfo(AccessibilityNodeInfo node,
             int rowIndex, int rowSpan, int columnIndex, int columnSpan, boolean heading) {
-        // Requires KitKat or higher.
+        // Requires Lollipop or higher.
     }
 
     @CalledByNative
     protected void setAccessibilityNodeInfoRangeInfo(AccessibilityNodeInfo node,
             int rangeType, float min, float max, float current) {
-        // Requires KitKat or higher.
+        // Requires Lollipop or higher.
     }
 
     @CalledByNative
@@ -876,14 +892,14 @@ public class BrowserAccessibilityManager {
     }
 
     @CalledByNative
-    protected void setAccessibilityEventKitKatAttributes(AccessibilityEvent event,
+    protected void setAccessibilityEventLollipopAttributes(AccessibilityEvent event,
             boolean canOpenPopup,
             boolean contentInvalid,
             boolean dismissable,
             boolean multiLine,
             int inputType,
             int liveRegion) {
-        // Backwards compatibility for KitKat AccessibilityNodeInfo fields.
+        // Backwards compatibility for Lollipop AccessibilityNodeInfo fields.
         Bundle bundle = getOrCreateBundleForAccessibilityEvent(event);
         bundle.putBoolean("AccessibilityNodeInfo.canOpenPopup", canOpenPopup);
         bundle.putBoolean("AccessibilityNodeInfo.contentInvalid", contentInvalid);
@@ -896,7 +912,7 @@ public class BrowserAccessibilityManager {
     @CalledByNative
     protected void setAccessibilityEventCollectionInfo(AccessibilityEvent event,
             int rowCount, int columnCount, boolean hierarchical) {
-        // Backwards compatibility for KitKat AccessibilityNodeInfo fields.
+        // Backwards compatibility for Lollipop AccessibilityNodeInfo fields.
         Bundle bundle = getOrCreateBundleForAccessibilityEvent(event);
         bundle.putInt("AccessibilityNodeInfo.CollectionInfo.rowCount", rowCount);
         bundle.putInt("AccessibilityNodeInfo.CollectionInfo.columnCount", columnCount);
@@ -906,7 +922,7 @@ public class BrowserAccessibilityManager {
     @CalledByNative
     protected void setAccessibilityEventHeadingFlag(AccessibilityEvent event,
             boolean heading) {
-        // Backwards compatibility for KitKat AccessibilityNodeInfo fields.
+        // Backwards compatibility for Lollipop AccessibilityNodeInfo fields.
         Bundle bundle = getOrCreateBundleForAccessibilityEvent(event);
         bundle.putBoolean("AccessibilityNodeInfo.CollectionItemInfo.heading", heading);
     }
@@ -914,7 +930,7 @@ public class BrowserAccessibilityManager {
     @CalledByNative
     protected void setAccessibilityEventCollectionItemInfo(AccessibilityEvent event,
             int rowIndex, int rowSpan, int columnIndex, int columnSpan) {
-        // Backwards compatibility for KitKat AccessibilityNodeInfo fields.
+        // Backwards compatibility for Lollipop AccessibilityNodeInfo fields.
         Bundle bundle = getOrCreateBundleForAccessibilityEvent(event);
         bundle.putInt("AccessibilityNodeInfo.CollectionItemInfo.rowIndex", rowIndex);
         bundle.putInt("AccessibilityNodeInfo.CollectionItemInfo.rowSpan", rowSpan);
@@ -925,7 +941,7 @@ public class BrowserAccessibilityManager {
     @CalledByNative
     protected void setAccessibilityEventRangeInfo(AccessibilityEvent event,
             int rangeType, float min, float max, float current) {
-        // Backwards compatibility for KitKat AccessibilityNodeInfo fields.
+        // Backwards compatibility for Lollipop AccessibilityNodeInfo fields.
         Bundle bundle = getOrCreateBundleForAccessibilityEvent(event);
         bundle.putInt("AccessibilityNodeInfo.RangeInfo.type", rangeType);
         bundle.putFloat("AccessibilityNodeInfo.RangeInfo.min", min);

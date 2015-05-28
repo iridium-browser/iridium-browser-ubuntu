@@ -6,6 +6,7 @@
 #include "bindings/core/v8/ScriptPromiseResolver.h"
 
 #include "bindings/core/v8/V8RecursionScope.h"
+#include "platform/LifecycleObserver.h"
 
 namespace blink {
 
@@ -24,6 +25,9 @@ ScriptPromiseResolver::ScriptPromiseResolver(ScriptState* scriptState)
         m_state = ResolvedOrRejected;
         m_resolver.clear();
     }
+#if ENABLE(OILPAN) && ENABLE(ASSERT)
+    ThreadState::current()->registerPreFinalizer(*this);
+#endif
 }
 
 void ScriptPromiseResolver::suspend()
@@ -97,7 +101,7 @@ void ScriptPromiseResolver::clear()
     }
 }
 
-void ScriptPromiseResolver::trace(Visitor* visitor)
+DEFINE_TRACE(ScriptPromiseResolver)
 {
     ActiveDOMObject::trace(visitor);
 }

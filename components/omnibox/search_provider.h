@@ -23,6 +23,7 @@
 #include "components/omnibox/answers_cache.h"
 #include "components/omnibox/base_search_provider.h"
 #include "components/search_engines/template_url.h"
+#include "components/search_engines/template_url_service_observer.h"
 #include "net/url_request/url_fetcher_delegate.h"
 
 class AutocompleteProviderClient;
@@ -50,6 +51,7 @@ class URLFetcher;
 // comes back, the provider creates and returns matches for the best
 // suggestions.
 class SearchProvider : public BaseSearchProvider,
+                       public TemplateURLServiceObserver,
                        public net::URLFetcherDelegate {
  public:
   SearchProvider(AutocompleteProviderListener* listener,
@@ -76,6 +78,7 @@ class SearchProvider : public BaseSearchProvider,
   ~SearchProvider() override;
 
  private:
+  friend class AutocompleteProviderTest;
   friend class SearchProviderTest;
   FRIEND_TEST_ALL_PREFIXES(SearchProviderTest, CanSendURL);
   FRIEND_TEST_ALL_PREFIXES(SearchProviderTest,
@@ -90,7 +93,6 @@ class SearchProvider : public BaseSearchProvider,
   FRIEND_TEST_ALL_PREFIXES(SearchProviderTest, AnswersCache);
   FRIEND_TEST_ALL_PREFIXES(SearchProviderTest, RemoveExtraAnswers);
   FRIEND_TEST_ALL_PREFIXES(SearchProviderTest, DoesNotProvideOnFocus);
-  FRIEND_TEST_ALL_PREFIXES(AutocompleteProviderTest, GetDestinationURL);
   FRIEND_TEST_ALL_PREFIXES(InstantExtendedPrefetchTest, ClearPrefetchedResults);
   FRIEND_TEST_ALL_PREFIXES(InstantExtendedPrefetchTest, SetPrefetchQuery);
 
@@ -162,7 +164,8 @@ class SearchProvider : public BaseSearchProvider,
   void Start(const AutocompleteInput& input,
              bool minimal_changes,
              bool called_due_to_focus) override;
-  void Stop(bool clear_cached_results) override;
+  void Stop(bool clear_cached_results,
+            bool due_to_user_inactivity) override;
 
   // BaseSearchProvider:
   const TemplateURL* GetTemplateURL(bool is_keyword) const override;
@@ -170,6 +173,9 @@ class SearchProvider : public BaseSearchProvider,
   bool ShouldAppendExtraParams(
       const SearchSuggestionParser::SuggestResult& result) const override;
   void RecordDeletionResult(bool success) override;
+
+  // TemplateURLServiceObserver:
+  void OnTemplateURLServiceChanged() override;
 
   // net::URLFetcherDelegate:
   void OnURLFetchComplete(const net::URLFetcher* source) override;
@@ -196,8 +202,10 @@ class SearchProvider : public BaseSearchProvider,
   // if suggested relevances cause undesirable behavior. Updates |done_|.
   void UpdateMatches();
 
-  // Called when timer_ expires.
-  void Run();
+  // Called when |timer_| expires.  Sends the suggest requests.
+  // If |query_is_private|, the function doesn't send this query to the default
+  // provider.
+  void Run(bool query_is_private);
 
   // Runs the history query, if necessary. The history query is synchronous.
   // This does not update |done_|.
@@ -211,10 +219,19 @@ class SearchProvider : public BaseSearchProvider,
   // NOTE: This function does not update |done_|.  Callers must do so.
   void StartOrStopSuggestQuery(bool minimal_changes);
 
-  // Returns true when the current query can be sent to the Suggest service.
-  // This will be false e.g. when Suggest is disabled, the query contains
-  // potentially private data, etc.
-  bool IsQuerySuitableForSuggest() const;
+  // Stops |fetcher| if it's running.  This includes resetting the scoped_ptr.
+  void CancelFetcher(scoped_ptr<net::URLFetcher>* fetcher);
+
+  // Returns true when the current query can be sent to at least one suggest
+  // service.  This will be false for example when suggest is disabled.  In
+  // the process, calculates whether the query may contain potentionally
+  // private data and stores the result in |is_query_private|; such queries
+  // should not be sent to the default search engine.
+  bool IsQuerySuitableForSuggest(bool* query_is_private) const;
+
+  // Returns true if sending the query to a suggest server may leak sensitive
+  // information (and hence the suggest request shouldn't be sent).
+  bool IsQueryPotentionallyPrivate() const;
 
   // Remove existing keyword results if the user is no longer in keyword mode,
   // and, if |minimal_changes| is false, revise the existing results to
@@ -296,7 +313,7 @@ class SearchProvider : public BaseSearchProvider,
 
   // Gets the relevance score for the verbatim result.  This value may be
   // provided by the suggest server or calculated locally; if
-  // |relevance_from_server| is non-NULL, it will be set to indicate which of
+  // |relevance_from_server| is non-null, it will be set to indicate which of
   // those is true.
   int GetVerbatimRelevance(bool* relevance_from_server) const;
 
@@ -348,10 +365,6 @@ class SearchProvider : public BaseSearchProvider,
 
   AutocompleteProviderListener* listener_;
 
-  // The number of suggest results that haven't yet arrived. If it's greater
-  // than 0, it indicates that one of the URLFetchers is still running.
-  int suggest_results_pending_;
-
   // Maintains the TemplateURLs used.
   Providers providers_;
 
@@ -378,6 +391,8 @@ class SearchProvider : public BaseSearchProvider,
   base::TimeTicks time_suggest_request_sent_;
 
   // Fetchers used to retrieve results for the keyword and default providers.
+  // After a fetcher's results are returned, it gets reset, so a non-null
+  // fetcher indicates that fetcher is still in flight.
   scoped_ptr<net::URLFetcher> keyword_fetcher_;
   scoped_ptr<net::URLFetcher> default_fetcher_;
 

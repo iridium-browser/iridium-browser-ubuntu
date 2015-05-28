@@ -1,5 +1,0 @@
-include_rules = [
-  "+components/dns_prefetch/common",
-  "+content/public/renderer",
-  "+third_party/WebKit/public",
-]

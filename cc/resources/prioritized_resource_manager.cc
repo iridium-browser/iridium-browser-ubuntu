@@ -6,7 +6,7 @@
 
 #include <algorithm>
 
-#include "base/debug/trace_event.h"
+#include "base/trace_event/trace_event.h"
 #include "cc/resources/prioritized_resource.h"
 #include "cc/resources/priority_calculator.h"
 #include "cc/trees/proxy.h"
@@ -451,11 +451,8 @@ PrioritizedResource::Backing* PrioritizedResourceManager::CreateBacking(
   DCHECK(resource_provider);
   ResourceProvider::ResourceId resource_id =
       resource_provider->CreateManagedResource(
-          size,
-          GL_TEXTURE_2D,
-          GL_CLAMP_TO_EDGE,
-          ResourceProvider::TextureHintImmutable,
-          format);
+          size, GL_TEXTURE_2D, GL_CLAMP_TO_EDGE,
+          ResourceProvider::TEXTURE_HINT_IMMUTABLE, format);
   PrioritizedResource::Backing* backing = new PrioritizedResource::Backing(
       resource_id, resource_provider, size, format);
   memory_use_bytes_ += backing->bytes();

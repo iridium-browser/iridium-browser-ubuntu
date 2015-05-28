@@ -492,9 +492,17 @@ int UseCounter::mapCSSPropertyIdToCSSSampleIdForHistogram(int id)
     case CSSPropertyJustifyItems: return 455;
     case CSSPropertyScrollBlocksOn: return 456;
     case CSSPropertyMotionPath: return 457;
-    case CSSPropertyMotionPosition: return 458;
+    case CSSPropertyMotionOffset: return 458;
     case CSSPropertyMotionRotation: return 459;
     case CSSPropertyMotion: return 460;
+    case CSSPropertyX: return 461;
+    case CSSPropertyY: return 462;
+    case CSSPropertyRx: return 463;
+    case CSSPropertyRy: return 464;
+    case CSSPropertyFontSizeAdjust: return 465;
+    case CSSPropertyCx: return 466;
+    case CSSPropertyCy: return 467;
+    case CSSPropertyR: return 468;
 
     // 1. Add new features above this line (don't change the assigned numbers of the existing
     // items).
@@ -511,7 +519,7 @@ int UseCounter::mapCSSPropertyIdToCSSSampleIdForHistogram(int id)
     return 0;
 }
 
-static int maximumCSSSampleId() { return 460; }
+static int maximumCSSSampleId() { return 468; }
 
 void UseCounter::muteForInspector()
 {
@@ -537,18 +545,22 @@ UseCounter::~UseCounter()
     updateMeasurements();
 }
 
-void UseCounter::updateMeasurements()
+void UseCounter::CountBits::updateMeasurements()
 {
-    blink::Platform::current()->histogramEnumeration("WebCore.FeatureObserver", PageVisits, NumberOfFeatures);
-
-    if (m_countBits) {
+    if (m_bits) {
         for (unsigned i = 0; i < NumberOfFeatures; ++i) {
-            if (m_countBits->quickGet(i))
+            if (m_bits->quickGet(i))
                 blink::Platform::current()->histogramEnumeration("WebCore.FeatureObserver", i, NumberOfFeatures);
         }
         // Clearing count bits is timing sensitive.
-        m_countBits->clearAll();
+        m_bits->clearAll();
     }
+}
+
+void UseCounter::updateMeasurements()
+{
+    blink::Platform::current()->histogramEnumeration("WebCore.FeatureObserver", PageVisits, NumberOfFeatures);
+    m_countBits.updateMeasurements();
 
     // FIXME: Sometimes this function is called more than once per page. The following
     //        bool guards against incrementing the page count when there are no CSS
@@ -581,7 +593,7 @@ void UseCounter::count(const Frame* frame, Feature feature)
     if (!host)
         return;
 
-    ASSERT(host->useCounter().deprecationMessage(feature).isEmpty());
+    ASSERT(deprecationMessage(feature).isEmpty());
     host->useCounter().recordMeasurement(feature);
 }
 
@@ -632,8 +644,8 @@ void UseCounter::countDeprecation(const LocalFrame* frame, Feature feature)
         return;
 
     if (host->useCounter().recordMeasurement(feature)) {
-        ASSERT(!host->useCounter().deprecationMessage(feature).isEmpty());
-        frame->console().addMessage(ConsoleMessage::create(DeprecationMessageSource, WarningMessageLevel, host->useCounter().deprecationMessage(feature)));
+        ASSERT(!deprecationMessage(feature).isEmpty());
+        frame->console().addMessage(ConsoleMessage::create(DeprecationMessageSource, WarningMessageLevel, deprecationMessage(feature)));
     }
 }
 
@@ -661,7 +673,6 @@ void UseCounter::countDeprecationIfNotPrivateScript(v8::Isolate* isolate, Execut
     UseCounter::countDeprecation(context, feature);
 }
 
-// FIXME: Update other UseCounter::deprecationMessage() cases to use this.
 static String replacedBy(const char* oldString, const char* newString)
 {
     return String::format("'%s' is deprecated. Please use '%s' instead.", oldString, newString);
@@ -679,13 +690,10 @@ String UseCounter::deprecationMessage(Feature feature)
         return replacedBy("KeyboardEvent.keyLocation", "KeyboardEvent.location");
 
     case ConsoleMarkTimeline:
-        return "console.markTimeline is deprecated. Please use the console.timeStamp instead.";
+        return replacedBy("console.markTimeline", "console.timeStamp");
 
     case FileError:
         return "FileError is deprecated. Please use the 'name' or 'message' attributes of DOMError rather than 'code'.";
-
-    case ShowModalDialog:
-        return "showModalDialog is deprecated. Please use window.open and postMessage instead.";
 
     case CSSStyleSheetInsertRuleOptionalArg:
         return "Calling CSSStyleSheet.insertRule() with one argument is deprecated. Please pass the index argument as well: insertRule(x, 0).";
@@ -694,19 +702,19 @@ String UseCounter::deprecationMessage(Feature feature)
         return "'HTMLVideoElement.webkitSupportsFullscreen' is deprecated. Its value is true if the video is loaded.";
 
     case PrefixedVideoDisplayingFullscreen:
-        return "'HTMLVideoElement.webkitDisplayingFullscreen' is deprecated. Please use the 'fullscreenchange' and 'webkitfullscreenchange' events instead.";
+        return "'HTMLVideoElement.webkitDisplayingFullscreen' is deprecated. Please use the 'fullscreenchange' event instead.";
 
     case PrefixedVideoEnterFullscreen:
-        return "'HTMLVideoElement.webkitEnterFullscreen()' is deprecated. Please use 'Element.requestFullscreen()' and 'Element.webkitRequestFullscreen()' instead.";
+        return replacedBy("HTMLVideoElement.webkitEnterFullscreen()", "Element.requestFullscreen()");
 
     case PrefixedVideoExitFullscreen:
-        return "'HTMLVideoElement.webkitExitFullscreen()' is deprecated. Please use 'Document.exitFullscreen()' and 'Document.webkitExitFullscreen()' instead.";
+        return replacedBy("HTMLVideoElement.webkitExitFullscreen()", "Document.exitFullscreen()");
 
     case PrefixedVideoEnterFullScreen:
-        return "'HTMLVideoElement.webkitEnterFullScreen()' is deprecated. Please use 'Element.requestFullscreen()' and 'Element.webkitRequestFullscreen()' instead.";
+        return replacedBy("HTMLVideoElement.webkitEnterFullScreen()", "Element.requestFullscreen()");
 
     case PrefixedVideoExitFullScreen:
-        return "'HTMLVideoElement.webkitExitFullScreen()' is deprecated. Please use 'Document.exitFullscreen()' and 'Document.webkitExitFullscreen()' instead.";
+        return replacedBy("HTMLVideoElement.webkitExitFullScreen()", "Document.exitFullscreen()");
 
     case PrefixedIndexedDB:
         return replacedBy("webkitIndexedDB", "indexedDB");
@@ -756,17 +764,11 @@ String UseCounter::deprecationMessage(Feature feature)
     case SyncXHRWithCredentials:
         return "Setting 'XMLHttpRequest.withCredentials' for synchronous requests is deprecated.";
 
-    case EventSourceURL:
-        return "'EventSource.URL' is deprecated. Please use 'EventSource.url' instead.";
-
-    case WebSocketURL:
-        return "'WebSocket.URL' is deprecated. Please use 'WebSocket.url' instead.";
-
     case HTMLTableElementVspace:
-        return "The 'vspace' attribute on table is deprecated. Please use CSS instead.";
+        return "The 'vspace' attribute on table is deprecated. Please use CSS margin-top and margin-bottom property instead.";
 
     case HTMLTableElementHspace:
-        return "The 'hspace' attribute on table is deprecated. Please use CSS instead.";
+        return "The 'hspace' attribute on table is deprecated. Please use CSS margin-left and margin-right property instead.";
 
     case PictureSourceSrc:
         return "<source src> with a <picture> parent is invalid and therefore ignored. Please use <source srcset> instead.";
@@ -778,10 +780,13 @@ String UseCounter::deprecationMessage(Feature feature)
         return "The XMLHttpRequest progress event property 'totalSize' is deprecated. Please use 'total' instead.";
 
     case ConsoleTimeline:
-        return "console.timeline is deprecated. Please use the console.time instead.";
+        return replacedBy("console.timeline", "console.time");
 
     case ConsoleTimelineEnd:
-        return "console.timelineEnd is deprecated. Please use the console.timeEnd instead.";
+        return replacedBy("console.timelineEnd", "console.timeEnd");
+
+    case CanvasRenderingContext2DCompositeOperationDarker:
+        return replacedBy("darker", "darken");
 
     case XMLHttpRequestSynchronousInNonWorkerOutsideBeforeUnload:
         return "Synchronous XMLHttpRequest on the main thread is deprecated because of its detrimental effects to the end user's experience. For more help, check http://xhr.spec.whatwg.org/.";
@@ -831,6 +836,39 @@ String UseCounter::deprecationMessage(Feature feature)
     case RangeExpand:
         return replacedBy("Range.expand()", "Selection.modify()");
 
+    case PrefixedMediaAddKey:
+    case PrefixedMediaGenerateKeyRequest:
+    case PrefixedMediaCancelKeyRequest:
+        return "The prefixed Encrypted Media Extensions APIs are deprecated and will be removed soon. Please use 'navigator.requestMediaKeySystemAccess()' instead.";
+
+    case CanPlayTypeKeySystem:
+        return "canPlayType()'s 'keySystem' parameter is deprecated and will be removed soon. Please use 'navigator.requestMediaKeySystemAccess()' instead.";
+
+    case AudioBufferSourceBufferOnce:
+        return "Setting AudioBufferSourceNode.buffer more than once is deprecated and will no longer work in Chrome 43.";
+
+    case SVGSVGElementForceRedraw:
+        return "'SVGSVGElement.forceRedraw()' is deprecated, please do not use it. It is a no-op, as per SVG2 (https://svgwg.org/svg2-draft/struct.html#__svg__SVGSVGElement__forceRedraw).";
+
+    case SVGSVGElementSuspendRedraw:
+        return "'SVGSVGElement.suspendRedraw()' is deprecated, please do not use it. It is a no-op, as per SVG2 (https://svgwg.org/svg2-draft/struct.html#__svg__SVGSVGElement__suspendRedraw).";
+
+    case SVGSVGElementUnsuspendRedraw:
+        return "'SVGSVGElement.unsuspendRedraw()' is deprecated, please do not use it. It is a no-op, as per SVG2 (https://svgwg.org/svg2-draft/struct.html#__svg__SVGSVGElement__unsuspendRedraw).";
+
+    case SVGSVGElementUnsuspendRedrawAll:
+        return "'SVGSVGElement.unsuspendRedrawAll()' is deprecated, please do not use it. It is a no-op, as per SVG2 (https://svgwg.org/svg2-draft/struct.html#__svg__SVGSVGElement__unsuspendRedrawAll).";
+
+    case ServiceWorkerClientPostMessage:
+        return "'Client.postMessage()' is an experimental API and may change. See https://github.com/slightlyoff/ServiceWorker/issues/609.";
+
+    case AttrChildAccess:
+    case AttrChildChange:
+        return "Attr child nodes are deprecated and will be removed in M45, around August 2015. Please use 'Attr.value' instead.";
+
+    case CSSKeyframesRuleInsertRule:
+        return "'CSSKeyframesRule.insertRule()' is deprecated and will be removed in M45, around August 2015. Please use 'CSSKeyframesRule.appendRule()' instead.";
+
     // Features that aren't deprecated don't have a deprecation message.
     default:
         return String();
@@ -841,7 +879,6 @@ void UseCounter::count(CSSParserContext context, CSSPropertyID feature)
 {
     ASSERT(feature >= firstCSSProperty);
     ASSERT(feature <= lastCSSProperty);
-    ASSERT(!isInternalProperty(feature));
 
     if (!isUseCounterEnabledForMode(context.mode()))
         return;

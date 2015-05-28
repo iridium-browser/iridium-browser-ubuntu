@@ -23,8 +23,10 @@
 #include "chrome/browser/chromeos/login/screens/base_screen_delegate.h"
 #include "chrome/browser/chromeos/login/screens/controller_pairing_screen.h"
 #include "chrome/browser/chromeos/login/screens/eula_screen.h"
+#include "chrome/browser/chromeos/login/screens/hid_detection_screen.h"
 #include "chrome/browser/chromeos/login/screens/host_pairing_screen.h"
 #include "chrome/browser/chromeos/login/screens/network_screen.h"
+#include "chrome/browser/chromeos/login/screens/reset_screen.h"
 #include "chrome/browser/chromeos/policy/enrollment_config.h"
 
 class PrefRegistrySimple;
@@ -59,7 +61,8 @@ class WizardController : public BaseScreenDelegate,
                          public EulaScreen::Delegate,
                          public ControllerPairingScreen::Delegate,
                          public HostPairingScreen::Delegate,
-                         public NetworkScreen::Delegate {
+                         public NetworkScreen::Delegate,
+                         public HIDDetectionScreen::Delegate {
  public:
   // Observes screen changes.
   class Observer {
@@ -72,7 +75,7 @@ class WizardController : public BaseScreenDelegate,
   };
 
   WizardController(LoginDisplayHost* host, OobeDisplay* oobe_display);
-  virtual ~WizardController();
+  ~WizardController() override;
 
   // Returns the default wizard controller if it has been created.
   static WizardController* default_controller() {
@@ -130,7 +133,8 @@ class WizardController : public BaseScreenDelegate,
   bool login_screen_started() const { return login_screen_started_; }
 
   // ScreenManager implementation.
-  virtual BaseScreen* CreateScreen(const std::string& screen_name) override;
+  BaseScreen* GetScreen(const std::string& screen_name) override;
+  BaseScreen* CreateScreen(const std::string& screen_name) override;
 
   static const char kNetworkScreenName[];
   static const char kLoginScreenName[];
@@ -181,9 +185,6 @@ class WizardController : public BaseScreenDelegate,
   // Shows images login screen.
   void ShowLoginScreen(const LoginScreenContext& context);
 
-  // Invokes corresponding first OOBE screen.
-  void OnHIDScreenNecessityCheck(bool screen_needed);
-
   // Exit handlers:
   void OnHIDDetectionCompleted();
   void OnNetworkConnected();
@@ -232,30 +233,33 @@ class WizardController : public BaseScreenDelegate,
   void PerformOOBECompletedActions();
 
   // Overridden from BaseScreenDelegate:
-  virtual void OnExit(BaseScreen& screen,
-                      ExitCodes exit_code,
-                      const ::login::ScreenContext* context) override;
-  virtual void ShowCurrentScreen() override;
-  virtual ErrorScreen* GetErrorScreen() override;
-  virtual void ShowErrorScreen() override;
-  virtual void HideErrorScreen(BaseScreen* parent_screen) override;
+  void OnExit(BaseScreen& screen,
+              ExitCodes exit_code,
+              const ::login::ScreenContext* context) override;
+  void ShowCurrentScreen() override;
+  ErrorScreen* GetErrorScreen() override;
+  void ShowErrorScreen() override;
+  void HideErrorScreen(BaseScreen* parent_screen) override;
 
   // Overridden from EulaScreen::Delegate:
-  virtual void SetUsageStatisticsReporting(bool val) override;
-  virtual bool GetUsageStatisticsReporting() const override;
+  void SetUsageStatisticsReporting(bool val) override;
+  bool GetUsageStatisticsReporting() const override;
 
   // Override from ControllerPairingScreen::Delegate:
-  virtual void SetHostConfiguration() override;
+  void SetHostConfiguration() override;
 
   // Override from HostPairingScreen::Delegate:
-  virtual void ConfigureHost(bool accepted_eula,
-                             const std::string& lang,
-                             const std::string& timezone,
-                             bool send_reports,
-                             const std::string& keyboard_layout) override;
+  void ConfigureHost(bool accepted_eula,
+                     const std::string& lang,
+                     const std::string& timezone,
+                     bool send_reports,
+                     const std::string& keyboard_layout) override;
 
   // Override from NetworkScreen::Delegate:
-  virtual void OnEnableDebuggingScreenRequested() override;
+  void OnEnableDebuggingScreenRequested() override;
+
+  // Override from HIDDetectionScreen::Delegate
+  void OnHIDScreenNecessityCheck(bool screen_needed) override;
 
   // Notification of a change in the state of an accessibility setting.
   void OnAccessibilityStatusChanged(
@@ -419,6 +423,8 @@ class WizardController : public BaseScreenDelegate,
   // conroller swithces to a pairing OOBE.
   scoped_ptr<pairing_chromeos::SharkConnectionListener>
       shark_connection_listener_;
+
+  BaseScreen* hid_screen_;
 
   base::WeakPtrFactory<WizardController> weak_factory_;
 

@@ -19,7 +19,6 @@ import org.chromium.base.VisibleForTesting;
 import org.chromium.chrome.R;
 import org.chromium.chrome.browser.ShortcutHelper;
 import org.chromium.chrome.browser.Tab;
-import org.chromium.ui.UiUtils;
 
 /**
  * Helper class showing the UI regarding Add to Homescreen and delegate the
@@ -75,14 +74,6 @@ public class AddToHomescreenDialog {
 
                 input.setEnabled(true);
                 input.setText(title);
-                input.setSelection(0, title.length());
-                input.requestFocus();
-                input.post(new Runnable() {
-                    @Override
-                    public void run() {
-                        UiUtils.showKeyboard(input);
-                    }
-                });
             }
         });
 
@@ -147,8 +138,9 @@ public class AddToHomescreenDialog {
         dialog.setOnShowListener(new DialogInterface.OnShowListener() {
             @Override
             public void onShow(DialogInterface d) {
-                if (!shortcutHelper.isInitialized())
+                if (!shortcutHelper.isInitialized()) {
                     dialog.getButton(DialogInterface.BUTTON_POSITIVE).setEnabled(false);
+                }
             }
         });
 

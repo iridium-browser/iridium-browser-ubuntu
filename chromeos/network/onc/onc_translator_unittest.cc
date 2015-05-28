@@ -4,6 +4,9 @@
 
 #include "chromeos/network/onc/onc_translator.h"
 
+#include <string>
+#include <utility>
+
 #include "base/memory/scoped_ptr.h"
 #include "base/values.h"
 #include "chromeos/network/onc/onc_signature.h"
@@ -58,7 +61,8 @@ INSTANTIATE_TEST_CASE_P(
         std::make_pair("openvpn_clientcert_with_cert_pems.onc",
                        "shill_openvpn_clientcert.json"),
         std::make_pair("cellular.onc", "shill_cellular.json"),
-        std::make_pair("wimax.onc", "shill_wimax.json")));
+        std::make_pair("wimax.onc", "shill_wimax.json"),
+        std::make_pair("third_party_vpn.onc", "shill_third_party_vpn.json")));
 
 // First parameter: Filename of source Shill json.
 // Second parameter: Filename of expected translated ONC network part.
@@ -97,6 +101,8 @@ INSTANTIATE_TEST_CASE_P(
                        "translation_of_shill_ethernet_with_ipconfig.onc"),
         std::make_pair("shill_wifi_clientcert.json",
                        "translation_of_shill_wifi_clientcert.onc"),
+        std::make_pair("shill_wifi_non_utf8_ssid.json",
+                       "translation_of_shill_wifi_non_utf8_ssid.onc"),
         std::make_pair("shill_output_l2tpipsec.json",
                        "translation_of_shill_l2tpipsec.onc"),
         std::make_pair("shill_output_openvpn.json",
@@ -108,7 +114,9 @@ INSTANTIATE_TEST_CASE_P(
         std::make_pair("shill_cellular_with_state.json",
                        "translation_of_shill_cellular_with_state.onc"),
         std::make_pair("shill_wimax_with_state.json",
-                       "translation_of_shill_wimax_with_state.onc")));
+                       "translation_of_shill_wimax_with_state.onc"),
+        std::make_pair("shill_output_third_party_vpn.json",
+                       "third_party_vpn.onc")));
 
 }  // namespace onc
 }  // namespace chromeos

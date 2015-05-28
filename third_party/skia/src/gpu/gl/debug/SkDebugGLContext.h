@@ -12,9 +12,9 @@
 
 class SkDebugGLContext : public SkGLContext {
 public:
-    virtual ~SkDebugGLContext() SK_OVERRIDE;
-    virtual void makeCurrent() const SK_OVERRIDE {}
-    virtual void swapBuffers() const SK_OVERRIDE {}
+    ~SkDebugGLContext() override;
+    void makeCurrent() const override {}
+    void swapBuffers() const override {}
 
     static SkDebugGLContext* Create(GrGLStandard forcedGpuAPI) {
         if (kGLES_GrGLStandard == forcedGpuAPI) {

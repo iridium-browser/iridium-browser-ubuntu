@@ -31,10 +31,11 @@
 #include "config.h"
 
 #include "bindings/core/v8/V8Binding.h"
+#include "bindings/core/v8/V8BindingForTesting.h"
 #include "core/page/Page.h"
 #include "core/page/PageSerializer.h"
-#include "core/testing/URLTestHelpers.h"
 #include "platform/SerializedResource.h"
+#include "platform/testing/URLTestHelpers.h"
 #include "public/platform/Platform.h"
 #include "public/platform/WebString.h"
 #include "public/platform/WebThread.h"
@@ -73,11 +74,6 @@ protected:
     virtual void TearDown()
     {
         Platform::current()->unitTestSupport()->unregisterAllMockedURLs();
-    }
-
-    void setBaseUrl(const char* url)
-    {
-        m_baseUrl = toKURL(url);
     }
 
     void setBaseFolder(const char* folder)

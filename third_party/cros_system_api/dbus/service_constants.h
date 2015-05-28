@@ -138,6 +138,8 @@ const char kCryptohomeSetBootAttribute[] = "SetBootAttribute";
 const char kCryptohomeFlushAndSignBootAttributes[] =
     "FlushAndSignBootAttributes";
 const char kCryptohomeGetLoginStatus[] = "GetLoginStatus";
+const char kCryptohomeGetTpmStatus[] = "GetTpmStatus";
+const char kCryptohomeGetEndorsementInfo[] = "GetEndorsementInfo";
 
 // Signals
 const char kSignalAsyncCallStatus[] = "AsyncCallStatus";
@@ -419,6 +421,7 @@ const char kWifiHiddenSsid[] = "WiFi.HiddenSSID";
 const char kWifiPhyMode[] = "WiFi.PhyMode";
 const char kWifiAuthMode[] = "WiFi.AuthMode";
 const char kWifiChannelProperty[] = "WiFi.Channel";
+const char kWifiPreferredDeviceProperty[] = "WiFi.PreferredDevice";
 
 // Flimflam EAP property names.
 const char kEapIdentityProperty[] = "EAP.Identity";
@@ -484,7 +487,9 @@ const char kRoamThresholdProperty[] = "RoamThreshold";
 const char kDBusObjectProperty[] = "DBus.Object";
 const char kDBusServiceProperty[] = "DBus.Service";
 const char kBgscanSignalThresholdProperty[] = "BgscanSignalThreshold";
-const char kWakeToScanFrequencyProperty[] = "WakeToScanFrequency";
+const char kWakeToScanPeriodSecondsProperty[] = "WakeToScanPeriodSeconds";
+const char kNetDetectScanPeriodSecondsProperty[] = "NetDetectScanPeriodSeconds";
+const char kForceWakeToScanTimerProperty[] = "ForceWakeToScanTimer";
 // The name of the network interface, ie. wlan0, eth0, etc.
 const char kInterfaceProperty[] = "Interface";
 const char kSelectedServiceProperty[] = "SelectedService";
@@ -628,6 +633,7 @@ const char kTypeWimax[] = "wimax";
 const char kTypeBluetooth[] = "bluetooth";
 const char kTypeCellular[] = "cellular";
 const char kTypeVPN[] = "vpn";
+const char kTypePPPoE[] = "pppoe";
 
 // Flimflam mode options.
 const char kModeManaged[] = "managed";
@@ -686,6 +692,13 @@ const char kOpenVPNStaticChallengeProperty[] = "OpenVPN.StaticChallenge";
 const char kOpenVPNTLSAuthContentsProperty[] = "OpenVPN.TLSAuthContents";
 const char kOpenVPNTLSRemoteProperty[] = "OpenVPN.TLSRemote";
 const char kOpenVPNUserProperty[] = "OpenVPN.User";
+
+// FlimFlam PPPoE property names.
+const char kPPPoEUsernameProperty[] = "PPPoE.Username";
+const char kPPPoEPasswordProperty[] = "PPPoE.Password";
+const char kPPPoELCPEchoIntervalProperty[] = "PPPoE.LCPEchoInterval";
+const char kPPPoELCPEchoFailureProperty[] = "PPPoE.LCPEchoFailure";
+const char kPPPoEMaxAuthFailureProperty[] = "PPPoE.MaxAuthFailure";
 
 // FlimFlam technology family options
 const char kTechnologyFamilyCdma[] = "CDMA";
@@ -814,8 +827,10 @@ const char kOnPlatformMessageFunction[] = "OnPlatformMessage";
 const char kEapAuthenticationCompletedProperty[] = "EapAuthenticationCompleted";
 const char kEapAuthenticatorDetectedProperty[] = "EapAuthenticatorDetected";
 const char kLinkMonitorResponseTimeProperty[] = "LinkMonitorResponseTime";
+const char kLinkUpProperty[] = "Ethernet.LinkUp";
 const char kProviderRequiresRoamingProperty[] =
     "Cellular.ProviderRequiresRoaming";
+const char kPPPoEProperty[] = "Ethernet.PPPoE";
 const char kReceiveByteCountProperty[] = "ReceiveByteCount";
 const char kSIMPresentProperty[] = "Cellular.SIMPresent";
 const char kSupportedCarriersProperty[] = "Cellular.SupportedCarriers";
@@ -865,6 +880,7 @@ const char kL2tpIpsecCaCertPemProperty[] = "L2TPIPsec.CACertPEM";
 const char kL2tpIpsecTunnelGroupProperty[] = "L2TPIPsec.TunnelGroup";
 const char kL2tpIpsecXauthPasswordProperty[] = "L2TPIPsec.XauthPassword";
 const char kL2tpIpsecXauthUserProperty[] = "L2TPIPsec.XauthUser";
+const char kL2tpIpsecLcpEchoDisabledProperty[] = "L2TPIPsec.LCPEchoDisabled";
 const char kManagedCredentialsProperty[] = "ManagedCredentials";
 const char kOpenVPNCaCertPemProperty[] = "OpenVPN.CACertPEM";
 const char kOpenVPNCertProperty[] = "OpenVPN.Cert";
@@ -991,6 +1007,8 @@ const char kSubnetPrefixParameterThirdPartyVpn[] = "subnet_prefix";
 const char kMtuParameterThirdPartyVpn[] = "mtu";
 const char kDomainSearchParameterThirdPartyVpn[] = "domain_search";
 const char kDnsServersParameterThirdPartyVpn[] = "dns_servers";
+const char kInclusionListParameterThirdPartyVpn[] = "inclusion_list";
+const char kExclusionListParameterThirdPartyVpn[] = "exclusion_list";
 const char kObjectPathSuffixProperty[] = "ObjectPathSuffix";
 const char kExtensionNameProperty[] = "ExtensionName";
 const char kConfigurationNameProperty[] = "ConfigurationName";
@@ -1096,6 +1114,7 @@ const char kBluetoothAdapterInterface[] = "org.bluez.Adapter1";
 
 // Bluetooth Adapter methods.
 const char kStartDiscovery[] = "StartDiscovery";
+const char kSetDiscoveryFilter[] = "SetDiscoveryFilter";
 const char kStopDiscovery[] = "StopDiscovery";
 const char kRemoveDevice[] = "RemoveDevice";
 
@@ -1118,6 +1137,12 @@ const char kErrorNotReady[] = "org.bluez.Error.NotReady";
 const char kErrorFailed[] = "org.bluez.Error.Failed";
 const char kErrorNotAuthorized[] = "org.bluez.Error.NotAuthorized";
 const char kErrorInvalidArguments[] = "org.bluez.Error.InvalidArguments";
+
+// Bluetooth Adapter parameters supplied to SetDiscoveryFilter request.
+const char kDiscoveryFilterParameterUUIDs[] = "UUIDs";
+const char kDiscoveryFilterParameterRSSI[] = "RSSI";
+const char kDiscoveryFilterParameterPathloss[] = "Pathloss";
+const char kDiscoveryFilterParameterTransport[] = "Transport";
 }  // namespace bluetooth_adapter
 
 namespace bluetooth_agent_manager {
@@ -1690,6 +1715,10 @@ const char kCloseStorage[] = "CloseStorage";
 const char kReadDirectoryEntryIds[] = "ReadDirectoryEntryIds";
 const char kGetFileInfo[] = "GetFileInfo";
 const char kReadFileChunk[] = "ReadFileChunk";
+const char kCopyFileFromLocal[] = "CopyFileFromLocal";
+const char kDeleteObject[] = "DeleteObject";
+const char kRenameObject[] = "RenameObject";
+const char kCreateDirectory[] = "CreateDirectory";
 
 // Signals.
 const char kMTPStorageAttached[] = "MTPStorageAttached";
@@ -1700,6 +1729,7 @@ const uint32_t kInvalidFileId = 0xffffffff;
 
 // For OpenStorage method:
 const char kReadOnlyMode[] = "ro";
+const char kReadWriteMode[] = "rw";
 
 // For GetFileInfo() method:
 // The id of the root node in a storage, as defined by the PTP/MTP standards.
@@ -1768,6 +1798,7 @@ const char kTestICMPWithOptions[] = "TestICMPWithOptions";
 const char kLogKernelTaskStates[] = "LogKernelTaskStates";
 const char kUploadCrashes[] = "UploadCrashes";
 const char kRemoveRootfsVerification[] = "RemoveRootfsVerification";
+const char kEnableChromeRemoteDebugging[] = "EnableChromeRemoteDebugging";
 const char kEnableBootFromUsb[] = "EnableBootFromUsb";
 const char kConfigureSshServer[] = "ConfigureSshServer";
 const char kSetUserPassword[] = "SetUserPassword";
@@ -1782,6 +1813,7 @@ enum DevFeatureFlag {
   DEV_FEATURE_SSH_SERVER_CONFIGURED = 1 << 3,
   DEV_FEATURE_DEV_MODE_ROOT_PASSWORD_SET = 1 << 4,
   DEV_FEATURE_SYSTEM_ROOT_PASSWORD_SET = 1 << 5,
+  DEV_FEATURE_CHROME_REMOTE_DEBUGGING_ENABLED = 1 << 6,
 };
 }  // namespace debugd
 
@@ -1791,7 +1823,14 @@ const char kPermissionBrokerServicePath[] = "/org/chromium/PermissionBroker";
 const char kPermissionBrokerServiceName[] = "org.chromium.PermissionBroker";
 
 // Methods
+const char kCheckPathAccess[] = "CheckPathAccess";
 const char kRequestPathAccess[] = "RequestPathAccess";
+const char kRequestTcpPortAccess[] = "RequestTcpPortAccess";
+const char kRequestUdpPortAccess[] = "RequestUdpPortAccess";
+const char kReleaseTcpPort[] = "ReleaseTcpPort";
+const char kReleaseUdpPort[] = "ReleaseUdpPort";
+const char kRequestVpnSetup[] = "RequestVpnSetup";
+const char kRemoveVpnSetup[] = "RemoveVpnSetup";
 }  // namespace permission_broker
 
 namespace system_clock {
@@ -1818,6 +1857,7 @@ const char kSetOutputNodeVolume[] = "SetOutputNodeVolume";
 const char kSwapLeftRight[] = "SwapLeftRight";
 const char kSetOutputMute[] = "SetOutputMute";
 const char kSetOutputUserMute[] = "SetOutputUserMute";
+const char kSetSuspendAudio[] = "SetSuspendAudio";
 const char kSetInputGain[] = "SetInputGain";
 const char kSetInputNodeGain[] = "SetInputNodeGain";
 const char kSetInputMute[] = "SetInputMute";
@@ -1957,5 +1997,11 @@ const char kOperationModeServer[] = "server";
 const char kOperationModeBridge[] = "bridge";
 
 }  // namespace apmanager
+
+namespace firewalld {
+const char kFirewalldInterface[] = "org.chromium.Firewalld";
+const char kServicePath[] = "/org/chromium/Firewalld";
+const char kServiceName[] = "org.chromium.Firewalld";
+}  // namespace firewalld
 
 #endif  // DBUS_SERVICE_CONSTANTS_H_

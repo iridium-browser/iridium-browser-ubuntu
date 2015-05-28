@@ -18,7 +18,6 @@ import re
 import shutil
 import tempfile
 
-from chromite.cbuildbot import cbuildbot_config
 from chromite.cbuildbot import failures_lib
 from chromite.cbuildbot import constants
 from chromite.cros.tests import cros_vm_test
@@ -116,11 +115,6 @@ def RunBuildScript(buildroot, cmd, chromite_cmd=False, **kwargs):
 
       # Looks like a generic failure. Raise a BuildScriptFailure.
       raise failures_lib.BuildScriptFailure(ex, cmd[0])
-
-
-def GetInput(prompt):
-  """Helper function to grab input from a user.   Makes testing easier."""
-  return raw_input(prompt)
 
 
 def ValidateClobber(buildroot):
@@ -424,7 +418,7 @@ def Build(buildroot, board, build_autotest, usepkg, chrome_binhost_only,
     chrome_root: The directory where chrome is stored.
   """
   cmd = ['./build_packages', '--board=%s' % board,
-         '--accept_licenses=@CHROMEOS']
+         '--accept_licenses=@CHROMEOS', '--withdebugsymbols']
 
   if not build_autotest:
     cmd.append('--nowithautotest')
@@ -812,7 +806,8 @@ def ArchiveVMFiles(buildroot, test_results_dir, archive_path):
                              timeout_util.TimeoutError)
 def RunHWTestSuite(build, suite, board, pool=None, num=None, file_bugs=None,
                    wait_for_results=None, priority=None, timeout_mins=None,
-                   retry=None, minimum_duts=0, suite_min_duts=0, debug=True):
+                   retry=None, max_retries=None,
+                   minimum_duts=0, suite_min_duts=0, debug=True):
   """Run the test suite in the Autotest lab.
 
   Args:
@@ -829,6 +824,8 @@ def RunHWTestSuite(build, suite, board, pool=None, num=None, file_bugs=None,
     timeout_mins: Timeout in minutes for the suite job and its sub-jobs.
     retry: If True, will enable job-level retry. Only works when
            wait_for_results is True.
+    max_retries: Integer, maximum job retries allowed at suite level.
+                 None for no max.
     minimum_duts: The minimum number of DUTs should be available in lab for the
                   suite job to be created. If it's set to 0, the check will be
                   skipped.
@@ -866,6 +863,9 @@ def RunHWTestSuite(build, suite, board, pool=None, num=None, file_bugs=None,
 
   if retry is not None:
     cmd += ['--retry', str(retry)]
+
+  if max_retries is not None:
+    cmd += ['--max_retries', str(max_retries)]
 
   if minimum_duts != 0:
     cmd += ['--minimum_duts', str(minimum_duts)]
@@ -946,45 +946,6 @@ def AbortHWTests(config_type_or_name, version, debug, suite=''):
       cros_build_lib.RunCommand(cmd)
     except cros_build_lib.RunCommandError:
       cros_build_lib.Warning('AbortHWTests failed', exc_info=True)
-
-
-def _GetAbortCQHWTestsURL(version, suite):
-  """Get the URL where we should save state about the specified abort command.
-
-  Args:
-    version: The version of the current build. E.g. R18-1655.0.0-rc1
-    suite: The suite argument that AbortCQHWTests was called with, if any.
-  """
-  url = '%s/hwtests-aborted/%s/suite=%s'
-  return url % (constants.MANIFEST_VERSIONS_GS_URL, version, suite)
-
-
-def AbortCQHWTests(version, debug, suite=''):
-  """Abort the specified hardware tests on the commit queue.
-
-  Args:
-    version: The version of the current build. E.g. R18-1655.0.0-rc1
-    debug: Whether we are in debug mode.
-    suite: Name of the Autotest suite. If empty, abort all suites.
-  """
-  # Mark the substr/suite as aborted in Google Storage.
-  ctx = gs.GSContext(dry_run=debug)
-  ctx.Copy('-', _GetAbortCQHWTestsURL(version, suite), input='')
-  # Abort all jobs for the given version, containing the 'paladin' suffix.
-  AbortHWTests(cbuildbot_config.CONFIG_TYPE_PALADIN, version, debug, suite)
-
-
-def HaveCQHWTestsBeenAborted(version, suite=''):
-  """Check in Google Storage whether the specified abort call was sent.
-
-  This function will return True if the following call has occurred:
-    AbortCQHWTests(version, debug=False, suite=suite)
-
-  Args:
-    version: The version of the current build. E.g. R18-1655.0.0-rc1
-    suite: The suite argument that AbortCQHWTests was called with, if any.
-  """
-  return gs.GSContext().Exists(_GetAbortCQHWTestsURL(version, suite))
 
 
 def GenerateStackTraces(buildroot, board, test_results_dir,
@@ -1558,10 +1519,9 @@ def FindFilesWithPattern(pattern, target='./', cwd=os.curdir, exclude_dirs=()):
 
   matches = []
   for target, _, filenames in os.walk(target):
-    if target in exclude_dirs:
-      continue
-    for filename in fnmatch.filter(filenames, pattern):
-      matches.append(os.path.join(target, filename))
+    if not any(target.startswith(e) for e in exclude_dirs):
+      for filename in fnmatch.filter(filenames, pattern):
+        matches.append(os.path.join(target, filename))
 
   # Restore the working directory
   os.chdir(old_cwd)
@@ -1669,6 +1629,27 @@ def BuildAutotestTestSuitesTarball(buildroot, cwd, tarball_dir):
   BuildTarball(buildroot, ['autotest/test_suites'], test_suites_tarball,
                cwd=cwd)
   return test_suites_tarball
+
+
+def BuildAutotestServerPackageTarball(buildroot, cwd, tarball_dir):
+  """Tar up the autotest files required by the server package.
+
+  Args:
+    buildroot: Root directory where build occurs.
+    cwd: Current working directory.
+    tarball_dir: Location for storing autotest tarballs.
+
+  Returns:
+    The path of the autotest server package tarball.
+  """
+  # Find all files in autotest excluding certain directories.
+  autotest_files = FindFilesWithPattern(
+      '*', target='autotest', cwd=cwd,
+      exclude_dirs=('autotest/packages', 'autotest/client/deps/',
+                    'autotest/client/tests', 'autotest/client/site_tests'))
+  tarball = os.path.join(tarball_dir, 'autotest_server_package.tar.bz2')
+  BuildTarball(buildroot, autotest_files, tarball, cwd=cwd, error_code_ok=True)
+  return tarball
 
 
 def BuildFullAutotestTarball(buildroot, board, tarball_dir):

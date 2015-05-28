@@ -29,10 +29,18 @@ class MockInputApi(object):
   def AffectedFiles(self, file_filter=None):
     return self.files
 
+  def AffectedSourceFiles(self, file_filter=None):
+    return self.files
+
+  def LocalPaths(self):
+    return self.files
+
   def PresubmitLocalPath(self):
     return os.path.dirname(__file__)
 
   def ReadFile(self, filename, mode='rU'):
+    if hasattr(filename, 'AbsoluteLocalPath'):
+       filename = filename.AbsoluteLocalPath()
     for file_ in self.files:
       if file_.LocalPath() == filename:
         return '\n'.join(file_.NewContents())
@@ -53,23 +61,26 @@ class MockOutputApi(object):
       self.items = items
       self.long_text = long_text
 
+    def __repr__(self):
+      return self.message
+
   class PresubmitError(PresubmitResult):
-    def __init__(self, message, items, long_text=''):
+    def __init__(self, message, items=None, long_text=''):
       MockOutputApi.PresubmitResult.__init__(self, message, items, long_text)
       self.type = 'error'
 
   class PresubmitPromptWarning(PresubmitResult):
-    def __init__(self, message, items, long_text=''):
+    def __init__(self, message, items=None, long_text=''):
       MockOutputApi.PresubmitResult.__init__(self, message, items, long_text)
       self.type = 'warning'
 
   class PresubmitNotifyResult(PresubmitResult):
-    def __init__(self, message, items, long_text=''):
+    def __init__(self, message, items=None, long_text=''):
       MockOutputApi.PresubmitResult.__init__(self, message, items, long_text)
       self.type = 'notify'
 
   class PresubmitPromptOrNotify(PresubmitResult):
-    def __init__(self, message, items, long_text=''):
+    def __init__(self, message, items=None, long_text=''):
       MockOutputApi.PresubmitResult.__init__(self, message, items, long_text)
       self.type = 'promptOrNotify'
 
@@ -93,6 +104,19 @@ class MockFile(object):
     return self._new_contents
 
   def LocalPath(self):
+    return self._local_path
+
+  def rfind(self, p):
+    """os.path.basename is called on MockFile so we need an rfind method."""
+    return self._local_path.rfind(p)
+
+  def __getitem__(self, i):
+    """os.path.basename is called on MockFile so we need a get method."""
+    return self._local_path[i]
+
+
+class MockAffectedFile(MockFile):
+  def AbsoluteLocalPath(self):
     return self._local_path
 
 

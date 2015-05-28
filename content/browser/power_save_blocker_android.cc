@@ -11,7 +11,7 @@
 #include "content/public/browser/android/content_view_core.h"
 #include "content/public/browser/browser_thread.h"
 #include "jni/PowerSaveBlocker_jni.h"
-#include "ui/base/android/view_android.h"
+#include "ui/android/view_android.h"
 
 using base::android::AttachCurrentThread;
 using base::android::ScopedJavaLocalRef;
@@ -41,7 +41,7 @@ class PowerSaveBlockerImpl::Delegate
 };
 
 void PowerSaveBlockerImpl::Delegate::ApplyBlock() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   JNIEnv* env = AttachCurrentThread();
   ScopedJavaLocalRef<jobject> j_object = j_view_android_.get(env);
   if (j_object.obj())
@@ -49,7 +49,7 @@ void PowerSaveBlockerImpl::Delegate::ApplyBlock() {
 }
 
 void PowerSaveBlockerImpl::Delegate::RemoveBlock() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   JNIEnv* env = AttachCurrentThread();
   ScopedJavaLocalRef<jobject> j_object = j_view_android_.get(env);
   if (j_object.obj())
@@ -57,7 +57,8 @@ void PowerSaveBlockerImpl::Delegate::RemoveBlock() {
 }
 
 PowerSaveBlockerImpl::PowerSaveBlockerImpl(PowerSaveBlockerType type,
-                                           const std::string& reason) {
+                                           Reason reason,
+                                           const std::string& description) {
   // Don't support kPowerSaveBlockPreventAppSuspension
 }
 

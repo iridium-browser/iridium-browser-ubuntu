@@ -36,6 +36,14 @@ class StubInputController : public InputController {
   void SetMouseSensitivity(int value) override;
   void SetPrimaryButtonRight(bool right) override;
   void SetTapToClickPaused(bool state) override;
+  void GetTouchDeviceStatus(const GetTouchDeviceStatusReply& reply) override;
+  void GetTouchEventLog(const base::FilePath& out_dir,
+                        const GetTouchEventLogReply& reply) override;
+  void DisableInternalTouchpad() override;
+  void EnableInternalTouchpad() override;
+  void DisableInternalKeyboardExceptKeys(
+      scoped_ptr<std::set<DomCode>> excepted_keys) override;
+  void EnableInternalKeyboard() override;
 
  private:
   DISALLOW_COPY_AND_ASSIGN(StubInputController);
@@ -116,6 +124,34 @@ void StubInputController::SetPrimaryButtonRight(bool right) {
 }
 
 void StubInputController::SetTapToClickPaused(bool state) {
+  NOTIMPLEMENTED();
+}
+
+void StubInputController::GetTouchDeviceStatus(
+    const GetTouchDeviceStatusReply& reply) {
+  reply.Run(scoped_ptr<std::string>(new std::string));
+}
+
+void StubInputController::GetTouchEventLog(const base::FilePath& out_dir,
+                                           const GetTouchEventLogReply& reply) {
+  reply.Run(
+      scoped_ptr<std::vector<base::FilePath>>(new std::vector<base::FilePath>));
+}
+
+void StubInputController::DisableInternalTouchpad() {
+  NOTIMPLEMENTED();
+}
+
+void StubInputController::EnableInternalTouchpad() {
+  NOTIMPLEMENTED();
+}
+
+void StubInputController::DisableInternalKeyboardExceptKeys(
+    scoped_ptr<std::set<DomCode>> excepted_keys) {
+  NOTIMPLEMENTED();
+}
+
+void StubInputController::EnableInternalKeyboard() {
   NOTIMPLEMENTED();
 }
 

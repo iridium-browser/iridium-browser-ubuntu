@@ -4,6 +4,7 @@
 
 #include <algorithm>
 #include <map>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -119,6 +120,14 @@ class TestKWallet {
   // No need to disallow copy and assign. This class is safe to copy and assign.
 };
 
+// Runs |backend->GetAutofillableLogins(forms)| and expects that the return
+// value is false.
+void CheckGetAutofillableLoginsFails(
+    PasswordStoreX::NativeBackend* backend,
+    ScopedVector<autofill::PasswordForm>* forms) {
+  EXPECT_FALSE(backend->GetAutofillableLogins(forms));
+}
+
 }  // anonymous namespace
 
 // Obscure magic: we need to declare storage for this constant because we use it
@@ -148,6 +157,7 @@ class NativeBackendKWalletTestBase : public testing::Test {
     old_form_google_.password_value = UTF8ToUTF16("seekrit");
     old_form_google_.submit_element = UTF8ToUTF16("submit");
     old_form_google_.signon_realm = "Google";
+    old_form_google_.date_created = base::Time::Now();
 
     form_google_ = old_form_google_;
     form_google_.times_used = 3;
@@ -155,10 +165,11 @@ class NativeBackendKWalletTestBase : public testing::Test {
     form_google_.form_data.name = UTF8ToUTF16("form_name");
     form_google_.form_data.user_submitted = true;
     form_google_.date_synced = base::Time::Now();
+    form_google_.date_created = old_form_google_.date_created;
     form_google_.display_name = UTF8ToUTF16("Joe Schmoe");
     form_google_.avatar_url = GURL("http://www.google.com/avatar");
     form_google_.federation_url = GURL("http://www.google.com/federation_url");
-    form_google_.is_zero_click = true;
+    form_google_.skip_zero_click = true;
 
     form_isc_.origin = GURL("http://www.isc.org/");
     form_isc_.action = GURL("http://www.isc.org/auth");
@@ -169,10 +180,12 @@ class NativeBackendKWalletTestBase : public testing::Test {
     form_isc_.submit_element = UTF8ToUTF16("login");
     form_isc_.signon_realm = "ISC";
     form_isc_.date_synced = base::Time::Now();
+    form_isc_.date_created = base::Time::Now();
   }
 
   static void CheckPasswordForm(const PasswordForm& expected,
-                                const PasswordForm& actual);
+                                const PasswordForm& actual,
+                                bool check_date_created);
   static void CheckPasswordChanges(const PasswordStoreChangeList& expected,
                                    const PasswordStoreChangeList& actual);
   static void CheckPasswordChangesWithResult(
@@ -187,7 +200,9 @@ class NativeBackendKWalletTestBase : public testing::Test {
 
 // static
 void NativeBackendKWalletTestBase::CheckPasswordForm(
-    const PasswordForm& expected, const PasswordForm& actual) {
+    const PasswordForm& expected,
+    const PasswordForm& actual,
+    bool check_date_created) {
   EXPECT_EQ(expected.origin, actual.origin);
   EXPECT_EQ(expected.password_value, actual.password_value);
   EXPECT_EQ(expected.action, actual.action);
@@ -198,7 +213,9 @@ void NativeBackendKWalletTestBase::CheckPasswordForm(
   EXPECT_EQ(expected.signon_realm, actual.signon_realm);
   EXPECT_EQ(expected.ssl_valid, actual.ssl_valid);
   EXPECT_EQ(expected.preferred, actual.preferred);
-  // We don't check the date created. It varies.
+  if (check_date_created) {
+    EXPECT_EQ(expected.date_created, actual.date_created);
+  }
   EXPECT_EQ(expected.blacklisted_by_user, actual.blacklisted_by_user);
   EXPECT_EQ(expected.type, actual.type);
   EXPECT_EQ(expected.times_used, actual.times_used);
@@ -207,7 +224,8 @@ void NativeBackendKWalletTestBase::CheckPasswordForm(
   EXPECT_EQ(expected.display_name, actual.display_name);
   EXPECT_EQ(expected.avatar_url, actual.avatar_url);
   EXPECT_EQ(expected.federation_url, actual.federation_url);
-  EXPECT_EQ(expected.is_zero_click, actual.is_zero_click);
+  EXPECT_EQ(expected.skip_zero_click, actual.skip_zero_click);
+  EXPECT_EQ(expected.generation_upload_status, actual.generation_upload_status);
 }
 
 // static
@@ -217,7 +235,7 @@ void NativeBackendKWalletTestBase::CheckPasswordChanges(
   ASSERT_EQ(expected.size(), actual.size());
   for (size_t i = 0; i < expected.size(); ++i) {
     EXPECT_EQ(expected[i].type(), actual[i].type());
-    CheckPasswordForm(expected[i].form(), actual[i].form());
+    CheckPasswordForm(expected[i].form(), actual[i].form(), true);
   }
 }
 
@@ -289,6 +307,10 @@ class NativeBackendKWalletTest : public NativeBackendKWalletTestBase {
 
   TestKWallet wallet_;
 
+  // For all method names contained in |failing_methods_|, the mocked KWallet
+  // will return a null response.
+  std::set<std::string> failing_methods_;
+
  private:
   dbus::Response* KLauncherMethodCall(
       dbus::MethodCall* method_call, testing::Unused);
@@ -352,8 +374,6 @@ void NativeBackendKWalletTest::TestRemoveLoginsBetween(
   base::Time now = base::Time::Now();
   base::Time next_day = now + base::TimeDelta::FromDays(1);
   if (date_to_test == CREATED) {
-    // crbug/374132. Remove the next line once it's fixed.
-    next_day = base::Time::FromTimeT(next_day.ToTimeT());
     form_google_.date_created = now;
     form_isc_.date_created = next_day;
   } else {
@@ -457,9 +477,11 @@ dbus::Response* NativeBackendKWalletTest::KLauncherMethodCall(
 dbus::Response* NativeBackendKWalletTest::KWalletMethodCall(
     dbus::MethodCall* method_call, testing::Unused) {
   if (!kwallet_running_)
-    return NULL;
+    return nullptr;
   EXPECT_EQ("org.kde.KWallet", method_call->GetInterface());
 
+  if (ContainsKey(failing_methods_, method_call->GetMember()))
+    return nullptr;
   scoped_ptr<dbus::Response> response;
   if (method_call->GetMember() == "isEnabled") {
     response = dbus::Response::CreateEmpty();
@@ -552,7 +574,7 @@ dbus::Response* NativeBackendKWalletTest::KWalletMethodCall(
     int handle = NativeBackendKWalletStub::kInvalidKWalletHandle;
     std::string folder_name;
     std::string key;
-    const uint8_t* bytes = NULL;
+    const uint8_t* bytes = nullptr;
     size_t length = 0;
     std::string app_name;
     EXPECT_TRUE(reader.PopInt32(&handle));
@@ -568,7 +590,7 @@ dbus::Response* NativeBackendKWalletTest::KWalletMethodCall(
                            TestKWallet::Blob(bytes, length)) ? 0 : 1);
   }
 
-  EXPECT_FALSE(response.get() == NULL);
+  EXPECT_TRUE(response);
   return response.release();
 }
 
@@ -584,13 +606,12 @@ void NativeBackendKWalletTest::CheckPasswordForms(
     TestKWallet::Blob value;
     EXPECT_TRUE(wallet_.readEntry(folder, entries[i], &value));
     Pickle pickle(reinterpret_cast<const char*>(value.data()), value.size());
-    std::vector<PasswordForm*> forms;
-    NativeBackendKWalletStub::DeserializeValue(entries[i], pickle, &forms);
+    ScopedVector<autofill::PasswordForm> forms =
+        NativeBackendKWalletStub::DeserializeValue(entries[i], pickle);
     const std::vector<const PasswordForm*>& expect = sorted_expected[i].second;
     EXPECT_EQ(expect.size(), forms.size());
     for (size_t j = 0; j < forms.size() && j < expect.size(); ++j)
-      CheckPasswordForm(*expect[j], *forms[j]);
-    STLDeleteElements(&forms);
+      CheckPasswordForm(*expect[j], *forms[j], true);
   }
 }
 
@@ -695,7 +716,7 @@ TEST_F(NativeBackendKWalletTest, BasicListLogins) {
       base::Bind(base::IgnoreResult(&NativeBackendKWalletStub::AddLogin),
                  base::Unretained(&backend), form_google_));
 
-  std::vector<PasswordForm*> form_list;
+  ScopedVector<autofill::PasswordForm> form_list;
   BrowserThread::PostTask(
       BrowserThread::DB, FROM_HERE,
       base::Bind(
@@ -706,7 +727,6 @@ TEST_F(NativeBackendKWalletTest, BasicListLogins) {
 
   // Quick check that we got something back.
   EXPECT_EQ(1u, form_list.size());
-  STLDeleteElements(&form_list);
 
   EXPECT_FALSE(wallet_.hasFolder("Chrome Form Data"));
 
@@ -807,7 +827,7 @@ TEST_F(NativeBackendKWalletTest, RemoveNonexistentLogin) {
                  base::Unretained(&backend), form_isc_));
 
   // Make sure we can still get the first form back.
-  std::vector<PasswordForm*> form_list;
+  ScopedVector<autofill::PasswordForm> form_list;
   BrowserThread::PostTask(
       BrowserThread::DB, FROM_HERE,
       base::Bind(
@@ -818,7 +838,6 @@ TEST_F(NativeBackendKWalletTest, RemoveNonexistentLogin) {
 
   // Quick check that we got something back.
   EXPECT_EQ(1u, form_list.size());
-  STLDeleteElements(&form_list);
 
   CheckPasswordForms("Chrome Form Data (42)", expected);
 }
@@ -862,43 +881,6 @@ TEST_F(NativeBackendKWalletTest, AddDuplicateLogin) {
   CheckPasswordForms("Chrome Form Data (42)", expected);
 }
 
-TEST_F(NativeBackendKWalletTest, ListLoginsAppends) {
-  NativeBackendKWalletStub backend(42);
-  EXPECT_TRUE(backend.InitWithBus(mock_session_bus_));
-
-  BrowserThread::PostTask(
-      BrowserThread::DB, FROM_HERE,
-      base::Bind(base::IgnoreResult(&NativeBackendKWalletStub::AddLogin),
-                 base::Unretained(&backend), form_google_));
-
-  // Send the same request twice with the same list both times.
-  std::vector<PasswordForm*> form_list;
-  BrowserThread::PostTask(
-      BrowserThread::DB, FROM_HERE,
-      base::Bind(
-          base::IgnoreResult(&NativeBackendKWalletStub::GetAutofillableLogins),
-          base::Unretained(&backend), &form_list));
-  BrowserThread::PostTask(
-      BrowserThread::DB, FROM_HERE,
-      base::Bind(
-          base::IgnoreResult(&NativeBackendKWalletStub::GetAutofillableLogins),
-          base::Unretained(&backend), &form_list));
-
-  RunDBThread();
-
-  // Quick check that we got two results back.
-  EXPECT_EQ(2u, form_list.size());
-  STLDeleteElements(&form_list);
-
-  EXPECT_FALSE(wallet_.hasFolder("Chrome Form Data"));
-
-  std::vector<const PasswordForm*> forms;
-  forms.push_back(&form_google_);
-  ExpectationArray expected;
-  expected.push_back(make_pair(std::string(form_google_.signon_realm), forms));
-  CheckPasswordForms("Chrome Form Data (42)", expected);
-}
-
 TEST_F(NativeBackendKWalletTest, AndroidCredentials) {
   NativeBackendKWalletStub backend(42);
   EXPECT_TRUE(backend.InitWithBus(mock_session_bus_));
@@ -916,7 +898,7 @@ TEST_F(NativeBackendKWalletTest, AndroidCredentials) {
       base::Bind(base::IgnoreResult(&NativeBackendKWalletStub::AddLogin),
                  base::Unretained(&backend), saved_android_form));
 
-  std::vector<PasswordForm*> form_list;
+  ScopedVector<autofill::PasswordForm> form_list;
   BrowserThread::PostTask(
       BrowserThread::DB, FROM_HERE,
       base::Bind(
@@ -948,25 +930,67 @@ TEST_F(NativeBackendKWalletTest, RemoveLoginsSyncedBetween) {
 
 class NativeBackendKWalletPickleTest : public NativeBackendKWalletTestBase {
  protected:
+  void CreateVersion6Pickle(const PasswordForm& form, Pickle* pickle);
+  void CreateVersion5Pickle(const PasswordForm& form, Pickle* pickle);
   void CreateVersion3Pickle(const PasswordForm& form, Pickle* pickle);
   void CreateVersion2Pickle(const PasswordForm& form, Pickle* pickle);
   void CreateVersion1Pickle(const PasswordForm& form, Pickle* pickle);
   void CreateVersion0Pickle(bool size_32,
                             const PasswordForm& form,
                             Pickle* pickle);
+  void CheckVersion6Pickle();
+  void CheckVersion5Pickle();
   void CheckVersion3Pickle();
   void CheckVersion2Pickle();
   void CheckVersion1Pickle();
   void CheckVersion0Pickle(bool size_32, PasswordForm::Scheme scheme);
 
  private:
-  void CreatePickle(bool size_32, const PasswordForm& form, Pickle* pickle);
+  // Creates a Pickle from |form|. If |size_32| is true, stores the number of
+  // forms in the pickle as a 32bit uint, otherwise as 64 bit size_t. The latter
+  // should be the case for versions > 0. If |date_created_internal| is true,
+  // stores |date_created| as base::Time's internal value, otherwise as time_t.
+  void CreatePickle(bool size_32,
+                    bool date_created_internal,
+                    const PasswordForm& form,
+                    Pickle* pickle);
 };
+
+void NativeBackendKWalletPickleTest::CreateVersion6Pickle(
+    const PasswordForm& form,
+    Pickle* pickle) {
+  pickle->WriteInt(6);
+  CreatePickle(false, true, form, pickle);
+  pickle->WriteInt(form.type);
+  pickle->WriteInt(form.times_used);
+  autofill::SerializeFormData(form.form_data, pickle);
+  pickle->WriteInt64(form.date_synced.ToInternalValue());
+  pickle->WriteString16(form.display_name);
+  pickle->WriteString(form.avatar_url.spec());
+  pickle->WriteString(form.federation_url.spec());
+  pickle->WriteBool(form.skip_zero_click);
+  pickle->WriteInt(form.generation_upload_status);
+}
+
+void NativeBackendKWalletPickleTest::CreateVersion5Pickle(
+    const PasswordForm& form,
+    Pickle* pickle) {
+  pickle->WriteInt(5);
+  CreatePickle(false, true, form, pickle);
+  pickle->WriteInt(form.type);
+  pickle->WriteInt(form.times_used);
+  autofill::SerializeFormData(form.form_data, pickle);
+  pickle->WriteInt64(form.date_synced.ToInternalValue());
+  pickle->WriteString16(form.display_name);
+  pickle->WriteString(form.avatar_url.spec());
+  pickle->WriteString(form.federation_url.spec());
+  pickle->WriteBool(form.skip_zero_click);
+}
 
 void NativeBackendKWalletPickleTest::CreateVersion3Pickle(
     const PasswordForm& form, Pickle* pickle) {
   pickle->WriteInt(3);
-  CreatePickle(false, form, pickle);
+  CreatePickle(false, false, form, pickle);
   pickle->WriteInt(form.type);
   pickle->WriteInt(form.times_used);
   autofill::SerializeFormData(form.form_data, pickle);
@@ -976,7 +1000,7 @@ void NativeBackendKWalletPickleTest::CreateVersion3Pickle(
 void NativeBackendKWalletPickleTest::CreateVersion2Pickle(
     const PasswordForm& form, Pickle* pickle) {
   pickle->WriteInt(2);
-  CreatePickle(false, form, pickle);
+  CreatePickle(false, false, form, pickle);
   pickle->WriteInt(form.type);
   pickle->WriteInt(form.times_used);
   autofill::SerializeFormData(form.form_data, pickle);
@@ -985,17 +1009,19 @@ void NativeBackendKWalletPickleTest::CreateVersion2Pickle(
 void NativeBackendKWalletPickleTest::CreateVersion1Pickle(
     const PasswordForm& form, Pickle* pickle) {
   pickle->WriteInt(1);
-  CreatePickle(false, form, pickle);
+  CreatePickle(false, false, form, pickle);
 }
 
 void NativeBackendKWalletPickleTest::CreateVersion0Pickle(
     bool size_32, const PasswordForm& form, Pickle* pickle) {
   pickle->WriteInt(0);
-  CreatePickle(size_32, form, pickle);
+  CreatePickle(size_32, false, form, pickle);
 }
 
-void NativeBackendKWalletPickleTest::CreatePickle(
-    bool size_32, const PasswordForm& form, Pickle* pickle) {
+void NativeBackendKWalletPickleTest::CreatePickle(bool size_32,
+                                                  bool date_created_internal,
+                                                  const PasswordForm& form,
+                                                  Pickle* pickle) {
   if (size_32)
     pickle->WriteUInt32(1);  // Size of form list. 32 bits.
   else
@@ -1011,7 +1037,38 @@ void NativeBackendKWalletPickleTest::CreatePickle(
   pickle->WriteBool(form.ssl_valid);
   pickle->WriteBool(form.preferred);
   pickle->WriteBool(form.blacklisted_by_user);
-  pickle->WriteInt64(form.date_created.ToTimeT());
+  if (date_created_internal)
+    pickle->WriteInt64(form.date_created.ToInternalValue());
+  else
+    pickle->WriteInt64(form.date_created.ToTimeT());
+}
+
+void NativeBackendKWalletPickleTest::CheckVersion6Pickle() {
+  Pickle pickle;
+  PasswordForm form = form_google_;
+  form.generation_upload_status = PasswordForm::NEGATIVE_SIGNAL_SENT;
+  CreateVersion6Pickle(form, &pickle);
+
+  ScopedVector<PasswordForm> form_list =
+      NativeBackendKWalletStub::DeserializeValue(form.signon_realm, pickle);
+
+  EXPECT_EQ(1u, form_list.size());
+  if (form_list.size() > 0)
+    CheckPasswordForm(form, *form_list[0], true);
+
+}
+
+void NativeBackendKWalletPickleTest::CheckVersion5Pickle() {
+  Pickle pickle;
+  PasswordForm form = form_google_;
+  CreateVersion5Pickle(form, &pickle);
+
+  ScopedVector<PasswordForm> form_list =
+      NativeBackendKWalletStub::DeserializeValue(form.signon_realm, pickle);
+
+  EXPECT_EQ(1u, form_list.size());
+  if (form_list.size() > 0)
+    CheckPasswordForm(form, *form_list[0], true);
 }
 
 void NativeBackendKWalletPickleTest::CheckVersion3Pickle() {
@@ -1021,16 +1078,15 @@ void NativeBackendKWalletPickleTest::CheckVersion3Pickle() {
   form.display_name.clear();
   form.avatar_url = GURL();
   form.federation_url = GURL();
-  form.is_zero_click = false;
+  form.skip_zero_click = false;
   CreateVersion3Pickle(form, &pickle);
 
-  ScopedVector<PasswordForm> form_list;
-  NativeBackendKWalletStub::DeserializeValue(form.signon_realm,
-                                             pickle, &form_list.get());
+  ScopedVector<PasswordForm> form_list =
+      NativeBackendKWalletStub::DeserializeValue(form.signon_realm, pickle);
 
   EXPECT_EQ(1u, form_list.size());
   if (form_list.size() > 0)
-    CheckPasswordForm(form, *form_list[0]);
+    CheckPasswordForm(form, *form_list[0], false);
 }
 
 void NativeBackendKWalletPickleTest::CheckVersion2Pickle() {
@@ -1041,13 +1097,12 @@ void NativeBackendKWalletPickleTest::CheckVersion2Pickle() {
   form.form_data = form_google_.form_data;
   CreateVersion2Pickle(form, &pickle);
 
-  ScopedVector<PasswordForm> form_list;
-  NativeBackendKWalletStub::DeserializeValue(form.signon_realm,
-                                             pickle, &form_list.get());
+  ScopedVector<PasswordForm> form_list =
+      NativeBackendKWalletStub::DeserializeValue(form.signon_realm, pickle);
 
   EXPECT_EQ(1u, form_list.size());
   if (form_list.size() > 0)
-    CheckPasswordForm(form, *form_list[0]);
+    CheckPasswordForm(form, *form_list[0], false);
 }
 
 // Make sure that we can still read version 1 pickles.
@@ -1056,16 +1111,14 @@ void NativeBackendKWalletPickleTest::CheckVersion1Pickle() {
   PasswordForm form = form_google_;
   CreateVersion1Pickle(form, &pickle);
 
-  std::vector<PasswordForm*> form_list;
-  NativeBackendKWalletStub::DeserializeValue(form.signon_realm,
-                                             pickle, &form_list);
+  ScopedVector<autofill::PasswordForm> form_list =
+      NativeBackendKWalletStub::DeserializeValue(form.signon_realm, pickle);
 
   // This will match |old_form_google_| because not all the fields present in
   // |form_google_| will be deserialized.
   EXPECT_EQ(1u, form_list.size());
   if (form_list.size() > 0)
-    CheckPasswordForm(old_form_google_, *form_list[0]);
-  STLDeleteElements(&form_list);
+    CheckPasswordForm(old_form_google_, *form_list[0], false);
 }
 
 void NativeBackendKWalletPickleTest::CheckVersion0Pickle(
@@ -1074,13 +1127,33 @@ void NativeBackendKWalletPickleTest::CheckVersion0Pickle(
   PasswordForm form = old_form_google_;
   form.scheme = scheme;
   CreateVersion0Pickle(size_32, form, &pickle);
-  std::vector<PasswordForm*> form_list;
-  NativeBackendKWalletStub::DeserializeValue(form.signon_realm,
-                                             pickle, &form_list);
+  ScopedVector<autofill::PasswordForm> form_list =
+      NativeBackendKWalletStub::DeserializeValue(form.signon_realm, pickle);
   EXPECT_EQ(1u, form_list.size());
   if (form_list.size() > 0)
-    CheckPasswordForm(form, *form_list[0]);
-  STLDeleteElements(&form_list);
+    CheckPasswordForm(form, *form_list[0], false);
+}
+
+// Check that if KWallet fails to respond, the backend propagates the error.
+TEST_F(NativeBackendKWalletTest, GetAllLoginsErrorHandling) {
+  NativeBackendKWalletStub backend(42);
+  EXPECT_TRUE(backend.InitWithBus(mock_session_bus_));
+  // Make KWallet fail on calling readEntry.
+  failing_methods_.insert("readEntry");
+
+  // Store some non-blacklisted logins to be potentially returned.
+  BrowserThread::PostTask(
+      BrowserThread::DB, FROM_HERE,
+      base::Bind(base::IgnoreResult(&NativeBackendKWalletStub::AddLogin),
+                 base::Unretained(&backend), form_google_));
+
+  // Verify that nothing is in fact returned, because KWallet fails to respond.
+  ScopedVector<autofill::PasswordForm> form_list;
+  BrowserThread::PostTask(BrowserThread::DB, FROM_HERE,
+                          base::Bind(&CheckGetAutofillableLoginsFails,
+                                     base::Unretained(&backend), &form_list));
+  RunDBThread();
+  EXPECT_EQ(0u, form_list.size());
 }
 
 // We try both SCHEME_HTML and SCHEME_BASIC since the scheme is stored right
@@ -1117,4 +1190,12 @@ TEST_F(NativeBackendKWalletPickleTest, CheckVersion2Pickle) {
 
 TEST_F(NativeBackendKWalletPickleTest, CheckVersion3Pickle) {
   CheckVersion3Pickle();
+}
+
+TEST_F(NativeBackendKWalletPickleTest, CheckVersion5Pickle) {
+  CheckVersion5Pickle();
+}
+
+TEST_F(NativeBackendKWalletPickleTest, CheckVersion6Pickle) {
+  CheckVersion6Pickle();
 }

@@ -14,8 +14,8 @@
 
 #include <vector>
 
+#include "webrtc/base/scoped_ptr.h"
 #include "webrtc/modules/video_coding/codecs/vp8/include/vp8.h"
-#include "webrtc/system_wrappers/interface/scoped_ptr.h"
 
 namespace webrtc {
 
@@ -33,29 +33,25 @@ class VideoEncoderFactory {
 class SimulcastEncoderAdapter : public VP8Encoder,
                                 public EncodedImageCallback {
  public:
-  explicit SimulcastEncoderAdapter(scoped_ptr<VideoEncoderFactory> factory);
-
+  explicit SimulcastEncoderAdapter(VideoEncoderFactory* factory);
   virtual ~SimulcastEncoderAdapter();
 
   // Implements VideoEncoder
-  virtual int Release() OVERRIDE;
-  virtual int InitEncode(const VideoCodec* inst,
-                         int number_of_cores,
-                         size_t max_payload_size) OVERRIDE;
-  virtual int Encode(const I420VideoFrame& input_image,
-                     const CodecSpecificInfo* codec_specific_info,
-                     const std::vector<VideoFrameType>* frame_types) OVERRIDE;
-  virtual int RegisterEncodeCompleteCallback(
-      EncodedImageCallback* callback) OVERRIDE;
-  virtual int SetChannelParameters(uint32_t packet_loss, int rtt) OVERRIDE;
-  virtual int SetRates(uint32_t new_bitrate_kbit,
-                       uint32_t new_framerate) OVERRIDE;
+  int Release() override;
+  int InitEncode(const VideoCodec* inst,
+                 int number_of_cores,
+                 size_t max_payload_size) override;
+  int Encode(const I420VideoFrame& input_image,
+             const CodecSpecificInfo* codec_specific_info,
+             const std::vector<VideoFrameType>* frame_types) override;
+  int RegisterEncodeCompleteCallback(EncodedImageCallback* callback) override;
+  int SetChannelParameters(uint32_t packet_loss, int64_t rtt) override;
+  int SetRates(uint32_t new_bitrate_kbit, uint32_t new_framerate) override;
 
   // Implements EncodedImageCallback
-  virtual int32_t Encoded(
-      const EncodedImage& encodedImage,
-      const CodecSpecificInfo* codecSpecificInfo = NULL,
-      const RTPFragmentationHeader* fragmentation = NULL) OVERRIDE;
+  int32_t Encoded(const EncodedImage& encodedImage,
+                  const CodecSpecificInfo* codecSpecificInfo = NULL,
+                  const RTPFragmentationHeader* fragmentation = NULL) override;
 
  private:
   struct StreamInfo {
@@ -98,8 +94,8 @@ class SimulcastEncoderAdapter : public VP8Encoder,
 
   bool Initialized() const;
 
-  scoped_ptr<VideoEncoderFactory> factory_;
-  scoped_ptr<Config> screensharing_extra_options_;
+  rtc::scoped_ptr<VideoEncoderFactory> factory_;
+  rtc::scoped_ptr<Config> screensharing_extra_options_;
   VideoCodec codec_;
   std::vector<StreamInfo> streaminfos_;
   EncodedImageCallback* encoded_complete_callback_;

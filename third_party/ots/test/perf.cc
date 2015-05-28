@@ -4,7 +4,7 @@
 
 #include <fcntl.h>
 #include <sys/stat.h>
-#include <sys/time.h>  // for timersub macro.
+#include <sys/time.h>
 #include <unistd.h>
 #include <time.h>
 
@@ -25,8 +25,6 @@ int Usage(const char *argv0) {
 }  // namespace
 
 int main(int argc, char **argv) {
-  ots::DisableDebugOutput();  // turn off ERROR and WARNING outputs.
-
   if (argc != 2) return Usage(argv[0]);
 
   const int fd = ::open(argv[1], O_RDONLY);
@@ -62,7 +60,8 @@ int main(int argc, char **argv) {
   ::gettimeofday(&start, 0);
   for (int i = 0; i < num_repeat; ++i) {
     ots::MemoryStream output(result, st.st_size + kPadLen);
-    bool r = ots::Process(&output, data, st.st_size);
+    ots::OTSContext context;
+    bool r = context.Process(&output, data, st.st_size);
     if (!r) {
       std::fprintf(stderr, "Failed to sanitise file!\n");
       return 1;

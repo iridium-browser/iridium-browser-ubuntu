@@ -1,4 +1,3 @@
-#!/usr/bin/python
 # Copyright (c) 2012 The Chromium OS Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
@@ -9,12 +8,11 @@ from __future__ import print_function
 
 import mock
 import os
+import re
 import cPickle
-import sys
 
-import constants
-sys.path.insert(0, constants.SOURCE_ROOT)
 from chromite.cbuildbot import cbuildbot_config
+from chromite.cbuildbot import constants
 from chromite.lib import cros_build_lib
 from chromite.lib import cros_test_lib
 from chromite.lib import git
@@ -80,6 +78,23 @@ class ConfigClassTest(cros_test_lib.TestCase):
     inherited_config_2 = inherited_config_1.derive(
         cbuildbot_config.delete_keys(base_config))
     self.assertEqual(inherited_config_2, {'qzr': 'flp'})
+
+  def testCallableOverrides(self):
+    append_foo = lambda x: x + 'foo' if x else 'foo'
+    base_config = cbuildbot_config._config()
+    inherited_config_1 = base_config.derive(foo=append_foo)
+    inherited_config_2 = inherited_config_1.derive(foo=append_foo)
+    self.assertEqual(inherited_config_1, {'foo': 'foo'})
+    self.assertEqual(inherited_config_2, {'foo': 'foofoo'})
+
+  def testAppendUseflags(self):
+    base_config = cbuildbot_config._config()
+    inherited_config_1 = base_config.derive(
+        useflags=cbuildbot_config.append_useflags(['foo', 'bar', '-baz']))
+    inherited_config_2 = inherited_config_1.derive(
+        useflags=cbuildbot_config.append_useflags(['-bar', 'baz']))
+    self.assertEqual(inherited_config_1.useflags, ['-baz', 'bar', 'foo'])
+    self.assertEqual(inherited_config_2.useflags, ['-bar', 'baz', 'foo'])
 
 
 class CBuildBotTest(cros_test_lib.TestCase):
@@ -484,6 +499,16 @@ class CBuildBotTest(cros_test_lib.TestCase):
                                             board))
             prebuilt_slave_boards[board] = slave['name']
 
+  def testNoDuplicateWaterfallNames(self):
+    """Tests that no two configs specify same waterfall name."""
+    waterfall_names = set()
+    for config in cbuildbot_config.config.values():
+      wn = config['buildbot_waterfall_name']
+      if wn is not None:
+        self.assertNotIn(wn, waterfall_names,
+                         'Duplicate waterfall name %s.' % wn)
+        waterfall_names.add(wn)
+
   def testCantBeBothTypesOfAFDO(self):
     """Using afdo_generate and afdo_use together doesn't work."""
     for config in cbuildbot_config.config.values():
@@ -572,6 +597,37 @@ class CBuildBotTest(cros_test_lib.TestCase):
         self.assertFalse(config.chrome_binhost_only and config.hw_tests,
                          msg % build_name)
 
+  def testExternalConfigsDoNotUseInternalFeatures(self):
+    """External configs should not use chrome_internal, or official.xml."""
+    msg = ('%s is not internal, so should not use chrome_internal, or an '
+           'internal manifest')
+    for build_name, config in cbuildbot_config.config.iteritems():
+      if not config['internal']:
+        self.assertFalse('chrome_internal' in config['useflags'],
+                         msg % build_name)
+        self.assertNotEqual(config.get('manifest'),
+                            constants.OFFICIAL_MANIFEST,
+                            msg % build_name)
+
+  def testNoShadowedUseflags(self):
+    """Configs should not have both useflags x and -x."""
+    msg = ('%s contains useflag %s and -%s.')
+    for build_name, config in cbuildbot_config.config.iteritems():
+      useflag_set = set(config['useflags'])
+      for flag in useflag_set:
+        if not flag.startswith('-'):
+          self.assertFalse('-' + flag in useflag_set,
+                           msg % (build_name, flag, flag))
+
+  def testHealthCheckEmails(self):
+    """Configs should only have valid email addresses or aliases"""
+    msg = ('%s contains an invalid tree alias or email address: %s')
+    for build_name, config in cbuildbot_config.config.iteritems():
+      health_alert_recipients = config['health_alert_recipients']
+      for recipient in health_alert_recipients:
+        self.assertTrue(re.match(r'[^@]+@[^@]+\.[^@]+', recipient) or
+                        recipient in constants.SHERIFF_TYPE_TO_URL.keys(),
+                        msg % (build_name, recipient))
 
 class FindFullTest(cros_test_lib.TestCase):
   """Test locating of official build for a board."""
@@ -691,10 +747,41 @@ class OverrideForTrybotTest(cros_test_lib.TestCase):
     self.assertEquals(new['vm_tests'], old['vm_tests'])
 
     # Don't override vm tests for brillo boards.
-    old = cbuildbot_config.config['duck-paladin']
+    old = cbuildbot_config.config['storm-paladin']
     new = cbuildbot_config.OverrideConfigForTrybot(old, mock_options)
     self.assertEquals(new['vm_tests'], old['vm_tests'])
 
+  # pylint: disable=protected-access
+  def testWaterfallManualConfigIsValid(self):
+    """Verify the correctness of the manual waterfall configuration."""
+    all_build_names = set(cbuildbot_config.config.iterkeys())
+    redundant = set()
+    seen = set()
+    for waterfall, names in cbuildbot_config._waterfall_config_map.iteritems():
+      for build_name in names:
+        # Every build in the configuration map must be valid.
+        self.assertTrue(build_name in all_build_names,
+                        "Invalid build name in manual waterfall config: %s" % (
+                            build_name,))
+        # No build should appear in multiple waterfalls.
+        self.assertFalse(build_name in seen,
+                         "Duplicate manual config for board: %s" % (
+                             build_name,))
+        seen.add(build_name)
 
-if __name__ == '__main__':
-  cros_test_lib.main()
+        # The manual configuration must be applied and override any default
+        # configuration.
+        config = cbuildbot_config.config[build_name]
+        self.assertEqual(config['active_waterfall'], waterfall,
+                         "Manual waterfall membership is not in the "
+                         "configuration for: %s" % (build_name,))
+
+
+        default_waterfall = cbuildbot_config.GetDefaultWaterfall(config)
+        if config['active_waterfall'] == default_waterfall:
+          redundant.add(build_name)
+
+    # No configurations should be redundant with defaults.
+    self.assertFalse(redundant,
+                     "Manual waterfall configs are automatically included: "
+                     "%s" % (sorted(redundant),))

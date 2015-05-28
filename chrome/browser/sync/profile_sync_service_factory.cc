@@ -32,6 +32,7 @@
 #include "components/keyed_service/content/browser_context_dependency_manager.h"
 #include "components/signin/core/browser/profile_oauth2_token_service.h"
 #include "components/signin/core/browser/signin_manager.h"
+#include "components/variations/variations_associated_data.h"
 #include "url/gurl.h"
 
 #if defined(ENABLE_EXTENSIONS)
@@ -50,8 +51,24 @@ ProfileSyncService* ProfileSyncServiceFactory::GetForProfile(
   if (!ProfileSyncService::IsSyncEnabled())
     return NULL;
 
+  // Disable sync experimentally to measure impact on startup time. Supervised
+  // users are unaffected, since supervised users rely completely on sync.
+  // TODO(mlerman): Remove this after the experiment. crbug.com/454788
+  if (!profile->IsSupervised() &&
+      !variations::GetVariationParamValue("LightSpeed", "DisableSync")
+           .empty()) {
+    return NULL;
+  }
+
   return static_cast<ProfileSyncService*>(
       GetInstance()->GetServiceForBrowserContext(profile, true));
+}
+
+// static
+sync_driver::SyncService*
+ProfileSyncServiceFactory::GetSyncServiceForBrowserContext(
+    content::BrowserContext* context) {
+  return GetForProfile(Profile::FromBrowserContext(context));
 }
 
 ProfileSyncServiceFactory::ProfileSyncServiceFactory()

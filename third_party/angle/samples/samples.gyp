@@ -52,13 +52,17 @@
                     'includes': [ '../build/common_defines.gypi', ],
                     'dependencies':
                     [
-                        '../src/angle.gyp:libEGL',
-                        '../src/angle.gyp:libGLESv2',
-                        '../util/util.gyp:angle_util',
+                        '<(angle_path)/src/angle.gyp:libEGL',
+                        '<(angle_path)/src/angle.gyp:libGLESv2',
+                        '<(angle_path)/util/util.gyp:angle_util',
+                    ],
+                    'export_dependent_settings':
+                    [
+                        '<(angle_path)/util/util.gyp:angle_util',
                     ],
                     'include_dirs':
                     [
-                        '../include',
+                        '<(angle_path)/include',
                         'angle/sample_util',
                     ],
                     'sources':
@@ -71,9 +75,7 @@
                         'msvs_disabled_warnings': [ 4201 ],
                         'include_dirs':
                         [
-                            '../include',
                             'angle/sample_util',
-                            '../util',
                         ],
                     },
                 },
@@ -130,6 +132,22 @@
                     'dependencies': [ 'sample_util' ],
                     'includes': [ '../build/common_defines.gypi', ],
                     'sources': [ '<!@(python <(angle_path)/enumerate_files.py angle/simple_instancing -types *.cpp *.h)' ],
+                },
+
+                {
+                    'target_name': 'tri_fan_microbench',
+                    'type': 'executable',
+                    'dependencies': [ 'sample_util' ],
+                    'includes': [ '../build/common_defines.gypi', ],
+                    'sources': [ '<!@(python <(angle_path)/enumerate_files.py angle/tri_fan_microbench -types *.cpp *.h *.glsl)' ],
+                },
+
+                {
+                    'target_name': 'tex_redef_microbench',
+                    'type': 'executable',
+                    'dependencies': [ 'sample_util' ],
+                    'includes': [ '../build/common_defines.gypi', ],
+                    'sources': [ '<!@(python <(angle_path)/enumerate_files.py angle/tex_redef_microbench -types *.cpp *.h *.glsl)' ],
                 },
 
                 {

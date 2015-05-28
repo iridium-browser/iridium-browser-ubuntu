@@ -8,7 +8,6 @@
 #include <vector>
 
 #include "cc/base/cc_export.h"
-#include "cc/resources/rasterizer.h"
 #include "cc/resources/resource_pool.h"
 #include "cc/resources/tile.h"
 #include "third_party/skia/include/core/SkMultiPictureDraw.h"
@@ -18,42 +17,29 @@ namespace cc {
 class ContextProvider;
 class ResourceProvider;
 
-class CC_EXPORT GpuRasterizer : public Rasterizer {
+class CC_EXPORT GpuRasterizer {
  public:
-  ~GpuRasterizer() override;
+  ~GpuRasterizer();
 
-  static scoped_ptr<GpuRasterizer> Create(ContextProvider* context_provider,
-                                          ResourceProvider* resource_provider,
-                                          bool use_distance_field_text,
-                                          bool tile_prepare_enabled);
-  PrepareTilesMode GetPrepareTilesMode() override;
-  void RasterizeTiles(
-      const TileVector& tiles,
-      ResourcePool* resource_pool,
-      const UpdateTileDrawInfoCallback& update_tile_draw_info) override;
+  void RasterizeSource(ResourceProvider::ScopedWriteLockGr* write_lock,
+                       const RasterSource* raster_source,
+                       const gfx::Rect& rect,
+                       float scale);
+
+  ResourceProvider* resource_provider() { return resource_provider_; }
 
  private:
   GpuRasterizer(ContextProvider* context_provider,
                 ResourceProvider* resource_provider,
                 bool use_distance_filed_text,
-                bool tile_prepare_enabled);
+                int msaa_sample_count);
 
-  using ScopedResourceWriteLocks =
-      ScopedPtrVector<ResourceProvider::ScopedWriteLockGr>;
-
-  void PerformSolidColorAnalysis(const Tile* tile,
-                                 RasterSource::SolidColorAnalysis* analysis);
-  void AddToMultiPictureDraw(const Tile* tile,
-                             const ScopedResource* resource,
-                             ScopedResourceWriteLocks* locks);
-
-  ContextProvider* context_provider_;
   ResourceProvider* resource_provider_;
-  SkMultiPictureDraw multi_picture_draw_;
 
   bool use_distance_field_text_;
-  bool tile_prepare_enabled_;
+  int msaa_sample_count_;
 
+  friend class GpuTileTaskWorkerPool;
   DISALLOW_COPY_AND_ASSIGN(GpuRasterizer);
 };
 

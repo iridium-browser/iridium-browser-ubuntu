@@ -16,6 +16,7 @@
 #include "libANGLE/FramebufferAttachment.h"
 
 #include "common/mathutil.h"
+#include "common/utilities.h"
 
 namespace gl
 {
@@ -310,33 +311,14 @@ bool ValidateES3TexImageParameters(Context *context, GLenum target, GLint level,
 
     const gl::Caps &caps = context->getCaps();
 
-    gl::Texture *texture = NULL;
-    bool textureCompressed = false;
-    GLenum textureInternalFormat = GL_NONE;
-    GLint textureLevelWidth = 0;
-    GLint textureLevelHeight = 0;
-    GLint textureLevelDepth = 0;
     switch (target)
     {
       case GL_TEXTURE_2D:
+        if (static_cast<GLuint>(width) > (caps.max2DTextureSize >> level) ||
+            static_cast<GLuint>(height) > (caps.max2DTextureSize >> level))
         {
-            if (static_cast<GLuint>(width) > (caps.max2DTextureSize >> level) ||
-                static_cast<GLuint>(height) > (caps.max2DTextureSize >> level))
-            {
-                context->recordError(Error(GL_INVALID_VALUE));
-                return false;
-            }
-
-            gl::Texture2D *texture2d = context->getTexture2D();
-            if (texture2d)
-            {
-                textureCompressed = texture2d->isCompressed(level);
-                textureInternalFormat = texture2d->getInternalFormat(level);
-                textureLevelWidth = texture2d->getWidth(level);
-                textureLevelHeight = texture2d->getHeight(level);
-                textureLevelDepth = 1;
-                texture = texture2d;
-            }
+            context->recordError(Error(GL_INVALID_VALUE));
+            return false;
         }
         break;
 
@@ -346,83 +328,45 @@ bool ValidateES3TexImageParameters(Context *context, GLenum target, GLint level,
       case GL_TEXTURE_CUBE_MAP_NEGATIVE_Y:
       case GL_TEXTURE_CUBE_MAP_POSITIVE_Z:
       case GL_TEXTURE_CUBE_MAP_NEGATIVE_Z:
+        if (!isSubImage && width != height)
         {
-            if (!isSubImage && width != height)
-            {
-                context->recordError(Error(GL_INVALID_VALUE));
-                return false;
-            }
+            context->recordError(Error(GL_INVALID_VALUE));
+            return false;
+        }
 
-            if (static_cast<GLuint>(width) > (caps.maxCubeMapTextureSize >> level))
-            {
-                context->recordError(Error(GL_INVALID_VALUE));
-                return false;
-            }
-
-            gl::TextureCubeMap *textureCube = context->getTextureCubeMap();
-            if (textureCube)
-            {
-                textureCompressed = textureCube->isCompressed(target, level);
-                textureInternalFormat = textureCube->getInternalFormat(target, level);
-                textureLevelWidth = textureCube->getWidth(target, level);
-                textureLevelHeight = textureCube->getHeight(target, level);
-                textureLevelDepth = 1;
-                texture = textureCube;
-            }
+        if (static_cast<GLuint>(width) > (caps.maxCubeMapTextureSize >> level))
+        {
+            context->recordError(Error(GL_INVALID_VALUE));
+            return false;
         }
         break;
 
       case GL_TEXTURE_3D:
+        if (static_cast<GLuint>(width) > (caps.max3DTextureSize >> level) ||
+            static_cast<GLuint>(height) > (caps.max3DTextureSize >> level) ||
+            static_cast<GLuint>(depth) > (caps.max3DTextureSize >> level))
         {
-            if (static_cast<GLuint>(width) > (caps.max3DTextureSize >> level) ||
-                static_cast<GLuint>(height) > (caps.max3DTextureSize >> level) ||
-                static_cast<GLuint>(depth) > (caps.max3DTextureSize >> level))
-            {
-                context->recordError(Error(GL_INVALID_VALUE));
-                return false;
-            }
-
-            gl::Texture3D *texture3d = context->getTexture3D();
-            if (texture3d)
-            {
-                textureCompressed = texture3d->isCompressed(level);
-                textureInternalFormat = texture3d->getInternalFormat(level);
-                textureLevelWidth = texture3d->getWidth(level);
-                textureLevelHeight = texture3d->getHeight(level);
-                textureLevelDepth = texture3d->getDepth(level);
-                texture = texture3d;
-            }
+            context->recordError(Error(GL_INVALID_VALUE));
+            return false;
         }
         break;
 
-        case GL_TEXTURE_2D_ARRAY:
-          {
-              if (static_cast<GLuint>(width) > (caps.max2DTextureSize >> level) ||
-                  static_cast<GLuint>(height) > (caps.max2DTextureSize >> level) ||
-                  static_cast<GLuint>(depth) > (caps.maxArrayTextureLayers >> level))
-              {
-                  context->recordError(Error(GL_INVALID_VALUE));
-                  return false;
-              }
-
-              gl::Texture2DArray *texture2darray = context->getTexture2DArray();
-              if (texture2darray)
-              {
-                  textureCompressed = texture2darray->isCompressed(level);
-                  textureInternalFormat = texture2darray->getInternalFormat(level);
-                  textureLevelWidth = texture2darray->getWidth(level);
-                  textureLevelHeight = texture2darray->getHeight(level);
-                  textureLevelDepth = texture2darray->getLayers(level);
-                  texture = texture2darray;
-              }
-          }
-          break;
+      case GL_TEXTURE_2D_ARRAY:
+        if (static_cast<GLuint>(width) > (caps.max2DTextureSize >> level) ||
+            static_cast<GLuint>(height) > (caps.max2DTextureSize >> level) ||
+            static_cast<GLuint>(depth) > (caps.maxArrayTextureLayers >> level))
+        {
+            context->recordError(Error(GL_INVALID_VALUE));
+            return false;
+        }
+        break;
 
       default:
         context->recordError(Error(GL_INVALID_ENUM));
         return false;
     }
 
+    gl::Texture *texture = context->getTargetTexture(IsCubeMapTextureTarget(target) ? GL_TEXTURE_CUBE_MAP : target);
     if (!texture)
     {
         context->recordError(Error(GL_INVALID_OPERATION));
@@ -436,7 +380,7 @@ bool ValidateES3TexImageParameters(Context *context, GLenum target, GLint level,
     }
 
     // Validate texture formats
-    GLenum actualInternalFormat = isSubImage ? textureInternalFormat : internalformat;
+    GLenum actualInternalFormat = isSubImage ? texture->getInternalFormat(target, level) : internalformat;
     const gl::InternalFormat &actualFormatInfo = gl::GetInternalFormatInfo(actualInternalFormat);
     if (isCompressed)
     {
@@ -475,20 +419,10 @@ bool ValidateES3TexImageParameters(Context *context, GLenum target, GLint level,
     // Validate sub image parameters
     if (isSubImage)
     {
-        if (isCompressed != textureCompressed)
+        if (isCompressed != actualFormatInfo.compressed)
         {
             context->recordError(Error(GL_INVALID_OPERATION));
             return false;
-        }
-
-        if (isCompressed)
-        {
-            if ((width % 4 != 0 && width != textureLevelWidth) ||
-                (height % 4 != 0 && height != textureLevelHeight))
-            {
-                context->recordError(Error(GL_INVALID_OPERATION));
-                return false;
-            }
         }
 
         if (width == 0 || height == 0 || depth == 0)
@@ -510,9 +444,9 @@ bool ValidateES3TexImageParameters(Context *context, GLenum target, GLint level,
             return false;
         }
 
-        if (xoffset + width > textureLevelWidth ||
-            yoffset + height > textureLevelHeight ||
-            zoffset + depth > textureLevelDepth)
+        if (static_cast<size_t>(xoffset + width) > texture->getWidth(target, level) ||
+            static_cast<size_t>(yoffset + height) > texture->getHeight(target, level) ||
+            static_cast<size_t>(zoffset + depth) > texture->getDepth(target, level))
         {
             context->recordError(Error(GL_INVALID_VALUE));
             return false;
@@ -797,8 +731,8 @@ static bool IsValidES3CopyTexImageCombination(GLenum textureInternalFormat, GLen
             {
                 // Renderbuffers cannot be created with an unsized internal format, so this must be an unsized-format
                 // texture. We can use the same table we use when creating textures to get its effective sized format.
-                const FormatType &typeInfo = GetFormatTypeInfo(framebufferInternalFormatInfo.format, framebufferInternalFormatInfo.type);
-                sourceEffectiveFormat = &GetInternalFormatInfo(typeInfo.internalFormat);
+                GLenum sizedInternalFormat = GetSizedInternalFormat(framebufferInternalFormatInfo.format, framebufferInternalFormatInfo.type);
+                sourceEffectiveFormat = &GetInternalFormatInfo(sizedInternalFormat);
             }
         }
         else
@@ -931,13 +865,10 @@ bool ValidateES3TexStorageParameters(Context *context, GLenum target, GLsizei le
 
     const gl::Caps &caps = context->getCaps();
 
-    gl::Texture *texture = NULL;
     switch (target)
     {
       case GL_TEXTURE_2D:
         {
-            texture = context->getTexture2D();
-
             if (static_cast<GLuint>(width) > caps.max2DTextureSize ||
                 static_cast<GLuint>(height) > caps.max2DTextureSize)
             {
@@ -949,8 +880,6 @@ bool ValidateES3TexStorageParameters(Context *context, GLenum target, GLsizei le
 
       case GL_TEXTURE_CUBE_MAP:
         {
-            texture = context->getTextureCubeMap();
-
             if (width != height)
             {
                 context->recordError(Error(GL_INVALID_VALUE));
@@ -967,8 +896,6 @@ bool ValidateES3TexStorageParameters(Context *context, GLenum target, GLsizei le
 
       case GL_TEXTURE_3D:
         {
-            texture = context->getTexture3D();
-
             if (static_cast<GLuint>(width) > caps.max3DTextureSize ||
                 static_cast<GLuint>(height) > caps.max3DTextureSize ||
                 static_cast<GLuint>(depth) > caps.max3DTextureSize)
@@ -981,8 +908,6 @@ bool ValidateES3TexStorageParameters(Context *context, GLenum target, GLsizei le
 
       case GL_TEXTURE_2D_ARRAY:
         {
-            texture = context->getTexture2DArray();
-
             if (static_cast<GLuint>(width) > caps.max2DTextureSize ||
                 static_cast<GLuint>(height) > caps.max2DTextureSize ||
                 static_cast<GLuint>(depth) > caps.maxArrayTextureLayers)
@@ -998,6 +923,7 @@ bool ValidateES3TexStorageParameters(Context *context, GLenum target, GLsizei le
         return false;
     }
 
+    gl::Texture *texture = context->getTargetTexture(target);
     if (!texture || texture->id() == 0)
     {
         context->recordError(Error(GL_INVALID_OPERATION));
@@ -1067,13 +993,6 @@ bool ValidateFramebufferTextureLayer(Context *context, GLenum target, GLenum att
                     context->recordError(Error(GL_INVALID_VALUE));
                     return false;
                 }
-
-                gl::Texture2DArray *texArray = static_cast<gl::Texture2DArray *>(tex);
-                if (texArray->isCompressed(level))
-                {
-                    context->recordError(Error(GL_INVALID_OPERATION));
-                    return false;
-                }
             }
             break;
 
@@ -1090,17 +1009,17 @@ bool ValidateFramebufferTextureLayer(Context *context, GLenum target, GLenum att
                     context->recordError(Error(GL_INVALID_VALUE));
                     return false;
                 }
-
-                gl::Texture3D *tex3d = static_cast<gl::Texture3D *>(tex);
-                if (tex3d->isCompressed(level))
-                {
-                    context->recordError(Error(GL_INVALID_OPERATION));
-                    return false;
-                }
             }
             break;
 
           default:
+            context->recordError(Error(GL_INVALID_OPERATION));
+            return false;
+        }
+
+        const gl::InternalFormat &internalFormatInfo = gl::GetInternalFormatInfo(tex->getInternalFormat(tex->getTarget(), level));
+        if (internalFormatInfo.compressed)
+        {
             context->recordError(Error(GL_INVALID_OPERATION));
             return false;
         }
@@ -1307,6 +1226,57 @@ bool ValidateGetUniformuiv(Context *context, GLuint program, GLint location, GLu
     }
 
     return ValidateGetUniformBase(context, program, location);
+}
+
+bool ValidateReadBuffer(Context *context, GLenum src)
+{
+    if (context->getClientVersion() < 3)
+    {
+        context->recordError(Error(GL_INVALID_OPERATION));
+        return false;
+    }
+
+    Framebuffer *readFBO = context->getState().getReadFramebuffer();
+
+    if (readFBO == nullptr)
+    {
+        context->recordError(gl::Error(GL_INVALID_OPERATION, "No active read framebuffer."));
+        return false;
+    }
+
+    if (src == GL_NONE)
+    {
+        return true;
+    }
+
+    if (src != GL_BACK && (src < GL_COLOR_ATTACHMENT0 || src > GL_COLOR_ATTACHMENT15))
+    {
+        context->recordError(gl::Error(GL_INVALID_ENUM, "Unknown enum for 'src' in ReadBuffer"));
+        return false;
+    }
+
+    if (readFBO->id() == 0)
+    {
+        if (src != GL_BACK)
+        {
+            const char *errorMsg = "'src' must be GL_NONE or GL_BACK when reading from the default framebuffer.";
+            context->recordError(gl::Error(GL_INVALID_OPERATION, errorMsg));
+            return false;
+        }
+    }
+    else
+    {
+        GLuint drawBuffer = static_cast<GLuint>(src - GL_COLOR_ATTACHMENT0);
+
+        if (drawBuffer >= context->getCaps().maxDrawBuffers)
+        {
+            const char *errorMsg = "'src' is greater than MAX_DRAW_BUFFERS.";
+            context->recordError(gl::Error(GL_INVALID_OPERATION, errorMsg));
+            return false;
+        }
+    }
+
+    return true;
 }
 
 }

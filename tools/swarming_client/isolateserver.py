@@ -5,8 +5,9 @@
 
 """Archives a set of files or directories to an Isolate Server."""
 
-__version__ = '0.4'
+__version__ = '0.4.3'
 
+import base64
 import functools
 import logging
 import optparse
@@ -17,6 +18,7 @@ import sys
 import tempfile
 import threading
 import time
+import types
 import urllib
 import urlparse
 import zlib
@@ -366,8 +368,11 @@ class Storage(object):
   def cpu_thread_pool(self):
     """ThreadPool for CPU-bound tasks like zipping."""
     if self._cpu_thread_pool is None:
-      self._cpu_thread_pool = threading_utils.ThreadPool(
-          2, max(threading_utils.num_processors(), 2), 0, 'zip')
+      threads = max(threading_utils.num_processors(), 2)
+      if sys.maxsize <= 2L**32:
+        # On 32 bits userland, do not try to use more than 16 threads.
+        threads = min(threads, 16)
+      self._cpu_thread_pool = threading_utils.ThreadPool(2, threads, 0, 'zip')
     return self._cpu_thread_pool
 
   @property
@@ -910,11 +915,18 @@ class _IsolateServerPushState(object):
   Note this needs to be a global class to support pickling.
   """
 
-  def __init__(self, upload_url, finalize_url):
-    self.upload_url = upload_url
-    self.finalize_url = finalize_url
+  def __init__(self, preupload_status, size):
+    self.preupload_status = preupload_status
+    gs_upload_url = preupload_status.get('gs_upload_url') or None
+    if gs_upload_url:
+      self.upload_url = gs_upload_url
+      self.finalize_url = '_ah/api/isolateservice/v1/finalize_gs_upload'
+    else:
+      self.upload_url = '_ah/api/isolateservice/v1/store_inline'
+      self.finalize_url = None
     self.uploaded = False
     self.finalized = False
+    self.size = size
 
 
 class IsolateServer(StorageApi):
@@ -929,64 +941,34 @@ class IsolateServer(StorageApi):
     assert file_path.is_url(base_url), base_url
     self._base_url = base_url.rstrip('/')
     self._namespace = namespace
+    self._namespace_dict = {
+        'compression': 'flate' if namespace.endswith(
+            ('-gzip', '-flate')) else '',
+        'digest_hash': 'sha-1',
+        'namespace': namespace,
+    }
     self._lock = threading.Lock()
     self._server_caps = None
-
-  @staticmethod
-  def _generate_handshake_request():
-    """Returns a dict to be sent as handshake request body."""
-    # TODO(vadimsh): Set 'pusher' and 'fetcher' according to intended usage.
-    return {
-        'client_app_version': __version__,
-        'fetcher': True,
-        'protocol_version': ISOLATE_PROTOCOL_VERSION,
-        'pusher': True,
-    }
-
-  @staticmethod
-  def _validate_handshake_response(caps):
-    """Validates and normalizes handshake response."""
-    logging.info('Protocol version: %s', caps['protocol_version'])
-    logging.info('Server version: %s', caps['server_app_version'])
-    if caps.get('error'):
-      raise isolated_format.MappingError(caps['error'])
-    if not caps['access_token']:
-      raise ValueError('access_token is missing')
-    return caps
+    self._memory_use = 0
 
   @property
   def _server_capabilities(self):
-    """Performs handshake with the server if not yet done.
+    """Gets server details.
 
     Returns:
-      Server capabilities dictionary as returned by /handshake endpoint.
-
-    Raises:
-      MappingError if server rejects the handshake.
+      Server capabilities dictionary as returned by /server_details endpoint.
     """
     # TODO(maruel): Make this request much earlier asynchronously while the
     # files are being enumerated.
 
     # TODO(vadimsh): Put |namespace| in the URL so that server can apply
     # namespace-level ACLs to this call.
+
     with self._lock:
       if self._server_caps is None:
-        try:
-          caps = net.url_read_json(
-              url=self._base_url + '/content-gs/handshake',
-              data=self._generate_handshake_request())
-          if caps is None:
-            raise isolated_format.MappingError('Failed to perform handshake.')
-          if not isinstance(caps, dict):
-            raise ValueError('Expecting JSON dict')
-          self._server_caps = self._validate_handshake_response(caps)
-        except (ValueError, KeyError, TypeError) as exc:
-          # KeyError exception has very confusing str conversion: it's just a
-          # missing key value and nothing else. So print exception class name
-          # as well.
-          raise isolated_format.MappingError(
-              'Invalid handshake response (%s): %s' % (
-              exc.__class__.__name__, exc))
+        self._server_caps = net.url_read_json(
+            url='%s/_ah/api/isolateservice/v1/server_details' % self._base_url,
+            data={})
       return self._server_caps
 
   @property
@@ -1003,14 +985,24 @@ class IsolateServer(StorageApi):
         self._base_url, self._namespace, digest)
 
   def fetch(self, digest, offset=0):
-    source_url = self.get_fetch_url(digest)
+    assert offset >= 0
+    source_url = '%s/_ah/api/isolateservice/v1/retrieve' % (
+        self._base_url)
     logging.debug('download_file(%s, %d)', source_url, offset)
+    response = self.do_fetch(source_url, digest, offset)
 
-    connection = self.do_fetch(source_url, offset)
-    if not connection:
-      raise IOError('Request failed - %s' % source_url)
+    if not response:
+      raise IOError('Attempted to fetch from %s; no data exist.' % source_url)
 
-    # If |offset| is used, verify server respects it by checking Content-Range.
+    # for DB uploads
+    content = response.get('content')
+    if content is not None:
+      return base64.b64decode(content)
+
+    # for GS entities
+    connection = net.url_open(response['url'])
+
+    # If |offset|, verify server respects it by checking Content-Range.
     if offset:
       content_range = connection.get_header('Content-Range')
       if not content_range:
@@ -1049,66 +1041,97 @@ class IsolateServer(StorageApi):
 
     # Default to item.content().
     content = item.content() if content is None else content
-
-    # Do not iterate byte by byte over 'str'. Push it all as a single chunk.
-    if isinstance(content, basestring):
-      assert not isinstance(content, unicode), 'Unicode string is not allowed'
-      content = [content]
-
-    # TODO(vadimsh): Do not read from |content| generator when retrying push.
-    # If |content| is indeed a generator, it can not be re-winded back
-    # to the beginning of the stream. A retry will find it exhausted. A possible
-    # solution is to wrap |content| generator with some sort of caching
-    # restartable generator. It should be done alongside streaming support
-    # implementation.
-
-    # This push operation may be a retry after failed finalization call below,
-    # no need to reupload contents in that case.
-    if not push_state.uploaded:
-      # PUT file to |upload_url|.
-      success = self.do_push(push_state.upload_url, content)
-      if not success:
-        raise IOError('Failed to upload a file %s to %s' % (
-            item.digest, push_state.upload_url))
-      push_state.uploaded = True
+    logging.info('Push state size: %d', push_state.size)
+    if isinstance(content, (basestring, list)):
+      # Memory is already used, too late.
+      with self._lock:
+        self._memory_use += push_state.size
     else:
-      logging.info(
-          'A file %s already uploaded, retrying finalization only', item.digest)
+      # TODO(vadimsh): Do not read from |content| generator when retrying push.
+      # If |content| is indeed a generator, it can not be re-winded back to the
+      # beginning of the stream. A retry will find it exhausted. A possible
+      # solution is to wrap |content| generator with some sort of caching
+      # restartable generator. It should be done alongside streaming support
+      # implementation.
+      #
+      # In theory, we should keep the generator, so that it is not serialized in
+      # memory. Sadly net.HttpService.request() requires the body to be
+      # serialized.
+      assert isinstance(content, types.GeneratorType), repr(content)
+      slept = False
+      # HACK HACK HACK. Please forgive me for my sins but OMG, it works!
+      # One byte less than 512mb. This is to cope with incompressible content.
+      max_size = int(sys.maxsize * 0.25)
+      while True:
+        with self._lock:
+          # This is due to 32 bits python when uploading very large files. The
+          # problem is that it's comparing uncompressed sizes, while we care
+          # about compressed sizes since it's what is serialized in memory.
+          # The first check assumes large files are compressible and that by
+          # throttling one upload at once, we can survive. Otherwise, kaboom.
+          memory_use = self._memory_use
+          if ((push_state.size >= max_size and not memory_use) or
+              (memory_use + push_state.size <= max_size)):
+            self._memory_use += push_state.size
+            memory_use = self._memory_use
+            break
+        time.sleep(0.1)
+        slept = True
+      if slept:
+        logging.info('Unblocked: %d %d', memory_use, push_state.size)
 
-    # Optionally notify the server that it's done.
-    if push_state.finalize_url:
-      # TODO(vadimsh): Calculate MD5 or CRC32C sum while uploading a file and
-      # send it to isolated server. That way isolate server can verify that
-      # the data safely reached Google Storage (GS provides MD5 and CRC32C of
-      # stored files).
-      # TODO(maruel): Fix the server to accept properly data={} so
-      # url_read_json() can be used.
-      response = net.url_read(
-          url=push_state.finalize_url,
-          data='',
-          content_type='application/json',
-          method='POST')
-      if response is None:
-        raise IOError('Failed to finalize an upload of %s' % item.digest)
-    push_state.finalized = True
+    try:
+      # This push operation may be a retry after failed finalization call below,
+      # no need to reupload contents in that case.
+      if not push_state.uploaded:
+        # PUT file to |upload_url|.
+        success = self.do_push(push_state, content)
+        if not success:
+          raise IOError('Failed to upload file with hash %s to URL %s' % (
+              item.digest, push_state.upload_url))
+        push_state.uploaded = True
+      else:
+        logging.info(
+            'A file %s already uploaded, retrying finalization only',
+            item.digest)
+
+      # Optionally notify the server that it's done.
+      if push_state.finalize_url:
+        # TODO(vadimsh): Calculate MD5 or CRC32C sum while uploading a file and
+        # send it to isolated server. That way isolate server can verify that
+        # the data safely reached Google Storage (GS provides MD5 and CRC32C of
+        # stored files).
+        # TODO(maruel): Fix the server to accept properly data={} so
+        # url_read_json() can be used.
+        response = net.url_read_json(
+            url='%s/%s' % (self._base_url, push_state.finalize_url),
+            data={
+                'upload_ticket': push_state.preupload_status['upload_ticket'],
+            })
+        if not response or not response['ok']:
+          raise IOError('Failed to finalize file with hash %s.' % item.digest)
+      push_state.finalized = True
+    finally:
+      with self._lock:
+        self._memory_use -= push_state.size
 
   def contains(self, items):
     # Ensure all items were initialized with 'prepare' call. Storage does that.
     assert all(i.digest is not None and i.size is not None for i in items)
 
     # Request body is a json encoded list of dicts.
-    body = [
-        {
-          'h': item.digest,
-          's': item.size,
-          'i': int(item.high_priority),
-        } for item in items
-    ]
+    body = {
+        'items': [
+          {
+            'digest': item.digest,
+            'is_isolated': bool(item.high_priority),
+            'size': item.size,
+          } for item in items
+        ],
+        'namespace': self._namespace_dict,
+    }
 
-    query_url = '%s/content-gs/pre-upload/%s?token=%s' % (
-        self._base_url,
-        self._namespace,
-        urllib.quote(self._server_capabilities['access_token']))
+    query_url = '%s/_ah/api/isolateservice/v1/preupload' % self._base_url
 
     # Response body is a list of push_urls (or null if file is already present).
     response = None
@@ -1116,29 +1139,24 @@ class IsolateServer(StorageApi):
       response = net.url_read_json(url=query_url, data=body)
       if response is None:
         raise isolated_format.MappingError(
-            'Failed to execute /pre-upload query')
-      if not isinstance(response, list):
-        raise ValueError('Expecting response with json-encoded list')
-      if len(response) != len(items):
-        raise ValueError(
-            'Incorrect number of items in the list, expected %d, '
-            'but got %d' % (len(items), len(response)))
+            'Failed to execute preupload query')
     except ValueError as err:
       raise isolated_format.MappingError(
           'Invalid response from server: %s, body is %s' % (err, response))
 
     # Pick Items that are missing, attach _PushState to them.
     missing_items = {}
-    for i, push_urls in enumerate(response):
-      if push_urls:
-        assert len(push_urls) == 2, str(push_urls)
-        missing_items[items[i]] = _IsolateServerPushState(
-            push_urls[0], push_urls[1])
+    for preupload_status in response.get('items', []):
+      assert 'upload_ticket' in preupload_status, (
+          preupload_status, '/preupload did not generate an upload ticket')
+      index = int(preupload_status['index'])
+      missing_items[items[index]] = _IsolateServerPushState(
+          preupload_status, items[index].size)
     logging.info('Queried %d files, %d cache hit',
         len(items), len(items) - len(missing_items))
     return missing_items
 
-  def do_fetch(self, url, offset):
+  def do_fetch(self, url, digest, offset):
     """Fetches isolated data from the URL.
 
     Used only for fetching files, not for API calls. Can be overridden in
@@ -1151,12 +1169,18 @@ class IsolateServer(StorageApi):
     Returns:
       net.HttpResponse compatible object, with 'read' and 'get_header' calls.
     """
-    return net.url_open(
-        url,
-        read_timeout=DOWNLOAD_READ_TIMEOUT,
-        headers={'Range': 'bytes=%d-' % offset} if offset else None)
+    assert isinstance(offset, int)
+    data = {
+        'digest': digest.encode('utf-8'),
+        'namespace': self._namespace_dict,
+        'offset': offset,
+    }
+    return net.url_read_json(
+        url=url,
+        data=data,
+        read_timeout=DOWNLOAD_READ_TIMEOUT)
 
-  def do_push(self, url, content):
+  def do_push(self, push_state, content):
     """Uploads isolated file to the URL.
 
     Used only for storing files, not for API calls. Can be overridden in
@@ -1164,10 +1188,9 @@ class IsolateServer(StorageApi):
 
     Args:
       url: URL to upload the data to.
+      push_state: an _IsolateServicePushState instance
+      item: the original Item to be uploaded
       content: an iterable that yields 'str' chunks.
-
-    Returns:
-      True on success, False on failure.
     """
     # A cheezy way to avoid memcpy of (possibly huge) file, until streaming
     # upload support is implemented.
@@ -1175,11 +1198,25 @@ class IsolateServer(StorageApi):
       content = content[0]
     else:
       content = ''.join(content)
+
+    # DB upload
+    if not push_state.finalize_url:
+      url = '%s/%s' % (self._base_url, push_state.upload_url)
+      content = base64.b64encode(content)
+      data = {
+          'upload_ticket': push_state.preupload_status['upload_ticket'],
+          'content': content,
+      }
+      response = net.url_read_json(url=url, data=data)
+      return response is not None and response['ok']
+
+    # upload to GS
+    url = push_state.upload_url
     response = net.url_read(
-          url=url,
-          data=content,
-          content_type='application/octet-stream',
-          method='PUT')
+        content_type='application/octet-stream',
+        data=content,
+        method='PUT',
+        url=url)
     return response is not None
 
 
@@ -1454,7 +1491,14 @@ class DiskCache(LocalCache):
       # An untracked file.
       if not isolated_format.is_valid_hash(filename, self.hash_algo):
         logging.warning('Removing unknown file %s from cache', filename)
-        file_path.try_remove(self._path(filename))
+        p = self._path(filename)
+        if os.path.isdir(p):
+          try:
+            file_path.rmtree(p)
+          except OSError:
+            pass
+        else:
+          file_path.try_remove(p)
         continue
       # File that's not referenced in 'state.json'.
       # TODO(vadimsh): Verify its SHA1 matches file name.
@@ -1902,8 +1946,8 @@ def archive_files_to_storage(storage, files, blacklist):
 
           # Create the .isolated file.
           if not tempdir:
-            tempdir = tempfile.mkdtemp(prefix='isolateserver')
-          handle, isolated = tempfile.mkstemp(dir=tempdir, suffix='.isolated')
+            tempdir = tempfile.mkdtemp(prefix=u'isolateserver')
+          handle, isolated = tempfile.mkstemp(dir=tempdir, suffix=u'.isolated')
           os.close(handle)
           data = {
               'algo':
@@ -1940,7 +1984,7 @@ def archive_files_to_storage(storage, files, blacklist):
     _uploaded_files = storage.upload_items(items_to_upload)
     return results
   finally:
-    if tempdir:
+    if tempdir and os.path.isdir(tempdir):
       file_path.rmtree(tempdir)
 
 
@@ -1989,14 +2033,14 @@ def CMDdownload(parser, args):
   """
   add_isolate_server_options(parser)
   parser.add_option(
-      '-i', '--isolated', metavar='HASH',
+      '-s', '--isolated', metavar='HASH',
       help='hash of an isolated file, .isolated file content is discarded, use '
            '--file if you need it')
   parser.add_option(
       '-f', '--file', metavar='HASH DEST', default=[], action='append', nargs=2,
       help='hash and destination of a file, can be used multiple times')
   parser.add_option(
-      '-t', '--target', metavar='DIR', default=os.getcwd(),
+      '-t', '--target', metavar='DIR', default='download',
       help='destination directory')
   add_cache_options(parser)
   options, args = parser.parse_args(args)
@@ -2009,6 +2053,11 @@ def CMDdownload(parser, args):
 
   cache = process_cache_options(options)
   options.target = os.path.abspath(options.target)
+  if options.isolated:
+    if (os.path.isfile(options.target) or
+        (os.path.isdir(options.target) and os.listdir(options.target))):
+      parser.error(
+          '--target \'%s\' exists, please use another target' % options.target)
   with get_storage(options.isolate_server, options.namespace) as storage:
     # Fetching individual files.
     if options.file:
@@ -2122,7 +2171,7 @@ def process_cache_options(options):
 
     # |options.cache| path may not exist until DiskCache() instance is created.
     return DiskCache(
-        os.path.abspath(options.cache),
+        unicode(os.path.abspath(options.cache)),
         policies,
         isolated_format.get_hash_algo(options.namespace))
   else:

@@ -16,7 +16,6 @@
 #include "net/base/io_buffer.h"
 #include "net/base/load_flags.h"
 #include "net/base/net_errors.h"
-#include "net/base/net_log.h"
 #include "net/base/request_priority.h"
 #include "net/base/test_completion_callback.h"
 #include "net/disk_cache/disk_cache.h"
@@ -24,6 +23,7 @@
 #include "net/http/http_request_info.h"
 #include "net/http/http_response_headers.h"
 #include "net/http/http_response_info.h"
+#include "net/log/net_log.h"
 
 namespace net {
 class HttpRequestHeaders;
@@ -291,11 +291,23 @@ class MockNetworkLayer : public net::HttpTransactionFactory,
   net::HttpCache* GetCache() override;
   net::HttpNetworkSession* GetSession() override;
 
+  // The caller must guarantee that |clock| will outlive this object.
+  void SetClock(base::Clock* clock);
+  base::Clock* clock() const { return clock_; }
+
+  // The current time (will use clock_ if it is non NULL).
+  base::Time Now();
+
  private:
   int transaction_count_;
   bool done_reading_called_;
   bool stop_caching_called_;
   net::RequestPriority last_create_transaction_priority_;
+
+  // By default clock_ is NULL but it can be set to a custom clock by test
+  // frameworks using SetClock.
+  base::Clock* clock_;
+
   base::WeakPtr<MockNetworkTransaction> last_transaction_;
 };
 

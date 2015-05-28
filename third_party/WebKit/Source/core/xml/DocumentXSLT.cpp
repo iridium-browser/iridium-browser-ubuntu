@@ -78,7 +78,7 @@ private:
     virtual void refDetachableEventListener() override { ref(); }
     virtual void derefDetachableEventListener() override { deref(); }
 
-    virtual v8::Local<v8::Value> callListenerFunction(ScriptState*, v8::Handle<v8::Value>, Event*)
+    virtual v8::Local<v8::Value> callListenerFunction(ScriptState*, v8::Local<v8::Value>, Event*)
     {
         ASSERT_NOT_REACHED();
         return v8::Local<v8::Value>();
@@ -196,7 +196,7 @@ DocumentXSLT& DocumentXSLT::from(DocumentSupplementable& document)
     return *supplement;
 }
 
-void DocumentXSLT::trace(Visitor* visitor)
+DEFINE_TRACE(DocumentXSLT)
 {
     visitor->trace(m_transformSourceDocument);
     DocumentSupplement::trace(visitor);

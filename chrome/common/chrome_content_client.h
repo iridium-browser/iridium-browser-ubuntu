@@ -21,8 +21,9 @@ std::string GetUserAgent();
 
 class ChromeContentClient : public content::ContentClient {
  public:
-  static const char* const kPDFPluginName;
-  static const char* const kRemotingViewerPluginPath;
+  static const char kPDFPluginName[];
+  static const char kPDFPluginPath[];
+  static const char kRemotingViewerPluginPath[];
 
   // The methods below are called by child processes to set the function
   // pointers for built-in plugins. We avoid linking these plugins into
@@ -37,6 +38,13 @@ class ChromeContentClient : public content::ContentClient {
 
 #if !defined(DISABLE_NACL)
   static void SetNaClEntryFunctions(
+      content::PepperPluginInfo::GetInterfaceFunc get_interface,
+      content::PepperPluginInfo::PPP_InitializeModuleFunc initialize_module,
+      content::PepperPluginInfo::PPP_ShutdownModuleFunc shutdown_module);
+#endif
+
+#if defined(ENABLE_PLUGINS)
+  static void SetPDFEntryFunctions(
       content::PepperPluginInfo::GetInterfaceFunc get_interface,
       content::PepperPluginInfo::PPP_InitializeModuleFunc initialize_module,
       content::PepperPluginInfo::PPP_ShutdownModuleFunc shutdown_module);

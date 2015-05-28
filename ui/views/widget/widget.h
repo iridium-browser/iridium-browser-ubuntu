@@ -13,7 +13,6 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/observer_list.h"
 #include "base/scoped_observer.h"
-#include "ui/aura/window_layer_type.h"
 #include "ui/base/ui_base_types.h"
 #include "ui/events/event_source.h"
 #include "ui/gfx/geometry/rect.h"
@@ -249,8 +248,8 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
     // rid of NW subclasses and do this all via message handling.
     DesktopWindowTreeHost* desktop_window_tree_host;
     // Only used by NativeWidgetAura. Specifies the type of layer for the
-    // aura::Window. Default is WINDOW_LAYER_TEXTURED.
-    aura::WindowLayerType layer_type;
+    // aura::Window. Default is ui::LAYER_TEXTURED.
+    ui::LayerType layer_type;
     // Only used by Aura. Provides a context window whose RootWindow is
     // consulted during widget creation to determine where in the Window
     // hierarchy this widget should be placed. (This is separate from |parent|;
@@ -567,6 +566,9 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
   FocusManager* GetFocusManager();
   const FocusManager* GetFocusManager() const;
 
+  // Returns the focused text input client within this widget.
+  ui::TextInputClient* GetFocusedTextInputClient();
+
   // Returns the InputMethod for this widget.
   // Note that all widgets in a widget hierarchy share the same input method.
   InputMethod* GetInputMethod();
@@ -626,6 +628,10 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
   // Notifies the view hierarchy contained in this widget that locale resources
   // changed.
   void LocaleChanged();
+
+  // Notifies the view hierarchy contained in this widget that the device scale
+  // factor changed.
+  void DeviceScaleFactorChanged(float device_scale_factor);
 
   void SetFocusTraversableParent(FocusTraversable* parent);
   void SetFocusTraversableParentView(View* parent_view);
@@ -773,8 +779,8 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
   bool IsInactiveRenderingDisabled() const override;
   void EnableInactiveRendering() override;
   void OnNativeWidgetActivationChanged(bool active) override;
-  void OnNativeFocus(gfx::NativeView old_focused_view) override;
-  void OnNativeBlur(gfx::NativeView new_focused_view) override;
+  void OnNativeFocus() override;
+  void OnNativeBlur() override;
   void OnNativeWidgetVisibilityChanging(bool visible) override;
   void OnNativeWidgetVisibilityChanged(bool visible) override;
   void OnNativeWidgetCreated(bool desktop_widget) override;
@@ -789,7 +795,7 @@ class VIEWS_EXPORT Widget : public internal::NativeWidgetDelegate,
   void OnNativeWidgetEndUserBoundsChange() override;
   bool HasFocusManager() const override;
   bool OnNativeWidgetPaintAccelerated(const gfx::Rect& dirty_region) override;
-  void OnNativeWidgetPaint(gfx::Canvas* canvas) override;
+  void OnNativeWidgetPaint(const ui::PaintContext& context) override;
   int GetNonClientComponent(const gfx::Point& point) override;
   void OnKeyEvent(ui::KeyEvent* event) override;
   void OnMouseEvent(ui::MouseEvent* event) override;

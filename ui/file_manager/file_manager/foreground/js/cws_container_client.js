@@ -4,26 +4,21 @@
 
 /**
  * @param {WebView} webView Web View tag.
- * @param {?string} ext File extension.
- * @param {?string} mime File mime type.
- * @param {?string} searchQuery Search query.
  * @param {number} width Width of the CWS widget.
  * @param {number} height Height of the CWS widget.
  * @param {string} url Share Url for an entry.
  * @param {string} target Target (scheme + host + port) of the widget.
+ * @param {Object<string, *>} options Options to be sent to the dialog host.
  * @constructor
  * @extends {cr.EventTarget}
  */
-function CWSContainerClient(
-    webView, ext, mime, searchQuery, width, height, url, target) {
+function CWSContainerClient(webView, width, height, url, target, options) {
   this.webView_ = webView;
-  this.ext_ = (ext && ext[0] == '.') ? ext.substr(1) : ext;
-  this.mime_ = mime;
-  this.searchQuery_ = searchQuery;
   this.width_ = width;
   this.height_ = height;
   this.url_ = url;
   this.target_ = target;
+  this.options_ = options;
 
   this.loaded_ = false;
   this.loading_ = false;
@@ -182,22 +177,38 @@ CWSContainerClient.prototype.postInstallSuccessMessage_ = function(itemId) {
  * @private
  */
 CWSContainerClient.prototype.postInitializeMessage_ = function() {
-  var message = {
-    message: 'initialize',
-    hl: util.getCurrentLocaleOrDefault(),
-    width: this.width_,
-    height: this.height_,
-    v: 1
-  };
+  new Promise(function(fulfill, reject) {
+    chrome.management.getAll(function(items) {
+      if (chrome.runtime.lastError) {
+        reject(chrome.runtime.lastError.message);
+        return;
+      }
+      fulfill(items.map(function(item) {
+        return item.id;
+      }));
+    })
+  }).then(
+      /**
+       * @param {!Array<string>} preinstalledExtensionIDs
+       */
+      function(preinstalledExtensionIDs) {
+        var message = {
+          message: 'initialize',
+          hl: util.getCurrentLocaleOrDefault(),
+          width: this.width_,
+          height: this.height_,
+          preinstalled_items: preinstalledExtensionIDs,
+          v: 1
+        };
 
-  if (this.searchQuery_) {
-    message['search_query'] = this.searchQuery_;
-  } else {
-    message['file_extension'] = this.ext_;
-    message['mime_type'] = this.mime_;
-  }
+        if (this.options_) {
+          Object.keys(this.options_).forEach(function(key) {
+            message[key] = this.options_[key];
+          }.bind(this));
+        }
 
-  this.postMessage_(message);
+        this.postMessage_(message);
+      }.bind(this));
 };
 
 /**

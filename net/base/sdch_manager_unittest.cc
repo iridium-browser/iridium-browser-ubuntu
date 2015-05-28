@@ -10,16 +10,13 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/strings/stringprintf.h"
 #include "base/test/simple_test_clock.h"
-#include "net/base/net_log.h"
 #include "net/base/sdch_manager.h"
 #include "net/base/sdch_observer.h"
+#include "net/log/net_log.h"
 #include "testing/gtest/include/gtest/gtest.h"
 #include "url/gurl.h"
 
 namespace net {
-
-// Workaround for http://crbug.com/437794; remove when fixed.
-#if !defined(OS_IOS)
 
 //------------------------------------------------------------------------------
 // Provide sample data and compression results with a sample VCDIFF dictionary.
@@ -691,18 +688,5 @@ TEST_F(SdchManagerTest, SdchDictionaryUsed) {
   EXPECT_EQ(1, observer.dictionary_used_notifications());
   EXPECT_EQ("xyzzy", observer.last_server_hash());
 }
-
-#else
-
-TEST(SdchManagerTest, SdchOffByDefault) {
-  GURL google_url("http://www.google.com");
-  scoped_ptr<SdchManager> sdch_manager(new SdchManager);
-
-  EXPECT_EQ(SDCH_DISABLED, sdch_manager->IsInSupportedDomain(google_url));
-  SdchManager::EnableSdchSupport(true);
-  EXPECT_EQ(SDCH_OK, sdch_manager->IsInSupportedDomain(google_url));
-}
-
-#endif  // !defined(OS_IOS)
 
 }  // namespace net

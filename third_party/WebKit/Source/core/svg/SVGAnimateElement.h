@@ -39,7 +39,7 @@ public:
     static PassRefPtrWillBeRawPtr<SVGAnimateElement> create(Document&);
     virtual ~SVGAnimateElement();
 
-    virtual void trace(Visitor*) override;
+    DECLARE_VIRTUAL_TRACE();
 
     AnimatedPropertyType animatedPropertyType();
     bool animatedPropertyTypeSupportsAddition();
@@ -48,7 +48,7 @@ protected:
     SVGAnimateElement(const QualifiedName&, Document&);
 
     virtual void resetAnimatedType() override final;
-    virtual void clearAnimatedType(SVGElement* targetElement) override final;
+    virtual void clearAnimatedType() override final;
 
     virtual bool calculateToAtEndOfDurationValue(const String& toAtEndOfDurationString) override final;
     virtual bool calculateFromAndToValues(const String& fromString, const String& toString) override final;
@@ -63,7 +63,6 @@ protected:
 
 private:
     void resetAnimatedPropertyType();
-    SVGAnimatedTypeAnimator* ensureAnimator();
 
     virtual bool hasValidAttributeType() override;
 
@@ -72,7 +71,7 @@ private:
     RefPtrWillBeMember<SVGPropertyBase> m_toAtEndOfDurationProperty;
     RefPtrWillBeMember<SVGPropertyBase> m_animatedProperty;
 
-    OwnPtrWillBeMember<SVGAnimatedTypeAnimator> m_animator;
+    SVGAnimatedTypeAnimator m_animator;
 };
 
 inline bool isSVGAnimateElement(const SVGElement& element)

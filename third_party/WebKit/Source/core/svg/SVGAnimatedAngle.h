@@ -58,13 +58,13 @@ public:
     virtual void setAnimatedValue(PassRefPtrWillBeRawPtr<SVGPropertyBase>) override;
     virtual void animationEnded() override;
 
-    virtual void trace(Visitor*) override;
+    DECLARE_VIRTUAL_TRACE();
 
 protected:
     explicit SVGAnimatedAngle(SVGMarkerElement* contextElement);
 
 private:
-    RefPtrWillBeMember<SVGAnimatedEnumeration<SVGMarkerOrientType> > m_orientType;
+    RefPtrWillBeMember<SVGAnimatedEnumeration<SVGMarkerOrientType>> m_orientType;
 };
 
 } // namespace blink

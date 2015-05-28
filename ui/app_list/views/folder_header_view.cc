@@ -18,6 +18,7 @@
 #include "ui/views/border.h"
 #include "ui/views/controls/button/image_button.h"
 #include "ui/views/controls/textfield/textfield.h"
+#include "ui/views/focus/focus_manager.h"
 #include "ui/views/painter.h"
 
 namespace app_list {
@@ -116,6 +117,18 @@ void FolderHeaderView::OnFolderItemRemoved() {
   folder_item_ = NULL;
 }
 
+void FolderHeaderView::SetTextFocus() {
+  if (!folder_name_view_->HasFocus()) {
+    views::FocusManager* focus_manager = GetFocusManager();
+    if (focus_manager)
+      focus_manager->SetFocusedView(folder_name_view_);
+  }
+}
+
+bool FolderHeaderView::HasTextFocus() const {
+  return folder_name_view_->HasFocus();
+}
+
 void FolderHeaderView::Update() {
   if (!folder_item_)
     return;
@@ -201,7 +214,7 @@ void FolderHeaderView::OnPaint(gfx::Canvas* canvas) {
 
   // Draw bottom separator line.
   int horizontal_padding = app_list::switches::IsExperimentalAppListEnabled()
-                               ? kExperimentalWindowPadding
+                               ? kExperimentalAppsGridPadding
                                : kBottomSeparatorPadding;
   rect.Inset(horizontal_padding, 0);
   rect.set_y(rect.bottom() - kBottomSeparatorHeight);

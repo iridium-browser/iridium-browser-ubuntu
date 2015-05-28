@@ -7,9 +7,10 @@
 
 #include "base/memory/scoped_ptr.h"
 #include "base/process/process_handle.h"
+#include "content/common/application_setup.mojom.h"
+#include "content/common/mojo/channel_init.h"
 #include "content/common/mojo/service_registry_impl.h"
-#include "mojo/edk/embedder/channel_init.h"
-#include "mojo/edk/embedder/scoped_platform_handle.h"
+#include "third_party/mojo/src/mojo/edk/embedder/scoped_platform_handle.h"
 
 #if defined(OS_ANDROID)
 #include "content/browser/mojo/service_registry_android.h"
@@ -29,7 +30,7 @@ namespace content {
 class CONTENT_EXPORT MojoApplicationHost {
  public:
   MojoApplicationHost();
-  virtual ~MojoApplicationHost();
+  ~MojoApplicationHost();
 
   // Two-phase initialization:
   //  1- Init makes service_registry() available synchronously.
@@ -39,6 +40,9 @@ class CONTENT_EXPORT MojoApplicationHost {
 
   void WillDestroySoon();
 
+  // Shuts down the Mojo channel. Must be called from the IO thread.
+  void ShutdownOnIOThread();
+
   ServiceRegistry* service_registry() { return &service_registry_; }
 
 #if defined(OS_ANDROID)
@@ -47,13 +51,19 @@ class CONTENT_EXPORT MojoApplicationHost {
   }
 #endif
 
+  void OverrideIOTaskRunnerForTest(
+      scoped_refptr<base::TaskRunner> io_task_runner);
+
  private:
-  mojo::embedder::ChannelInit channel_init_;
+  ChannelInit channel_init_;
   mojo::embedder::ScopedPlatformHandle client_handle_;
 
   bool did_activate_;
 
+  scoped_ptr<ApplicationSetup> application_setup_;
   ServiceRegistryImpl service_registry_;
+
+  scoped_refptr<base::TaskRunner> io_task_runner_override_;
 
 #if defined(OS_ANDROID)
   scoped_ptr<ServiceRegistryAndroid> service_registry_android_;

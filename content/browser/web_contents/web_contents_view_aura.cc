@@ -21,7 +21,6 @@
 #include "content/browser/renderer_host/render_widget_host_view_aura.h"
 #include "content/browser/renderer_host/web_input_event_aura.h"
 #include "content/browser/web_contents/aura/gesture_nav_simple.h"
-#include "content/browser/web_contents/aura/image_window_delegate.h"
 #include "content/browser/web_contents/aura/overscroll_navigation_overlay.h"
 #include "content/browser/web_contents/aura/shadow_layer_delegate.h"
 #include "content/browser/web_contents/aura/window_slider.h"
@@ -52,6 +51,7 @@
 #include "ui/aura/window_observer.h"
 #include "ui/aura/window_tree_host.h"
 #include "ui/aura/window_tree_host_observer.h"
+#include "ui/aura_extra/image_window_delegate.h"
 #include "ui/base/clipboard/clipboard.h"
 #include "ui/base/clipboard/custom_data_helper.h"
 #include "ui/base/dragdrop/drag_drop_types.h"
@@ -116,7 +116,7 @@ RenderWidgetHostViewAura* ToRenderWidgetHostViewAura(
 // The window delegate for the overscroll window. This redirects trackpad events
 // to the web-contents window. The delegate destroys itself when the window is
 // destroyed.
-class OverscrollWindowDelegate : public ImageWindowDelegate {
+class OverscrollWindowDelegate : public aura_extra::ImageWindowDelegate {
  public:
   OverscrollWindowDelegate(WebContentsImpl* web_contents,
                            OverscrollMode overscroll_mode)
@@ -125,11 +125,9 @@ class OverscrollWindowDelegate : public ImageWindowDelegate {
     const NavigationControllerImpl& controller = web_contents->GetController();
     const NavigationEntryImpl* entry = NULL;
     if (ShouldNavigateForward(controller, overscroll_mode)) {
-      entry = NavigationEntryImpl::FromNavigationEntry(
-          controller.GetEntryAtOffset(1));
+      entry = controller.GetEntryAtOffset(1);
     } else if (ShouldNavigateBack(controller, overscroll_mode)) {
-      entry = NavigationEntryImpl::FromNavigationEntry(
-          controller.GetEntryAtOffset(-1));
+      entry = controller.GetEntryAtOffset(-1);
     }
 
     gfx::Image image;
@@ -458,6 +456,12 @@ int ConvertAuraEventFlagsToWebInputEventModifiers(int aura_event_flags) {
     web_input_event_modifiers |= blink::WebInputEvent::AltKey;
   if (aura_event_flags & ui::EF_COMMAND_DOWN)
     web_input_event_modifiers |= blink::WebInputEvent::MetaKey;
+  if (aura_event_flags & ui::EF_LEFT_MOUSE_BUTTON)
+    web_input_event_modifiers |= blink::WebInputEvent::LeftButtonDown;
+  if (aura_event_flags & ui::EF_MIDDLE_MOUSE_BUTTON)
+    web_input_event_modifiers |= blink::WebInputEvent::MiddleButtonDown;
+  if (aura_event_flags & ui::EF_RIGHT_MOUSE_BUTTON)
+    web_input_event_modifiers |= blink::WebInputEvent::RightButtonDown;
   return web_input_event_modifiers;
 }
 
@@ -824,7 +828,7 @@ void WebContentsViewAura::PrepareOverscrollWindow() {
   overscroll_window_.reset(new aura::Window(overscroll_delegate));
   overscroll_window_->SetType(ui::wm::WINDOW_TYPE_CONTROL);
   overscroll_window_->SetTransparent(true);
-  overscroll_window_->Init(aura::WINDOW_LAYER_TEXTURED);
+  overscroll_window_->Init(ui::LAYER_TEXTURED);
   overscroll_window_->layer()->SetMasksToBounds(false);
   overscroll_window_->SetName("OverscrollOverlay");
 
@@ -1079,7 +1083,7 @@ void WebContentsViewAura::CreateView(
   window_->set_owned_by_parent(false);
   window_->SetType(ui::wm::WINDOW_TYPE_CONTROL);
   window_->SetTransparent(false);
-  window_->Init(aura::WINDOW_LAYER_NOT_DRAWN);
+  window_->Init(ui::LAYER_NOT_DRAWN);
   window_->AddObserver(this);
   aura::Window* root_window = context ? context->GetRootWindow() : NULL;
   if (root_window) {
@@ -1197,6 +1201,11 @@ void WebContentsViewAura::ShowContextMenu(RenderFrameHost* render_frame_host,
     touch_editable_->EndTouchEditing(false);
   }
   if (delegate_) {
+    RenderWidgetHostViewAura* view = ToRenderWidgetHostViewAura(
+        web_contents_->GetRenderWidgetHostView());
+    if (view)
+      view->OnShowContextMenu();
+
     delegate_->ShowContextMenu(render_frame_host, params);
     // WARNING: we may have been deleted during the call to ShowContextMenu().
   }
@@ -1435,6 +1444,10 @@ void WebContentsViewAura::OnBoundsChanged(const gfx::Rect& old_bounds,
   }
 }
 
+ui::TextInputClient* WebContentsViewAura::GetFocusedTextInputClient() {
+  return nullptr;
+}
+
 gfx::NativeCursor WebContentsViewAura::GetCursor(const gfx::Point& point) {
   return gfx::kNullCursor;
 }
@@ -1464,7 +1477,7 @@ bool WebContentsViewAura::CanFocus() {
 void WebContentsViewAura::OnCaptureLost() {
 }
 
-void WebContentsViewAura::OnPaint(gfx::Canvas* canvas) {
+void WebContentsViewAura::OnPaint(const ui::PaintContext& context) {
 }
 
 void WebContentsViewAura::OnDeviceScaleFactorChanged(

@@ -28,11 +28,10 @@
 
 #include "core/editing/TextGranularity.h"
 #include "core/events/TextEventInputType.h"
+#include "core/layout/HitTestRequest.h"
+#include "core/style/ComputedStyleConstants.h"
 #include "core/page/DragActions.h"
 #include "core/page/EventWithHitTestResults.h"
-#include "core/page/FocusType.h"
-#include "core/rendering/HitTestRequest.h"
-#include "core/rendering/style/RenderStyleConstants.h"
 #include "platform/Cursor.h"
 #include "platform/PlatformMouseEvent.h"
 #include "platform/Timer.h"
@@ -40,6 +39,7 @@
 #include "platform/geometry/LayoutPoint.h"
 #include "platform/heap/Handle.h"
 #include "platform/scroll/ScrollTypes.h"
+#include "public/platform/WebFocusType.h"
 #include "wtf/Forward.h"
 #include "wtf/HashMap.h"
 #include "wtf/HashTraits.h"
@@ -49,6 +49,8 @@ namespace blink {
 
 class AutoscrollController;
 class DataTransfer;
+class DeprecatedPaintLayer;
+class DeprecatedPaintLayerScrollableArea;
 class Document;
 class DragState;
 class Element;
@@ -69,11 +71,10 @@ class PlatformGestureEvent;
 class PlatformKeyboardEvent;
 class PlatformTouchEvent;
 class PlatformWheelEvent;
-class RenderLayer;
-class RenderLayerScrollableArea;
-class RenderObject;
+class LayoutObject;
 class ScrollableArea;
 class Scrollbar;
+class ScrollState;
 class TextEvent;
 class VisibleSelection;
 class WheelEvent;
@@ -87,17 +88,15 @@ class EventHandler : public NoBaseWillBeGarbageCollectedFinalized<EventHandler> 
 public:
     explicit EventHandler(LocalFrame*);
     ~EventHandler();
-    void trace(Visitor*);
+    DECLARE_TRACE();
 
     void clear();
     void nodeWillBeRemoved(Node&);
 
     void updateSelectionForMouseDrag();
 
-    Node* mousePressNode() const;
-
 #if OS(WIN)
-    void startPanScrolling(RenderObject*);
+    void startPanScrolling(LayoutObject*);
 #endif
 
     void stopAutoscroll();
@@ -110,7 +109,6 @@ public:
         const LayoutSize& padding = LayoutSize());
 
     bool mousePressed() const { return m_mousePressed; }
-    void setMousePressed(bool pressed) { m_mousePressed = pressed; }
 
     void setCapturingMouseEventsNode(PassRefPtrWillBeRawPtr<Node>); // A caller is responsible for resetting capturing node to 0.
 
@@ -244,11 +242,11 @@ private:
     bool isCursorVisible() const;
     void updateCursor();
 
-    ScrollableArea* associatedScrollableArea(const RenderLayer*) const;
+    ScrollableArea* associatedScrollableArea(const DeprecatedPaintLayer*) const;
 
     // Scrolls the elements of the DOM tree. Returns true if a node was scrolled.
     // False if we reached the root and couldn't scroll anything.
-    // direction - The direction to scroll in. If this is a logicl direction, it will be
+    // direction - The direction to scroll in. If this is a logical direction, it will be
     //             converted to the physical direction based on a node's writing mode.
     // granularity - The units that the  scroll delta parameter is in.
     // startNode - The node to start bubbling the scroll from. If a node can't scroll,
@@ -259,6 +257,8 @@ private:
     // absolutePoint - For wheel scrolls - the location, in absolute coordinates, where the event occured.
     bool scroll(ScrollDirection, ScrollGranularity, Node* startNode = nullptr, Node** stopNode = nullptr, float delta = 1.0f, IntPoint absolutePoint = IntPoint());
 
+    void customizedScroll(const Node& startNode, ScrollState&);
+
     TouchAction intersectTouchAction(const TouchAction, const TouchAction);
     TouchAction computeEffectiveTouchAction(const Node&);
 
@@ -266,7 +266,10 @@ private:
 
     void invalidateClick();
 
-    void updateMouseEventTargetNode(Node*, const PlatformMouseEvent&, bool fireMouseOverOut);
+    void updateMouseEventTargetNode(Node*, const PlatformMouseEvent&, bool);
+
+    /* Dispatches mouseover, mouseout, mouseenter and mouseleave events to appropriate nodes when the mouse pointer moves from one node to another. */
+    void sendMouseEventsForNodeTransition(Node*, Node*, const PlatformMouseEvent&);
 
     MouseEventWithHitTestResults prepareMouseEvent(const HitTestRequest&, const PlatformMouseEvent&);
 
@@ -281,7 +284,6 @@ private:
 
     bool dispatchDragSrcEvent(const AtomicString& eventType, const PlatformMouseEvent&);
 
-    bool dragHysteresisExceeded(const FloatPoint&) const;
     bool dragHysteresisExceeded(const IntPoint&) const;
 
     bool passMousePressEventToSubframe(MouseEventWithHitTestResults&, LocalFrame* subframe);
@@ -290,14 +292,12 @@ private:
 
     bool passMousePressEventToScrollbar(MouseEventWithHitTestResults&);
 
-    bool passWidgetMouseDownEventToWidget(const MouseEventWithHitTestResults&);
-
     bool passWheelEventToWidget(const PlatformWheelEvent&, Widget&);
     void defaultSpaceEventHandler(KeyboardEvent*);
     void defaultBackspaceEventHandler(KeyboardEvent*);
     void defaultTabEventHandler(KeyboardEvent*);
     void defaultEscapeEventHandler(KeyboardEvent*);
-    void defaultArrowEventHandler(FocusType, KeyboardEvent*);
+    void defaultArrowEventHandler(WebFocusType, KeyboardEvent*);
 
     void updateSelectionForMouseDrag(const HitTestResult&);
 
@@ -311,11 +311,17 @@ private:
 
     bool handleScrollGestureOnResizer(Node*, const PlatformGestureEvent&);
 
-    bool passScrollGestureEventToWidget(const PlatformGestureEvent&, RenderObject*);
+    bool passScrollGestureEventToWidget(const PlatformGestureEvent&, LayoutObject*);
 
     AutoscrollController* autoscrollController() const;
     bool panScrollInProgress() const;
     void setLastKnownMousePosition(const PlatformMouseEvent&);
+
+    bool shouldTopControlsConsumeScroll(FloatSize) const;
+
+    // If the given element is a shadow host with tabStop = false, slide focus to its inner
+    // element. Returns true if the resulting focus is different from the given element.
+    bool slideFocusOnShadowHostIfNecessary(const Element&);
 
     // NOTE: If adding a new field to this class please ensure that it is
     // cleared in |EventHandler::clear()|.
@@ -343,7 +349,7 @@ private:
 
     bool m_svgPan;
 
-    RenderLayerScrollableArea* m_resizeScrollableArea;
+    DeprecatedPaintLayerScrollableArea* m_resizeScrollableArea;
 
     RefPtrWillBeMember<Node> m_capturingMouseEventsNode;
     bool m_eventHandlerWillResetCapturingMouseEventsNode;
@@ -389,6 +395,10 @@ private:
 
     RefPtrWillBeMember<Node> m_scrollGestureHandlingNode;
     bool m_lastGestureScrollOverWidget;
+    // The most recent element to scroll natively during this scroll
+    // sequence. Null if no native element has scrolled this scroll
+    // sequence, or if the most recent element to scroll used scroll
+    // customization.
     RefPtrWillBeMember<Node> m_previousGestureScrolledNode;
     RefPtrWillBeMember<Scrollbar> m_scrollbarHandlingScrollGesture;
 
@@ -399,6 +409,15 @@ private:
     Timer<EventHandler> m_activeIntervalTimer;
     double m_lastShowPressTimestamp;
     RefPtrWillBeMember<Element> m_lastDeferredTapElement;
+
+    // Only used with the ScrollCustomization runtime enabled feature.
+    WillBeHeapDeque<RefPtrWillBeMember<Element>> m_currentScrollChain;
+    // True iff some of the delta has been consumed for the current
+    // scroll sequence in this frame, or any child frames. Only used
+    // with ScrollCustomization. If some delta has been consumed, a
+    // scroll which shouldn't propagate can't cause any element to
+    // scroll other than the |m_previousGestureScrolledNode|.
+    bool m_deltaConsumedForScrollSequence;
 };
 
 } // namespace blink

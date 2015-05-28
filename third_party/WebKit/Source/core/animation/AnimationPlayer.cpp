@@ -37,7 +37,13 @@
 #include "core/dom/ExceptionCode.h"
 #include "core/events/AnimationPlayerEvent.h"
 #include "core/frame/UseCounter.h"
+#include "core/inspector/InspectorInstrumentation.h"
+#include "core/inspector/InspectorTraceEvents.h"
+#include "platform/RuntimeEnabledFeatures.h"
 #include "platform/TraceEvent.h"
+#include "public/platform/Platform.h"
+#include "public/platform/WebCompositorAnimationPlayer.h"
+#include "public/platform/WebCompositorSupport.h"
 #include "wtf/MathExtras.h"
 
 namespace blink {
@@ -52,12 +58,21 @@ static unsigned nextSequenceNumber()
 
 }
 
-PassRefPtrWillBeRawPtr<AnimationPlayer> AnimationPlayer::create(ExecutionContext* executionContext, AnimationTimeline& timeline, AnimationNode* content)
+PassRefPtrWillBeRawPtr<AnimationPlayer> AnimationPlayer::create(AnimationNode* source, AnimationTimeline* timeline)
 {
-    RefPtrWillBeRawPtr<AnimationPlayer> player = adoptRefWillBeNoop(new AnimationPlayer(executionContext, timeline, content));
-    player->play();
-    timeline.document()->compositorPendingAnimations().add(player.get());
+    if (!timeline) {
+        // FIXME: Support creating players without a timeline.
+        return nullptr;
+    }
+
+    RefPtrWillBeRawPtr<AnimationPlayer> player = adoptRefWillBeNoop(new AnimationPlayer(timeline->document()->contextDocument().get(), *timeline, source));
     player->suspendIfNeeded();
+
+    if (timeline) {
+        timeline->playerAttached(*player);
+        player->attachCompositorTimeline();
+    }
+
     return player.release();
 }
 
@@ -73,10 +88,10 @@ AnimationPlayer::AnimationPlayer(ExecutionContext* executionContext, AnimationTi
     , m_paused(false)
     , m_held(true)
     , m_isPausedForTesting(false)
-    , m_outdated(true)
+    , m_outdated(false)
     , m_finished(true)
     , m_compositorState(nullptr)
-    , m_compositorPending(true)
+    , m_compositorPending(false)
     , m_compositorGroup(0)
     , m_currentTimePending(false)
     , m_stateIsBeingUpdated(false)
@@ -98,6 +113,8 @@ AnimationPlayer::~AnimationPlayer()
     if (m_timeline)
         m_timeline->playerDestroyed(this);
 #endif
+
+    destroyCompositorPlayer();
 }
 
 double AnimationPlayer::sourceEnd() const
@@ -112,14 +129,13 @@ bool AnimationPlayer::limited(double currentTime) const
 
 void AnimationPlayer::setCurrentTime(double newCurrentTime)
 {
-    UseCounter::count(executionContext(), UseCounter::AnimationPlayerSetCurrentTime);
-    if (!std::isfinite(newCurrentTime))
-        return;
-
     PlayStateUpdateScope updateScope(*this, TimingUpdateOnDemand);
 
     m_currentTimePending = false;
     setCurrentTimeInternal(newCurrentTime / 1000, TimingUpdateOnDemand);
+
+    if (calculatePlayState() == Finished)
+        m_startTime = calculateStartTime(newCurrentTime);
 }
 
 void AnimationPlayer::setCurrentTimeInternal(double newCurrentTime, TimingUpdateReason reason)
@@ -155,13 +171,24 @@ void AnimationPlayer::setCurrentTimeInternal(double newCurrentTime, TimingUpdate
 void AnimationPlayer::updateCurrentTimingState(TimingUpdateReason reason)
 {
     if (m_held) {
-        setCurrentTimeInternal(m_holdTime, reason);
-        return;
+        double newCurrentTime = m_holdTime;
+        if (playStateInternal() == Finished && !isNull(m_startTime) && m_timeline) {
+            // Add hystersis due to floating point error accumulation
+            if (!limited(calculateCurrentTime() + 0.001 * m_playbackRate)) {
+                // The current time became unlimited, eg. due to a backwards
+                // seek of the timeline.
+                newCurrentTime = calculateCurrentTime();
+            } else if (!limited(m_holdTime)) {
+                // The hold time became unlimited, eg. due to the source content
+                // becoming longer.
+                newCurrentTime = clampTo<double>(calculateCurrentTime(), 0, sourceEnd());
+            }
+        }
+        setCurrentTimeInternal(newCurrentTime, reason);
+    } else if (limited(calculateCurrentTime())) {
+        m_held = true;
+        m_holdTime = m_playbackRate < 0 ? 0 : sourceEnd();
     }
-    if (!limited(calculateCurrentTime()))
-        return;
-    m_held = true;
-    m_holdTime = m_playbackRate < 0 ? 0 : sourceEnd();
 }
 
 double AnimationPlayer::startTime(bool& isNull) const
@@ -173,7 +200,6 @@ double AnimationPlayer::startTime(bool& isNull) const
 
 double AnimationPlayer::startTime() const
 {
-    UseCounter::count(executionContext(), UseCounter::AnimationPlayerGetStartTime);
     return m_startTime * 1000;
 }
 
@@ -188,7 +214,6 @@ double AnimationPlayer::currentTime()
 {
     PlayStateUpdateScope updateScope(*this, TimingUpdateOnDemand);
 
-    UseCounter::count(executionContext(), UseCounter::AnimationPlayerGetCurrentTime);
     if (m_currentTimePending || playStateInternal() == Idle)
         return std::numeric_limits<double>::quiet_NaN();
 
@@ -205,15 +230,18 @@ double AnimationPlayer::currentTimeInternal() const
     return result;
 }
 
+double AnimationPlayer::unlimitedCurrentTimeInternal() const
+{
+#if ENABLE(ASSERT)
+    currentTimeInternal();
+#endif
+    return playStateInternal() == Paused || isNull(m_startTime)
+        ? currentTimeInternal()
+        : calculateCurrentTime();
+}
+
 void AnimationPlayer::preCommit(int compositorGroup, bool startOnCompositor)
 {
-    if (m_compositorState && m_compositorState->pendingAction == Start) {
-        // Still waiting for a start time.
-        return;
-    }
-
-    ASSERT(!m_compositorState || !std::isnan(m_compositorState->startTime));
-
     PlayStateUpdateScope updateScope(*this, TimingUpdateOnDemand, DoNotSetCompositorPending);
 
     bool softChange = m_compositorState && (paused() || m_compositorState->playbackRate != m_playbackRate);
@@ -231,14 +259,27 @@ void AnimationPlayer::preCommit(int compositorGroup, bool startOnCompositor)
         m_compositorState = nullptr;
     }
 
+    if (m_compositorState && m_compositorState->pendingAction == Start) {
+        // Still waiting for a start time.
+        return;
+    }
+
+    ASSERT(!m_compositorState || !std::isnan(m_compositorState->startTime));
+
     if (!shouldStart) {
         m_currentTimePending = false;
     }
 
     if (shouldStart) {
         m_compositorGroup = compositorGroup;
-        if (startOnCompositor && maybeStartAnimationOnCompositor()) {
-            m_compositorState = adoptPtr(new CompositorState(*this));
+        if (startOnCompositor) {
+            if (isCandidateForAnimationOnCompositor())
+                createCompositorPlayer();
+
+            if (maybeStartAnimationOnCompositor())
+                m_compositorState = adoptPtr(new CompositorState(*this));
+            else
+                cancelIncompatibleAnimationsOnCompositor();
         }
     }
 }
@@ -322,6 +363,15 @@ void AnimationPlayer::notifyStartTime(double timelineTime)
     }
 }
 
+bool AnimationPlayer::affects(const Element& element, CSSPropertyID property) const
+{
+    if (!m_content || !m_content->isAnimation())
+        return false;
+
+    const Animation* animation = toAnimation(m_content.get());
+    return (animation->target() == &element) && animation->affects(property);
+}
+
 double AnimationPlayer::calculateStartTime(double currentTime) const
 {
     return m_timeline->effectiveTime() - currentTime / m_playbackRate;
@@ -329,7 +379,6 @@ double AnimationPlayer::calculateStartTime(double currentTime) const
 
 double AnimationPlayer::calculateCurrentTime() const
 {
-    ASSERT(!m_held);
     if (isNull(m_startTime) || !m_timeline)
         return 0;
     return (m_timeline->effectiveTime() - m_startTime) * m_playbackRate;
@@ -339,10 +388,7 @@ void AnimationPlayer::setStartTime(double startTime)
 {
     PlayStateUpdateScope updateScope(*this, TimingUpdateOnDemand);
 
-    UseCounter::count(executionContext(), UseCounter::AnimationPlayerSetStartTime);
     if (m_paused || playStateInternal() == Idle)
-        return;
-    if (!std::isfinite(startTime))
         return;
     if (startTime == m_startTime)
         return;
@@ -388,7 +434,6 @@ void AnimationPlayer::setSource(AnimationNode* newSource)
 {
     if (m_content == newSource)
         return;
-
     PlayStateUpdateScope updateScope(*this, TimingUpdateOnDemand, SetCompositorPendingWithSourceChanged);
 
     double storedCurrentTime = currentTimeInternal();
@@ -439,7 +484,7 @@ AnimationPlayer::AnimationPlayState AnimationPlayer::calculatePlayState()
         return Pending;
     if (m_paused)
         return Paused;
-    if (finished())
+    if (limited())
         return Finished;
     return Running;
 }
@@ -498,10 +543,13 @@ void AnimationPlayer::play()
     if (!m_content)
         return;
     double currentTime = this->currentTimeInternal();
-    if (m_playbackRate > 0 && (currentTime < 0 || currentTime >= sourceEnd()))
+    if (m_playbackRate > 0 && (currentTime < 0 || currentTime >= sourceEnd())) {
+        m_startTime = nullValue();
         setCurrentTimeInternal(0, TimingUpdateOnDemand);
-    else if (m_playbackRate < 0 && (currentTime <= 0 || currentTime > sourceEnd()))
+    } else if (m_playbackRate < 0 && (currentTime <= 0 || currentTime > sourceEnd())) {
+        m_startTime = nullValue();
         setCurrentTimeInternal(sourceEnd(), TimingUpdateOnDemand);
+    }
 }
 
 void AnimationPlayer::reverse()
@@ -533,7 +581,28 @@ void AnimationPlayer::finish(ExceptionState& exceptionState)
     }
 
     m_currentTimePending = false;
-    ASSERT(finished());
+    ASSERT(playStateInternal() != Idle);
+    ASSERT(limited());
+}
+
+ScriptPromise AnimationPlayer::finished(ScriptState* scriptState)
+{
+    if (!m_finishedPromise) {
+        m_finishedPromise = new AnimationPlayerPromise(scriptState->executionContext(), this, AnimationPlayerPromise::Finished);
+        if (playStateInternal() == Finished)
+            m_finishedPromise->resolve(this);
+    }
+    return m_finishedPromise->promise(scriptState->world());
+}
+
+ScriptPromise AnimationPlayer::ready(ScriptState* scriptState)
+{
+    if (!m_readyPromise) {
+        m_readyPromise = new AnimationPlayerPromise(scriptState->executionContext(), this, AnimationPlayerPromise::Ready);
+        if (playStateInternal() != Pending)
+            m_readyPromise->resolve(this);
+    }
+    return m_readyPromise->promise(scriptState->world());
 }
 
 const AtomicString& AnimationPlayer::interfaceName() const
@@ -568,15 +637,11 @@ bool AnimationPlayer::dispatchEvent(PassRefPtrWillBeRawPtr<Event> event)
 
 double AnimationPlayer::playbackRate() const
 {
-    UseCounter::count(executionContext(), UseCounter::AnimationPlayerGetPlaybackRate);
     return m_playbackRate;
 }
 
 void AnimationPlayer::setPlaybackRate(double playbackRate)
 {
-    UseCounter::count(executionContext(), UseCounter::AnimationPlayerSetPlaybackRate);
-    if (!std::isfinite(playbackRate))
-        return;
     if (playbackRate == m_playbackRate)
         return;
 
@@ -590,7 +655,7 @@ void AnimationPlayer::setPlaybackRateInternal(double playbackRate)
     ASSERT(std::isfinite(playbackRate));
     ASSERT(playbackRate != m_playbackRate);
 
-    if (!finished() && !paused() && hasStartTime())
+    if (!limited() && !paused() && hasStartTime())
         m_currentTimePending = true;
 
     double storedCurrentTime = currentTimeInternal();
@@ -609,13 +674,21 @@ void AnimationPlayer::setOutdated()
         m_timeline->setOutdatedAnimationPlayer(this);
 }
 
-bool AnimationPlayer::canStartAnimationOnCompositor()
+bool AnimationPlayer::canStartAnimationOnCompositor() const
 {
     // FIXME: Timeline playback rates should be compositable
     if (m_playbackRate == 0 || (std::isinf(sourceEnd()) && m_playbackRate < 0) || (timeline() && timeline()->playbackRate() != 1))
         return false;
 
     return m_timeline && m_content && m_content->isAnimation() && playing();
+}
+
+bool AnimationPlayer::isCandidateForAnimationOnCompositor() const
+{
+    if (!canStartAnimationOnCompositor())
+        return false;
+
+    return toAnimation(m_content.get())->isCandidateForAnimationOnCompositor(m_playbackRate);
 }
 
 bool AnimationPlayer::maybeStartAnimationOnCompositor()
@@ -643,6 +716,7 @@ void AnimationPlayer::setCompositorPending(bool sourceChanged)
 {
     // FIXME: Animation could notify this directly?
     if (!hasActiveAnimationsOnCompositor()) {
+        destroyCompositorPlayer();
         m_compositorState.release();
     }
     if (sourceChanged && m_compositorState) {
@@ -660,18 +734,32 @@ void AnimationPlayer::setCompositorPending(bool sourceChanged)
     }
 }
 
+void AnimationPlayer::cancelAnimationOnCompositor()
+{
+    if (hasActiveAnimationsOnCompositor())
+        toAnimation(m_content.get())->cancelAnimationOnCompositor();
+
+    destroyCompositorPlayer();
+}
+
+void AnimationPlayer::restartAnimationOnCompositor()
+{
+    if (hasActiveAnimationsOnCompositor())
+        toAnimation(m_content.get())->restartAnimationOnCompositor();
+}
+
+void AnimationPlayer::cancelIncompatibleAnimationsOnCompositor()
+{
+    if (m_content && m_content->isAnimation())
+        toAnimation(m_content.get())->cancelIncompatibleAnimationsOnCompositor();
+}
+
 bool AnimationPlayer::hasActiveAnimationsOnCompositor()
 {
     if (!m_content || !m_content->isAnimation())
         return false;
 
     return toAnimation(m_content.get())->hasActiveAnimationsOnCompositor();
-}
-
-void AnimationPlayer::cancelAnimationOnCompositor()
-{
-    if (hasActiveAnimationsOnCompositor())
-        toAnimation(m_content.get())->cancelAnimationOnCompositor();
 }
 
 bool AnimationPlayer::update(TimingUpdateReason reason)
@@ -692,7 +780,7 @@ bool AnimationPlayer::update(TimingUpdateReason reason)
         m_content->updateInheritedTime(inheritedTime, reason);
     }
 
-    if ((idle || finished()) && !m_finished) {
+    if ((idle || limited()) && !m_finished) {
         if (reason == TimingUpdateForAnimationFrame && (idle || hasStartTime())) {
             const AtomicString& eventType = EventTypeNames::finish;
             if (executionContext() && hasEventListeners(eventType)) {
@@ -738,11 +826,7 @@ void AnimationPlayer::cancel()
     m_startTime = nullValue();
     m_currentTimePending = false;
 
-    // after cancelation, transitions must be downgraded or they'll fail
-    // to be considered when retriggering themselves. This can happen if
-    // the transition is captured through getAnimationPlayers then played.
-    if (m_content && m_content->isAnimation())
-        toAnimation(m_content.get())->downgradeToNormalAnimation();
+    InspectorInstrumentation::didCancelAnimationPlayer(timeline()->document(), this);
 }
 
 void AnimationPlayer::beginUpdatingState()
@@ -758,9 +842,74 @@ void AnimationPlayer::endUpdatingState()
     m_stateIsBeingUpdated = false;
 }
 
+void AnimationPlayer::createCompositorPlayer()
+{
+    if (RuntimeEnabledFeatures::compositorAnimationTimelinesEnabled() && !m_compositorPlayer && Platform::current()->compositorSupport()) {
+        m_compositorPlayer = adoptPtr(Platform::current()->compositorSupport()->createAnimationPlayer());
+        ASSERT(m_compositorPlayer);
+        m_compositorPlayer->setAnimationDelegate(this);
+        attachCompositorTimeline();
+    }
+
+    attachCompositedLayers();
+}
+
+void AnimationPlayer::destroyCompositorPlayer()
+{
+    detachCompositedLayers();
+
+    if (m_compositorPlayer) {
+        detachCompositorTimeline();
+        m_compositorPlayer->setAnimationDelegate(nullptr);
+    }
+    m_compositorPlayer.clear();
+}
+
+void AnimationPlayer::attachCompositorTimeline()
+{
+    if (m_compositorPlayer) {
+        WebCompositorAnimationTimeline* timeline = m_timeline ? m_timeline->compositorTimeline() : nullptr;
+        if (timeline)
+            timeline->playerAttached(*this);
+    }
+}
+
+void AnimationPlayer::detachCompositorTimeline()
+{
+    if (m_compositorPlayer) {
+        WebCompositorAnimationTimeline* timeline = m_timeline ? m_timeline->compositorTimeline() : nullptr;
+        if (timeline)
+            timeline->playerDestroyed(*this);
+    }
+}
+
+void AnimationPlayer::attachCompositedLayers()
+{
+    if (!RuntimeEnabledFeatures::compositorAnimationTimelinesEnabled() || !m_compositorPlayer)
+        return;
+
+    ASSERT(m_content);
+    ASSERT(m_content->isAnimation());
+
+    if (toAnimation(m_content.get())->canAttachCompositedLayers())
+        toAnimation(m_content.get())->attachCompositedLayers();
+}
+
+void AnimationPlayer::detachCompositedLayers()
+{
+    if (m_compositorPlayer && m_compositorPlayer->isLayerAttached())
+        m_compositorPlayer->detachLayer();
+}
+
+void AnimationPlayer::notifyAnimationStarted(double monotonicTime, int group)
+{
+    ASSERT(RuntimeEnabledFeatures::compositorAnimationTimelinesEnabled());
+    timeline()->document()->compositorPendingAnimations().notifyCompositorAnimationStarted(monotonicTime, group);
+}
+
 AnimationPlayer::PlayStateUpdateScope::PlayStateUpdateScope(AnimationPlayer& player, TimingUpdateReason reason, CompositorPendingChange compositorPendingChange)
     : m_player(player)
-    , m_initial(m_player->playStateInternal())
+    , m_initialPlayState(m_player->playStateInternal())
     , m_compositorPendingChange(compositorPendingChange)
 {
     m_player->beginUpdatingState();
@@ -769,32 +918,54 @@ AnimationPlayer::PlayStateUpdateScope::PlayStateUpdateScope(AnimationPlayer& pla
 
 AnimationPlayer::PlayStateUpdateScope::~PlayStateUpdateScope()
 {
-    AnimationPlayState oldPlayState = m_initial;
+    AnimationPlayState oldPlayState = m_initialPlayState;
     AnimationPlayState newPlayState = m_player->calculatePlayState();
+
+    m_player->m_playState = newPlayState;
     if (oldPlayState != newPlayState) {
         bool wasActive = oldPlayState == Pending || oldPlayState == Running;
         bool isActive = newPlayState == Pending || newPlayState == Running;
-        if (!wasActive && isActive) {
-            if (m_player->m_content) {
-                TRACE_EVENT_ASYNC_BEGIN1("blink", "Animation", &m_player, "Name", TRACE_STR_COPY(m_player->m_content->name().utf8().data()));
-            } else {
-                TRACE_EVENT_ASYNC_BEGIN0("blink", "Animation", &m_player);
+        if (!wasActive && isActive)
+            TRACE_EVENT_NESTABLE_ASYNC_BEGIN1("blink.animations," TRACE_DISABLED_BY_DEFAULT("devtools.timeline"), "Animation", m_player, "data", InspectorAnimationEvent::data(*m_player));
+        else if (wasActive && !isActive)
+            TRACE_EVENT_NESTABLE_ASYNC_END1("blink.animations," TRACE_DISABLED_BY_DEFAULT("devtools.timeline"), "Animation", m_player, "endData", InspectorAnimationStateEvent::data(*m_player));
+        else
+            TRACE_EVENT_NESTABLE_ASYNC_INSTANT1("blink.animations," TRACE_DISABLED_BY_DEFAULT("devtools.timeline"), "Animation", m_player, "data", InspectorAnimationStateEvent::data(*m_player));
+    }
+
+    // Ordering is important, the ready promise should resolve/reject before
+    // the finished promise.
+    if (m_player->m_readyPromise && newPlayState != oldPlayState) {
+        if (newPlayState == Idle) {
+            if (m_player->m_readyPromise->state() == AnimationPlayerPromise::Pending) {
+                m_player->m_readyPromise->reject(DOMException::create(AbortError));
             }
-        } else if (wasActive && !isActive) {
-            if (oldPlayState != Idle && oldPlayState != Finished) {
-                TRACE_EVENT_ASYNC_END0("blink", "Animation", &m_player);
-            }
+            m_player->m_readyPromise->reset();
+            m_player->m_readyPromise->resolve(m_player);
+        } else if (oldPlayState == Pending) {
+            m_player->m_readyPromise->resolve(m_player);
+        } else if (newPlayState == Pending) {
+            ASSERT(m_player->m_readyPromise->state() != AnimationPlayerPromise::Pending);
+            m_player->m_readyPromise->reset();
         }
-        if (isActive) {
-            TRACE_EVENT_ASYNC_STEP_INTO0("blink", "Animation", &m_player, playStateString(newPlayState));
+    }
+
+    if (m_player->m_finishedPromise && newPlayState != oldPlayState) {
+        if (newPlayState == Idle) {
+            if (m_player->m_finishedPromise->state() == AnimationPlayerPromise::Pending) {
+                m_player->m_finishedPromise->reject(DOMException::create(AbortError));
+            }
+            m_player->m_finishedPromise->reset();
+        } else if (newPlayState == Finished) {
+            m_player->m_finishedPromise->resolve(m_player);
+        } else if (oldPlayState == Finished) {
+            m_player->m_finishedPromise->reset();
         }
     }
 
     if (oldPlayState != newPlayState && (oldPlayState == Idle || newPlayState == Idle)) {
         m_player->setOutdated();
     }
-
-    m_player->m_playState = newPlayState;
 
 #if ENABLE(ASSERT)
     // Verify that current time is up to date.
@@ -815,16 +986,10 @@ AnimationPlayer::PlayStateUpdateScope::~PlayStateUpdateScope()
         break;
     }
     m_player->endUpdatingState();
-}
 
-
-#if !ENABLE(OILPAN)
-bool AnimationPlayer::canFree() const
-{
-    ASSERT(m_content);
-    return hasOneRef() && m_content->isAnimation() && m_content->hasOneRef();
+    if (oldPlayState != newPlayState && newPlayState == Running)
+        InspectorInstrumentation::didCreateAnimationPlayer(m_player->timeline()->document(), m_player);
 }
-#endif
 
 bool AnimationPlayer::addEventListener(const AtomicString& eventType, PassRefPtr<EventListener> listener, bool useCapture)
 {
@@ -843,11 +1008,13 @@ void AnimationPlayer::pauseForTesting(double pauseTime)
     pause();
 }
 
-void AnimationPlayer::trace(Visitor* visitor)
+DEFINE_TRACE(AnimationPlayer)
 {
     visitor->trace(m_content);
     visitor->trace(m_timeline);
     visitor->trace(m_pendingFinishedEvent);
+    visitor->trace(m_finishedPromise);
+    visitor->trace(m_readyPromise);
     EventTargetWithInlineData::trace(visitor);
     ActiveDOMObject::trace(visitor);
 }

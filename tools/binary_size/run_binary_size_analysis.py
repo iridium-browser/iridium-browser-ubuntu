@@ -59,29 +59,6 @@ NAME_NO_PATH_BUCKET = '(No Path)'
 BIG_BUCKET_LIMIT = 3000
 
 
-# TODO(andrewhayden): Only used for legacy reports. Delete.
-def FormatBytes(byte_count):
-  """Pretty-print a number of bytes."""
-  if byte_count > 1e6:
-    byte_count = byte_count / 1.0e6
-    return '%.1fm' % byte_count
-  if byte_count > 1e3:
-    byte_count = byte_count / 1.0e3
-    return '%.1fk' % byte_count
-  return str(byte_count)
-
-
-# TODO(andrewhayden): Only used for legacy reports. Delete.
-def SymbolTypeToHuman(symbol_type):
-  """Convert a symbol type as printed by nm into a human-readable name."""
-  return {'b': 'bss',
-          'd': 'data',
-          'r': 'read-only data',
-          't': 'code',
-          'w': 'weak symbol',
-          'v': 'weak symbol'}[symbol_type]
-
-
 def _MkChild(node, name):
   child = node[NODE_CHILDREN_KEY].get(name)
   if child is None:
@@ -169,7 +146,7 @@ def MakeCompactTree(symbols, symbol_path_origin_dir):
             NODE_MAX_DEPTH_KEY: 0}
   seen_symbol_with_path = False
   cwd = os.path.abspath(os.getcwd())
-  for symbol_name, symbol_type, symbol_size, file_path in symbols:
+  for symbol_name, symbol_type, symbol_size, file_path, _address in symbols:
 
     if 'vtable for ' in symbol_name:
       symbol_type = '@'  # hack to categorize these separately
@@ -231,7 +208,7 @@ def DumpCompactTree(symbols, symbol_path_origin_dir, outfile):
 
 def MakeSourceMap(symbols):
   sources = {}
-  for _sym, _symbol_type, size, path in symbols:
+  for _sym, _symbol_type, size, path, _address in symbols:
     key = None
     if path:
       key = os.path.normpath(path)
@@ -598,8 +575,6 @@ def main():
                     'mapped to source locations. By default, a tempfile is '
                     'used and is deleted when the program terminates.'
                     'This argument is only valid when using --library.')
-  parser.add_option('--legacy', action='store_true',
-                    help='emit legacy binary size report instead of modern')
   parser.add_option('--disable-disambiguation', action='store_true',
                     help='disables the disambiguation process altogether,'
                     ' NOTE: this may, depending on your toolchain, produce'

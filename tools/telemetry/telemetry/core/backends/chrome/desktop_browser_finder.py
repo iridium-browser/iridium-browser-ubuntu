@@ -8,11 +8,12 @@ import os
 import subprocess
 import sys
 
-from telemetry.core import platform as platform_module
+from telemetry.core.backends.chrome import desktop_browser_backend
 from telemetry.core import browser
 from telemetry.core import exceptions
+from telemetry.core import platform as platform_module
+from telemetry.core.platform import desktop_device
 from telemetry.core import possible_browser
-from telemetry.core.backends.chrome import desktop_browser_backend
 from telemetry.util import path
 
 
@@ -113,17 +114,20 @@ def FindAllBrowserTypes(_):
       'content-shell-release_x64',
       'system']
 
-def FindAllAvailableBrowsers(finder_options):
+def FindAllAvailableBrowsers(finder_options, device):
   """Finds all the desktop browsers available on this machine."""
+  if not isinstance(device, desktop_device.DesktopDevice):
+    return []
+
   browsers = []
 
   if not CanFindAvailableBrowsers():
     return []
 
-  has_display = True
+  has_x11_display = True
   if (sys.platform.startswith('linux') and
       os.getenv('DISPLAY') == None):
-    has_display = False
+    has_x11_display = False
 
   # Look for a browser in the standard chrome build locations.
   if finder_options.chrome_root:
@@ -255,7 +259,12 @@ def FindAllAvailableBrowsers(finder_options):
               browser_name, finder_options, app_path,
               None, False, os.path.dirname(app_path)))
 
-  if len(browsers) and not has_display:
+  has_ozone_platform = False
+  for arg in finder_options.browser_options.extra_browser_args:
+    if "--ozone-platform" in arg:
+      has_ozone_platform = True
+
+  if len(browsers) and not has_x11_display and not has_ozone_platform:
     logging.warning(
       'Found (%s), but you do not have a DISPLAY environment set.' %
       ','.join([b.browser_type for b in browsers]))

@@ -15,13 +15,15 @@
 #include "base/strings/utf_string_conversions.h"
 #include "base/task/cancelable_task_tracker.h"
 #include "base/threading/worker_pool.h"
-#include "chrome/browser/android/tab_android.h"
-#include "chrome/browser/favicon/favicon_service.h"
+#include "chrome/browser/banners/app_banner_settings_helper.h"
 #include "chrome/browser/favicon/favicon_service_factory.h"
+#include "chrome/browser/manifest/manifest_icon_selector.h"
+#include "chrome/browser/profiles/profile.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/render_messages.h"
 #include "chrome/common/web_application_info.h"
 #include "components/dom_distiller/core/url_utils.h"
+#include "components/favicon/core/favicon_service.h"
 #include "content/public/browser/user_metrics.h"
 #include "content/public/browser/web_contents.h"
 #include "content/public/browser/web_contents_observer.h"
@@ -29,6 +31,7 @@
 #include "content/public/common/manifest.h"
 #include "jni/ShortcutHelper_jni.h"
 #include "net/base/mime_util.h"
+#include "third_party/WebKit/public/platform/WebScreenOrientationLockType.h"
 #include "ui/gfx/android/java_bitmap.h"
 #include "ui/gfx/codec/png_codec.h"
 #include "ui/gfx/color_analysis.h"
@@ -42,11 +45,10 @@ using content::Manifest;
 // http://developer.android.com/design/style/iconography.html
 const int ShortcutHelper::kPreferredIconSizeInDp = 48;
 
-jlong Initialize(JNIEnv* env, jobject obj, jlong tab_android_ptr) {
-  TabAndroid* tab = reinterpret_cast<TabAndroid*>(tab_android_ptr);
-
-  ShortcutHelper* shortcut_helper =
-      new ShortcutHelper(env, obj, tab->web_contents());
+jlong Initialize(JNIEnv* env, jobject obj, jobject java_web_contents) {
+  content::WebContents* web_contents =
+      content::WebContents::FromJavaWebContents(java_web_contents);
+  ShortcutHelper* shortcut_helper = new ShortcutHelper(env, obj, web_contents);
   shortcut_helper->Initialize();
 
   return reinterpret_cast<intptr_t>(shortcut_helper);
@@ -57,10 +59,8 @@ ShortcutHelper::ShortcutHelper(JNIEnv* env,
                                content::WebContents* web_contents)
     : WebContentsObserver(web_contents),
       java_ref_(env, obj),
-      url_(dom_distiller::url_utils::GetOriginalUrlFromDistillerUrl(
-          web_contents->GetURL())),
-      display_(content::Manifest::DISPLAY_MODE_BROWSER),
-      orientation_(blink::WebScreenOrientationLockDefault),
+      shortcut_info_(dom_distiller::url_utils::GetOriginalUrlFromDistillerUrl(
+                     web_contents->GetURL())),
       add_shortcut_requested_(false),
       manifest_icon_status_(MANIFEST_ICON_STATUS_NONE),
       preferred_icon_size_in_px_(kPreferredIconSizeInDp *
@@ -86,12 +86,12 @@ void ShortcutHelper::OnDidGetWebApplicationInfo(
   web_app_info.description =
       web_app_info.description.substr(0, chrome::kMaxMetaTagAttributeLength);
 
-  title_ = web_app_info.title.empty() ? web_contents()->GetTitle()
-                                      : web_app_info.title;
+  shortcut_info_.title = web_app_info.title.empty() ? web_contents()->GetTitle()
+                                                    : web_app_info.title;
 
   if (web_app_info.mobile_capable == WebApplicationInfo::MOBILE_CAPABLE ||
       web_app_info.mobile_capable == WebApplicationInfo::MOBILE_CAPABLE_APPLE) {
-    display_ = content::Manifest::DISPLAY_MODE_STANDALONE;
+    shortcut_info_.display = content::Manifest::DISPLAY_MODE_STANDALONE;
   }
 
   // Record what type of shortcut was added by the user.
@@ -114,165 +114,23 @@ void ShortcutHelper::OnDidGetWebApplicationInfo(
                                          weak_ptr_factory_.GetWeakPtr()));
 }
 
-bool ShortcutHelper::IconSizesContainsPreferredSize(
-    const std::vector<gfx::Size>& sizes) const {
-  for (size_t i = 0; i < sizes.size(); ++i) {
-    if (sizes[i].height() != sizes[i].width())
-      continue;
-    if (sizes[i].width() == preferred_icon_size_in_px_)
-      return true;
-  }
-
-  return false;
-}
-
-bool ShortcutHelper::IconSizesContainsAny(
-    const std::vector<gfx::Size>& sizes) const {
-  for (size_t i = 0; i < sizes.size(); ++i) {
-    if (sizes[i].IsEmpty())
-      return true;
-  }
-
-  return false;
-}
-
-GURL ShortcutHelper::FindBestMatchingIcon(
-    const std::vector<Manifest::Icon>& icons, float density) const {
-  GURL url;
-  int best_delta = std::numeric_limits<int>::min();
-
-  for (size_t i = 0; i < icons.size(); ++i) {
-    if (icons[i].density != density)
-      continue;
-
-    const std::vector<gfx::Size>& sizes = icons[i].sizes;
-    for (size_t j = 0; j < sizes.size(); ++j) {
-      if (sizes[j].height() != sizes[j].width())
-        continue;
-      int delta = sizes[j].width() - preferred_icon_size_in_px_;
-      if (delta == 0)
-        return icons[i].src;
-      if (best_delta > 0 && delta < 0)
-        continue;
-      if ((best_delta > 0 && delta < best_delta) ||
-          (best_delta < 0 && delta > best_delta)) {
-        url = icons[i].src;
-        best_delta = delta;
-      }
-    }
-  }
-
-  return url;
-}
-
-// static
-std::vector<Manifest::Icon> ShortcutHelper::FilterIconsByType(
-    const std::vector<Manifest::Icon>& icons) {
-  std::vector<Manifest::Icon> result;
-
-  for (size_t i = 0; i < icons.size(); ++i) {
-    if (icons[i].type.is_null() ||
-        net::IsSupportedImageMimeType(
-            base::UTF16ToUTF8(icons[i].type.string()))) {
-      result.push_back(icons[i]);
-    }
-  }
-
-  return result;
-}
-
-GURL ShortcutHelper::FindBestMatchingIcon(
-    const std::vector<Manifest::Icon>& unfiltered_icons) const {
-  const float device_scale_factor =
-      gfx::Screen::GetScreenFor(web_contents()->GetNativeView())->
-          GetPrimaryDisplay().device_scale_factor();
-
-  GURL url;
-  std::vector<Manifest::Icon> icons = FilterIconsByType(unfiltered_icons);
-
-  // The first pass is to find the ideal icon. That icon is of the right size
-  // with the default density or the device's density.
-  for (size_t i = 0; i < icons.size(); ++i) {
-    if (icons[i].density == device_scale_factor &&
-        IconSizesContainsPreferredSize(icons[i].sizes)) {
-      return icons[i].src;
-    }
-
-    // If there is an icon with the right size but not the right density, keep
-    // it on the side and only use it if nothing better is found.
-    if (icons[i].density == Manifest::Icon::kDefaultDensity &&
-        IconSizesContainsPreferredSize(icons[i].sizes)) {
-      url = icons[i].src;
-    }
-  }
-
-  // The second pass is to find an icon with 'any'. The current device scale
-  // factor is preferred. Otherwise, the default scale factor is used.
-  for (size_t i = 0; i < icons.size(); ++i) {
-    if (icons[i].density == device_scale_factor &&
-        IconSizesContainsAny(icons[i].sizes)) {
-      return icons[i].src;
-    }
-
-    // If there is an icon with 'any' but not the right density, keep it on the
-    // side and only use it if nothing better is found.
-    if (icons[i].density == Manifest::Icon::kDefaultDensity &&
-        IconSizesContainsAny(icons[i].sizes)) {
-      url = icons[i].src;
-    }
-  }
-
-  // The last pass will try to find the best suitable icon for the device's
-  // scale factor. If none, another pass will be run using kDefaultDensity.
-  if (!url.is_valid())
-    url = FindBestMatchingIcon(icons, device_scale_factor);
-  if (!url.is_valid())
-    url = FindBestMatchingIcon(icons, Manifest::Icon::kDefaultDensity);
-
-  return url;
-}
-
 void ShortcutHelper::OnDidGetManifest(const content::Manifest& manifest) {
   if (!manifest.IsEmpty()) {
       content::RecordAction(
           base::UserMetricsAction("webapps.AddShortcut.Manifest"));
   }
 
-  // Set the title based on the manifest value, if any.
-  if (!manifest.short_name.is_null())
-    title_ = manifest.short_name.string();
-  else if (!manifest.name.is_null())
-    title_ = manifest.name.string();
+  shortcut_info_.UpdateFromManifest(manifest);
 
-  // Set the url based on the manifest value, if any.
-  if (manifest.start_url.is_valid())
-    url_ = manifest.start_url;
-
-  // Set the display based on the manifest value, if any.
-  if (manifest.display != content::Manifest::DISPLAY_MODE_UNSPECIFIED)
-    display_ = manifest.display;
-
-  // 'fullscreen' and 'minimal-ui' are not yet supported, fallback to the right
-  // mode in those cases.
-  if (manifest.display == content::Manifest::DISPLAY_MODE_FULLSCREEN)
-    display_ = content::Manifest::DISPLAY_MODE_STANDALONE;
-  if (manifest.display == content::Manifest::DISPLAY_MODE_MINIMAL_UI)
-    display_ = content::Manifest::DISPLAY_MODE_BROWSER;
-
-  // Set the orientation based on the manifest value, if any.
-  if (manifest.orientation != blink::WebScreenOrientationLockDefault) {
-    // Ignore the orientation if the display mode is different from
-    // 'standalone'.
-    // TODO(mlamouri): send a message to the developer console about this.
-    if (display_ == content::Manifest::DISPLAY_MODE_STANDALONE)
-      orientation_ = manifest.orientation;
-  }
-
-  GURL icon_src = FindBestMatchingIcon(manifest.icons);
+  GURL icon_src = ManifestIconSelector::FindBestMatchingIcon(
+      manifest.icons,
+      kPreferredIconSizeInDp,
+      gfx::Screen::GetScreenFor(web_contents()->GetNativeView()));
   if (icon_src.is_valid()) {
     web_contents()->DownloadImage(icon_src,
                                   false,
                                   preferred_icon_size_in_px_,
+                                  false,
                                   base::Bind(&ShortcutHelper::OnDidDownloadIcon,
                                              weak_ptr_factory_.GetWeakPtr()));
     manifest_icon_status_ = MANIFEST_ICON_STATUS_FETCHING;
@@ -285,7 +143,7 @@ void ShortcutHelper::OnDidGetManifest(const content::Manifest& manifest) {
   JNIEnv* env = base::android::AttachCurrentThread();
   ScopedJavaLocalRef<jobject> j_obj = java_ref_.get(env);
   ScopedJavaLocalRef<jstring> j_title =
-      base::android::ConvertUTF16ToJavaString(env, title_);
+      base::android::ConvertUTF16ToJavaString(env, shortcut_info_.title);
 
   Java_ShortcutHelper_onInitialized(env, j_obj.obj(), j_title.obj());
 }
@@ -341,7 +199,7 @@ void ShortcutHelper::AddShortcut(
 
   base::string16 title = base::android::ConvertJavaStringToUTF16(env, jtitle);
   if (!title.empty())
-    title_ = title;
+    shortcut_info_.title = title;
 
   switch (manifest_icon_status_) {
     case MANIFEST_ICON_STATUS_NONE:
@@ -357,23 +215,25 @@ void ShortcutHelper::AddShortcut(
 }
 
 void ShortcutHelper::AddShortcutUsingManifestIcon() {
+  RecordAddToHomescreen();
+
   // Stop observing so we don't get destroyed while doing the last steps.
   Observe(NULL);
 
   base::WorkerPool::PostTask(
       FROM_HERE,
       base::Bind(&ShortcutHelper::AddShortcutInBackgroundWithSkBitmap,
-                 url_,
-                 title_,
-                 display_,
+                 shortcut_info_,
                  manifest_icon_,
-                 orientation_),
+                 true),
       true);
 
   Destroy();
 }
 
 void ShortcutHelper::AddShortcutUsingFavicon() {
+  RecordAddToHomescreen();
+
   Profile* profile =
       Profile::FromBrowserContext(web_contents()->GetBrowserContext());
 
@@ -384,13 +244,16 @@ void ShortcutHelper::AddShortcutUsingFavicon() {
   icon_types.push_back(favicon_base::FAVICON);
   icon_types.push_back(favicon_base::TOUCH_PRECOMPOSED_ICON |
                        favicon_base::TOUCH_ICON);
-  FaviconService* favicon_service = FaviconServiceFactory::GetForProfile(
-      profile, Profile::EXPLICIT_ACCESS);
+  favicon::FaviconService* favicon_service =
+      FaviconServiceFactory::GetForProfile(profile,
+                                           ServiceAccessType::EXPLICIT_ACCESS);
 
   // Using favicon if its size is not smaller than platform required size,
   // otherwise using the largest icon among all avaliable icons.
   int threshold_to_get_any_largest_icon = preferred_icon_size_in_px_ - 1;
-  favicon_service->GetLargestRawFaviconForPageURL(url_, icon_types,
+  favicon_service->GetLargestRawFaviconForPageURL(
+      shortcut_info_.url,
+      icon_types,
       threshold_to_get_any_largest_icon,
       base::Bind(&ShortcutHelper::OnDidGetFavicon,
                  base::Unretained(this)),
@@ -405,11 +268,8 @@ void ShortcutHelper::OnDidGetFavicon(
   base::WorkerPool::PostTask(
       FROM_HERE,
       base::Bind(&ShortcutHelper::AddShortcutInBackgroundWithRawBitmap,
-                 url_,
-                 title_,
-                 display_,
-                 bitmap_result,
-                 orientation_),
+                 shortcut_info_,
+                 bitmap_result),
       true);
 
   Destroy();
@@ -436,11 +296,8 @@ bool ShortcutHelper::RegisterShortcutHelper(JNIEnv* env) {
 }
 
 void ShortcutHelper::AddShortcutInBackgroundWithRawBitmap(
-    const GURL& url,
-    const base::string16& title,
-    content::Manifest::DisplayMode display,
-    const favicon_base::FaviconRawBitmapResult& bitmap_result,
-    blink::WebScreenOrientationLockType orientation) {
+    const ShortcutInfo& info,
+    const favicon_base::FaviconRawBitmapResult& bitmap_result) {
   DCHECK(base::WorkerPool::RunsTasksOnCurrentThread());
 
   SkBitmap icon_bitmap;
@@ -450,16 +307,13 @@ void ShortcutHelper::AddShortcutInBackgroundWithRawBitmap(
                           &icon_bitmap);
   }
 
-  AddShortcutInBackgroundWithSkBitmap(
-      url, title, display, icon_bitmap, orientation);
+  AddShortcutInBackgroundWithSkBitmap(info, icon_bitmap, true);
 }
 
 void ShortcutHelper::AddShortcutInBackgroundWithSkBitmap(
-    const GURL& url,
-    const base::string16& title,
-    content::Manifest::DisplayMode display,
+    const ShortcutInfo& info,
     const SkBitmap& icon_bitmap,
-    blink::WebScreenOrientationLockType orientation) {
+    const bool return_to_homescreen) {
   DCHECK(base::WorkerPool::RunsTasksOnCurrentThread());
 
   SkColor color = color_utils::CalculateKMeanColorOfBitmap(icon_bitmap);
@@ -470,9 +324,9 @@ void ShortcutHelper::AddShortcutInBackgroundWithSkBitmap(
   // Send the data to the Java side to create the shortcut.
   JNIEnv* env = base::android::AttachCurrentThread();
   ScopedJavaLocalRef<jstring> java_url =
-      base::android::ConvertUTF8ToJavaString(env, url.spec());
+      base::android::ConvertUTF8ToJavaString(env, info.url.spec());
   ScopedJavaLocalRef<jstring> java_title =
-      base::android::ConvertUTF16ToJavaString(env, title);
+      base::android::ConvertUTF16ToJavaString(env, info.title);
   ScopedJavaLocalRef<jobject> java_bitmap;
   if (icon_bitmap.getSize())
     java_bitmap = gfx::ConvertToJavaBitmap(&icon_bitmap);
@@ -486,6 +340,16 @@ void ShortcutHelper::AddShortcutInBackgroundWithSkBitmap(
       r_value,
       g_value,
       b_value,
-      display == content::Manifest::DISPLAY_MODE_STANDALONE,
-      orientation);
+      info.display == content::Manifest::DISPLAY_MODE_STANDALONE,
+      info.orientation,
+      return_to_homescreen);
+}
+
+void ShortcutHelper::RecordAddToHomescreen() {
+  // Record that the shortcut has been added, so no banners will be shown
+  // for this app.
+  AppBannerSettingsHelper::RecordBannerEvent(
+      web_contents(), shortcut_info_.url, shortcut_info_.url.spec(),
+      AppBannerSettingsHelper::APP_BANNER_EVENT_DID_ADD_TO_HOMESCREEN,
+      base::Time::Now());
 }

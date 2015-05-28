@@ -16,6 +16,7 @@ class URLRequestContextGetter;
 }
 
 namespace web {
+class CertificatePolicyCache;
 
 // This class holds the context needed for a browsing session.
 // It lives on the UI thread. All these methods must only be called on the UI
@@ -24,11 +25,17 @@ class BrowserState : public base::SupportsUserData {
  public:
   ~BrowserState() override;
 
+  // static
+  static scoped_refptr<CertificatePolicyCache> GetCertificatePolicyCache(
+      BrowserState* browser_state);
+
   // Returns whether this BrowserState is incognito. Default is false.
   virtual bool IsOffTheRecord() const = 0;
 
   // Returns the path where the BrowserState data is stored.
-  virtual base::FilePath GetPath() const = 0;
+  // Unlike Profile::GetPath(), incognito BrowserState do not share their path
+  // with their original BrowserState.
+  virtual base::FilePath GetStatePath() const = 0;
 
   // Returns the request context information associated with this
   // BrowserState.

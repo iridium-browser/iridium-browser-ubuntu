@@ -70,19 +70,17 @@ public:
 
     // ChromeClient methods:
     virtual void chromeDestroyed() override;
-    virtual void setWindowRect(const FloatRect&) override;
-    virtual FloatRect windowRect() override;
-    virtual FloatRect pageRect() override;
+    virtual void setWindowRect(const IntRect&) override;
+    virtual IntRect windowRect() override;
+    virtual IntRect pageRect() override;
     virtual void focus() override;
-    virtual bool canTakeFocus(FocusType) override;
-    virtual void takeFocus(FocusType) override;
-    virtual void focusedNodeChanged(Node*) override;
+    virtual bool canTakeFocus(WebFocusType) override;
+    virtual void takeFocus(WebFocusType) override;
+    virtual void focusedNodeChanged(Node* fromNode, Node* toNode) override;
     virtual void focusedFrameChanged(LocalFrame*) override;
     virtual Page* createWindow(
         LocalFrame*, const FrameLoadRequest&, const WindowFeatures&, NavigationPolicy, ShouldSendReferrer) override;
     virtual void show(NavigationPolicy) override;
-    virtual bool canRunModal() override;
-    virtual void runModal() override;
     virtual void setToolbarsVisible(bool) override;
     virtual bool toolbarsVisible() override;
     virtual void setStatusbarVisible(bool) override;
@@ -112,10 +110,11 @@ public:
     virtual void invalidateRect(const IntRect&) override;
     virtual void scheduleAnimation() override;
     virtual void scheduleAnimationForFrame(LocalFrame* localRoot) override;
-    virtual IntRect rootViewToScreen(const IntRect&) const override;
+    virtual IntRect viewportToScreen(const IntRect&) const override;
     virtual WebScreenInfo screenInfo() const override;
     virtual void contentsSizeChanged(LocalFrame*, const IntSize&) const override;
-    virtual void deviceOrPageScaleFactorChanged() const override;
+    virtual void pageScaleFactorChanged() const override;
+    virtual float clampPageScaleFactorToLimits(float scale) const override;
     virtual void layoutUpdated(LocalFrame*) const override;
     virtual void mouseDidMoveOverElement(const HitTestResult&) override;
     virtual void setToolTip(const WTF::String& tooltipText, TextDirection) override;
@@ -136,6 +135,9 @@ public:
     // Pass 0 as the GraphicsLayer to detatch the root layer.
     virtual void attachRootGraphicsLayer(GraphicsLayer*, LocalFrame* localRoot) override;
 
+    virtual void attachCompositorAnimationTimeline(WebCompositorAnimationTimeline*, LocalFrame* localRoot) override;
+    virtual void detachCompositorAnimationTimeline(WebCompositorAnimationTimeline*, LocalFrame* localRoot) override;
+
     virtual void enterFullScreenForElement(Element*) override;
     virtual void exitFullScreenForElement(Element*) override;
 
@@ -152,7 +154,7 @@ public:
 
     virtual bool hasOpenedPopup() const override;
     virtual PassRefPtrWillBeRawPtr<PopupMenu> createPopupMenu(LocalFrame&, PopupMenuClient*) override;
-    PagePopup* openPagePopup(PagePopupClient*, const IntRect&);
+    PagePopup* openPagePopup(PagePopupClient*);
     void closePagePopup(PagePopup*);
     virtual DOMWindow* pagePopupWindowForTesting() const override;
 
@@ -168,6 +170,7 @@ public:
     virtual void didEndEditingOnTextField(HTMLInputElement&) override;
     virtual void openTextDataListChooser(HTMLInputElement&) override;
     virtual void textFieldDataListChanged(HTMLInputElement&) override;
+    virtual void xhrSucceeded(LocalFrame*) override;
 
     virtual void didCancelCompositionOnSelectionChange() override;
     virtual void willSetInputMethodState() override;
@@ -177,6 +180,7 @@ public:
     virtual void registerViewportLayers() const override;
 
     virtual void showUnhandledTapUIIfNeeded(IntPoint, Node*, bool) override;
+    virtual void didUpdateTopControls() const override;
 
 private:
     virtual bool isChromeClientImpl() const override { return true; }

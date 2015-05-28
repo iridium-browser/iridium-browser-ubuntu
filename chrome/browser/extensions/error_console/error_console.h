@@ -17,6 +17,7 @@
 #include "extensions/browser/extension_registry_observer.h"
 
 namespace content {
+class BrowserContext;
 class NotificationDetails;
 class NotificationSource;
 class RenderViewHost;
@@ -51,8 +52,8 @@ class ErrorConsole : public content::NotificationObserver,
   explicit ErrorConsole(Profile* profile);
   ~ErrorConsole() override;
 
-  // Convenience method to return the ErrorConsole for a given profile.
-  static ErrorConsole* Get(Profile* profile);
+  // Convenience method to return the ErrorConsole for a given |context|.
+  static ErrorConsole* Get(content::BrowserContext* context);
 
   // Set whether or not errors of the specified |type| are stored for the
   // extension with the given |extension_id|. This will be stored in the
@@ -75,6 +76,9 @@ class ErrorConsole : public content::NotificationObserver,
 
   // Report an extension error, and add it to the list.
   void ReportError(scoped_ptr<ExtensionError> error);
+
+  // Removes errors from the map according to the given |filter|.
+  void RemoveErrors(const ErrorMap::Filter& filter);
 
   // Get a collection of weak pointers to all errors relating to the extension
   // with the given |extension_id|.

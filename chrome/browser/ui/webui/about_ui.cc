@@ -18,7 +18,6 @@
 #include "base/json/json_writer.h"
 #include "base/memory/singleton.h"
 #include "base/metrics/statistics_recorder.h"
-#include "base/metrics/stats_table.h"
 #include "base/strings/string_number_conversions.h"
 #include "base/strings/string_piece.h"
 #include "base/strings/string_util.h"
@@ -184,10 +183,10 @@ class ChromeOSOnlineTermsHandler : public net::URLFetcherDelegate {
  private:
   // Prevents allocation on the stack. ChromeOSOnlineTermsHandler should be
   // created by 'operator new'. |this| takes care of destruction.
-  virtual ~ChromeOSOnlineTermsHandler() {}
+  ~ChromeOSOnlineTermsHandler() override {}
 
   // net::URLFetcherDelegate:
-  virtual void OnURLFetchComplete(const net::URLFetcher* source) override {
+  void OnURLFetchComplete(const net::URLFetcher* source) override {
     if (source != eula_fetcher_.get()) {
       NOTREACHED() << "Callback from foreign URL fetcher";
       return;
@@ -645,8 +644,7 @@ void FinishMemoryDataRequest(
     // The AboutMemoryHandler cleans itself up, but |StartFetch()| will want
     // the refcount to be greater than 0.
     scoped_refptr<AboutMemoryHandler> handler(new AboutMemoryHandler(callback));
-    // TODO(jamescook): Maybe this shouldn't update UMA?
-    handler->StartFetch(MemoryDetails::UPDATE_USER_METRICS);
+    handler->StartFetch(MemoryDetails::FROM_ALL_BROWSERS);
   } else {
     int id = IDR_ABOUT_MEMORY_HTML;
     if (path == kMemoryJsPath) {
@@ -659,173 +657,6 @@ void FinishMemoryDataRequest(
         ResourceBundle::GetSharedInstance().GetRawDataResource(id).as_string();
     callback.Run(base::RefCountedString::TakeString(&result));
   }
-}
-
-// Handler for filling in the "about:stats" page, as called by the browser's
-// About handler processing.
-// |query| is roughly the query string of the about:stats URL.
-// Returns a string containing the HTML to render for the about:stats page.
-// Conditional Output:
-//      if |query| is "json", returns a JSON format of all counters.
-//      if |query| is "raw", returns plain text of counter deltas.
-//      otherwise, returns HTML with pretty JS/HTML to display the data.
-std::string AboutStats(const std::string& query) {
-  // We keep the base::DictionaryValue tree live so that we can do delta
-  // stats computations across runs.
-  CR_DEFINE_STATIC_LOCAL(base::DictionaryValue, root, ());
-  static base::TimeTicks last_sample_time = base::TimeTicks::Now();
-
-  base::TimeTicks now = base::TimeTicks::Now();
-  base::TimeDelta time_since_last_sample = now - last_sample_time;
-  last_sample_time = now;
-
-  base::StatsTable* table = base::StatsTable::current();
-  if (!table)
-    return std::string();
-
-  // We maintain two lists - one for counters and one for timers.
-  // Timers actually get stored on both lists.
-  base::ListValue* counters;
-  if (!root.GetList("counters", &counters)) {
-    counters = new base::ListValue();
-    root.Set("counters", counters);
-  }
-
-  base::ListValue* timers;
-  if (!root.GetList("timers", &timers)) {
-    timers = new base::ListValue();
-    root.Set("timers", timers);
-  }
-
-  // NOTE: Counters start at index 1.
-  for (int index = 1; index <= table->GetMaxCounters(); index++) {
-    // Get the counter's full name
-    std::string full_name = table->GetRowName(index);
-    if (full_name.length() == 0)
-      break;
-    DCHECK_EQ(':', full_name[1]);
-    char counter_type = full_name[0];
-    std::string name = full_name.substr(2);
-
-    // JSON doesn't allow '.' in names.
-    size_t pos;
-    while ((pos = name.find(".")) != std::string::npos)
-      name.replace(pos, 1, ":");
-
-    // Try to see if this name already exists.
-    base::DictionaryValue* counter = NULL;
-    for (size_t scan_index = 0;
-         scan_index < counters->GetSize(); scan_index++) {
-      base::DictionaryValue* dictionary;
-      if (counters->GetDictionary(scan_index, &dictionary)) {
-        std::string scan_name;
-        if (dictionary->GetString("name", &scan_name) && scan_name == name) {
-          counter = dictionary;
-        }
-      } else {
-        NOTREACHED();  // Should always be there
-      }
-    }
-
-    if (counter == NULL) {
-      counter = new base::DictionaryValue();
-      counter->SetString("name", name);
-      counters->Append(counter);
-    }
-
-    switch (counter_type) {
-      case 'c':
-        {
-          int new_value = table->GetRowValue(index);
-          int prior_value = 0;
-          int delta = 0;
-          if (counter->GetInteger("value", &prior_value)) {
-            delta = new_value - prior_value;
-          }
-          counter->SetInteger("value", new_value);
-          counter->SetInteger("delta", delta);
-        }
-        break;
-      case 'm':
-        {
-          // TODO(mbelshe): implement me.
-        }
-        break;
-      case 't':
-        {
-          int time = table->GetRowValue(index);
-          counter->SetInteger("time", time);
-
-          // Store this on the timers list as well.
-          timers->Append(counter);
-        }
-        break;
-      default:
-        NOTREACHED();
-    }
-  }
-
-  std::string data;
-  if (query == "json" || query == kStringsJsPath) {
-    base::JSONWriter::WriteWithOptions(
-          &root,
-          base::JSONWriter::OPTIONS_PRETTY_PRINT,
-          &data);
-    if (query == kStringsJsPath)
-      data = "loadTimeData.data = " + data + ";";
-  } else if (query == "raw") {
-    // Dump the raw counters which have changed in text format.
-    data = "<pre>";
-    data.append(base::StringPrintf("Counter changes in the last %ldms\n",
-        static_cast<long int>(time_since_last_sample.InMilliseconds())));
-    for (size_t i = 0; i < counters->GetSize(); ++i) {
-      base::Value* entry = NULL;
-      bool rv = counters->Get(i, &entry);
-      if (!rv)
-        continue;  // None of these should fail.
-      base::DictionaryValue* counter =
-          static_cast<base::DictionaryValue*>(entry);
-      int delta;
-      rv = counter->GetInteger("delta", &delta);
-      if (!rv)
-        continue;
-      if (delta > 0) {
-        std::string name;
-        rv = counter->GetString("name", &name);
-        if (!rv)
-          continue;
-        int value;
-        rv = counter->GetInteger("value", &value);
-        if (!rv)
-          continue;
-        data.append(name);
-        data.append(":");
-        data.append(base::IntToString(delta));
-        data.append("\n");
-      }
-    }
-    data.append("</pre>");
-  } else {
-    // Get about_stats.html/js from resource bundle.
-    data = ResourceBundle::GetSharedInstance().GetRawDataResource(
-        (query == kStatsJsPath ?
-         IDR_ABOUT_STATS_JS : IDR_ABOUT_STATS_HTML)).as_string();
-
-    if (query != kStatsJsPath) {
-      // Clear the timer list since we stored the data in the timers list
-      // as well.
-      for (int index = static_cast<int>(timers->GetSize())-1; index >= 0;
-           index--) {
-        scoped_ptr<base::Value> value;
-        timers->Remove(index, &value);
-        // We don't care about the value pointer; it's still tracked
-        // on the counters list.
-        ignore_result(value.release());
-      }
-    }
-  }
-
-  return data;
 }
 
 #if defined(OS_LINUX) || defined(OS_OPENBSD)
@@ -844,10 +675,8 @@ std::string AboutLinuxProxyConfig() {
   return data;
 }
 
-void AboutSandboxRow(std::string* data, const std::string& prefix, int name_id,
-                     bool good) {
+void AboutSandboxRow(std::string* data, int name_id, bool good) {
   data->append("<tr><td>");
-  data->append(prefix);
   data->append(l10n_util::GetStringUTF8(name_id));
   if (good) {
     data->append("</td><td style='color: green;'>");
@@ -874,31 +703,26 @@ std::string AboutSandbox() {
 
   data.append("<table>");
 
-  AboutSandboxRow(&data,
-                  std::string(),
-                  IDS_ABOUT_SANDBOX_SUID_SANDBOX,
+  AboutSandboxRow(&data, IDS_ABOUT_SANDBOX_SUID_SANDBOX,
                   status & content::kSandboxLinuxSUID);
-  AboutSandboxRow(&data, "&nbsp;&nbsp;", IDS_ABOUT_SANDBOX_PID_NAMESPACES,
+  AboutSandboxRow(&data, IDS_ABOUT_SANDBOX_NAMESPACE_SANDBOX,
+                  status & content::kSandboxLinuxUserNS);
+  AboutSandboxRow(&data, IDS_ABOUT_SANDBOX_PID_NAMESPACES,
                   status & content::kSandboxLinuxPIDNS);
-  AboutSandboxRow(&data, "&nbsp;&nbsp;", IDS_ABOUT_SANDBOX_NET_NAMESPACES,
+  AboutSandboxRow(&data, IDS_ABOUT_SANDBOX_NET_NAMESPACES,
                   status & content::kSandboxLinuxNetNS);
-  AboutSandboxRow(&data,
-                  std::string(),
-                  IDS_ABOUT_SANDBOX_SECCOMP_BPF_SANDBOX,
+  AboutSandboxRow(&data, IDS_ABOUT_SANDBOX_SECCOMP_BPF_SANDBOX,
                   status & content::kSandboxLinuxSeccompBPF);
-  AboutSandboxRow(&data,
-                  std::string(),
-                  IDS_ABOUT_SANDBOX_SECCOMP_BPF_SANDBOX_TSYNC,
+  AboutSandboxRow(&data, IDS_ABOUT_SANDBOX_SECCOMP_BPF_SANDBOX_TSYNC,
                   status & content::kSandboxLinuxSeccompTSYNC);
-  AboutSandboxRow(&data,
-                  std::string(),
-                  IDS_ABOUT_SANDBOX_YAMA_LSM,
+  AboutSandboxRow(&data, IDS_ABOUT_SANDBOX_YAMA_LSM,
                   status & content::kSandboxLinuxYama);
 
   data.append("</table>");
 
-  // The setuid sandbox is required as our first-layer sandbox.
-  bool good_layer1 = status & content::kSandboxLinuxSUID &&
+  // Require either the setuid or namespace sandbox for our first-layer sandbox.
+  bool good_layer1 = (status & content::kSandboxLinuxSUID ||
+                      status & content::kSandboxLinuxUserNS) &&
                      status & content::kSandboxLinuxPIDNS &&
                      status & content::kSandboxLinuxNetNS;
   // A second-layer sandbox is also required to be adequately sandboxed.
@@ -1039,7 +863,8 @@ void AboutMemoryHandler::OnDetailsAvailable() {
   load_time_data.SetString(
       "summary_desc",
       l10n_util::GetStringUTF16(IDS_MEMORY_USAGE_SUMMARY_DESC));
-  webui::SetFontAndTextDirection(&load_time_data);
+  const std::string& app_locale = g_browser_process->GetApplicationLocale();
+  webui::SetLoadTimeDataDefaults(app_locale, &load_time_data);
   load_time_data.Set("jstemplateData", root.release());
 
   std::string data;
@@ -1107,8 +932,6 @@ void AboutUIHTMLSource::StartDataRequest(
   } else if (source_name_ == chrome::kChromeUISandboxHost) {
     response = AboutSandbox();
 #endif
-  } else if (source_name_ == chrome::kChromeUIStatsHost) {
-    response = AboutStats(path);
 #if !defined(OS_ANDROID)
   } else if (source_name_ == chrome::kChromeUITermsHost) {
 #if defined(OS_CHROMEOS)

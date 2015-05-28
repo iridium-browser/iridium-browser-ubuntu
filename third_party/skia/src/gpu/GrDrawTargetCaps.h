@@ -56,10 +56,10 @@ public:
     };
 
 
-    GrDrawTargetCaps() : fUniqueID(CreateUniqueID()) {
+    GrDrawTargetCaps() {
         this->reset();
     }
-    GrDrawTargetCaps(const GrDrawTargetCaps& other) : INHERITED(), fUniqueID(CreateUniqueID()) {
+    GrDrawTargetCaps(const GrDrawTargetCaps& other) : INHERITED() {
         *this = other;
     }
     GrDrawTargetCaps& operator= (const GrDrawTargetCaps&);
@@ -73,15 +73,19 @@ public:
     bool mipMapSupport() const { return fMipMapSupport; }
     bool twoSidedStencilSupport() const { return fTwoSidedStencilSupport; }
     bool stencilWrapOpsSupport() const { return  fStencilWrapOpsSupport; }
-    bool hwAALineSupport() const { return fHWAALineSupport; }
     bool shaderDerivativeSupport() const { return fShaderDerivativeSupport; }
     bool geometryShaderSupport() const { return fGeometryShaderSupport; }
     bool dualSourceBlendingSupport() const { return fDualSourceBlendingSupport; }
     bool pathRenderingSupport() const { return fPathRenderingSupport; }
     bool dstReadInShaderSupport() const { return fDstReadInShaderSupport; }
     bool discardRenderTargetSupport() const { return fDiscardRenderTargetSupport; }
+#if GR_FORCE_GPU_TRACE_DEBUGGING
+    bool gpuTracingSupport() const { return true; }
+#else
     bool gpuTracingSupport() const { return fGpuTracingSupport; }
+#endif
     bool compressedTexSubImageSupport() const { return fCompressedTexSubImageSupport; }
+    bool oversizedStencilSupport() const { return fOversizedStencilSupport; }
 
     bool useDrawInsteadOfClear() const { return fUseDrawInsteadOfClear; }
 
@@ -138,31 +142,23 @@ public:
      */
     bool floatPrecisionVaries() const { return fShaderPrecisionVaries; }
 
-    /**
-     * Gets an id that is unique for this GrDrawTargetCaps object. It is static in that it does
-     * not change when the content of the GrDrawTargetCaps object changes. This will never return
-     * 0.
-     */
-    uint32_t getUniqueID() const { return fUniqueID; }
-
 protected:
-    bool fNPOTTextureTileSupport    : 1;
-    bool fMipMapSupport             : 1;
-    bool fTwoSidedStencilSupport    : 1;
-    bool fStencilWrapOpsSupport     : 1;
-    bool fHWAALineSupport           : 1;
-    bool fShaderDerivativeSupport   : 1;
-    bool fGeometryShaderSupport     : 1;
-    bool fDualSourceBlendingSupport : 1;
-    bool fPathRenderingSupport      : 1;
-    bool fDstReadInShaderSupport    : 1;
-    bool fDiscardRenderTargetSupport: 1;
-    bool fReuseScratchTextures      : 1;
-    bool fGpuTracingSupport         : 1;
-    bool fCompressedTexSubImageSupport : 1;
-
+    bool fNPOTTextureTileSupport        : 1;
+    bool fMipMapSupport                 : 1;
+    bool fTwoSidedStencilSupport        : 1;
+    bool fStencilWrapOpsSupport         : 1;
+    bool fShaderDerivativeSupport       : 1;
+    bool fGeometryShaderSupport         : 1;
+    bool fDualSourceBlendingSupport     : 1;
+    bool fPathRenderingSupport          : 1;
+    bool fDstReadInShaderSupport        : 1;
+    bool fDiscardRenderTargetSupport    : 1;
+    bool fReuseScratchTextures          : 1;
+    bool fGpuTracingSupport             : 1;
+    bool fCompressedTexSubImageSupport  : 1;
+    bool fOversizedStencilSupport       : 1;
     // Driver workaround
-    bool fUseDrawInsteadOfClear     : 1;
+    bool fUseDrawInsteadOfClear         : 1;
 
     uint32_t fMapBufferFlags;
 
@@ -178,10 +174,6 @@ protected:
     PrecisionInfo fFloatPrecisions[kGrShaderTypeCount][kGrSLPrecisionCount];
 
 private:
-    static uint32_t CreateUniqueID();
-
-    const uint32_t          fUniqueID;
-
     typedef SkRefCnt INHERITED;
 };
 

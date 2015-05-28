@@ -6,8 +6,8 @@ import logging
 import platform
 import re
 
-from telemetry import decorators
 from telemetry.core.platform import power_monitor
+from telemetry import decorators
 
 
 MSR_RAPL_POWER_UNIT = 0x606
@@ -25,8 +25,7 @@ def _JoulesToMilliwattHours(value_joules):
 
 def _IsSandyBridgeOrLater(vendor, family, model):
   # Model numbers from:
-  # https://software.intel.com/en-us/articles/intel-architecture-and- \
-  # processor-identification-with-cpuid-model-and-family-numbers
+  # https://software.intel.com/en-us/articles/intel-architecture-and-processor-identification-with-cpuid-model-and-family-numbers
   # http://www.speedtraq.com
   return ('Intel' in vendor and family == 6 and
           (model in (0x2A, 0x2D) or model >= 0x30))

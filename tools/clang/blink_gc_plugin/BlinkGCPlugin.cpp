@@ -201,8 +201,7 @@ class CollectVisitor : public RecursiveASTVisitor<CollectVisitor> {
 
   // Collect tracing method definitions, but don't traverse method bodies.
   bool TraverseCXXMethodDecl(CXXMethodDecl* method) {
-    if (method->isThisDeclarationADefinition() &&
-        Config::IsTraceMethod(method, nullptr))
+    if (method->isThisDeclarationADefinition() && Config::IsTraceMethod(method))
       trace_decls_.push_back(method);
     return true;
   }
@@ -316,6 +315,20 @@ class CheckDispatchVisitor : public RecursiveASTVisitor<CheckDispatchVisitor> {
     return true;
   }
 
+  bool VisitUnresolvedMemberExpr(UnresolvedMemberExpr* member) {
+    for (Decl* decl : member->decls()) {
+      if (CXXMethodDecl* method = dyn_cast<CXXMethodDecl>(decl)) {
+        if (method->getParent() == receiver_->record() &&
+            Config::GetTraceMethodType(method) ==
+            Config::TRACE_AFTER_DISPATCH_METHOD) {
+          dispatched_to_receiver_ = true;
+          return true;
+        }
+      }
+    }
+    return true;
+  }
+
  private:
   RecordInfo* receiver_;
   bool dispatched_to_receiver_;
@@ -326,8 +339,12 @@ class CheckDispatchVisitor : public RecursiveASTVisitor<CheckDispatchVisitor> {
 // - A base is traced if a base-qualified call to a trace method is found.
 class CheckTraceVisitor : public RecursiveASTVisitor<CheckTraceVisitor> {
  public:
-  CheckTraceVisitor(CXXMethodDecl* trace, RecordInfo* info)
-      : trace_(trace), info_(info), delegates_to_traceimpl_(false) {}
+  CheckTraceVisitor(CXXMethodDecl* trace, RecordInfo* info, RecordCache* cache)
+      : trace_(trace),
+        info_(info),
+        cache_(cache),
+        delegates_to_traceimpl_(false) {
+  }
 
   bool delegates_to_traceimpl() const { return delegates_to_traceimpl_; }
 
@@ -366,17 +383,13 @@ class CheckTraceVisitor : public RecursiveASTVisitor<CheckTraceVisitor> {
     Expr* arg = call->getArg(0);
 
     if (UnresolvedMemberExpr* expr = dyn_cast<UnresolvedMemberExpr>(callee)) {
-      // If we find a call to registerWeakMembers which is unresolved we
-      // unsoundly consider all weak members as traced.
-      // TODO: Find out how to validate weak member tracing for unresolved call.
-      if (expr->getMemberName().getAsString() == kRegisterWeakMembersName) {
-        for (RecordInfo::Fields::iterator it = info_->GetFields().begin();
-             it != info_->GetFields().end();
-             ++it) {
-          if (it->second.edge()->IsWeakMember())
-            it->second.MarkTraced();
-        }
-      }
+      // This could be a trace call of a base class, as explained in the
+      // comments of CheckTraceBaseCall().
+      if (CheckTraceBaseCall(call))
+        return true;
+
+      if (expr->getMemberName().getAsString() == kRegisterWeakMembersName)
+        MarkAllWeakMembersTraced();
 
       QualType base = expr->getBaseType();
       if (!base->isPointerType())
@@ -384,6 +397,8 @@ class CheckTraceVisitor : public RecursiveASTVisitor<CheckTraceVisitor> {
       CXXRecordDecl* decl = base->getPointeeType()->getAsCXXRecordDecl();
       if (decl)
         CheckTraceFieldCall(expr->getMemberName().getAsString(), decl, arg);
+      if (Config::IsTraceImplName(expr->getMemberName().getAsString()))
+        delegates_to_traceimpl_ = true;
       return true;
     }
 
@@ -391,7 +406,7 @@ class CheckTraceVisitor : public RecursiveASTVisitor<CheckTraceVisitor> {
       if (CheckTraceFieldCall(expr) || CheckRegisterWeakMembers(expr))
         return true;
 
-      if (expr->getMethodDecl()->getNameAsString() == kTraceImplName) {
+      if (Config::IsTraceImplName(expr->getMethodDecl()->getNameAsString())) {
         delegates_to_traceimpl_ = true;
         return true;
       }
@@ -402,6 +417,17 @@ class CheckTraceVisitor : public RecursiveASTVisitor<CheckTraceVisitor> {
   }
 
  private:
+  bool IsTraceCallName(const std::string& name) {
+    if (trace_->getName() == kTraceImplName)
+      return name == kTraceName;
+    if (trace_->getName() == kTraceAfterDispatchImplName)
+      return name == kTraceAfterDispatchName;
+    // Currently, a manually dispatched class cannot have mixin bases (having
+    // one would add a vtable which we explicitly check against). This means
+    // that we can only make calls to a trace method of the same name. Revisit
+    // this if our mixin/vtable assumption changes.
+    return name == trace_->getName();
+  }
 
   CXXRecordDecl* GetDependentTemplatedDecl(CXXDependentScopeMemberExpr* expr) {
     NestedNameSpecifier* qual = expr->getQualifier();
@@ -419,18 +445,23 @@ class CheckTraceVisitor : public RecursiveASTVisitor<CheckTraceVisitor> {
                                         CXXDependentScopeMemberExpr* expr) {
     string fn_name = expr->getMember().getAsString();
 
-    // Check for VisitorDispatcher::trace(field)
+    // Check for VisitorDispatcher::trace(field) and
+    // VisitorDispatcher::registerWeakMembers.
     if (!expr->isImplicitAccess()) {
       if (clang::DeclRefExpr* base_decl =
               clang::dyn_cast<clang::DeclRefExpr>(expr->getBase())) {
-        if (Config::IsVisitorDispatcherType(base_decl->getType()) &&
-            call->getNumArgs() == 1 && fn_name == kTraceName) {
-          FindFieldVisitor finder;
-          finder.TraverseStmt(call->getArg(0));
-          if (finder.field())
-            FoundField(finder.field());
+        if (Config::IsVisitorDispatcherType(base_decl->getType())) {
+          if (call->getNumArgs() == 1 && fn_name == kTraceName) {
+            FindFieldVisitor finder;
+            finder.TraverseStmt(call->getArg(0));
+            if (finder.field())
+              FoundField(finder.field());
 
-          return;
+            return;
+          } else if (call->getNumArgs() == 1 &&
+                     fn_name == kRegisterWeakMembersName) {
+            MarkAllWeakMembersTraced();
+          }
         }
       }
     }
@@ -440,13 +471,12 @@ class CheckTraceVisitor : public RecursiveASTVisitor<CheckTraceVisitor> {
       return;
 
     // Check for Super<T>::trace(visitor)
-    if (call->getNumArgs() == 1 && fn_name == trace_->getName()) {
+    if (call->getNumArgs() == 1 && IsTraceCallName(fn_name)) {
       RecordInfo::Bases::iterator it = info_->GetBases().begin();
       for (; it != info_->GetBases().end(); ++it) {
         if (it->first->getName() == tmpl->getName())
           it->second.MarkTraced();
       }
-      return;
     }
 
     // Check for TraceIfNeeded<T>::trace(visitor, &field)
@@ -460,35 +490,113 @@ class CheckTraceVisitor : public RecursiveASTVisitor<CheckTraceVisitor> {
   }
 
   bool CheckTraceBaseCall(CallExpr* call) {
-    MemberExpr* callee = dyn_cast<MemberExpr>(call->getCallee());
-    if (!callee)
-      return false;
+    // Checks for "Base::trace(visitor)"-like calls.
 
-    FunctionDecl* fn = dyn_cast<FunctionDecl>(callee->getMemberDecl());
-    if (!fn || !Config::IsTraceMethod(fn, nullptr))
-      return false;
+    // Checking code for these two variables is shared among MemberExpr* case
+    // and UnresolvedMemberCase* case below.
+    //
+    // For example, if we've got "Base::trace(visitor)" as |call|,
+    // callee_record will be "Base", and func_name will be "trace".
+    CXXRecordDecl* callee_record = nullptr;
+    std::string func_name;
 
-    // Currently, a manually dispatched class cannot have mixin bases (having
-    // one would add a vtable which we explicitly check against). This means
-    // that we can only make calls to a trace method of the same name. Revisit
-    // this if our mixin/vtable assumption changes.
-    if (fn->getName() != trace_->getName())
-      return false;
+    if (MemberExpr* callee = dyn_cast<MemberExpr>(call->getCallee())) {
+      if (!callee->hasQualifier())
+        return false;
 
-    CXXRecordDecl* decl = 0;
-    if (callee && callee->hasQualifier()) {
-      if (const Type* type = callee->getQualifier()->getAsType())
-        decl = type->getAsCXXRecordDecl();
+      FunctionDecl* trace_decl =
+          dyn_cast<FunctionDecl>(callee->getMemberDecl());
+      if (!trace_decl || !Config::IsTraceMethod(trace_decl))
+        return false;
+
+      const Type* type = callee->getQualifier()->getAsType();
+      if (!type)
+        return false;
+
+      callee_record = type->getAsCXXRecordDecl();
+      func_name = trace_decl->getName();
+    } else if (UnresolvedMemberExpr* callee =
+               dyn_cast<UnresolvedMemberExpr>(call->getCallee())) {
+      // Callee part may become unresolved if the type of the argument
+      // ("visitor") is a template parameter and the called function is
+      // overloaded (i.e. trace(Visitor*) and
+      // trace(InlinedGlobalMarkingVisitor)).
+      //
+      // Here, we try to find a function that looks like trace() from the
+      // candidate overloaded functions, and if we find one, we assume it is
+      // called here.
+
+      CXXMethodDecl* trace_decl = nullptr;
+      for (NamedDecl* named_decl : callee->decls()) {
+        if (CXXMethodDecl* method_decl = dyn_cast<CXXMethodDecl>(named_decl)) {
+          if (Config::IsTraceMethod(method_decl)) {
+            trace_decl = method_decl;
+            break;
+          }
+        }
+      }
+      if (!trace_decl)
+        return false;
+
+      // Check if the passed argument is named "visitor".
+      if (call->getNumArgs() != 1)
+        return false;
+      DeclRefExpr* arg = dyn_cast<DeclRefExpr>(call->getArg(0));
+      if (!arg || arg->getNameInfo().getAsString() != kVisitorVarName)
+        return false;
+
+      callee_record = trace_decl->getParent();
+      func_name = callee->getMemberName().getAsString();
     }
-    if (!decl)
+
+    if (!callee_record)
       return false;
 
-    RecordInfo::Bases::iterator it = info_->GetBases().find(decl);
-    if (it != info_->GetBases().end()) {
-      it->second.MarkTraced();
+    if (!IsTraceCallName(func_name))
+      return false;
+
+    for (auto& base : info_->GetBases()) {
+      // We want to deal with omitted trace() function in an intermediary
+      // class in the class hierarchy, e.g.:
+      //     class A : public GarbageCollected<A> { trace() { ... } };
+      //     class B : public A { /* No trace(); have nothing to trace. */ };
+      //     class C : public B { trace() { B::trace(visitor); } }
+      // where, B::trace() is actually A::trace(), and in some cases we get
+      // A as |callee_record| instead of B. We somehow need to mark B as
+      // traced if we find A::trace() call.
+      //
+      // To solve this, here we keep going up the class hierarchy as long as
+      // they are not required to have a trace method. The implementation is
+      // a simple DFS, where |base_records| represents the set of base classes
+      // we need to visit.
+
+      std::vector<CXXRecordDecl*> base_records;
+      base_records.push_back(base.first);
+
+      while (!base_records.empty()) {
+        CXXRecordDecl* base_record = base_records.back();
+        base_records.pop_back();
+
+        if (base_record == callee_record) {
+          // If we find a matching trace method, pretend the user has written
+          // a correct trace() method of the base; in the example above, we
+          // find A::trace() here and mark B as correctly traced.
+          base.second.MarkTraced();
+          return true;
+        }
+
+        if (RecordInfo* base_info = cache_->Lookup(base_record)) {
+          if (!base_info->RequiresTraceMethod()) {
+            // If this base class is not required to have a trace method, then
+            // the actual trace method may be defined in an ancestor.
+            for (auto& inner_base : base_info->GetBases())
+              base_records.push_back(inner_base.first);
+          }
+        }
+      }
     }
 
-    return true;
+    return false;
   }
 
   bool CheckTraceFieldCall(CXXMemberCallExpr* call) {
@@ -551,7 +659,8 @@ class CheckTraceVisitor : public RecursiveASTVisitor<CheckTraceVisitor> {
   };
 
   // Nested checking for weak callbacks.
-  CheckTraceVisitor(RecordInfo* info) : trace_(0), info_(info) {}
+  CheckTraceVisitor(RecordInfo* info)
+      : trace_(nullptr), info_(info), cache_(nullptr) {}
 
   bool IsWeakCallback() { return !trace_; }
 
@@ -583,8 +692,19 @@ class CheckTraceVisitor : public RecursiveASTVisitor<CheckTraceVisitor> {
     }
   }
 
+  void MarkAllWeakMembersTraced() {
+    // If we find a call to registerWeakMembers which is unresolved we
+    // unsoundly consider all weak members as traced.
+    // TODO: Find out how to validate weak member tracing for unresolved call.
+    for (auto& field : info_->GetFields()) {
+      if (field.second.edge()->IsWeakMember())
+        field.second.MarkTraced();
+    }
+  }
+
   CXXMethodDecl* trace_;
   RecordInfo* info_;
+  RecordCache* cache_;
   bool delegates_to_traceimpl_;
 };
 
@@ -1011,7 +1131,8 @@ class BlinkGCPluginConsumer : public ASTConsumer {
         CheckLeftMostDerived(info);
         CheckDispatch(info);
         if (CXXMethodDecl* newop = info->DeclaresNewOperator())
-          ReportClassOverridesNew(info, newop);
+          if (!Config::IsIgnoreAnnotated(newop))
+            ReportClassOverridesNew(info, newop);
         if (info->IsGCMixinInstance()) {
           // Require that declared GCMixin implementations
           // also provide a trace() override.
@@ -1306,21 +1427,21 @@ class BlinkGCPluginConsumer : public ASTConsumer {
 
   // Determine what type of tracing method this is (dispatch or trace).
   void CheckTraceOrDispatchMethod(RecordInfo* parent, CXXMethodDecl* method) {
-    bool isTraceAfterDispatch;
-    if (Config::IsTraceMethod(method, &isTraceAfterDispatch)) {
-      if (isTraceAfterDispatch || !parent->GetTraceDispatchMethod()) {
-        CheckTraceMethod(parent, method, isTraceAfterDispatch);
-      }
-      // Dispatch methods are checked when we identify subclasses.
+    Config::TraceMethodType trace_type = Config::GetTraceMethodType(method);
+    if (trace_type == Config::TRACE_AFTER_DISPATCH_METHOD ||
+        trace_type == Config::TRACE_AFTER_DISPATCH_IMPL_METHOD ||
+        !parent->GetTraceDispatchMethod()) {
+      CheckTraceMethod(parent, method, trace_type);
     }
+    // Dispatch methods are checked when we identify subclasses.
   }
 
   // Check an actual trace method.
   void CheckTraceMethod(RecordInfo* parent,
                         CXXMethodDecl* trace,
-                        bool isTraceAfterDispatch) {
+                        Config::TraceMethodType trace_type) {
     // A trace method must not override any non-virtual trace methods.
-    if (!isTraceAfterDispatch) {
+    if (trace_type == Config::TRACE_METHOD) {
       for (RecordInfo::Bases::iterator it = parent->GetBases().begin();
            it != parent->GetBases().end();
            ++it) {
@@ -1330,11 +1451,12 @@ class BlinkGCPluginConsumer : public ASTConsumer {
       }
     }
 
-    CheckTraceVisitor visitor(trace, parent);
+    CheckTraceVisitor visitor(trace, parent, &cache_);
     visitor.TraverseCXXMethodDecl(trace);
 
     // Skip reporting if this trace method is a just delegate to
-    // traceImpl method. We will report on CheckTraceMethod on traceImpl method.
+    // traceImpl (or traceAfterDispatchImpl) method. We will report on
+    // CheckTraceMethod on traceImpl method.
     if (visitor.delegates_to_traceimpl())
       return;
 

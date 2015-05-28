@@ -40,10 +40,10 @@ using google_apis::FileList;
 using google_apis::FileListCallback;
 using google_apis::FileResource;
 using google_apis::FileResourceCallback;
-using google_apis::GDATA_FILE_ERROR;
-using google_apis::GDATA_NO_CONNECTION;
-using google_apis::GDATA_OTHER_ERROR;
-using google_apis::GDataErrorCode;
+using google_apis::DRIVE_FILE_ERROR;
+using google_apis::DRIVE_NO_CONNECTION;
+using google_apis::DRIVE_OTHER_ERROR;
+using google_apis::DriveApiErrorCode;
 using google_apis::GetContentCallback;
 using google_apis::GetShareUrlCallback;
 using google_apis::HTTP_BAD_REQUEST;
@@ -103,7 +103,7 @@ bool EntryMatchWithQuery(const ChangeResource& entry,
 void ScheduleUploadRangeCallback(const UploadRangeCallback& callback,
                                  int64 start_position,
                                  int64 end_position,
-                                 GDataErrorCode error,
+                                 DriveApiErrorCode error,
                                  scoped_ptr<FileResource> entry) {
   base::MessageLoop::current()->PostTask(
       FROM_HERE,
@@ -115,7 +115,7 @@ void ScheduleUploadRangeCallback(const UploadRangeCallback& callback,
 }
 
 void FileListCallbackAdapter(const FileListCallback& callback,
-                             GDataErrorCode error,
+                             DriveApiErrorCode error,
                              scoped_ptr<ChangeList> change_list) {
   scoped_ptr<FileList> file_list;
   if (!change_list) {
@@ -155,7 +155,7 @@ struct CallResumeUpload {
   CallResumeUpload() {}
   ~CallResumeUpload() {}
 
-  void Run(GDataErrorCode code, const GURL& upload_url) {
+  void Run(DriveApiErrorCode code, const GURL& upload_url) {
     if (service) {
       service->ResumeUpload(
           upload_url,
@@ -280,7 +280,7 @@ void FakeDriveService::AddApp(const std::string& app_id,
   ReplaceSubstringsAfterOffset(
       &app_json, 0, "$Removable", is_removable ? "true" : "false");
 
-  JSONStringValueSerializer json(app_json);
+  JSONStringValueDeserializer json(app_json);
   std::string error_message;
   scoped_ptr<base::Value> value(json.Deserialize(NULL, &error_message));
   CHECK_EQ(base::Value::TYPE_DICTIONARY, value->GetType());
@@ -537,7 +537,7 @@ CancelCallback FakeDriveService::GetFileResource(
     base::MessageLoop::current()->PostTask(
         FROM_HERE,
         base::Bind(callback,
-                   GDATA_NO_CONNECTION,
+                   DRIVE_NO_CONNECTION,
                    base::Passed(scoped_ptr<FileResource>())));
     return CancelCallback();
   }
@@ -569,7 +569,7 @@ CancelCallback FakeDriveService::GetShareUrl(
     base::MessageLoop::current()->PostTask(
         FROM_HERE,
         base::Bind(callback,
-                   GDATA_NO_CONNECTION,
+                   DRIVE_NO_CONNECTION,
                    GURL()));
     return CancelCallback();
   }
@@ -598,7 +598,7 @@ CancelCallback FakeDriveService::GetAboutResource(
     base::MessageLoop::current()->PostTask(
         FROM_HERE,
         base::Bind(callback,
-                   GDATA_NO_CONNECTION, base::Passed(&null)));
+                   DRIVE_NO_CONNECTION, base::Passed(&null)));
     return CancelCallback();
   }
 
@@ -621,7 +621,7 @@ CancelCallback FakeDriveService::GetAppList(const AppListCallback& callback) {
     base::MessageLoop::current()->PostTask(
         FROM_HERE,
         base::Bind(callback,
-                   GDATA_NO_CONNECTION,
+                   DRIVE_NO_CONNECTION,
                    base::Passed(&null)));
     return CancelCallback();
   }
@@ -643,7 +643,7 @@ CancelCallback FakeDriveService::DeleteResource(
 
   if (offline_) {
     base::MessageLoop::current()->PostTask(
-        FROM_HERE, base::Bind(callback, GDATA_NO_CONNECTION));
+        FROM_HERE, base::Bind(callback, DRIVE_NO_CONNECTION));
     return CancelCallback();
   }
 
@@ -694,7 +694,7 @@ CancelCallback FakeDriveService::TrashResource(
 
   if (offline_) {
     base::MessageLoop::current()->PostTask(
-        FROM_HERE, base::Bind(callback, GDATA_NO_CONNECTION));
+        FROM_HERE, base::Bind(callback, DRIVE_NO_CONNECTION));
     return CancelCallback();
   }
 
@@ -743,7 +743,7 @@ CancelCallback FakeDriveService::DownloadFile(
     base::MessageLoop::current()->PostTask(
         FROM_HERE,
         base::Bind(download_action_callback,
-                   GDATA_NO_CONNECTION,
+                   DRIVE_NO_CONNECTION,
                    base::FilePath()));
     return CancelCallback();
   }
@@ -779,7 +779,7 @@ CancelCallback FakeDriveService::DownloadFile(
     base::MessageLoopProxy::current()->PostTask(
         FROM_HERE,
         base::Bind(download_action_callback,
-                   GDATA_FILE_ERROR, base::FilePath()));
+                   DRIVE_FILE_ERROR, base::FilePath()));
     return CancelCallback();
   }
 
@@ -815,7 +815,7 @@ CancelCallback FakeDriveService::CopyResource(
     base::MessageLoop::current()->PostTask(
         FROM_HERE,
         base::Bind(callback,
-                   GDATA_NO_CONNECTION,
+                   DRIVE_NO_CONNECTION,
                    base::Passed(scoped_ptr<FileResource>())));
     return CancelCallback();
   }
@@ -880,13 +880,14 @@ CancelCallback FakeDriveService::UpdateResource(
     const std::string& new_title,
     const base::Time& last_modified,
     const base::Time& last_viewed_by_me,
+    const google_apis::drive::Properties& properties,
     const google_apis::FileResourceCallback& callback) {
   DCHECK(thread_checker_.CalledOnValidThread());
   DCHECK(!callback.is_null());
 
   if (offline_) {
     base::MessageLoop::current()->PostTask(
-        FROM_HERE, base::Bind(callback, GDATA_NO_CONNECTION,
+        FROM_HERE, base::Bind(callback, DRIVE_NO_CONNECTION,
                               base::Passed(scoped_ptr<FileResource>())));
     return CancelCallback();
   }
@@ -954,7 +955,7 @@ CancelCallback FakeDriveService::AddResourceToDirectory(
 
   if (offline_) {
     base::MessageLoop::current()->PostTask(
-        FROM_HERE, base::Bind(callback, GDATA_NO_CONNECTION));
+        FROM_HERE, base::Bind(callback, DRIVE_NO_CONNECTION));
     return CancelCallback();
   }
 
@@ -994,7 +995,7 @@ CancelCallback FakeDriveService::RemoveResourceFromDirectory(
 
   if (offline_) {
     base::MessageLoop::current()->PostTask(
-        FROM_HERE, base::Bind(callback, GDATA_NO_CONNECTION));
+        FROM_HERE, base::Bind(callback, DRIVE_NO_CONNECTION));
     return CancelCallback();
   }
 
@@ -1053,7 +1054,7 @@ CancelCallback FakeDriveService::InitiateUploadNewFile(
   if (offline_) {
     base::MessageLoop::current()->PostTask(
         FROM_HERE,
-        base::Bind(callback, GDATA_NO_CONNECTION, GURL()));
+        base::Bind(callback, DRIVE_NO_CONNECTION, GURL()));
     return CancelCallback();
   }
 
@@ -1091,7 +1092,7 @@ CancelCallback FakeDriveService::InitiateUploadExistingFile(
   if (offline_) {
     base::MessageLoop::current()->PostTask(
         FROM_HERE,
-        base::Bind(callback, GDATA_NO_CONNECTION, GURL()));
+        base::Bind(callback, DRIVE_NO_CONNECTION, GURL()));
     return CancelCallback();
   }
 
@@ -1159,7 +1160,7 @@ CancelCallback FakeDriveService::ResumeUpload(
                    callback, start_position, end_position);
 
   if (offline_) {
-    completion_callback.Run(GDATA_NO_CONNECTION, scoped_ptr<FileResource>());
+    completion_callback.Run(DRIVE_NO_CONNECTION, scoped_ptr<FileResource>());
     return CancelCallback();
   }
 
@@ -1200,7 +1201,7 @@ CancelCallback FakeDriveService::ResumeUpload(
   std::string content_data;
   if (!base::ReadFileToString(local_file_path, &content_data)) {
     session->uploaded_size = end_position;
-    completion_callback.Run(GDATA_FILE_ERROR, scoped_ptr<FileResource>());
+    completion_callback.Run(DRIVE_FILE_ERROR, scoped_ptr<FileResource>());
     return CancelCallback();
   }
   session->uploaded_size = end_position;
@@ -1336,7 +1337,7 @@ CancelCallback FakeDriveService::UninstallApp(
   if (offline_) {
     base::MessageLoop::current()->PostTask(
         FROM_HERE,
-        base::Bind(callback, google_apis::GDATA_NO_CONNECTION));
+        base::Bind(callback, google_apis::DRIVE_NO_CONNECTION));
     return CancelCallback();
   }
 
@@ -1394,7 +1395,7 @@ void FakeDriveService::AddNewFileWithResourceId(
     base::MessageLoop::current()->PostTask(
         FROM_HERE,
         base::Bind(callback,
-                   GDATA_NO_CONNECTION,
+                   DRIVE_NO_CONNECTION,
                    base::Passed(scoped_ptr<FileResource>())));
     return;
   }
@@ -1437,7 +1438,7 @@ CancelCallback FakeDriveService::AddNewDirectoryWithResourceId(
     base::MessageLoop::current()->PostTask(
         FROM_HERE,
         base::Bind(callback,
-                   GDATA_NO_CONNECTION,
+                   DRIVE_NO_CONNECTION,
                    base::Passed(scoped_ptr<FileResource>())));
     return CancelCallback();
   }
@@ -1479,7 +1480,7 @@ void FakeDriveService::SetLastModifiedTime(
     base::MessageLoop::current()->PostTask(
         FROM_HERE,
         base::Bind(callback,
-                   GDATA_NO_CONNECTION,
+                   DRIVE_NO_CONNECTION,
                    base::Passed(scoped_ptr<FileResource>())));
     return;
   }
@@ -1503,7 +1504,7 @@ void FakeDriveService::SetLastModifiedTime(
                  base::Passed(make_scoped_ptr(new FileResource(*file)))));
 }
 
-google_apis::GDataErrorCode FakeDriveService::SetUserPermission(
+google_apis::DriveApiErrorCode FakeDriveService::SetUserPermission(
     const std::string& resource_id,
     google_apis::drive::PermissionRole user_permission) {
   DCHECK(thread_checker_.CalledOnValidThread());
@@ -1641,7 +1642,7 @@ void FakeDriveService::GetChangeListInternal(
     base::MessageLoop::current()->PostTask(
         FROM_HERE,
         base::Bind(callback,
-                   GDATA_NO_CONNECTION,
+                   DRIVE_NO_CONNECTION,
                    base::Passed(scoped_ptr<ChangeList>())));
     return;
   }
@@ -1769,6 +1770,14 @@ google_apis::CancelCallback FakeDriveService::AddPermission(
 
   NOTREACHED();
   return CancelCallback();
+}
+
+scoped_ptr<BatchRequestConfiguratorInterface>
+FakeDriveService::StartBatchRequest() {
+  DCHECK(thread_checker_.CalledOnValidThread());
+
+  NOTREACHED();
+  return scoped_ptr<BatchRequestConfiguratorInterface>();
 }
 
 void FakeDriveService::NotifyObservers() {

@@ -9,11 +9,11 @@
 #include "base/base64.h"
 #include "base/files/file_path.h"
 #include "base/rand_util.h"
-#include "net/base/capturing_net_log.h"
 #include "net/base/test_completion_callback.h"
 #include "net/base/test_data_directory.h"
 #include "net/cert/cert_verify_result.h"
 #include "net/http/transport_security_state.h"
+#include "net/log/capturing_net_log.h"
 #include "net/quic/crypto/aes_128_gcm_12_encrypter.h"
 #include "net/quic/crypto/crypto_protocol.h"
 #include "net/quic/crypto/proof_verifier_chromium.h"
@@ -41,11 +41,16 @@ const uint16 kServerPort = 80;
 class QuicClientSessionTest : public ::testing::TestWithParam<QuicVersion> {
  protected:
   QuicClientSessionTest()
-      : connection_(
-            new PacketSavingConnection(false, SupportedVersions(GetParam()))),
-        session_(connection_, GetSocket().Pass(), nullptr,
+      : connection_(new PacketSavingConnection(Perspective::IS_CLIENT,
+                                               SupportedVersions(GetParam()))),
+        session_(connection_,
+                 GetSocket().Pass(),
+                 nullptr,
                  &transport_security_state_,
-                 make_scoped_ptr((QuicServerInfo*)nullptr), DefaultQuicConfig(),
+                 make_scoped_ptr((QuicServerInfo*)nullptr),
+                 DefaultQuicConfig(),
+                 "CONNECTION_UNKNOWN",
+                 base::TimeTicks::Now(),
                  base::MessageLoop::current()->message_loop_proxy().get(),
                  &net_log_) {
     session_.InitializeSession(QuicServerId(kServerHostname, kServerPort,
@@ -56,7 +61,9 @@ class QuicClientSessionTest : public ::testing::TestWithParam<QuicVersion> {
     connection_->AdvanceTime(QuicTime::Delta::FromSeconds(1));
   }
 
-  void TearDown() override { session_.CloseSessionOnError(ERR_ABORTED); }
+  void TearDown() override {
+    session_.CloseSessionOnError(ERR_ABORTED, QUIC_INTERNAL_ERROR);
+  }
 
   scoped_ptr<DatagramClientSocket> GetSocket() {
     socket_factory_.AddSocketDataProvider(&socket_data_);

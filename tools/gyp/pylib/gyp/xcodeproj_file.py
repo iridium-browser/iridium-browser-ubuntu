@@ -2753,11 +2753,12 @@ class PBXProject(XCContainerPortal):
     # The value of inherit_unique_symroot decides, if a configuration is assumed
     # to inherit a unique 'SYMROOT' attribute from its parent, if it doesn't
     # define an explicit value for 'SYMROOT'.
+    symroots = self._DefinedSymroots(target)
     for s in self._DefinedSymroots(target):
       if (s is not None and not self._IsUniqueSymrootForTarget(s) or
           s is None and not inherit_unique_symroot):
         return False
-    return True
+    return True if symroots else inherit_unique_symroot
 
   def _DefinedSymroots(self, target):
     # Returns all values for the 'SYMROOT' attribute defined in all
@@ -2862,26 +2863,9 @@ class XCProjectFile(XCObject):
   _schema.update({
     'archiveVersion': [0, int,        0, 1, 1],
     'classes':        [0, dict,       0, 1, {}],
-    'objectVersion':  [0, int,        0, 1, 45],
+    'objectVersion':  [0, int,        0, 1, 46],
     'rootObject':     [0, PBXProject, 1, 1],
   })
-
-  def SetXcodeVersion(self, version):
-    version_to_object_version = {
-      '2.4': 45,
-      '3.0': 45,
-      '3.1': 45,
-      '3.2': 46,
-    }
-    if not version in version_to_object_version:
-      supported_str = ', '.join(sorted(version_to_object_version.keys()))
-      raise Exception(
-          'Unsupported Xcode version %s (supported: %s)' %
-          ( version, supported_str ) )
-    compatibility_version = 'Xcode %s' % version
-    self._properties['rootObject'].SetProperty('compatibilityVersion',
-                                               compatibility_version)
-    self.SetProperty('objectVersion', version_to_object_version[version]);
 
   def ComputeIDs(self, recursive=True, overwrite=True, hash=None):
     # Although XCProjectFile is implemented here as an XCObject, it's not a

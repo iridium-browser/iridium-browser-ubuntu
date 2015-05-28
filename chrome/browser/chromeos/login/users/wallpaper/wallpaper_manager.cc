@@ -12,7 +12,6 @@
 #include "ash/shell.h"
 #include "base/bind.h"
 #include "base/command_line.h"
-#include "base/debug/trace_event.h"
 #include "base/files/file_enumerator.h"
 #include "base/files/file_path.h"
 #include "base/files/file_util.h"
@@ -28,6 +27,7 @@
 #include "base/sys_info.h"
 #include "base/threading/worker_pool.h"
 #include "base/time/time.h"
+#include "base/trace_event/trace_event.h"
 #include "base/values.h"
 #include "chrome/browser/browser_process.h"
 #include "chrome/browser/chrome_notification_types.h"
@@ -64,6 +64,8 @@ namespace chromeos {
 
 namespace {
 
+WallpaperManager* wallpaper_manager = nullptr;
+
 // The amount of delay before starts to move custom wallpapers to the new place.
 const int kMoveCustomWallpaperDelaySeconds = 30;
 
@@ -96,8 +98,7 @@ bool ShouldUseCustomizedDefaultWallpaper() {
   PrefService* pref_service = g_browser_process->local_state();
 
   return !(pref_service->FindPreference(
-                             prefs::kCustomizationDefaultWallpaperURL)
-               ->IsDefaultValue());
+      prefs::kCustomizationDefaultWallpaperURL)->IsDefaultValue());
 }
 
 // Returns index of the first public session user found in |users|
@@ -191,7 +192,7 @@ class WallpaperManager::PendingWallpaper :
 
   // This method is usually triggered by timer to actually load request.
   void ProcessRequest() {
-    DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+    DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
     timer.Stop();  // Erase reference to self.
 
@@ -230,7 +231,7 @@ class WallpaperManager::PendingWallpaper :
 
   // This method is called by callback, when load request is finished.
   void OnWallpaperSet() {
-    DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+    DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
     // The only known case for this check to fail is global destruction during
     // wallpaper load. It should never happen.
@@ -272,66 +273,42 @@ class WallpaperManager::PendingWallpaper :
   DISALLOW_COPY_AND_ASSIGN(PendingWallpaper);
 };
 
-static WallpaperManager* g_wallpaper_manager = NULL;
-
 // WallpaperManager, public: ---------------------------------------------------
+
+WallpaperManager::~WallpaperManager() {
+  show_user_name_on_signin_subscription_.reset();
+  user_manager::UserManager::Get()->RemoveSessionStateObserver(this);
+  weak_factory_.InvalidateWeakPtrs();
+}
+
+// static
+void WallpaperManager::Initialize() {
+  CHECK(!wallpaper_manager);
+  wallpaper_manager = new WallpaperManager();
+}
 
 // static
 WallpaperManager* WallpaperManager::Get() {
-  if (!g_wallpaper_manager)
-    g_wallpaper_manager = new WallpaperManager();
-  return g_wallpaper_manager;
+  DCHECK(wallpaper_manager);
+  return wallpaper_manager;
 }
 
-WallpaperManager::WallpaperManager()
-    : pending_inactive_(NULL), weak_factory_(this) {
-  wallpaper::WallpaperManagerBase::SetPathIds(
-      chrome::DIR_USER_DATA,
-      chrome::DIR_CHROMEOS_WALLPAPERS,
-      chrome::DIR_CHROMEOS_CUSTOM_WALLPAPERS);
-  SetDefaultWallpaperPathsFromCommandLine(
-      base::CommandLine::ForCurrentProcess());
-  registrar_.Add(this,
-                 chrome::NOTIFICATION_LOGIN_USER_CHANGED,
-                 content::NotificationService::AllSources());
-  registrar_.Add(this,
-                 chrome::NOTIFICATION_LOGIN_OR_LOCK_WEBUI_VISIBLE,
-                 content::NotificationService::AllSources());
-  registrar_.Add(this,
-                 chrome::NOTIFICATION_WALLPAPER_ANIMATION_FINISHED,
-                 content::NotificationService::AllSources());
-  sequence_token_ = BrowserThread::GetBlockingPool()->GetNamedSequenceToken(
-      wallpaper::kWallpaperSequenceTokenName);
-  task_runner_ = BrowserThread::GetBlockingPool()->
-      GetSequencedTaskRunnerWithShutdownBehavior(
-          sequence_token_,
-          base::SequencedWorkerPool::CONTINUE_ON_SHUTDOWN);
-  wallpaper_loader_ = new UserImageLoader(ImageDecoder::ROBUST_JPEG_CODEC,
-                                          task_runner_);
-}
-
-WallpaperManager::~WallpaperManager() {
-  // TODO(bshe): Lifetime of WallpaperManager needs more consideration.
-  // http://crbug.com/171694
-  DCHECK(!show_user_name_on_signin_subscription_);
-
-  ClearObsoleteWallpaperPrefs();
-  weak_factory_.InvalidateWeakPtrs();
+// static
+void WallpaperManager::Shutdown() {
+  CHECK(wallpaper_manager);
+  delete wallpaper_manager;
+  wallpaper_manager = nullptr;
 }
 
 WallpaperManager::WallpaperResolution
 WallpaperManager::GetAppropriateResolution() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   gfx::Size size =
       ash::DesktopBackgroundController::GetMaxDisplaySizeInNative();
   return (size.width() > wallpaper::kSmallWallpaperMaxWidth ||
           size.height() > wallpaper::kSmallWallpaperMaxHeight)
              ? WALLPAPER_RESOLUTION_LARGE
              : WALLPAPER_RESOLUTION_SMALL;
-}
-
-void WallpaperManager::Shutdown() {
-  show_user_name_on_signin_subscription_.reset();
 }
 
 void WallpaperManager::AddObservers() {
@@ -361,7 +338,7 @@ void WallpaperManager::EnsureLoggedInUserWallpaperLoaded() {
 }
 
 void WallpaperManager::InitializeWallpaper() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   user_manager::UserManager* user_manager = user_manager::UserManager::Get();
 
   // Apply device customization.
@@ -406,7 +383,7 @@ void WallpaperManager::InitializeWallpaper() {
 void WallpaperManager::Observe(int type,
                                const content::NotificationSource& source,
                                const content::NotificationDetails& details) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   switch (type) {
     case chrome::NOTIFICATION_LOGIN_USER_CHANGED: {
       ClearDisposableWallpaperCache();
@@ -479,7 +456,7 @@ void WallpaperManager::SetCustomWallpaper(
     user_manager::User::WallpaperType type,
     const gfx::ImageSkia& image,
     bool update_wallpaper) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   // There is no visible background in kiosk mode.
   if (user_manager::UserManager::Get()->IsLoggedInAsKioskApp())
@@ -577,9 +554,15 @@ void WallpaperManager::DoSetDefaultWallpaper(
 
   const base::FilePath* file = NULL;
 
+  const user_manager::User* user =
+      user_manager::UserManager::Get()->FindUser(user_id);
+
   if (user_manager::UserManager::Get()->IsLoggedInAsGuest()) {
     file =
         use_small ? &guest_small_wallpaper_file_ : &guest_large_wallpaper_file_;
+  } else if (user && user->GetType() == user_manager::USER_TYPE_CHILD) {
+    file =
+        use_small ? &child_small_wallpaper_file_ : &child_large_wallpaper_file_;
   } else {
     file = use_small ? &default_small_wallpaper_file_
                      : &default_large_wallpaper_file_;
@@ -612,7 +595,7 @@ void WallpaperManager::DoSetDefaultWallpaper(
 void WallpaperManager::SetUserWallpaperInfo(const std::string& user_id,
                                             const WallpaperInfo& info,
                                             bool is_persistent) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   current_user_wallpaper_info_ = info;
   if (!is_persistent)
     return;
@@ -632,8 +615,8 @@ void WallpaperManager::SetUserWallpaperInfo(const std::string& user_id,
 
 void WallpaperManager::ScheduleSetUserWallpaper(const std::string& user_id,
                                                 bool delayed) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-  // Some unit tests come here without a UserManager or without a pref system.
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  // Some unit tests come here without a UserManager or without a pref system.q
   if (!user_manager::UserManager::IsInitialized() ||
       !g_browser_process->local_state()) {
     return;
@@ -737,6 +720,31 @@ void WallpaperManager::SetWallpaperFromImageSkia(
 
 // WallpaperManager, private: --------------------------------------------------
 
+WallpaperManager::WallpaperManager()
+    : pending_inactive_(NULL), weak_factory_(this) {
+  wallpaper::WallpaperManagerBase::SetPathIds(
+      chrome::DIR_USER_DATA, chrome::DIR_CHROMEOS_WALLPAPERS,
+      chrome::DIR_CHROMEOS_CUSTOM_WALLPAPERS);
+  SetDefaultWallpaperPathsFromCommandLine(
+      base::CommandLine::ForCurrentProcess());
+  registrar_.Add(this, chrome::NOTIFICATION_LOGIN_USER_CHANGED,
+                 content::NotificationService::AllSources());
+  registrar_.Add(this, chrome::NOTIFICATION_LOGIN_OR_LOCK_WEBUI_VISIBLE,
+                 content::NotificationService::AllSources());
+  registrar_.Add(this, chrome::NOTIFICATION_WALLPAPER_ANIMATION_FINISHED,
+                 content::NotificationService::AllSources());
+  sequence_token_ = BrowserThread::GetBlockingPool()->GetNamedSequenceToken(
+      wallpaper::kWallpaperSequenceTokenName);
+  task_runner_ =
+      BrowserThread::GetBlockingPool()
+          ->GetSequencedTaskRunnerWithShutdownBehavior(
+              sequence_token_, base::SequencedWorkerPool::CONTINUE_ON_SHUTDOWN);
+  wallpaper_loader_ =
+      new UserImageLoader(ImageDecoder::ROBUST_JPEG_CODEC, task_runner_);
+
+  user_manager::UserManager::Get()->AddSessionStateObserver(this);
+}
+
 WallpaperManager::PendingWallpaper* WallpaperManager::GetPendingWallpaper(
     const std::string& user_id,
     bool delayed) {
@@ -764,15 +772,6 @@ void WallpaperManager::RemovePendingWallpaperFromList(
 
   if (loading_.empty())
     FOR_EACH_OBSERVER(Observer, observers_, OnPendingListEmptyForTesting());
-}
-
-void WallpaperManager::ClearObsoleteWallpaperPrefs() {
-  PrefService* prefs = g_browser_process->local_state();
-  DictionaryPrefUpdate wallpaper_properties_pref(prefs,
-      wallpaper::kUserWallpapersProperties);
-  wallpaper_properties_pref->Clear();
-  DictionaryPrefUpdate wallpapers_pref(prefs, wallpaper::kUserWallpapers);
-  wallpapers_pref->Clear();
 }
 
 void WallpaperManager::InitializeRegisteredDeviceWallpaper() {
@@ -806,7 +805,7 @@ void WallpaperManager::InitializeRegisteredDeviceWallpaper() {
 
 bool WallpaperManager::GetUserWallpaperInfo(const std::string& user_id,
                                             WallpaperInfo* info) const {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   if (user_manager::UserManager::Get()->IsUserNonCryptohomeDataEphemeral(
           user_id)) {
@@ -855,7 +854,7 @@ void WallpaperManager::OnWallpaperDecoded(
     bool update_wallpaper,
     MovableOnDestroyCallbackHolder on_finish,
     const user_manager::UserImage& user_image) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   TRACE_EVENT_ASYNC_END0("ui", "LoadAndDecodeWallpaper", this);
 
   // If decoded wallpaper is empty, we have probably failed to decode the file.
@@ -888,7 +887,7 @@ void WallpaperManager::StartLoad(const std::string& user_id,
                                  bool update_wallpaper,
                                  const base::FilePath& wallpaper_path,
                                  MovableOnDestroyCallbackHolder on_finish) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   TRACE_EVENT_ASYNC_BEGIN0("ui", "LoadAndDecodeWallpaper", this);
   if (update_wallpaper) {
     // We are now about to change the wallpaper, so update the path and remove
@@ -940,7 +939,7 @@ void WallpaperManager::OnCustomizedDefaultWallpaperResized(
     scoped_ptr<bool> success,
     scoped_ptr<gfx::ImageSkia> small_wallpaper_image,
     scoped_ptr<gfx::ImageSkia> large_wallpaper_image) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(rescaled_files);
   DCHECK(success.get());
   if (!*success) {
@@ -959,6 +958,10 @@ void WallpaperManager::OnCustomizedDefaultWallpaperResized(
 
 size_t WallpaperManager::GetPendingListSizeForTesting() const {
   return loading_.size();
+}
+
+void WallpaperManager::UserChangedChildStatus(user_manager::User* user) {
+  SetUserWallpaperNow(user->email());
 }
 
 void WallpaperManager::OnDefaultWallpaperDecoded(

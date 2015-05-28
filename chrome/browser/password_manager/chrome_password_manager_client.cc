@@ -31,13 +31,12 @@
 #include "components/password_manager/content/browser/content_password_manager_driver.h"
 #include "components/password_manager/content/browser/password_manager_internals_service_factory.h"
 #include "components/password_manager/content/common/credential_manager_messages.h"
-#include "components/password_manager/content/common/credential_manager_types.h"
 #include "components/password_manager/core/browser/browser_save_password_progress_logger.h"
 #include "components/password_manager/core/browser/log_receiver.h"
 #include "components/password_manager/core/browser/password_form_manager.h"
 #include "components/password_manager/core/browser/password_manager_internals_service.h"
 #include "components/password_manager/core/browser/password_manager_metrics_util.h"
-#include "components/password_manager/core/browser/password_manager_url_collection_experiment.h"
+#include "components/password_manager/core/common/credential_manager_types.h"
 #include "components/password_manager/core/common/password_manager_switches.h"
 #include "content/public/browser/navigation_entry.h"
 #include "content/public/browser/render_view_host.h"
@@ -133,13 +132,6 @@ bool ChromePasswordManagerClient::IsPasswordManagerEnabledForCurrentPage()
   return entry->GetURL().host() != chrome::kChromeUIChromeSigninHost;
 }
 
-bool ChromePasswordManagerClient::ShouldAskUserToSubmitURL(const GURL& url) {
-  return url.is_valid() && !url.is_empty() && url.has_host() &&
-         password_manager_.IsSavingEnabledForCurrentPage() &&
-         password_manager::urls_collection_experiment::ShouldShowBubble(
-             GetPrefs());
-}
-
 bool ChromePasswordManagerClient::ShouldFilterAutofillResult(
     const autofill::PasswordForm& form) {
   if (!IsSyncAccountCredential(base::UTF16ToUTF8(form.username_value),
@@ -170,13 +162,6 @@ bool ChromePasswordManagerClient::IsSyncAccountCredential(
       profile_, username, origin);
 }
 
-void ChromePasswordManagerClient::AskUserAndMaybeReportURL(
-    const GURL& url) const {
-  ManagePasswordsUIController* manage_passwords_ui_controller =
-      ManagePasswordsUIController::FromWebContents(web_contents());
-  manage_passwords_ui_controller->OnAskToReportURL(url);
-}
-
 void ChromePasswordManagerClient::AutofillResultsComputed() {
   UMA_HISTOGRAM_BOOLEAN("PasswordManager.SyncCredentialFiltered",
                         sync_credential_was_filtered_);
@@ -184,7 +169,8 @@ void ChromePasswordManagerClient::AutofillResultsComputed() {
 }
 
 bool ChromePasswordManagerClient::PromptUserToSavePassword(
-    scoped_ptr<password_manager::PasswordFormManager> form_to_save) {
+    scoped_ptr<password_manager::PasswordFormManager> form_to_save,
+    password_manager::CredentialSourceType type) {
   // Save password infobar and the password bubble prompts in case of
   // "webby" URLs and do not prompt in case of "non-webby" URLS (e.g. file://).
   if (!BrowsingDataHelper::IsWebScheme(
@@ -197,30 +183,33 @@ bool ChromePasswordManagerClient::PromptUserToSavePassword(
         ManagePasswordsUIController::FromWebContents(web_contents());
     manage_passwords_ui_controller->OnPasswordSubmitted(form_to_save.Pass());
   } else {
+    // TODO(melandory): If type is CREDENTIAL_SOURCE_API then new bubble should
+    // be shown.
     std::string uma_histogram_suffix(
         password_manager::metrics_util::GroupIdToString(
             password_manager::metrics_util::MonitoredDomainGroupId(
                 form_to_save->realm(), GetPrefs())));
     SavePasswordInfoBarDelegate::Create(
-        web_contents(), form_to_save.Pass(), uma_histogram_suffix);
+        web_contents(), form_to_save.Pass(), uma_histogram_suffix, type);
   }
   return true;
 }
 
 bool ChromePasswordManagerClient::PromptUserToChooseCredentials(
-    const std::vector<autofill::PasswordForm*>& local_forms,
-    const std::vector<autofill::PasswordForm*>& federated_forms,
+    ScopedVector<autofill::PasswordForm> local_forms,
+    ScopedVector<autofill::PasswordForm> federated_forms,
+    const GURL& origin,
     base::Callback<void(const password_manager::CredentialInfo&)> callback) {
-  // Take ownership of all the password form objects in the forms vectors.
-  ScopedVector<autofill::PasswordForm> local_entries;
-  local_entries.assign(local_forms.begin(), local_forms.end());
-  ScopedVector<autofill::PasswordForm> federated_entries;
-  federated_entries.assign(federated_forms.begin(), federated_forms.end());
+  return ManagePasswordsUIController::FromWebContents(web_contents())->
+      OnChooseCredentials(local_forms.Pass(), federated_forms.Pass(), origin,
+                          callback);
+}
 
-  ManagePasswordsUIController* manage_passwords_ui_controller =
-      ManagePasswordsUIController::FromWebContents(web_contents());
-  return manage_passwords_ui_controller->OnChooseCredentials(
-      local_entries.Pass(), federated_entries.Pass(), callback);
+void ChromePasswordManagerClient::NotifyUserAutoSignin(
+    ScopedVector<autofill::PasswordForm> local_forms) {
+  DCHECK(!local_forms.empty());
+  ManagePasswordsUIController::FromWebContents(web_contents())->
+      OnAutoSignin(local_forms.Pass());
 }
 
 void ChromePasswordManagerClient::AutomaticPasswordSave(
@@ -263,34 +252,17 @@ PrefService* ChromePasswordManagerClient::GetPrefs() {
 }
 
 password_manager::PasswordStore*
-ChromePasswordManagerClient::GetPasswordStore() {
+ChromePasswordManagerClient::GetPasswordStore() const {
   // Always use EXPLICIT_ACCESS as the password manager checks IsOffTheRecord
   // itself when it shouldn't access the PasswordStore.
-  // TODO(gcasto): Is is safe to change this to Profile::IMPLICIT_ACCESS?
-  return PasswordStoreFactory::GetForProfile(profile_, Profile::EXPLICIT_ACCESS)
-      .get();
-}
-
-base::FieldTrial::Probability
-ChromePasswordManagerClient::GetProbabilityForExperiment(
-    const std::string& experiment_name) {
-  base::FieldTrial::Probability enabled_probability = 0;
-  if (experiment_name ==
-      password_manager::PasswordManager::kOtherPossibleUsernamesExperiment) {
-    switch (chrome::VersionInfo::GetChannel()) {
-      case chrome::VersionInfo::CHANNEL_DEV:
-      case chrome::VersionInfo::CHANNEL_BETA:
-        enabled_probability = 50;
-        break;
-      default:
-        break;
-    }
-  }
-  return enabled_probability;
+  // TODO(gcasto): Is is safe to change this to
+  // ServiceAccessType::IMPLICIT_ACCESS?
+  return PasswordStoreFactory::GetForProfile(
+             profile_, ServiceAccessType::EXPLICIT_ACCESS).get();
 }
 
 bool ChromePasswordManagerClient::IsPasswordSyncEnabled(
-    password_manager::CustomPassphraseState state) {
+    password_manager::CustomPassphraseState state) const {
   ProfileSyncService* sync_service =
       ProfileSyncServiceFactory::GetForProfile(profile_);
   if (sync_service && sync_service->HasSyncSetupCompleted() &&
@@ -354,7 +326,7 @@ bool ChromePasswordManagerClient::WasLastNavigationHTTPError() const {
   return false;
 }
 
-bool ChromePasswordManagerClient::DidLastPageLoadEncounterSSLErrors() {
+bool ChromePasswordManagerClient::DidLastPageLoadEncounterSSLErrors() const {
   content::NavigationEntry* entry =
       web_contents()->GetController().GetLastCommittedEntry();
   if (!entry)
@@ -363,7 +335,7 @@ bool ChromePasswordManagerClient::DidLastPageLoadEncounterSSLErrors() {
   return net::IsCertStatusError(entry->GetSSL().cert_status);
 }
 
-bool ChromePasswordManagerClient::IsOffTheRecord() {
+bool ChromePasswordManagerClient::IsOffTheRecord() const {
   return web_contents()->GetBrowserContext()->IsOffTheRecord();
 }
 
@@ -567,6 +539,6 @@ void ChromePasswordManagerClient::SetUpAutofillSyncState() {
   }
 }
 
-const GURL& ChromePasswordManagerClient::GetMainFrameURL() {
+const GURL& ChromePasswordManagerClient::GetMainFrameURL() const {
   return web_contents()->GetVisibleURL();
 }

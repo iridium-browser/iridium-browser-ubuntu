@@ -110,7 +110,7 @@ class LayerTreeHostContextTest : public LayerTreeTest {
       // Only valid for single-threaded impl-side painting, which activates
       // immediately and will try to draw again when content has finished.
       DCHECK(!host_impl->proxy()->HasImplThread());
-      DCHECK(layer_tree_host()->settings().impl_side_painting);
+      DCHECK(host_impl->settings().impl_side_painting);
       return draw_result;
     }
     EXPECT_EQ(DRAW_SUCCESS, draw_result);
@@ -883,7 +883,7 @@ class LayerTreeHostContextTestLayersNotified : public LayerTreeHostContextTest {
     FakeContentLayerImpl* child_content = NULL;
     FakeContentLayerImpl* grandchild_content = NULL;
 
-    if (layer_tree_host()->settings().impl_side_painting) {
+    if (host_impl->settings().impl_side_painting) {
       root_picture = static_cast<FakePictureLayerImpl*>(
           host_impl->active_tree()->root_layer());
       child_picture =
@@ -903,7 +903,7 @@ class LayerTreeHostContextTestLayersNotified : public LayerTreeHostContextTest {
     ++num_commits_;
     switch (num_commits_) {
       case 1:
-        if (layer_tree_host()->settings().impl_side_painting) {
+        if (host_impl->settings().impl_side_painting) {
           EXPECT_EQ(0u, root_picture->release_resources_count());
           EXPECT_EQ(0u, child_picture->release_resources_count());
           EXPECT_EQ(0u, grandchild_picture->release_resources_count());
@@ -918,7 +918,7 @@ class LayerTreeHostContextTestLayersNotified : public LayerTreeHostContextTest {
         times_to_fail_create_ = 1;
         break;
       case 2:
-        if (layer_tree_host()->settings().impl_side_painting) {
+        if (host_impl->settings().impl_side_painting) {
           EXPECT_TRUE(root_picture->release_resources_count());
           EXPECT_TRUE(child_picture->release_resources_count());
           EXPECT_TRUE(grandchild_picture->release_resources_count());
@@ -1000,10 +1000,8 @@ class LayerTreeHostContextTestDontUseLostResources
 
     ResourceProvider::ResourceId resource =
         child_resource_provider_->CreateResource(
-            gfx::Size(4, 4),
-            GL_CLAMP_TO_EDGE,
-            ResourceProvider::TextureHintImmutable,
-            RGBA_8888);
+            gfx::Size(4, 4), GL_CLAMP_TO_EDGE,
+            ResourceProvider::TEXTURE_HINT_IMMUTABLE, RGBA_8888);
     ResourceProvider::ScopedWriteLockGL lock(child_resource_provider_.get(),
                                              resource);
 
@@ -1077,24 +1075,16 @@ class LayerTreeHostContextTestDontUseLostResources
 
     color_video_frame_ = VideoFrame::CreateColorFrame(
         gfx::Size(4, 4), 0x80, 0x80, 0x80, base::TimeDelta());
-    hw_video_frame_ =
-        VideoFrame::WrapNativeTexture(make_scoped_ptr(new gpu::MailboxHolder(
-                                          mailbox, GL_TEXTURE_2D, sync_point)),
-                                      media::VideoFrame::ReleaseMailboxCB(),
-                                      gfx::Size(4, 4),
-                                      gfx::Rect(0, 0, 4, 4),
-                                      gfx::Size(4, 4),
-                                      base::TimeDelta(),
-                                      VideoFrame::ReadPixelsCB());
-    scaled_hw_video_frame_ =
-        VideoFrame::WrapNativeTexture(make_scoped_ptr(new gpu::MailboxHolder(
-                                          mailbox, GL_TEXTURE_2D, sync_point)),
-                                      media::VideoFrame::ReleaseMailboxCB(),
-                                      gfx::Size(4, 4),
-                                      gfx::Rect(0, 0, 3, 2),
-                                      gfx::Size(4, 4),
-                                      base::TimeDelta(),
-                                      VideoFrame::ReadPixelsCB());
+    hw_video_frame_ = VideoFrame::WrapNativeTexture(
+        make_scoped_ptr(
+            new gpu::MailboxHolder(mailbox, GL_TEXTURE_2D, sync_point)),
+        media::VideoFrame::ReleaseMailboxCB(), gfx::Size(4, 4),
+        gfx::Rect(0, 0, 4, 4), gfx::Size(4, 4), base::TimeDelta(), false);
+    scaled_hw_video_frame_ = VideoFrame::WrapNativeTexture(
+        make_scoped_ptr(
+            new gpu::MailboxHolder(mailbox, GL_TEXTURE_2D, sync_point)),
+        media::VideoFrame::ReleaseMailboxCB(), gfx::Size(4, 4),
+        gfx::Rect(0, 0, 3, 2), gfx::Size(4, 4), base::TimeDelta(), false);
 
     color_frame_provider_.set_frame(color_video_frame_);
     hw_frame_provider_.set_frame(hw_video_frame_);
@@ -1337,7 +1327,7 @@ class UIResourceLostTestSimple : public UIResourceLostTest {
   virtual void StepCompleteOnImplThread(LayerTreeHostImpl* impl) = 0;
 
   void CommitCompleteOnThread(LayerTreeHostImpl* impl) override {
-    if (!layer_tree_host()->settings().impl_side_painting) {
+    if (!impl->settings().impl_side_painting) {
       StepCompleteOnImplThread(impl);
       PostStepCompleteToMainThread();
       ++time_step_;
@@ -1345,7 +1335,7 @@ class UIResourceLostTestSimple : public UIResourceLostTest {
   }
 
   void DidActivateTreeOnThread(LayerTreeHostImpl* impl) override {
-    if (layer_tree_host()->settings().impl_side_painting) {
+    if (impl->settings().impl_side_painting) {
       StepCompleteOnImplThread(impl);
       PostStepCompleteToMainThread();
       ++time_step_;
@@ -1776,12 +1766,7 @@ class LayerTreeHostContextTestLoseAfterSendingBeginMainFrame
     deferred_ = true;
 
     // Defer commits before the BeginFrame arrives, causing it to be delayed.
-    MainThreadTaskRunner()->PostTask(
-        FROM_HERE,
-        base::Bind(&LayerTreeHostContextTestLoseAfterSendingBeginMainFrame::
-                       DeferCommitsOnMainThread,
-                   base::Unretained(this),
-                   true));
+    PostSetDeferCommitsToMainThread(true);
     // Meanwhile, lose the context while we are in defer commits.
     ImplThreadTaskRunner()->PostTask(
         FROM_HERE,
@@ -1794,16 +1779,7 @@ class LayerTreeHostContextTestLoseAfterSendingBeginMainFrame
     LoseContext();
 
     // After losing the context, stop deferring commits.
-    MainThreadTaskRunner()->PostTask(
-        FROM_HERE,
-        base::Bind(&LayerTreeHostContextTestLoseAfterSendingBeginMainFrame::
-                       DeferCommitsOnMainThread,
-                   base::Unretained(this),
-                   false));
-  }
-
-  void DeferCommitsOnMainThread(bool defer_commits) {
-    layer_tree_host()->SetDeferCommits(defer_commits);
+    PostSetDeferCommitsToMainThread(false);
   }
 
   void WillBeginMainFrame() override {

@@ -52,10 +52,10 @@ template<typename CallbackType> struct CreateErrorRunCallbackHelper;
 
 // CreateErrorRunCallback with two arguments.
 template<typename P1>
-struct CreateErrorRunCallbackHelper<void(google_apis::GDataErrorCode, P1)> {
+struct CreateErrorRunCallbackHelper<void(google_apis::DriveApiErrorCode, P1)> {
   static void Run(
-      const base::Callback<void(google_apis::GDataErrorCode, P1)>& callback,
-      google_apis::GDataErrorCode error) {
+      const base::Callback<void(google_apis::DriveApiErrorCode, P1)>& callback,
+      google_apis::DriveApiErrorCode error) {
     callback.Run(error, DefaultValueCreator<P1>::GetDefaultValue());
   }
 };
@@ -63,7 +63,7 @@ struct CreateErrorRunCallbackHelper<void(google_apis::GDataErrorCode, P1)> {
 // Returns a callback with the tail parameter bound to its default value.
 // In other words, returned_callback.Run(error) runs callback.Run(error, T()).
 template<typename CallbackType>
-base::Callback<void(google_apis::GDataErrorCode)>
+base::Callback<void(google_apis::DriveApiErrorCode)>
 CreateErrorRunCallback(const base::Callback<CallbackType>& callback) {
   return base::Bind(&CreateErrorRunCallbackHelper<CallbackType>::Run, callback);
 }
@@ -74,7 +74,7 @@ struct UploadNewFileParams {
   base::FilePath local_file_path;
   std::string title;
   std::string content_type;
-  DriveUploader::UploadNewFileOptions options;
+  UploadNewFileOptions options;
   UploadCompletionCallback callback;
   google_apis::ProgressCallback progress_callback;
 };
@@ -97,7 +97,7 @@ struct UploadExistingFileParams {
   std::string resource_id;
   base::FilePath local_file_path;
   std::string content_type;
-  DriveUploader::UploadExistingFileOptions options;
+  UploadExistingFileOptions options;
   std::string etag;
   UploadCompletionCallback callback;
   google_apis::ProgressCallback progress_callback;
@@ -147,29 +147,16 @@ void CollectCopyHistogramSample(const std::string& histogram_name, int64 size) {
   counter->Add(size / 1024);
 }
 
-// Callback for GetSizeAndCollectCopyHistogramSample().
-void OnGotSizeForCollectCopyHistogramSample(const std::string& histogram_name,
-                                            int64* size) {
-  if (*size != -1)
-    CollectCopyHistogramSample(histogram_name, *size);
-}
-
-// Collects information about sizes of files copied or moved from or to Drive
-// Otherwise does nothing. Temporary for crbug.com/229650.
-void GetSizeAndCollectCopyHistogramSample(
-    base::SequencedTaskRunner* blocking_task_runner,
-    const base::FilePath& local_file_path,
-    const std::string& histogram_name) {
+// Obtains file size to be uploaded for setting total bytes of JobInfo.
+void GetFileSizeForJob(base::SequencedTaskRunner* blocking_task_runner,
+                       const base::FilePath& local_file_path,
+                       const base::Callback<void(int64* size)>& callback) {
   int64* const size = new int64;
   *size = -1;
   blocking_task_runner->PostTaskAndReply(
-      FROM_HERE,
-      base::Bind(base::IgnoreResult(&base::GetFileSize),
-                 local_file_path,
-                 base::Unretained(size)),
-      base::Bind(&OnGotSizeForCollectCopyHistogramSample,
-                 histogram_name,
-                 base::Owned(size)));
+      FROM_HERE, base::Bind(base::IgnoreResult(&base::GetFileSize),
+                            local_file_path, base::Unretained(size)),
+      base::Bind(callback, base::Owned(size)));
 }
 
 }  // namespace
@@ -184,11 +171,11 @@ JobScheduler::JobEntry::JobEntry(JobType type)
     : job_info(type),
       context(ClientContext(USER_INITIATED)),
       retry_count(0) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
 }
 
 JobScheduler::JobEntry::~JobEntry() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
 }
 
 struct JobScheduler::ResumeUploadParams {
@@ -210,7 +197,7 @@ JobScheduler::JobScheduler(PrefService* pref_service,
       uploader_(new DriveUploader(drive_service, blocking_task_runner)),
       pref_service_(pref_service),
       weak_ptr_factory_(this) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   for (int i = 0; i < NUM_QUEUES; ++i)
     queue_[i].reset(new JobQueue(kMaxJobCount[i], NUM_CONTEXT_TYPES));
@@ -219,7 +206,7 @@ JobScheduler::JobScheduler(PrefService* pref_service,
 }
 
 JobScheduler::~JobScheduler() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   size_t num_queued_jobs = 0;
   for (int i = 0; i < NUM_QUEUES; ++i)
@@ -237,17 +224,17 @@ std::vector<JobInfo> JobScheduler::GetJobInfoList() {
 }
 
 void JobScheduler::AddObserver(JobListObserver* observer) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   observer_list_.AddObserver(observer);
 }
 
 void JobScheduler::RemoveObserver(JobListObserver* observer) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   observer_list_.RemoveObserver(observer);
 }
 
 void JobScheduler::CancelJob(JobID job_id) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   JobEntry* job = job_map_.Lookup(job_id);
   if (job) {
@@ -258,13 +245,13 @@ void JobScheduler::CancelJob(JobID job_id) {
       if (!job->cancel_callback.is_null())
         job->cancel_callback.Run();
     } else {
-      AbortNotRunningJob(job, google_apis::GDATA_CANCELLED);
+      AbortNotRunningJob(job, google_apis::DRIVE_CANCELLED);
     }
   }
 }
 
 void JobScheduler::CancelAllJobs() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   // CancelJob may remove the entry from |job_map_|. That's OK. IDMap supports
   // removable during iteration.
@@ -274,7 +261,7 @@ void JobScheduler::CancelAllJobs() {
 
 void JobScheduler::GetAboutResource(
     const google_apis::AboutResourceCallback& callback) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(!callback.is_null());
 
   JobEntry* new_job = CreateNewJob(TYPE_GET_ABOUT_RESOURCE);
@@ -290,7 +277,7 @@ void JobScheduler::GetAboutResource(
 }
 
 void JobScheduler::GetAppList(const google_apis::AppListCallback& callback) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(!callback.is_null());
 
   JobEntry* new_job = CreateNewJob(TYPE_GET_APP_LIST);
@@ -307,7 +294,7 @@ void JobScheduler::GetAppList(const google_apis::AppListCallback& callback) {
 
 void JobScheduler::GetAllFileList(
     const google_apis::FileListCallback& callback) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(!callback.is_null());
 
   JobEntry* new_job = CreateNewJob(TYPE_GET_ALL_RESOURCE_LIST);
@@ -325,7 +312,7 @@ void JobScheduler::GetAllFileList(
 void JobScheduler::GetFileListInDirectory(
     const std::string& directory_resource_id,
     const google_apis::FileListCallback& callback) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(!callback.is_null());
 
   JobEntry* new_job = CreateNewJob(
@@ -344,7 +331,7 @@ void JobScheduler::GetFileListInDirectory(
 
 void JobScheduler::Search(const std::string& search_query,
                           const google_apis::FileListCallback& callback) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(!callback.is_null());
 
   JobEntry* new_job = CreateNewJob(TYPE_SEARCH);
@@ -363,7 +350,7 @@ void JobScheduler::Search(const std::string& search_query,
 void JobScheduler::GetChangeList(
     int64 start_changestamp,
     const google_apis::ChangeListCallback& callback) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(!callback.is_null());
 
   JobEntry* new_job = CreateNewJob(TYPE_GET_CHANGE_LIST);
@@ -382,7 +369,7 @@ void JobScheduler::GetChangeList(
 void JobScheduler::GetRemainingChangeList(
     const GURL& next_link,
     const google_apis::ChangeListCallback& callback) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(!callback.is_null());
 
   JobEntry* new_job = CreateNewJob(TYPE_GET_REMAINING_CHANGE_LIST);
@@ -401,7 +388,7 @@ void JobScheduler::GetRemainingChangeList(
 void JobScheduler::GetRemainingFileList(
     const GURL& next_link,
     const google_apis::FileListCallback& callback) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(!callback.is_null());
 
   JobEntry* new_job = CreateNewJob(TYPE_GET_REMAINING_FILE_LIST);
@@ -421,7 +408,7 @@ void JobScheduler::GetFileResource(
     const std::string& resource_id,
     const ClientContext& context,
     const google_apis::FileResourceCallback& callback) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(!callback.is_null());
 
   JobEntry* new_job = CreateNewJob(TYPE_GET_RESOURCE_ENTRY);
@@ -443,7 +430,7 @@ void JobScheduler::GetShareUrl(
     const GURL& embed_origin,
     const ClientContext& context,
     const google_apis::GetShareUrlCallback& callback) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(!callback.is_null());
 
   JobEntry* new_job = CreateNewJob(TYPE_GET_SHARE_URL);
@@ -465,7 +452,7 @@ void JobScheduler::TrashResource(
     const std::string& resource_id,
     const ClientContext& context,
     const google_apis::EntryActionCallback& callback) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(!callback.is_null());
 
   JobEntry* new_job = CreateNewJob(TYPE_TRASH_RESOURCE);
@@ -488,7 +475,7 @@ void JobScheduler::CopyResource(
     const std::string& new_title,
     const base::Time& last_modified,
     const google_apis::FileResourceCallback& callback) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(!callback.is_null());
 
   JobEntry* new_job = CreateNewJob(TYPE_COPY_RESOURCE);
@@ -513,25 +500,21 @@ void JobScheduler::UpdateResource(
     const std::string& new_title,
     const base::Time& last_modified,
     const base::Time& last_viewed_by_me,
+    const google_apis::drive::Properties& properties,
     const ClientContext& context,
     const google_apis::FileResourceCallback& callback) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(!callback.is_null());
 
   JobEntry* new_job = CreateNewJob(TYPE_UPDATE_RESOURCE);
   new_job->context = context;
-  new_job->task = base::Bind(
-      &DriveServiceInterface::UpdateResource,
-      base::Unretained(drive_service_),
-      resource_id,
-      parent_resource_id,
-      new_title,
-      last_modified,
-      last_viewed_by_me,
-      base::Bind(&JobScheduler::OnGetFileResourceJobDone,
-                 weak_ptr_factory_.GetWeakPtr(),
-                 new_job->job_info.job_id,
-                 callback));
+  new_job->task = base::Bind(&DriveServiceInterface::UpdateResource,
+                             base::Unretained(drive_service_), resource_id,
+                             parent_resource_id, new_title, last_modified,
+                             last_viewed_by_me, properties,
+                             base::Bind(&JobScheduler::OnGetFileResourceJobDone,
+                                        weak_ptr_factory_.GetWeakPtr(),
+                                        new_job->job_info.job_id, callback));
   new_job->abort_callback = CreateErrorRunCallback(callback);
   StartJob(new_job);
 }
@@ -540,7 +523,7 @@ void JobScheduler::AddResourceToDirectory(
     const std::string& parent_resource_id,
     const std::string& resource_id,
     const google_apis::EntryActionCallback& callback) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(!callback.is_null());
 
   JobEntry* new_job = CreateNewJob(TYPE_ADD_RESOURCE_TO_DIRECTORY);
@@ -562,7 +545,7 @@ void JobScheduler::RemoveResourceFromDirectory(
     const std::string& resource_id,
     const ClientContext& context,
     const google_apis::EntryActionCallback& callback) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   JobEntry* new_job = CreateNewJob(TYPE_REMOVE_RESOURCE_FROM_DIRECTORY);
   new_job->context = context;
@@ -582,10 +565,10 @@ void JobScheduler::RemoveResourceFromDirectory(
 void JobScheduler::AddNewDirectory(
     const std::string& parent_resource_id,
     const std::string& directory_title,
-    const DriveServiceInterface::AddNewDirectoryOptions& options,
+    const AddNewDirectoryOptions& options,
     const ClientContext& context,
     const google_apis::FileResourceCallback& callback) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   JobEntry* new_job = CreateNewJob(TYPE_ADD_NEW_DIRECTORY);
   new_job->context = context;
@@ -611,7 +594,7 @@ JobID JobScheduler::DownloadFile(
     const ClientContext& context,
     const google_apis::DownloadActionCallback& download_action_callback,
     const google_apis::GetContentCallback& get_content_callback) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   // Temporary histogram for crbug.com/229650.
   CollectCopyHistogramSample("Drive.DownloadFromDriveFileSize",
@@ -645,18 +628,20 @@ void JobScheduler::UploadNewFile(
     const base::FilePath& local_file_path,
     const std::string& title,
     const std::string& content_type,
-    const DriveUploader::UploadNewFileOptions& options,
+    const UploadNewFileOptions& options,
     const ClientContext& context,
     const google_apis::FileResourceCallback& callback) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-
-  // Temporary histogram for crbug.com/229650.
-  GetSizeAndCollectCopyHistogramSample(
-      blocking_task_runner_, local_file_path, "Drive.UploadToDriveFileSize");
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   JobEntry* new_job = CreateNewJob(TYPE_UPLOAD_NEW_FILE);
   new_job->job_info.file_path = drive_file_path;
   new_job->context = context;
+
+  GetFileSizeForJob(
+      blocking_task_runner_, local_file_path,
+      base::Bind(&JobScheduler::OnGotFileSizeForJob,
+                 weak_ptr_factory_.GetWeakPtr(), new_job->job_info.job_id,
+                 "Drive.UploadToDriveFileSize"));
 
   UploadNewFileParams params;
   params.parent_resource_id = parent_resource_id;
@@ -687,18 +672,20 @@ void JobScheduler::UploadExistingFile(
     const base::FilePath& drive_file_path,
     const base::FilePath& local_file_path,
     const std::string& content_type,
-    const DriveUploader::UploadExistingFileOptions& options,
+    const UploadExistingFileOptions& options,
     const ClientContext& context,
     const google_apis::FileResourceCallback& callback) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
-
-  // Temporary histogram for crbug.com/229650.
-  GetSizeAndCollectCopyHistogramSample(
-      blocking_task_runner_, local_file_path, "Drive.UploadToDriveFileSize");
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   JobEntry* new_job = CreateNewJob(TYPE_UPLOAD_EXISTING_FILE);
   new_job->job_info.file_path = drive_file_path;
   new_job->context = context;
+
+  GetFileSizeForJob(
+      blocking_task_runner_, local_file_path,
+      base::Bind(&JobScheduler::OnGotFileSizeForJob,
+                 weak_ptr_factory_.GetWeakPtr(), new_job->job_info.job_id,
+                 "Drive.UploadToDriveFileSize"));
 
   UploadExistingFileParams params;
   params.resource_id = resource_id;
@@ -728,7 +715,7 @@ void JobScheduler::AddPermission(
     const std::string& email,
     google_apis::drive::PermissionRole role,
     const google_apis::EntryActionCallback& callback) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(!callback.is_null());
 
   JobEntry* new_job = CreateNewJob(TYPE_ADD_PERMISSION);
@@ -760,7 +747,7 @@ void JobScheduler::StartJob(JobEntry* job) {
 }
 
 void JobScheduler::QueueJob(JobID job_id) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   JobEntry* job_entry = job_map_.Lookup(job_id);
   DCHECK(job_entry);
@@ -793,7 +780,7 @@ void JobScheduler::QueueJob(JobID job_id) {
 }
 
 void JobScheduler::DoJobLoop(QueueType queue_type) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   const int accepted_priority = GetCurrentAcceptedPriority(queue_type);
 
@@ -804,7 +791,7 @@ void JobScheduler::DoJobLoop(QueueType queue_type) {
     for (size_t i = 0; i < jobs.size(); ++i) {
       JobEntry* job = job_map_.Lookup(jobs[i]);
       DCHECK(job);
-      AbortNotRunningJob(job, google_apis::GDATA_NO_CONNECTION);
+      AbortNotRunningJob(job, google_apis::DRIVE_NO_CONNECTION);
     }
   }
 
@@ -844,7 +831,7 @@ void JobScheduler::DoJobLoop(QueueType queue_type) {
 }
 
 int JobScheduler::GetCurrentAcceptedPriority(QueueType queue_type) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   const int kNoJobShouldRun = -1;
 
@@ -869,7 +856,7 @@ int JobScheduler::GetCurrentAcceptedPriority(QueueType queue_type) {
 }
 
 void JobScheduler::UpdateWait() {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   if (disable_throttling_ || throttle_count_ == 0)
     return;
@@ -883,8 +870,9 @@ void JobScheduler::UpdateWait() {
   wait_until_ = std::max(wait_until_, base::Time::Now() + delay);
 }
 
-bool JobScheduler::OnJobDone(JobID job_id, google_apis::GDataErrorCode error) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+bool JobScheduler::OnJobDone(JobID job_id,
+                             google_apis::DriveApiErrorCode error) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   JobEntry* job_entry = job_map_.Lookup(job_id);
   DCHECK(job_entry);
@@ -897,7 +885,7 @@ bool JobScheduler::OnJobDone(JobID job_id, google_apis::GDataErrorCode error) {
   logger_->Log(success ? logging::LOG_INFO : logging::LOG_WARNING,
                "Job done: %s => %s (elapsed time: %sms) - %s",
                job_info->ToString().c_str(),
-               GDataErrorCodeToString(error).c_str(),
+               DriveApiErrorCodeToString(error).c_str(),
                base::Int64ToString(elapsed.InMilliseconds()).c_str(),
                GetQueueInfo(queue_type).c_str());
 
@@ -943,9 +931,9 @@ bool JobScheduler::OnJobDone(JobID job_id, google_apis::GDataErrorCode error) {
 void JobScheduler::OnGetFileListJobDone(
     JobID job_id,
     const google_apis::FileListCallback& callback,
-    google_apis::GDataErrorCode error,
+    google_apis::DriveApiErrorCode error,
     scoped_ptr<google_apis::FileList> file_list) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(!callback.is_null());
 
   if (OnJobDone(job_id, error))
@@ -955,9 +943,9 @@ void JobScheduler::OnGetFileListJobDone(
 void JobScheduler::OnGetChangeListJobDone(
     JobID job_id,
     const google_apis::ChangeListCallback& callback,
-    google_apis::GDataErrorCode error,
+    google_apis::DriveApiErrorCode error,
     scoped_ptr<google_apis::ChangeList> change_list) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(!callback.is_null());
 
   if (OnJobDone(job_id, error))
@@ -967,9 +955,9 @@ void JobScheduler::OnGetChangeListJobDone(
 void JobScheduler::OnGetFileResourceJobDone(
     JobID job_id,
     const google_apis::FileResourceCallback& callback,
-    google_apis::GDataErrorCode error,
+    google_apis::DriveApiErrorCode error,
     scoped_ptr<google_apis::FileResource> entry) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(!callback.is_null());
 
   if (OnJobDone(job_id, error))
@@ -979,9 +967,9 @@ void JobScheduler::OnGetFileResourceJobDone(
 void JobScheduler::OnGetAboutResourceJobDone(
     JobID job_id,
     const google_apis::AboutResourceCallback& callback,
-    google_apis::GDataErrorCode error,
+    google_apis::DriveApiErrorCode error,
     scoped_ptr<google_apis::AboutResource> about_resource) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(!callback.is_null());
 
   if (OnJobDone(job_id, error))
@@ -991,9 +979,9 @@ void JobScheduler::OnGetAboutResourceJobDone(
 void JobScheduler::OnGetShareUrlJobDone(
     JobID job_id,
     const google_apis::GetShareUrlCallback& callback,
-    google_apis::GDataErrorCode error,
+    google_apis::DriveApiErrorCode error,
     const GURL& share_url) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(!callback.is_null());
 
   if (OnJobDone(job_id, error))
@@ -1003,9 +991,9 @@ void JobScheduler::OnGetShareUrlJobDone(
 void JobScheduler::OnGetAppListJobDone(
     JobID job_id,
     const google_apis::AppListCallback& callback,
-    google_apis::GDataErrorCode error,
+    google_apis::DriveApiErrorCode error,
     scoped_ptr<google_apis::AppList> app_list) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(!callback.is_null());
 
   if (OnJobDone(job_id, error))
@@ -1015,8 +1003,8 @@ void JobScheduler::OnGetAppListJobDone(
 void JobScheduler::OnEntryActionJobDone(
     JobID job_id,
     const google_apis::EntryActionCallback& callback,
-    google_apis::GDataErrorCode error) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+    google_apis::DriveApiErrorCode error) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(!callback.is_null());
 
   if (OnJobDone(job_id, error))
@@ -1026,9 +1014,9 @@ void JobScheduler::OnEntryActionJobDone(
 void JobScheduler::OnDownloadActionJobDone(
     JobID job_id,
     const google_apis::DownloadActionCallback& callback,
-    google_apis::GDataErrorCode error,
+    google_apis::DriveApiErrorCode error,
     const base::FilePath& temp_file) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(!callback.is_null());
 
   if (OnJobDone(job_id, error))
@@ -1039,10 +1027,10 @@ void JobScheduler::OnUploadCompletionJobDone(
     JobID job_id,
     const ResumeUploadParams& resume_params,
     const google_apis::FileResourceCallback& callback,
-    google_apis::GDataErrorCode error,
+    google_apis::DriveApiErrorCode error,
     const GURL& upload_location,
     scoped_ptr<google_apis::FileResource> entry) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(!callback.is_null());
 
   if (!upload_location.is_empty()) {
@@ -1076,10 +1064,10 @@ void JobScheduler::OnResumeUploadFileDone(
     JobID job_id,
     const base::Callback<google_apis::CancelCallback()>& original_task,
     const google_apis::FileResourceCallback& callback,
-    google_apis::GDataErrorCode error,
+    google_apis::DriveApiErrorCode error,
     const GURL& upload_location,
     scoped_ptr<google_apis::FileResource> entry) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(!original_task.is_null());
   DCHECK(!callback.is_null());
 
@@ -1107,13 +1095,31 @@ void JobScheduler::UpdateProgress(JobID job_id, int64 progress, int64 total) {
 
 void JobScheduler::OnConnectionTypeChanged(
     net::NetworkChangeNotifier::ConnectionType type) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   // Resume the job loop.
   // Note that we don't need to check the network connection status as it will
   // be checked in GetCurrentAcceptedPriority().
   for (int i = METADATA_QUEUE; i < NUM_QUEUES; ++i)
     DoJobLoop(static_cast<QueueType>(i));
+}
+
+void JobScheduler::OnGotFileSizeForJob(JobID job_id,
+                                       const std::string& histogram_name,
+                                       int64* size) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
+  if (*size == -1)
+    return;
+
+  // Temporary histogram for crbug.com/229650.
+  CollectCopyHistogramSample(histogram_name, *size);
+
+  JobEntry* const job_entry = job_map_.Lookup(job_id);
+  if (!job_entry)
+    return;
+
+  job_entry->job_info.num_total_bytes = *size;
+  NotifyJobUpdated(job_entry->job_info);
 }
 
 JobScheduler::QueueType JobScheduler::GetJobQueueType(JobType type) {
@@ -1147,19 +1153,19 @@ JobScheduler::QueueType JobScheduler::GetJobQueueType(JobType type) {
 }
 
 void JobScheduler::AbortNotRunningJob(JobEntry* job,
-                                      google_apis::GDataErrorCode error) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+                                      google_apis::DriveApiErrorCode error) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   const base::TimeDelta elapsed = base::Time::Now() - job->job_info.start_time;
   const QueueType queue_type = GetJobQueueType(job->job_info.job_type);
   logger_->Log(logging::LOG_INFO,
                "Job aborted: %s => %s (elapsed time: %sms) - %s",
                job->job_info.ToString().c_str(),
-               GDataErrorCodeToString(error).c_str(),
+               DriveApiErrorCodeToString(error).c_str(),
                base::Int64ToString(elapsed.InMilliseconds()).c_str(),
                GetQueueInfo(queue_type).c_str());
 
-  base::Callback<void(google_apis::GDataErrorCode)> callback =
+  base::Callback<void(google_apis::DriveApiErrorCode)> callback =
       job->abort_callback;
   queue_[GetJobQueueType(job->job_info.job_type)]->Remove(job->job_info.job_id);
   NotifyJobDone(job->job_info, error);
@@ -1169,19 +1175,19 @@ void JobScheduler::AbortNotRunningJob(JobEntry* job,
 }
 
 void JobScheduler::NotifyJobAdded(const JobInfo& job_info) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   FOR_EACH_OBSERVER(JobListObserver, observer_list_, OnJobAdded(job_info));
 }
 
 void JobScheduler::NotifyJobDone(const JobInfo& job_info,
-                                 google_apis::GDataErrorCode error) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+                                 google_apis::DriveApiErrorCode error) {
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   FOR_EACH_OBSERVER(JobListObserver, observer_list_,
                     OnJobDone(job_info, GDataToFileError(error)));
 }
 
 void JobScheduler::NotifyJobUpdated(const JobInfo& job_info) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   FOR_EACH_OBSERVER(JobListObserver, observer_list_, OnJobUpdated(job_info));
 }
 

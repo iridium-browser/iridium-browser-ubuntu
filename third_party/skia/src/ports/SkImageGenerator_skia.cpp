@@ -21,7 +21,7 @@ public:
     {}
 
 protected:
-    bool allocPixelRef(SkBitmap* bm, SkColorTable* ctable) SK_OVERRIDE {
+    bool allocPixelRef(SkBitmap* bm, SkColorTable* ctable) override {
         const SkImageInfo bmi = bm->info();
         if (bmi.width() != fInfo.width() || bmi.height() != fInfo.height() ||
             bmi.colorType() != fInfo.colorType())
@@ -39,21 +39,24 @@ class SkImageDecoderGenerator : public SkImageGenerator {
 
 public:
     SkImageDecoderGenerator(const SkImageInfo& info, SkImageDecoder* decoder, SkData* data)
-        : fInfo(info), fDecoder(decoder), fData(SkRef(data))
+        : INHERITED(info), fInfo(info), fDecoder(decoder), fData(SkRef(data))
     {}
 
 protected:
-    SkData* onRefEncodedData() SK_OVERRIDE {
+    SkData* onRefEncodedData() override {
         return SkRef(fData.get());
     }
 
-    virtual bool onGetInfo(SkImageInfo* info) {
+#ifdef SK_SUPPORT_LEGACY_BOOL_ONGETINFO
+    virtual bool onGetInfo(SkImageInfo* info) override {
         *info = fInfo;
         return true;
     }
+#endif
 
-    virtual bool onGetPixels(const SkImageInfo& info, void* pixels, size_t rowBytes,
-                             SkPMColor ctableEntries[], int* ctableCount) {
+    virtual Result onGetPixels(const SkImageInfo& info, void* pixels, size_t rowBytes,
+                               const Options&,
+                               SkPMColor ctableEntries[], int* ctableCount) override {
         SkMemoryStream stream(fData->data(), fData->size(), false);
         SkAutoTUnref<BareMemoryAllocator> allocator(SkNEW_ARGS(BareMemoryAllocator,
                                                                (info, pixels, rowBytes)));
@@ -61,13 +64,10 @@ protected:
         fDecoder->setRequireUnpremultipliedColors(kUnpremul_SkAlphaType == info.alphaType());
 
         SkBitmap bm;
-        SkImageDecoder::Result result = fDecoder->decode(&stream, &bm, info.colorType(),
-                                                         SkImageDecoder::kDecodePixels_Mode);
-        switch (result) {
-            case SkImageDecoder::kSuccess:
-                break;
-            default:
-                return false;
+        const SkImageDecoder::Result result = fDecoder->decode(&stream, &bm, info.colorType(),
+                                                               SkImageDecoder::kDecodePixels_Mode);
+        if (SkImageDecoder::kFailure == result) {
+            return kInvalidInput;
         }
 
         SkASSERT(info.colorType() == bm.info().colorType());
@@ -77,21 +77,26 @@ protected:
 
             SkColorTable* ctable = bm.getColorTable();
             if (NULL == ctable) {
-                return false;
+                return kInvalidConversion;
             }
             const int count = ctable->count();
             memcpy(ctableEntries, ctable->readColors(), count * sizeof(SkPMColor));
             *ctableCount = count;
         }
-        return true;
+        if (SkImageDecoder::kPartialSuccess == result) {
+            return kIncompleteInput;
+        }
+        return kSuccess;
     }
 
     bool onGetYUV8Planes(SkISize sizes[3], void* planes[3], size_t rowBytes[3],
-                         SkYUVColorSpace* colorSpace) SK_OVERRIDE {
+                         SkYUVColorSpace* colorSpace) override {
         SkMemoryStream stream(fData->data(), fData->size(), false);
         return fDecoder->decodeYUV8Planes(&stream, sizes, planes, rowBytes, colorSpace);
     }
-    
+
+private:
+    typedef SkImageGenerator INHERITED;
 };
 
 SkImageGenerator* SkImageGenerator::NewFromData(SkData* data) {

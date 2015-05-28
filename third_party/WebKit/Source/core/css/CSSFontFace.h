@@ -107,14 +107,14 @@ public:
 
     bool hadBlankText() { return isValid() && m_sources.first()->hadBlankText(); }
 
-    void trace(Visitor*);
+    DECLARE_TRACE();
 
 private:
     void setLoadStatus(FontFace::LoadStatus);
 
     UnicodeRangeSet m_ranges;
     RawPtrWillBeMember<CSSSegmentedFontFace> m_segmentedFontFace;
-    WillBeHeapDeque<OwnPtrWillBeMember<CSSFontFaceSource> > m_sources;
+    WillBeHeapDeque<OwnPtrWillBeMember<CSSFontFaceSource>> m_sources;
     RawPtrWillBeMember<FontFace> m_fontFace;
 };
 

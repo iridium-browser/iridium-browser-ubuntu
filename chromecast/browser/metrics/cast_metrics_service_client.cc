@@ -21,6 +21,7 @@
 #include "components/metrics/net/net_metrics_log_uploader.h"
 #include "components/metrics/net/network_metrics_provider.h"
 #include "components/metrics/profiler/profiler_metrics_provider.h"
+#include "components/metrics/url_constants.h"
 #include "content/public/common/content_switches.h"
 
 #if defined(OS_LINUX)
@@ -29,6 +30,10 @@
 
 namespace chromecast {
 namespace metrics {
+
+namespace {
+const int kStandardUploadIntervalMinutes = 5;
+}  // namespace
 
 // static
 scoped_ptr<CastMetricsServiceClient> CastMetricsServiceClient::Create(
@@ -45,6 +50,9 @@ void CastMetricsServiceClient::SetMetricsClientId(
   client_id_ = client_id;
   LOG(INFO) << "Metrics client ID set: " << client_id;
   PlatformSetClientID(cast_service_, client_id);
+}
+
+void CastMetricsServiceClient::OnRecordingDisabled() {
 }
 
 void CastMetricsServiceClient::StoreClientInfo(
@@ -133,10 +141,8 @@ void CastMetricsServiceClient::CollectFinalMetrics(
 
 scoped_ptr< ::metrics::MetricsLogUploader>
 CastMetricsServiceClient::CreateUploader(
-    const std::string& server_url,
-    const std::string& mime_type,
     const base::Callback<void(int)>& on_upload_complete) {
-  std::string uma_server_url(server_url);
+  std::string uma_server_url(::metrics::kDefaultMetricsServerUrl);
   base::CommandLine* command_line = base::CommandLine::ForCurrentProcess();
   if (command_line->HasSwitch(switches::kOverrideMetricsUploadUrl)) {
     uma_server_url.assign(
@@ -147,8 +153,12 @@ CastMetricsServiceClient::CreateUploader(
       new ::metrics::NetMetricsLogUploader(
           request_context_,
           uma_server_url,
-          mime_type,
+          ::metrics::kDefaultMetricsMimeType,
           on_upload_complete));
+}
+
+base::TimeDelta CastMetricsServiceClient::GetStandardUploadInterval() {
+  return base::TimeDelta::FromMinutes(kStandardUploadIntervalMinutes);
 }
 
 void CastMetricsServiceClient::EnableMetricsService(bool enabled) {
@@ -175,13 +185,17 @@ CastMetricsServiceClient::CastMetricsServiceClient(
     : io_task_runner_(io_task_runner),
       pref_service_(pref_service),
       cast_service_(NULL),
+#if !defined(OS_ANDROID)
       external_metrics_(NULL),
+#endif  // !defined(OS_ANDROID)
       metrics_service_loop_(base::MessageLoopProxy::current()),
       request_context_(request_context) {
 }
 
 CastMetricsServiceClient::~CastMetricsServiceClient() {
+#if !defined(OS_ANDROID)
   DCHECK(!external_metrics_);
+#endif  // !defined(OS_ANDROID)
 }
 
 void CastMetricsServiceClient::Initialize(CastService* cast_service) {

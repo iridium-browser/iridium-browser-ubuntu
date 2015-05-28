@@ -25,8 +25,8 @@ remoting.LoadingWindow = function() {};
  */
 remoting.LoadingWindow.onTimeout_ = function() {
   remoting.MessageWindow.showErrorMessage(
-      chrome.i18n.getMessage(/**i18n-content*/'PRODUCT_NAME'),
-      chrome.i18n.getMessage(remoting.Error.SERVICE_UNAVAILABLE));
+      remoting.app.getApplicationName(),
+      chrome.i18n.getMessage(remoting.Error.Tag.SERVICE_UNAVAILABLE));
 };
 
 /**
@@ -43,15 +43,15 @@ remoting.LoadingWindow.show = function() {
   var kConnectionTimeout = 15 * 60 * 1000;
 
   var transparencyWarning = '';
-  if (navigator.platform.indexOf('Mac') != -1) {
+  if (remoting.platformIsMac()) {
     transparencyWarning =
-        chrome.i18n.getMessage(/**i18n-content*/'NO_TRANSPARENCY_WARNING');
+        chrome.i18n.getMessage(/*i18n-content*/'NO_TRANSPARENCY_WARNING');
   }
   remoting.loadingWindow_ = remoting.MessageWindow.showTimedMessageWindow(
-      chrome.i18n.getMessage(/**i18n-content*/'PRODUCT_NAME'),
-      chrome.i18n.getMessage(/**i18n-content*/'FOOTER_CONNECTING'),
+      remoting.app.getApplicationName(),
+      chrome.i18n.getMessage(/*i18n-content*/'FOOTER_CONNECTING'),
       transparencyWarning,
-      chrome.i18n.getMessage(/**i18n-content*/'CANCEL'),
+      chrome.i18n.getMessage(/*i18n-content*/'CANCEL'),
       remoting.MessageWindow.quitApp,
       kConnectionTimeout,
       remoting.LoadingWindow.onTimeout_);

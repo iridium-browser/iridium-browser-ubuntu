@@ -4,7 +4,7 @@
 
 #include "cc/output/begin_frame_args.h"
 
-#include "base/debug/trace_event_argument.h"
+#include "base/trace_event/trace_event_argument.h"
 #include "ui/gfx/frame_time.h"
 
 namespace cc {
@@ -15,8 +15,6 @@ const char* BeginFrameArgs::TypeToString(BeginFrameArgsType type) {
       return "INVALID";
     case BeginFrameArgs::NORMAL:
       return "NORMAL";
-    case BeginFrameArgs::SYNCHRONOUS:
-      return "SYNCHRONOUS";
     case BeginFrameArgs::MISSED:
       return "MISSED";
     case BeginFrameArgs::BEGIN_FRAME_ARGS_TYPE_MAX:
@@ -59,15 +57,15 @@ BeginFrameArgs BeginFrameArgs::Create(BeginFrameArgs::CreationLocation location,
 #endif
 }
 
-scoped_refptr<base::debug::ConvertableToTraceFormat> BeginFrameArgs::AsValue()
-    const {
-  scoped_refptr<base::debug::TracedValue> state =
-      new base::debug::TracedValue();
+scoped_refptr<base::trace_event::ConvertableToTraceFormat>
+BeginFrameArgs::AsValue() const {
+  scoped_refptr<base::trace_event::TracedValue> state =
+      new base::trace_event::TracedValue();
   AsValueInto(state.get());
   return state;
 }
 
-void BeginFrameArgs::AsValueInto(base::debug::TracedValue* state) const {
+void BeginFrameArgs::AsValueInto(base::trace_event::TracedValue* state) const {
   state->SetString("type", "BeginFrameArgs");
   state->SetString("subtype", TypeToString(type));
   state->SetDouble("frame_time_us", frame_time.ToInternalValue());

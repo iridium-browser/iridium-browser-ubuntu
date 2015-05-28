@@ -10,6 +10,7 @@ import ctypes
 import ctypes.util
 import errno
 import os
+import signal
 # Note: We avoid cros_build_lib here as that's a "large" module and we want
 # to keep this "light" and standalone.  The subprocess usage in here is also
 # simple by design -- if it gets more complicated, we should look at using
@@ -19,6 +20,7 @@ import sys
 
 from chromite.lib import osutils
 from chromite.lib import process_util
+from chromite.lib import proctitle
 
 
 CLONE_FS = 0x00000200
@@ -91,10 +93,26 @@ def _ReapChildren(pid):
     except OSError as e:
       if e.errno == errno.ECHILD:
         break
-      else:
+      elif e.errno != errno.EINTR:
         raise
 
   return pid_status
+
+
+def _SafeTcSetPgrp(fd, pgrp):
+  """Set |pgrp| as the controller of the tty |fd|."""
+  try:
+    curr_pgrp = os.tcgetpgrp(fd)
+  except OSError as e:
+    # This can come up when the fd is not connected to a terminal.
+    if e.errno == errno.ENOTTY:
+      return
+    raise
+
+  # We can change the owner only if currently own it.  Otherwise we'll get
+  # stopped by the kernel with SIGTTOU and that'll hit the whole group.
+  if curr_pgrp == os.getpgrp():
+    os.tcsetpgrp(fd, pgrp)
 
 
 def CreatePidNs():
@@ -127,6 +145,15 @@ def CreatePidNs():
   # It is only allowed to fork once too.
   pid = os.fork()
   if pid:
+    proctitle.settitle('pid ns', 'external init')
+
+    # Mask SIGINT with the assumption that the child will catch & process it.
+    # We'll pass that back up below.
+    signal.signal(signal.SIGINT, signal.SIG_IGN)
+
+    # Forward the control of the terminal to the child so it can manage input.
+    _SafeTcSetPgrp(sys.stdin.fileno(), pid)
+
     # Reap the children as the parent of the new namespace.
     process_util.ExitAsStatus(_ReapChildren(pid))
   else:
@@ -145,9 +172,27 @@ def CreatePidNs():
 
     pid = os.fork()
     if pid:
+      proctitle.settitle('pid ns', 'init')
+
+      # Mask SIGINT with the assumption that the child will catch & process it.
+      # We'll pass that back up below.
+      signal.signal(signal.SIGINT, signal.SIG_IGN)
+
+      # Now that we're in a new pid namespace, start a new process group so that
+      # children have something valid to use.  Otherwise getpgrp/etc... will get
+      # back 0 which tends to confuse -- you can't setpgrp(0) for example.
+      os.setpgrp()
+
+      # Forward the control of the terminal to the child so it can manage input.
+      _SafeTcSetPgrp(sys.stdin.fileno(), pid)
+
       # Watch all of the children.  We need to act as the master inside the
       # namespace and reap old processes.
       process_util.ExitAsStatus(_ReapChildren(pid))
+
+  # Create a process group for the grandchild so it can manage things
+  # independent of the init process.
+  os.setpgrp()
 
   # The grandchild will return and take over the rest of the sdk steps.
   return first_pid

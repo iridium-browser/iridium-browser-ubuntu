@@ -35,12 +35,12 @@
 
 namespace blink {
 
-class InspectorController;
+class DevToolsEmulator;
 class Settings;
 
 class WebSettingsImpl final : public WebSettings {
 public:
-    explicit WebSettingsImpl(Settings*, InspectorController*);
+    WebSettingsImpl(Settings*, DevToolsEmulator*);
     virtual ~WebSettingsImpl() { }
 
     virtual bool mainFrameResizesAreOrientationChanges() const override;
@@ -60,7 +60,6 @@ public:
     virtual void setAllowFileAccessFromFileURLs(bool) override;
     virtual void setAllowCustomScrollbarInMainFrame(bool) override;
     virtual void setAllowRunningOfInsecureContent(bool) override;
-    virtual void setAllowConnectingInsecureWebSocket(bool) override;
     virtual void setAllowScriptsToCloseWindows(bool) override;
     virtual void setAllowUniversalAccessFromFileURLs(bool) override;
     virtual void setAntialiased2dCanvasEnabled(bool) override;
@@ -85,6 +84,7 @@ public:
     virtual void setDeviceSupportsMouse(bool) override;
     virtual void setDeviceSupportsTouch(bool) override;
 
+    virtual void setDisableReadingFromCanvas(bool) override;
     virtual void setDoubleTapToZoomEnabled(bool) override;
     virtual void setDownloadableBinaryFontsEnabled(bool) override;
     virtual void setEditingBehavior(EditingBehavior) override;
@@ -124,7 +124,6 @@ public:
     virtual void setPerTilePaintingEnabled(bool) override;
     virtual void setPictographFontFamily(const WebString&, UScriptCode = USCRIPT_COMMON) override;
     virtual void setPinchOverlayScrollbarThickness(int) override;
-    virtual void setPinchVirtualViewportEnabled(bool) override;
     virtual void setPluginsEnabled(bool) override;
     virtual void setAvailablePointerTypes(int) override;
     virtual void setPrimaryPointerType(PointerType) override;
@@ -157,6 +156,13 @@ public:
     virtual void setTextAreasAreResizable(bool) override;
     virtual void setTextAutosizingEnabled(bool) override;
     virtual void setAccessibilityFontScaleFactor(float) override;
+    virtual void setTextTrackBackgroundColor(const WebString&);
+    virtual void setTextTrackFontFamily(const WebString&);
+    virtual void setTextTrackFontStyle(const WebString&);
+    virtual void setTextTrackFontVariant(const WebString&);
+    virtual void setTextTrackTextColor(const WebString&);
+    virtual void setTextTrackTextShadow(const WebString&);
+    virtual void setTextTrackTextSize(const WebString&);
     virtual void setThreadedScrollingEnabled(bool) override;
     virtual void setTouchDragDropEnabled(bool) override;
     virtual void setTouchEditingEnabled(bool) override;
@@ -164,11 +170,10 @@ public:
     virtual void setUnsafePluginPastingEnabled(bool) override;
     virtual void setUsesEncodingDetector(bool) override;
     virtual void setUseLegacyBackgroundSizeShorthandBehavior(bool) override;
+    virtual void setUseMobileViewportStyle(bool) override;
     virtual void setUseSolidColorScrollbars(bool) override;
     virtual void setUseWideViewport(bool) override;
     virtual void setV8CacheOptions(V8CacheOptions) override;
-    virtual void setV8ScriptStreamingEnabled(bool) override;
-    virtual void setV8ScriptStreamingMode(V8ScriptStreamingMode) override;
     virtual void setValidationMessageTimerMagnification(int) override;
     virtual void setViewportEnabled(bool) override;
     virtual void setViewportMetaEnabled(bool) override;
@@ -186,7 +191,7 @@ public:
     bool showPaintRects() const { return m_showPaintRects; }
     bool renderVSyncNotificationEnabled() const { return m_renderVSyncNotificationEnabled; }
     bool autoZoomFocusedNodeToLegibleScale() const { return m_autoZoomFocusedNodeToLegibleScale; }
-    bool doubleTapToZoomEnabled() const { return m_doubleTapToZoomEnabled; }
+    bool doubleTapToZoomEnabled() const;
     bool perTilePaintingEnabled() const { return m_perTilePaintingEnabled; }
     bool supportDeprecatedTargetDensityDPI() const { return m_supportDeprecatedTargetDensityDPI; }
     bool viewportMetaLayoutSizeQuirk() const { return m_viewportMetaLayoutSizeQuirk; }
@@ -198,13 +203,12 @@ public:
 
 private:
     Settings* m_settings;
-    InspectorController* m_inspectorController;
+    DevToolsEmulator* m_devToolsEmulator;
     bool m_showFPSCounter;
     bool m_showPaintRects;
     bool m_renderVSyncNotificationEnabled;
     bool m_autoZoomFocusedNodeToLegibleScale;
     bool m_deferredImageDecodingEnabled;
-    bool m_doubleTapToZoomEnabled;
     bool m_perTilePaintingEnabled;
     bool m_supportDeprecatedTargetDensityDPI;
     bool m_shrinksViewportContentToFit;

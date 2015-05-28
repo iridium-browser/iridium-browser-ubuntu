@@ -25,16 +25,27 @@
 #include "base/threading/sequenced_worker_pool.h"
 #include "base/threading/thread_checker.h"
 #include "base/timer/timer.h"
-#include "components/component_updater/component_patcher_operation.h"
-#include "components/component_updater/component_unpacker.h"
-#include "components/component_updater/component_updater_configurator.h"
-#include "components/component_updater/component_updater_ping_manager.h"
-#include "components/component_updater/component_updater_utils.h"
-#include "components/component_updater/crx_downloader.h"
-#include "components/component_updater/crx_update_item.h"
-#include "components/component_updater/update_checker.h"
-#include "components/component_updater/update_response.h"
+#include "components/update_client/component_patcher_operation.h"
+#include "components/update_client/component_unpacker.h"
+#include "components/update_client/configurator.h"
+#include "components/update_client/crx_downloader.h"
+#include "components/update_client/crx_update_item.h"
+#include "components/update_client/ping_manager.h"
+#include "components/update_client/update_checker.h"
+#include "components/update_client/update_client.h"
+#include "components/update_client/update_response.h"
+#include "components/update_client/utils.h"
 #include "url/gurl.h"
+
+using update_client::ComponentInstaller;
+using update_client::ComponentUnpacker;
+using update_client::Configurator;
+using update_client::CrxComponent;
+using update_client::CrxDownloader;
+using update_client::CrxUpdateItem;
+using update_client::PingManager;
+using update_client::UpdateChecker;
+using update_client::UpdateResponse;
 
 namespace component_updater {
 
@@ -65,28 +76,6 @@ void AppendDownloadMetrics(
 
 }  // namespace
 
-CrxUpdateItem::CrxUpdateItem()
-    : status(kNew),
-      on_demand(false),
-      diff_update_failed(false),
-      error_category(0),
-      error_code(0),
-      extra_code1(0),
-      diff_error_category(0),
-      diff_error_code(0),
-      diff_extra_code1(0) {
-}
-
-CrxUpdateItem::~CrxUpdateItem() {
-}
-
-CrxComponent::CrxComponent()
-    : installer(NULL), allow_background_download(true) {
-}
-
-CrxComponent::~CrxComponent() {
-}
-
 //////////////////////////////////////////////////////////////////////////////
 // The one and only implementation of the ComponentUpdateService interface. In
 // charge of running the show. The main method is ProcessPendingItems() which
@@ -111,6 +100,7 @@ class CrxUpdateService : public ComponentUpdateService, public OnDemandUpdater {
   Status Start() override;
   Status Stop() override;
   Status RegisterComponent(const CrxComponent& component) override;
+  Status UnregisterComponent(const std::string& crx_id) override;
   std::vector<std::string> GetComponentIDs() const override;
   OnDemandUpdater& GetOnDemandUpdater() override;
   void MaybeThrottle(const std::string& crx_id,
@@ -119,7 +109,7 @@ class CrxUpdateService : public ComponentUpdateService, public OnDemandUpdater {
 
   // Context for a crx download url request.
   struct CRXContext {
-    ComponentInstaller* installer;
+    scoped_refptr<ComponentInstaller> installer;
     std::vector<uint8_t> pk_hash;
     std::string id;
     std::string fingerprint;
@@ -164,6 +154,9 @@ class CrxUpdateService : public ComponentUpdateService, public OnDemandUpdater {
   Status OnDemandUpdateWithCooldown(CrxUpdateItem* item);
 
   void ProcessPendingItems();
+
+  // Uninstall and remove all unregistered work items.
+  void UninstallUnregisteredItems();
 
   // Find a component that is ready to update.
   CrxUpdateItem* FindReadyComponent() const;
@@ -443,6 +436,7 @@ ComponentUpdateService::Status CrxUpdateService::RegisterComponent(
   CrxUpdateItem* uit = FindUpdateItemById(id);
   if (uit) {
     uit->component = component;
+    uit->unregistered = false;
     return kReplaced;
   }
 
@@ -469,6 +463,19 @@ ComponentUpdateService::Status CrxUpdateService::RegisterComponent(
     }
   }
 
+  return kOk;
+}
+
+ComponentUpdateService::Status CrxUpdateService::UnregisterComponent(
+    const std::string& crx_id) {
+  auto it = std::find_if(work_items_.begin(), work_items_.end(),
+                         CrxUpdateItem::FindById(crx_id));
+  if (it == work_items_.end())
+    return kError;
+
+  (*it)->unregistered = true;
+
+  ScheduleNextRun(kStepDelayShort);
   return kOk;
 }
 
@@ -503,7 +510,7 @@ void CrxUpdateService::MaybeThrottle(const std::string& crx_id,
 
 scoped_refptr<base::SequencedTaskRunner>
 CrxUpdateService::GetSequencedTaskRunner() {
-  return config_->GetSequencedTaskRunner();
+  return blocking_task_runner_;
 }
 
 bool CrxUpdateService::GetComponentDetails(const std::string& component_id,
@@ -535,8 +542,24 @@ void CrxUpdateService::ProcessPendingItems() {
     return;
   }
 
+  UninstallUnregisteredItems();
+
   if (!CheckForUpdates())
     ScheduleNextRun(kStepDelayLong);
+}
+
+void CrxUpdateService::UninstallUnregisteredItems() {
+  std::vector<CrxUpdateItem*> new_work_items;
+  for (CrxUpdateItem* item : work_items_) {
+    scoped_ptr<CrxUpdateItem> owned_item(item);
+    if (owned_item->unregistered) {
+      const bool success = owned_item->component.installer->Uninstall();
+      DCHECK(success);
+    } else {
+      new_work_items.push_back(owned_item.release());
+    }
+  }
+  new_work_items.swap(work_items_);
 }
 
 CrxUpdateItem* CrxUpdateService::FindReadyComponent() const {
@@ -792,6 +815,7 @@ void CrxUpdateService::DownloadComplete(
   DCHECK(thread_checker_.CalledOnValidThread());
 
   CrxUpdateItem* crx = FindUpdateItemById(crx_context->id);
+
   DCHECK(crx->status == CrxUpdateItem::kDownloadingDiff ||
          crx->status == CrxUpdateItem::kDownloading);
 
@@ -869,7 +893,7 @@ void CrxUpdateService::EndUnpacking(const std::string& component_id,
                                     const base::FilePath& crx_path,
                                     ComponentUnpacker::Error error,
                                     int extended_error) {
-  if (!DeleteFileAndEmptyParentDirectory(crx_path))
+  if (!update_client::DeleteFileAndEmptyParentDirectory(crx_path))
     NOTREACHED() << crx_path.value();
   main_task_runner_->PostDelayedTask(
       FROM_HERE,
@@ -906,6 +930,7 @@ void CrxUpdateService::DoneInstalling(const std::string& component_id,
   const bool is_success = error == ComponentUnpacker::kNone;
 
   CrxUpdateItem* item = FindUpdateItemById(component_id);
+
   if (item->status == CrxUpdateItem::kUpdatingDiff && !is_success) {
     item->diff_error_category = error_category;
     item->diff_error_code = error;

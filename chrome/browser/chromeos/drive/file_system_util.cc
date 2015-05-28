@@ -58,7 +58,7 @@ std::string ReadStringFromGDocFile(const base::FilePath& file_path,
     return std::string();
   }
 
-  JSONFileValueSerializer reader(file_path);
+  JSONFileValueDeserializer reader(file_path);
   std::string error_message;
   scoped_ptr<base::Value> root_value(reader.Deserialize(NULL, &error_message));
   if (!root_value) {
@@ -121,7 +121,7 @@ base::FilePath GetDriveMountPointPath(Profile* profile) {
     // enabled. In that case, we fall back to use UserManager (it basically just
     // returns currently active users's hash in such a case.) I still try
     // ProfileHelper first because it works better in tests.
-    user_manager::User* const user =
+    const user_manager::User* const user =
         user_manager::UserManager::IsInitialized()
             ? chromeos::ProfileHelper::Get()->GetUserByProfile(
                   profile->GetOriginalProfile())
@@ -133,7 +133,7 @@ base::FilePath GetDriveMountPointPath(Profile* profile) {
 }
 
 FileSystemInterface* GetFileSystemByProfile(Profile* profile) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   DriveIntegrationService* integration_service =
       GetIntegrationServiceByProfile(profile);
@@ -141,7 +141,7 @@ FileSystemInterface* GetFileSystemByProfile(Profile* profile) {
 }
 
 FileSystemInterface* GetFileSystemByProfileId(void* profile_id) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   // |profile_id| needs to be checked with ProfileManager::IsValidProfile
   // before using it.
@@ -152,7 +152,7 @@ FileSystemInterface* GetFileSystemByProfileId(void* profile_id) {
 }
 
 DriveAppRegistry* GetDriveAppRegistryByProfile(Profile* profile) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   DriveIntegrationService* integration_service =
       GetIntegrationServiceByProfile(profile);
@@ -162,7 +162,7 @@ DriveAppRegistry* GetDriveAppRegistryByProfile(Profile* profile) {
 }
 
 DriveServiceInterface* GetDriveServiceByProfile(Profile* profile) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   DriveIntegrationService* integration_service =
       GetIntegrationServiceByProfile(profile);
@@ -192,7 +192,7 @@ base::FilePath ExtractDrivePath(const base::FilePath& path) {
 }
 
 Profile* ExtractProfileFromPath(const base::FilePath& path) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   const std::vector<Profile*>& profiles =
       g_browser_process->profile_manager()->GetLoadedProfiles();
@@ -268,7 +268,7 @@ std::string NormalizeFileName(const std::string& input) {
 void PrepareWritableFileAndRun(Profile* profile,
                                const base::FilePath& path,
                                const PrepareWritableFileCallback& callback) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(!callback.is_null());
 
   FileSystemInterface* file_system = GetFileSystemByProfile(profile);
@@ -287,7 +287,7 @@ void PrepareWritableFileAndRun(Profile* profile,
 void EnsureDirectoryExists(Profile* profile,
                            const base::FilePath& directory,
                            const FileOperationCallback& callback) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
   DCHECK(!callback.is_null());
   if (IsUnderDriveMountPoint(directory)) {
     FileSystemInterface* file_system = GetFileSystemByProfile(profile);
@@ -325,7 +325,7 @@ std::string ReadResourceIdFromGDocFile(const base::FilePath& file_path) {
 }
 
 bool IsDriveEnabledForProfile(Profile* profile) {
-  DCHECK(BrowserThread::CurrentlyOn(BrowserThread::UI));
+  DCHECK_CURRENTLY_ON(BrowserThread::UI);
 
   if (!chromeos::IsProfileAssociatedWithGaiaAccount(profile))
     return false;

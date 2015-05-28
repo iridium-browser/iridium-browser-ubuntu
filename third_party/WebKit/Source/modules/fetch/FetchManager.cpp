@@ -9,6 +9,7 @@
 #include "bindings/core/v8/ScriptPromiseResolver.h"
 #include "bindings/core/v8/ScriptState.h"
 #include "bindings/core/v8/V8ThrowException.h"
+#include "core/dom/DOMArrayBuffer.h"
 #include "core/dom/ExceptionCode.h"
 #include "core/fetch/FetchUtils.h"
 #include "core/fileapi/Blob.h"
@@ -21,7 +22,9 @@
 #include "modules/fetch/FetchRequestData.h"
 #include "modules/fetch/Response.h"
 #include "modules/fetch/ResponseInit.h"
+#include "platform/network/ResourceError.h"
 #include "platform/network/ResourceRequest.h"
+#include "platform/network/ResourceResponse.h"
 #include "platform/weborigin/SecurityOrigin.h"
 #include "public/platform/WebURLRequest.h"
 #include "wtf/HashSet.h"
@@ -31,13 +34,13 @@ namespace blink {
 class FetchManager::Loader final : public NoBaseWillBeGarbageCollectedFinalized<FetchManager::Loader>, public ThreadableLoaderClient, public ContextLifecycleObserver {
     WILL_BE_USING_GARBAGE_COLLECTED_MIXIN(FetchManager::Loader);
 public:
-    static PassOwnPtrWillBeRawPtr<Loader> create(ExecutionContext* executionContext, FetchManager* fetchManager, PassRefPtrWillBeRawPtr<ScriptPromiseResolver> resolver, const FetchRequestData* request)
+    static PassOwnPtrWillBeRawPtr<Loader> create(ExecutionContext* executionContext, FetchManager* fetchManager, PassRefPtrWillBeRawPtr<ScriptPromiseResolver> resolver, FetchRequestData* request)
     {
         return adoptPtrWillBeNoop(new Loader(executionContext, fetchManager, resolver, request));
     }
 
     ~Loader() override;
-    void trace(Visitor*) override;
+    DECLARE_VIRTUAL_TRACE();
 
     void didReceiveResponse(unsigned long, const ResourceResponse&, PassOwnPtr<WebDataConsumerHandle>) override;
     void didReceiveData(const char*, unsigned) override;
@@ -47,10 +50,38 @@ public:
     void didFailRedirectCheck() override;
 
     void start();
-    void cleanup();
+    void cancel();
+    void dispose();
 
 private:
-    Loader(ExecutionContext*, FetchManager*, PassRefPtrWillBeRawPtr<ScriptPromiseResolver>, const FetchRequestData*);
+    class Canceller : public BodyStreamBuffer::Canceller {
+    public:
+        explicit Canceller(Loader* loader) : m_loader(loader) { }
+        void cancel() override
+        {
+            if (m_loader)
+                m_loader->cancel();
+        }
+
+#if !ENABLE(OILPAN)
+        // FIXME: This function should go away once Oilpan is shipped.
+        void disconnect() { m_loader = nullptr; }
+#endif
+
+        DEFINE_INLINE_VIRTUAL_TRACE()
+        {
+            visitor->trace(m_loader);
+            BodyStreamBuffer::Canceller::trace(visitor);
+        }
+
+    private:
+        // |m_loader| is a raw ptr in non-oilpan circumstance to avoid
+        // circular reference. It will be cleared when the loader is destructed.
+        RawPtrWillBeMember<Loader> m_loader;
+    };
+
+
+    Loader(ExecutionContext*, FetchManager*, PassRefPtrWillBeRawPtr<ScriptPromiseResolver>, FetchRequestData*);
 
     void performBasicFetch();
     void performNetworkError(const String& message);
@@ -63,30 +94,40 @@ private:
     PersistentWillBeMember<FetchRequestData> m_request;
     PersistentWillBeMember<BodyStreamBuffer> m_responseBuffer;
     RefPtr<ThreadableLoader> m_loader;
+    // Hold as a member in order to call |disconnect|. This member can be
+    // eliminated once Oilpan is shipped.
+    PersistentWillBeMember<Canceller> m_canceller;
     bool m_failed;
+    bool m_finished;
 };
 
-FetchManager::Loader::Loader(ExecutionContext* executionContext, FetchManager* fetchManager, PassRefPtrWillBeRawPtr<ScriptPromiseResolver> resolver, const FetchRequestData* request)
+FetchManager::Loader::Loader(ExecutionContext* executionContext, FetchManager* fetchManager, PassRefPtrWillBeRawPtr<ScriptPromiseResolver> resolver, FetchRequestData* request)
     : ContextLifecycleObserver(executionContext)
     , m_fetchManager(fetchManager)
     , m_resolver(resolver)
-    , m_request(request->createCopy())
+    , m_request(request)
+    , m_canceller(new Canceller(this))
     , m_failed(false)
+    , m_finished(false)
 {
 }
 
 FetchManager::Loader::~Loader()
 {
-    if (m_loader)
-        m_loader->cancel();
+    ASSERT(!m_loader);
+#if !ENABLE(OILPAN)
+    // FIXME: This should go away once Oilpan is shipped.
+    m_canceller->disconnect();
+#endif
 }
 
-void FetchManager::Loader::trace(Visitor* visitor)
+DEFINE_TRACE(FetchManager::Loader)
 {
     visitor->trace(m_fetchManager);
     visitor->trace(m_resolver);
     visitor->trace(m_request);
     visitor->trace(m_responseBuffer);
+    visitor->trace(m_canceller);
     ContextLifecycleObserver::trace(visitor);
 }
 
@@ -110,14 +151,14 @@ void FetchManager::Loader::didReceiveResponse(unsigned long, const ResourceRespo
             break;
         }
     }
-    m_responseBuffer = new BodyStreamBuffer();
+    m_responseBuffer = new BodyStreamBuffer(m_canceller);
     FetchResponseData* responseData = FetchResponseData::createWithBuffer(m_responseBuffer);
     responseData->setStatus(response.httpStatusCode());
     responseData->setStatusMessage(response.httpStatusText());
     for (auto& it : response.httpHeaderFields())
         responseData->headerList()->append(it.key, it.value);
     responseData->setURL(response.url());
-    responseData->setContentTypeForBuffer(response.mimeType());
+    responseData->setMIMEType(response.mimeType());
 
     FetchResponseData* taintedResponse = responseData;
     switch (m_request->tainting()) {
@@ -131,7 +172,9 @@ void FetchManager::Loader::didReceiveResponse(unsigned long, const ResourceRespo
         taintedResponse = responseData->createOpaqueFilteredResponse();
         break;
     }
-    m_resolver->resolve(Response::create(m_resolver->executionContext(), taintedResponse));
+    Response* r = Response::create(m_resolver->executionContext(), taintedResponse);
+    r->headers()->setGuard(Headers::ImmutableGuard);
+    m_resolver->resolve(r);
     m_resolver.clear();
 }
 
@@ -143,8 +186,10 @@ void FetchManager::Loader::didReceiveData(const char* data, unsigned size)
 void FetchManager::Loader::didFinishLoading(unsigned long, double)
 {
     ASSERT(m_responseBuffer);
+    ASSERT(!m_failed);
     m_responseBuffer->close();
     m_responseBuffer.clear();
+    m_finished = true;
     notifyFinished();
 }
 
@@ -254,11 +299,33 @@ void FetchManager::Loader::start()
     performHTTPFetch(true, false);
 }
 
-void FetchManager::Loader::cleanup()
+void FetchManager::Loader::cancel()
+{
+    m_finished = true;
+    if (m_loader) {
+        m_loader->cancel();
+        m_loader.clear();
+    }
+    if (m_responseBuffer) {
+        m_responseBuffer->close();
+        m_responseBuffer.clear();
+    }
+    if (m_resolver) {
+        // Note: In the current implementation this branch is never taken
+        // because this function can be called only through the body stream.
+        ScriptState* scriptState = m_resolver->scriptState();
+        ScriptState::Scope scope(scriptState);
+        m_resolver->reject(V8ThrowException::createTypeError(scriptState->isolate(), "fetch is cancelled"));
+        m_resolver.clear();
+    }
+
+    notifyFinished();
+}
+
+void FetchManager::Loader::dispose()
 {
     // Prevent notification
-    m_fetchManager = 0;
-
+    m_fetchManager = nullptr;
     if (m_loader) {
         m_loader->cancel();
         m_loader.clear();
@@ -295,7 +362,7 @@ void FetchManager::Loader::performHTTPFetch(bool corsFlag, bool corsPreflightFla
     ResourceRequest request(m_request->url());
     request.setRequestContext(WebURLRequest::RequestContextFetch);
     request.setHTTPMethod(m_request->method());
-    const Vector<OwnPtr<FetchHeaderList::Header> >& list = m_request->headerList()->list();
+    const Vector<OwnPtr<FetchHeaderList::Header>>& list = m_request->headerList()->list();
     for (size_t i = 0; i < list.size(); ++i) {
         request.addHTTPHeaderField(AtomicString(list[i]->first), AtomicString(list[i]->second));
     }
@@ -354,11 +421,13 @@ void FetchManager::Loader::performHTTPFetch(bool corsFlag, bool corsPreflightFla
         break;
     }
     m_loader = ThreadableLoader::create(*executionContext(), this, request, threadableLoaderOptions, resourceLoaderOptions);
+    if (!m_loader)
+        performNetworkError("Can't create ThreadableLoader");
 }
 
 void FetchManager::Loader::failed(const String& message)
 {
-    if (m_failed)
+    if (m_failed || m_finished)
         return;
     m_failed = true;
     executionContext()->addConsoleMessage(ConsoleMessage::create(JSMessageSource, ErrorMessageLevel, message));
@@ -395,7 +464,7 @@ FetchManager::~FetchManager()
 #endif
 }
 
-ScriptPromise FetchManager::fetch(ScriptState* scriptState, const FetchRequestData* request)
+ScriptPromise FetchManager::fetch(ScriptState* scriptState, FetchRequestData* request)
 {
     RefPtrWillBeRawPtr<ScriptPromiseResolver> resolver = ScriptPromiseResolver::create(scriptState);
     ScriptPromise promise = resolver->promise();
@@ -410,19 +479,19 @@ void FetchManager::stop()
 {
     ASSERT(!m_isStopped);
     m_isStopped = true;
-    for (auto& loader : m_loaders) {
-        loader->cleanup();
-    }
+    for (auto& loader : m_loaders)
+        loader->dispose();
 }
 
 void FetchManager::onLoaderFinished(Loader* loader)
 {
     // We don't use remove here, because it may cause recursive deletion.
     OwnPtrWillBeRawPtr<Loader> p = m_loaders.take(loader);
-    ALLOW_UNUSED_LOCAL(p);
+    ASSERT(p);
+    p->dispose();
 }
 
-void FetchManager::trace(Visitor* visitor)
+DEFINE_TRACE(FetchManager)
 {
 #if ENABLE(OILPAN)
     visitor->trace(m_executionContext);

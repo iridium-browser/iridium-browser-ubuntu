@@ -28,6 +28,9 @@
 
 #define ALIGN 32
 
+#include "libavutil/ffversion.h"
+const char swr_ffversion[] = "FFmpeg version " FFMPEG_VERSION;
+
 unsigned swresample_version(void)
 {
     av_assert0(LIBSWRESAMPLE_VERSION_MICRO >= 100);
@@ -173,8 +176,7 @@ av_cold int swr_init(struct SwrContext *s){
 
     switch(s->engine){
 #if CONFIG_LIBSOXR
-        extern struct Resampler const soxr_resampler;
-        case SWR_ENGINE_SOXR: s->resampler = &soxr_resampler; break;
+        case SWR_ENGINE_SOXR: s->resampler = &swri_soxr_resampler; break;
 #endif
         case SWR_ENGINE_SWR : s->resampler = &swri_resampler; break;
         default:

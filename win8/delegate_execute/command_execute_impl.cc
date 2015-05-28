@@ -12,7 +12,6 @@
 #include "base/files/file_util.h"
 #include "base/path_service.h"
 #include "base/process/launch.h"
-#include "base/process/process_handle.h"
 #include "base/strings/utf_string_conversions.h"
 #include "base/win/message_window.h"
 #include "base/win/registry.h"
@@ -20,6 +19,7 @@
 #include "base/win/scoped_handle.h"
 #include "base/win/scoped_process_information.h"
 #include "base/win/win_util.h"
+#include "base/win/windows_version.h"
 #include "chrome/common/chrome_constants.h"
 #include "chrome/common/chrome_paths.h"
 #include "chrome/common/chrome_switches.h"
@@ -287,8 +287,7 @@ STDMETHODIMP CommandExecuteImpl::Initialize(LPCWSTR name,
     verb_ = name;
   }
 
-  base::GetProcessIntegrityLevel(base::GetCurrentProcessHandle(),
-                                 &integrity_level_);
+  integrity_level_ = base::GetCurrentProcessIntegrityLevel();
   return S_OK;
 }
 
@@ -481,6 +480,16 @@ EC_HOST_UI_MODE CommandExecuteImpl::GetLaunchMode() {
     AtlTrace("Launch mode forced by cmdline to %s\n", modes[launch_mode]);
     reg_key.WriteValue(chrome::kLaunchModeValue,
                        static_cast<DWORD>(launch_mode));
+    return launch_mode;
+  }
+
+  // As of now ActivateApplication fails on Windows 10 (Build 9926).
+  // Until there is some clarity on special status of browser in metro mode on
+  // Windows 10, we just  disable Chrome metro mode so that browser remains
+  // usable.
+  if (base::win::GetVersion() >= base::win::VERSION_WIN10) {
+    launch_mode = ECHUIM_DESKTOP;
+    launch_mode_determined = true;
     return launch_mode;
   }
 

@@ -5,7 +5,7 @@
 #include "net/udp/udp_client_socket.h"
 
 #include "net/base/net_errors.h"
-#include "net/base/net_log.h"
+#include "net/log/net_log.h"
 
 namespace net {
 
@@ -61,5 +61,11 @@ int UDPClientSocket::SetSendBufferSize(int32 size) {
 const BoundNetLog& UDPClientSocket::NetLog() const {
   return socket_.NetLog();
 }
+
+#if defined(OS_WIN)
+void UDPClientSocket::UseNonBlockingIO() {
+  socket_.UseNonBlockingIO();
+}
+#endif
 
 }  // namespace net

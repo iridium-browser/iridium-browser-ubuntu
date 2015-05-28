@@ -26,6 +26,7 @@
 #ifndef MediaKeyEvent_h
 #define MediaKeyEvent_h
 
+#include "core/CoreExport.h"
 #include "core/dom/DOMTypedArray.h"
 #include "core/events/Event.h"
 #include "core/html/MediaKeyError.h"
@@ -33,7 +34,7 @@
 
 namespace blink {
 
-class MediaKeyEvent final : public Event {
+class CORE_EXPORT MediaKeyEvent final : public Event {
     DEFINE_WRAPPERTYPEINFO();
 public:
     virtual ~MediaKeyEvent();
@@ -58,7 +59,7 @@ public:
     MediaKeyError* errorCode() const { return m_errorCode.get(); }
     unsigned short systemCode() const { return m_systemCode; }
 
-    virtual void trace(Visitor*) override;
+    DECLARE_VIRTUAL_TRACE();
 
 private:
     MediaKeyEvent();

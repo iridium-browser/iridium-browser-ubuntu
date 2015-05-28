@@ -26,18 +26,20 @@ public:
 
     // Client.idl
     String url() const { return m_url; }
+    String frameType() const;
     void postMessage(ExecutionContext*, PassRefPtr<SerializedScriptValue> message, const MessagePortArray*, ExceptionState&);
 
-    virtual void trace(Visitor*) { }
+    DEFINE_INLINE_VIRTUAL_TRACE() { }
 
 protected:
     explicit ServiceWorkerClient(const WebServiceWorkerClientInfo&);
 
-    unsigned id() const { return m_id; }
+    String uuid() const { return m_uuid; }
 
 private:
-    unsigned m_id;
+    String m_uuid;
     String m_url;
+    WebURLRequest::FrameType m_frameType;
 };
 
 } // namespace blink

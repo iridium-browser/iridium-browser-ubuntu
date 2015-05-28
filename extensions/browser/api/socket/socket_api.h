@@ -17,6 +17,10 @@
 #include "net/dns/host_resolver.h"
 #include "net/socket/tcp_client_socket.h"
 
+#if defined(OS_CHROMEOS)
+#include "extensions/browser/api/socket/app_firewall_hole_manager.h"
+#endif  // OS_CHROMEOS
+
 namespace content {
 class BrowserContext;
 class ResourceContext;
@@ -29,8 +33,8 @@ class SSLClientSocket;
 }
 
 namespace extensions {
-class TLSSocket;
 class Socket;
+class TLSSocket;
 
 // A simple interface to ApiResourceManager<Socket> or derived class. The goal
 // of this interface is to allow Socket API functions to use distinct instances
@@ -118,7 +122,22 @@ class SocketAsyncApiFunction : public AsyncApiFunction {
   void RemoveSocket(int api_resource_id);
   base::hash_set<int>* GetSocketIds();
 
+  // A no-op outside of Chrome OS.
+  void OpenFirewallHole(const std::string& address,
+                        int socket_id,
+                        Socket* socket);
+
  private:
+#if defined(OS_CHROMEOS)
+  void OpenFirewallHoleOnUIThread(AppFirewallHole::PortType type,
+                                  uint16_t port,
+                                  int socket_id);
+  void OnFirewallHoleOpened(
+      int socket_id,
+      scoped_ptr<AppFirewallHole, content::BrowserThread::DeleteOnUIThread>
+          hole);
+#endif  // OS_CHROMEOS
+
   scoped_ptr<SocketResourceManagerInterface> manager_;
 };
 
@@ -230,7 +249,7 @@ class SocketBindFunction : public SocketAsyncApiFunction {
 
   // AsyncApiFunction:
   bool Prepare() override;
-  void Work() override;
+  void AsyncWorkStart() override;
 
  private:
   int socket_id_;
@@ -249,7 +268,7 @@ class SocketListenFunction : public SocketAsyncApiFunction {
 
   // AsyncApiFunction:
   bool Prepare() override;
-  void Work() override;
+  void AsyncWorkStart() override;
 
  private:
   scoped_ptr<core_api::socket::Listen::Params> params_;

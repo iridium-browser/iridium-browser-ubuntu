@@ -106,6 +106,7 @@ MixedContentChecker::ContextType MixedContentChecker::contextTypeFromContext(Web
     case WebURLRequest::RequestContextAudio:
     case WebURLRequest::RequestContextFavicon:
     case WebURLRequest::RequestContextImage:
+    case WebURLRequest::RequestContextPlugin:
     case WebURLRequest::RequestContextVideo:
         return ContextTypeOptionallyBlockable;
 
@@ -140,7 +141,6 @@ MixedContentChecker::ContextType MixedContentChecker::contextTypeFromContext(Web
     // FIXME: Contexts that we should block, but don't currently. https://crbug.com/388650
     case WebURLRequest::RequestContextDownload:
     case WebURLRequest::RequestContextInternal:
-    case WebURLRequest::RequestContextPlugin:
     case WebURLRequest::RequestContextPrefetch:
         return ContextTypeShouldBeBlockable;
 
@@ -229,7 +229,7 @@ const char* MixedContentChecker::typeNameFromContext(WebURLRequest::RequestConte
 }
 
 // static
-void MixedContentChecker::logToConsole(LocalFrame* frame, const KURL& url, WebURLRequest::RequestContext requestContext, bool allowed)
+void MixedContentChecker::logToConsoleAboutFetch(LocalFrame* frame, const KURL& url, WebURLRequest::RequestContext requestContext, bool allowed)
 {
     String message = String::format(
         "Mixed Content: The page at '%s' was loaded over HTTPS, but requested an insecure %s '%s'. %s",
@@ -329,18 +329,30 @@ bool MixedContentChecker::shouldBlockFetch(LocalFrame* frame, WebURLRequest::Req
         break;
 
     case ContextTypeShouldBeBlockable:
-        allowed = true;
-        client->didDisplayInsecureContent();
+        allowed = !strictMode;
+        if (allowed)
+            client->didDisplayInsecureContent();
         break;
     };
 
     if (reportingStatus == SendReport)
-        logToConsole(frame, url, requestContext, allowed);
+        logToConsoleAboutFetch(frame, url, requestContext, allowed);
     return !allowed;
 }
 
 // static
-bool MixedContentChecker::shouldBlockConnection(LocalFrame* frame, const KURL& url, MixedContentChecker::ReportingStatus reportingStatus)
+void MixedContentChecker::logToConsoleAboutWebSocket(LocalFrame* frame, const KURL& url, bool allowed)
+{
+    String message = String::format(
+        "Mixed Content: The page at '%s' was loaded over HTTPS, but attempted to connect to the insecure WebSocket endpoint '%s'. %s",
+        frame->document()->url().elidedString().utf8().data(), url.elidedString().utf8().data(),
+        allowed ? "This endpoint should be available via WSS. Insecure access is deprecated." : "This request has been blocked; this endpoint must be available over WSS.");
+    MessageLevel messageLevel = allowed ? WarningMessageLevel : ErrorMessageLevel;
+    frame->document()->addConsoleMessage(ConsoleMessage::create(SecurityMessageSource, messageLevel, message));
+}
+
+// static
+bool MixedContentChecker::shouldBlockWebSocket(LocalFrame* frame, const KURL& url, MixedContentChecker::ReportingStatus reportingStatus)
 {
     LocalFrame* mixedFrame = inWhichFrameIsContentMixed(frame, WebURLRequest::FrameTypeNone, url);
     if (!mixedFrame)
@@ -349,25 +361,24 @@ bool MixedContentChecker::shouldBlockConnection(LocalFrame* frame, const KURL& u
     UseCounter::count(mixedFrame, UseCounter::MixedContentPresent);
     UseCounter::count(mixedFrame, UseCounter::MixedContentWebSocket);
 
-    // If we're in strict mode, we'll automagically fail everything, and intentionally skip
-    // the client checks in order to prevent degrading the site's security UI.
-    bool strictMode = mixedFrame->document()->shouldEnforceStrictMixedContentChecking();
-
     Settings* settings = mixedFrame->settings();
     FrameLoaderClient* client = mixedFrame->loader().client();
     SecurityOrigin* securityOrigin = mixedFrame->document()->securityOrigin();
-    bool allowedPerSettings = settings && (settings->allowRunningOfInsecureContent() || settings->allowConnectingInsecureWebSocket());
-    bool allowed = !strictMode && client->allowRunningInsecureContent(allowedPerSettings, securityOrigin, url);
+    bool allowed = false;
 
-    if (reportingStatus == SendReport) {
-        String message = String::format(
-            "Mixed Content: The page at '%s' was loaded over HTTPS, but attempted to connect to the insecure WebSocket endpoint '%s'. %s",
-            frame->document()->url().elidedString().utf8().data(), url.elidedString().utf8().data(),
-            allowed ? "This endpoint should be available via WSS. Insecure access is deprecated." : "This request has been blocked; this endpoint must be available over WSS.");
-        MessageLevel messageLevel = allowed ? WarningMessageLevel : ErrorMessageLevel;
-        mixedFrame->document()->addConsoleMessage(ConsoleMessage::create(SecurityMessageSource, messageLevel, message));
+    // If we're in strict mode, we'll automagically fail everything, and intentionally skip
+    // the client checks in order to prevent degrading the site's security UI.
+    bool strictMode = mixedFrame->document()->shouldEnforceStrictMixedContentChecking() || settings->strictMixedContentChecking();
+    if (!strictMode) {
+        bool allowedPerSettings = settings && settings->allowRunningOfInsecureContent();
+        allowed = client->allowRunningInsecureContent(allowedPerSettings, securityOrigin, url);
     }
 
+    if (allowed)
+        client->didRunInsecureContent(securityOrigin, url);
+
+    if (reportingStatus == SendReport)
+        logToConsoleAboutWebSocket(frame, url, allowed);
     return !allowed;
 }
 
@@ -402,13 +413,8 @@ void MixedContentChecker::checkMixedPrivatePublic(LocalFrame* frame, const Atomi
     if (!frame || !frame->document() || !frame->document()->loader())
         return;
 
-    KURL documentIP(ParsedURLString, "http://" + frame->document()->loader()->response().remoteIPAddress());
-    KURL resourceIP(ParsedURLString, "http://" + resourceIPAddress);
-
     // Just count these for the moment, don't block them.
-    //
-    // FIXME: Once we know how we want to check this, adjust the platform APIs to avoid the KURL construction.
-    if (Platform::current()->isReservedIPAddress(resourceIP) && !Platform::current()->isReservedIPAddress(documentIP))
+    if (Platform::current()->isReservedIPAddress(resourceIPAddress) && !frame->document()->isHostedInReservedIPRange())
         UseCounter::count(frame->document(), UseCounter::MixedContentPrivateHostnameInPublicHostname);
 }
 

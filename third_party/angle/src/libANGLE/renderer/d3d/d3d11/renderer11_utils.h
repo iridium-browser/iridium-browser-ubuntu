@@ -50,7 +50,8 @@ D3D11_QUERY ConvertQueryType(GLenum queryType);
 namespace d3d11_gl
 {
 
-void GenerateCaps(ID3D11Device *device, gl::Caps *caps, gl::TextureCapsMap *textureCapsMap, gl::Extensions *extensions);
+GLint GetMaximumClientVersion(D3D_FEATURE_LEVEL featureLevel);
+void GenerateCaps(ID3D11Device *device, ID3D11DeviceContext *deviceContext, gl::Caps *caps, gl::TextureCapsMap *textureCapsMap, gl::Extensions *extensions);
 
 }
 
@@ -180,7 +181,7 @@ inline void SetBufferData(ID3D11DeviceContext *context, ID3D11Buffer *constantBu
 
 gl::Error GetAttachmentRenderTarget(const gl::FramebufferAttachment *attachment, RenderTarget11 **outRT);
 
-Workarounds GenerateWorkarounds();
+Workarounds GenerateWorkarounds(D3D_FEATURE_LEVEL featureLevel);
 
 }
 

@@ -4,7 +4,7 @@
 
 #include "cc/resources/display_list_raster_source.h"
 
-#include "base/debug/trace_event.h"
+#include "base/trace_event/trace_event.h"
 #include "cc/base/region.h"
 #include "cc/debug/debug_colors.h"
 #include "cc/resources/display_item_list.h"
@@ -26,14 +26,12 @@ const bool kDefaultClearCanvasSetting = true;
 
 namespace cc {
 
-scoped_refptr<DisplayListRasterSource> DisplayListRasterSource::Create() {
-  return make_scoped_refptr(new DisplayListRasterSource);
-}
-
 scoped_refptr<DisplayListRasterSource>
 DisplayListRasterSource::CreateFromDisplayListRecordingSource(
-    const DisplayListRecordingSource* other) {
-  return make_scoped_refptr(new DisplayListRasterSource(other));
+    const DisplayListRecordingSource* other,
+    bool can_use_lcd_text) {
+  return make_scoped_refptr(
+      new DisplayListRasterSource(other, can_use_lcd_text));
 }
 
 DisplayListRasterSource::DisplayListRasterSource()
@@ -48,11 +46,12 @@ DisplayListRasterSource::DisplayListRasterSource()
 }
 
 DisplayListRasterSource::DisplayListRasterSource(
-    const DisplayListRecordingSource* other)
+    const DisplayListRecordingSource* other,
+    bool can_use_lcd_text)
     : display_list_(other->display_list_),
-      background_color_(SK_ColorTRANSPARENT),
-      requires_clear_(true),
-      can_use_lcd_text_(other->can_use_lcd_text_),
+      background_color_(other->background_color_),
+      requires_clear_(other->requires_clear_),
+      can_use_lcd_text_(can_use_lcd_text),
       is_solid_color_(other->is_solid_color_),
       solid_color_(other->solid_color_),
       recorded_viewport_(other->recorded_viewport_),
@@ -63,6 +62,24 @@ DisplayListRasterSource::DisplayListRasterSource(
       should_attempt_to_use_distance_field_text_(false) {
 }
 
+DisplayListRasterSource::DisplayListRasterSource(
+    const DisplayListRasterSource* other,
+    bool can_use_lcd_text)
+    : display_list_(other->display_list_),
+      background_color_(other->background_color_),
+      requires_clear_(other->requires_clear_),
+      can_use_lcd_text_(can_use_lcd_text),
+      is_solid_color_(other->is_solid_color_),
+      solid_color_(other->solid_color_),
+      recorded_viewport_(other->recorded_viewport_),
+      size_(other->size_),
+      clear_canvas_with_debug_color_(kDefaultClearCanvasSetting),
+      slow_down_raster_scale_factor_for_debug_(
+          other->slow_down_raster_scale_factor_for_debug_),
+      should_attempt_to_use_distance_field_text_(
+          other->should_attempt_to_use_distance_field_text_) {
+}
+
 DisplayListRasterSource::~DisplayListRasterSource() {
 }
 
@@ -70,13 +87,13 @@ void DisplayListRasterSource::PlaybackToSharedCanvas(
     SkCanvas* canvas,
     const gfx::Rect& canvas_rect,
     float contents_scale) const {
-  RasterCommon(canvas, NULL, canvas_rect, contents_scale, false);
+  RasterCommon(canvas, NULL, canvas_rect, contents_scale);
 }
 
 void DisplayListRasterSource::RasterForAnalysis(skia::AnalysisCanvas* canvas,
                                                 const gfx::Rect& canvas_rect,
                                                 float contents_scale) const {
-  RasterCommon(canvas, canvas, canvas_rect, contents_scale, true);
+  RasterCommon(canvas, canvas, canvas_rect, contents_scale);
 }
 
 void DisplayListRasterSource::PlaybackToCanvas(SkCanvas* canvas,
@@ -86,14 +103,13 @@ void DisplayListRasterSource::PlaybackToCanvas(SkCanvas* canvas,
       canvas, canvas_rect, gfx::Rect(size_), contents_scale, background_color_,
       clear_canvas_with_debug_color_, requires_clear_);
 
-  RasterCommon(canvas, NULL, canvas_rect, contents_scale, false);
+  RasterCommon(canvas, NULL, canvas_rect, contents_scale);
 }
 
 void DisplayListRasterSource::RasterCommon(SkCanvas* canvas,
                                            SkDrawPictureCallback* callback,
                                            const gfx::Rect& canvas_rect,
-                                           float contents_scale,
-                                           bool is_analysis) const {
+                                           float contents_scale) const {
   canvas->translate(-canvas_rect.x(), -canvas_rect.y());
   gfx::Rect content_rect =
       gfx::ToEnclosingRect(gfx::ScaleRect(gfx::Rect(size_), contents_scale));
@@ -143,7 +159,16 @@ void DisplayListRasterSource::GatherPixelRefs(
     const gfx::Rect& content_rect,
     float contents_scale,
     std::vector<SkPixelRef*>* pixel_refs) const {
-  // TODO(ajuma): Implement this.
+  DCHECK_EQ(0u, pixel_refs->size());
+
+  gfx::Rect layer_rect =
+      gfx::ScaleToEnclosingRect(content_rect, 1.0f / contents_scale);
+
+  PixelRefMap::Iterator iterator(layer_rect, display_list_.get());
+  while (iterator) {
+    pixel_refs->push_back(*iterator);
+    ++iterator;
+  }
 }
 
 bool DisplayListRasterSource::CoversRect(const gfx::Rect& content_rect,
@@ -178,20 +203,12 @@ void DisplayListRasterSource::SetShouldAttemptToUseDistanceFieldText() {
   should_attempt_to_use_distance_field_text_ = true;
 }
 
-void DisplayListRasterSource::SetBackgoundColor(SkColor background_color) {
-  background_color_ = background_color;
-}
-
-void DisplayListRasterSource::SetRequiresClear(bool requires_clear) {
-  requires_clear_ = requires_clear;
-}
-
 bool DisplayListRasterSource::ShouldAttemptToUseDistanceFieldText() const {
   return should_attempt_to_use_distance_field_text_;
 }
 
 void DisplayListRasterSource::AsValueInto(
-    base::debug::TracedValue* array) const {
+    base::trace_event::TracedValue* array) const {
   if (display_list_.get())
     TracedValue::AppendIDRef(display_list_.get(), array);
 }
@@ -203,6 +220,13 @@ void DisplayListRasterSource::DidBeginTracing() {
 
 bool DisplayListRasterSource::CanUseLCDText() const {
   return can_use_lcd_text_;
+}
+
+scoped_refptr<RasterSource> DisplayListRasterSource::CreateCloneWithoutLCDText()
+    const {
+  bool can_use_lcd_text = false;
+  return scoped_refptr<RasterSource>(
+      new DisplayListRasterSource(this, can_use_lcd_text));
 }
 
 }  // namespace cc

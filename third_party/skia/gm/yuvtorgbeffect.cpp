@@ -34,20 +34,15 @@ public:
     }
 
 protected:
-    virtual SkString onShortName() SK_OVERRIDE {
+    SkString onShortName() override {
         return SkString("yuv_to_rgb_effect");
     }
 
-    virtual SkISize onISize() SK_OVERRIDE {
+    SkISize onISize() override {
         return SkISize::Make(238, 84);
     }
 
-    virtual uint32_t onGetFlags() const SK_OVERRIDE {
-        // This is a GPU-specific GM.
-        return kGPUOnly_Flag;
-    }
-
-    virtual void onOnceBeforeDraw() SK_OVERRIDE {
+    void onOnceBeforeDraw() override {
         SkImageInfo yinfo = SkImageInfo::MakeA8(YSIZE, YSIZE);
         fBmp[0].allocPixels(yinfo);
         SkImageInfo uinfo = SkImageInfo::MakeA8(USIZE, USIZE);
@@ -71,13 +66,14 @@ protected:
         }
     }
 
-    virtual void onDraw(SkCanvas* canvas) SK_OVERRIDE {
+    void onDraw(SkCanvas* canvas) override {
         GrRenderTarget* rt = canvas->internal_private_accessTopLayerRenderTarget();
         if (NULL == rt) {
             return;
         }
         GrContext* context = rt->getContext();
         if (NULL == context) {
+            this->drawGpuOnlyMessage(canvas);
             return;
         }
 
@@ -124,10 +120,13 @@ protected:
                 if (fp) {
                     SkMatrix viewMatrix;
                     viewMatrix.setTranslate(x, y);
-                    GrDrawState drawState;
-                    drawState.setRenderTarget(rt);
-                    drawState.addColorProcessor(fp);
-                    tt.target()->drawSimpleRect(&drawState, GrColor_WHITE, viewMatrix, renderRect);
+                    GrPipelineBuilder pipelineBuilder;
+                    pipelineBuilder.setRenderTarget(rt);
+                    pipelineBuilder.addColorProcessor(fp);
+                    tt.target()->drawSimpleRect(&pipelineBuilder,
+                                                GrColor_WHITE,
+                                                viewMatrix,
+                                                renderRect);
                 }
                 x += renderRect.width() + kTestPad;
             }

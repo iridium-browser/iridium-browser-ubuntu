@@ -208,6 +208,15 @@ import org.chromium.content_public.browser.NavigationHistory;
     }
 
     @Override
+    public NavigationEntry getEntryAtIndex(int index) {
+        if (mNativeNavigationControllerAndroid != 0) {
+            return nativeGetEntryAtIndex(mNativeNavigationControllerAndroid, index);
+        }
+
+        return null;
+    }
+
+    @Override
     public NavigationEntry getPendingEntry() {
         if (mNativeNavigationControllerAndroid != 0) {
             return nativeGetPendingEntry(mNativeNavigationControllerAndroid);
@@ -239,8 +248,8 @@ import org.chromium.content_public.browser.NavigationHistory;
 
     @CalledByNative
     private static NavigationEntry createNavigationEntry(int index, String url,
-            String virtualUrl, String originalUrl, String title, Bitmap favicon) {
-        return new NavigationEntry(index, url, virtualUrl, originalUrl, title, favicon);
+            String virtualUrl, String originalUrl, String title, Bitmap favicon, int transition) {
+        return new NavigationEntry(index, url, virtualUrl, originalUrl, title, favicon, transition);
     }
 
     private native boolean nativeCanGoBack(long nativeNavigationControllerAndroid);
@@ -286,6 +295,8 @@ import org.chromium.content_public.browser.NavigationHistory;
     private native boolean nativeGetUseDesktopUserAgent(long nativeNavigationControllerAndroid);
     private native void nativeSetUseDesktopUserAgent(long nativeNavigationControllerAndroid,
             boolean override, boolean reloadOnChange);
+    private native NavigationEntry nativeGetEntryAtIndex(
+            long nativeNavigationControllerAndroid, int index);
     private native NavigationEntry nativeGetPendingEntry(long nativeNavigationControllerAndroid);
     private native int nativeGetLastCommittedEntryIndex(long nativeNavigationControllerAndroid);
     private native boolean nativeRemoveEntryAtIndex(long nativeNavigationControllerAndroid,

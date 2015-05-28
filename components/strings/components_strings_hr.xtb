@@ -1,9 +1,11 @@
 <?xml version="1.0" ?><!DOCTYPE translationbundle><translationbundle lang="hr">
+<translation id="2774256287122201187">Možete nastaviti. Ako otvorite stranicu, to će se upozorenje pojaviti tek za pet minuta.</translation>
 <translation id="7485870689360869515">Nema pronađenih podataka.</translation>
 <translation id="3884278016824448484">Identifikator uređaja sukobljen je</translation>
 <translation id="6779575937362063477">Google novčanik ne podržava tu vrstu kartice. Odaberite neku drugu karticu.</translation>
 <translation id="5172758083709347301">Strojno</translation>
 <translation id="7180611975245234373">Osvježi</translation>
+<translation id="8208216423136871611">Ne spremaj</translation>
 <translation id="777702478322588152">Prefektura</translation>
 <translation id="7600965453749440009">Nikad ne prevodi <ph name="LANGUAGE"/></translation>
 <translation id="2262243747453050782">HTTP pogreška</translation>
@@ -11,6 +13,7 @@
 <translation id="7298195798382681320">Preporučeno</translation>
 <translation id="4058922952496707368">Stavka &quot;<ph name="SUBKEY"/>&quot;: <ph name="ERROR"/></translation>
 <translation id="6980028882292583085">JavaScript upozorenje</translation>
+<translation id="4081383687659939437">Spremi informacije</translation>
 <translation id="5299298092464848405">Pogreška u pravilu analize</translation>
 <translation id="6628463337424475685"><ph name="ENGINE"/> Pretraživanje</translation>
 <translation id="2498091847651709837">Skeniraj novu karticu</translation>
@@ -37,6 +40,7 @@
 <translation id="2704283930420550640">Vrijednost ne odgovara formatu.</translation>
 <translation id="4850886885716139402">Prikaz</translation>
 <translation id="8091372947890762290">Aktivacija je na čekanju na poslužitelju</translation>
+<translation id="4607653538520819196">Ušteda podataka ne može obraditi stranicu putem proxyja.</translation>
 <translation id="719464814642662924">Visa</translation>
 <translation id="6839929833149231406">Područje</translation>
 <translation id="1871208020102129563">Proxy poslužitelj postavljen je na upotrebu fiksnih proxy poslužitelja, a ne URL .pac skripte.</translation>
@@ -48,6 +52,7 @@
 <translation id="7441627299479586546">Pogrešan predmet pravila</translation>
 <translation id="3885155851504623709">Župa</translation>
 <translation id="6973656660372572881">Određeni su fiksni proxy poslužitelji i URL .pac skripte.</translation>
+<translation id="1426410128494586442">Da</translation>
 <translation id="4506176782989081258">Pogreška pri provjeri valjanosti: <ph name="VALIDATION_ERROR"/>.</translation>
 <translation id="7108649287766967076">Prijevod na <ph name="TARGET_LANGUAGE"/> nije uspio.</translation>
 <translation id="4103249731201008433">Serijski broj uređaja nije važeći</translation>
@@ -66,11 +71,15 @@
 <translation id="1132774398110320017">Postavke Automatskog popunjavanja u Chromeu...</translation>
 <translation id="6458467102616083041">Zanemareno jer je zadano pretraživanje onemogućeno pravilom.</translation>
 <translation id="1227224963052638717">Nepoznato pravilo.</translation>
+<translation id="4250680216510889253">Ne</translation>
 <translation id="9207861905230894330">Dodavanje članka nije uspjelo.</translation>
+<translation id="5872918882028971132">Nadređeni prijedlozi</translation>
 <translation id="337363190475750230">Dodjela je uklonjena</translation>
 <translation id="2367567093518048410">Razina</translation>
 <translation id="7977590112176369853">&lt;unesite upit&gt;</translation>
+<translation id="552553974213252141">Je li tekst ispravno izdvojen?</translation>
 <translation id="7610193165460212391">Vrijednost je izvan raspona <ph name="VALUE"/>.</translation>
+<translation id="3739623965217189342">Veza koju ste kopirali</translation>
 <translation id="8311778656528046050">Jeste li sigurni da želite ponovo učitati ovu stranicu?</translation>
 <translation id="370665806235115550">Učitavanje...</translation>
 <translation id="2096368010154057602">Departman</translation>
@@ -78,7 +87,6 @@
 <translation id="3024663005179499861">Pogrešna vrsta pravila</translation>
 <translation id="2030481566774242610">Jeste li mislili <ph name="LINK"/>?</translation>
 <translation id="3450660100078934250">MasterCard</translation>
-<translation id="2107287771748948380"><ph name="OBFUSCATED_CC_NUMBER"/>, istek: <ph name="CC_EXPIRATION_DATE"/></translation>
 <translation id="4148925816941278100">American Express</translation>
 <translation id="225207911366869382">Ta je vrijednost obustavljena za to pravilo.</translation>
 <translation id="3145945101586104090">Dekodiranje odgovora nije uspjelo</translation>
@@ -107,6 +115,7 @@
 <translation id="5455374756549232013">Vremenska oznaka pravila koje nije valjano</translation>
 <translation id="2025623846716345241">Potvrda ponovnog učitavanja</translation>
 <translation id="1962204205936693436">Oznake s domene <ph name="DOMAIN"/></translation>
+<translation id="4300246636397505754">Nadređeni prijedlozi</translation>
 <translation id="111844081046043029">Jeste li sigurni da želite zatvoriti ovu stranicu?</translation>
 <translation id="1973335181906896915">Pogreška postavljanja u seriju</translation>
 <translation id="5989320800837274978">Nisu određeni fiksni proxy poslužitelji ni URL .pac skripte.</translation>
@@ -126,6 +135,7 @@
 <translation id="3228969707346345236">Prijevod nije uspio jer stranica već je na jeziku: <ph name="LANGUAGE"/>.</translation>
 <translation id="7521387064766892559">JavaScript</translation>
 <translation id="8034522405403831421">Jezik ove stranice jest <ph name="SOURCE_LANGUAGE"/>. Želite li je prevesti na <ph name="TARGET_LANGUAGE"/>?</translation>
+<translation id="1734864079702812349">Amex</translation>
 <translation id="8891727572606052622">Nevažeći način proxy poslužitelja.</translation>
 <translation id="6008256403891681546">JCB</translation>
 <translation id="7752995774971033316">Nema upravitelja</translation>
@@ -142,6 +152,7 @@
 <translation id="5629630648637658800">Učitavanje postavki pravila nije uspjelo</translation>
 <translation id="2354001756790975382">Druge oznake</translation>
 <translation id="3650584904733503804">Valjanost je uspješna</translation>
+<translation id="2359808026110333948">Nastavi</translation>
 <translation id="6915804003454593391">Korisnik:</translation>
 <translation id="3377188786107721145">Pogreška pri analizi pravila</translation>
 <translation id="2270192940992995399">Članak nije pronađen.</translation>
@@ -174,6 +185,7 @@
 <translation id="2479410451996844060">Nevažeći URL pretraživanja.</translation>
 <translation id="5509780412636533143">Upravljane oznake</translation>
 <translation id="8866481888320382733">Pogreška pri analizi postavki pravila</translation>
+<translation id="4120075327926916474">Želite li da Chrome spremi podatke o ovoj kreditnoj kartici za dovršavanje web-obrazaca?</translation>
 <translation id="6644283850729428850">Ovo je pravilo zastarjelo.</translation>
 <translation id="1693754753824026215">Stranica na web-lokaciji <ph name="SITE"/> navodi sljedeće:</translation>
 <translation id="4269787794583293679">(Nema korisničkog imena)</translation>
@@ -197,12 +209,15 @@
 <translation id="8713130696108419660">Pogrešan početni potpis</translation>
 <translation id="20817612488360358">Postavljena je upotreba sistemskih postavki proxy poslužitelja, ali također je određena izričita konfiguracija proxy poslužitelja.</translation>
 <translation id="2639739919103226564">Status:</translation>
+<translation id="4968547170521245791">Nije moguća obrada putem proxyja</translation>
+<translation id="385051799172605136">Natrag</translation>
 <translation id="5095208057601539847">Provincija</translation>
 <translation id="2581221116934462656">Želite li da <ph name="PRODUCT_NAME"/> sljedeći put ponudi prijevod stranica ove web-lokacije na <ph name="LANGUAGE_NAME"/>?</translation>
 <translation id="3934680773876859118">Učitavanje dokumenta PDF nije uspjelo</translation>
 <translation id="6965382102122355670">U redu</translation>
 <translation id="2721148159707890343">Zahtjev je uspio</translation>
 <translation id="2455981314101692989">Ova web-stranica ima onemogućeno automatsko popunjavanje za taj obrazac.</translation>
+<translation id="6597614308054261376">Pokušavate pristupiti web-stranici <ph name="BEGIN_BOLD"/><ph name="SITE"/><ph name="END_BOLD"/>. Ušteda podataka trenutačno ne može obraditi tu stranicu putem proxyja.</translation>
 <translation id="8308427013383895095">Prijevod nije uspio zbog problema s mrežnom vezom.</translation>
 <translation id="5720705177508910913">Trenutačni korisnik:</translation>
 <translation id="3380864720620200369">ID klijenta:</translation>

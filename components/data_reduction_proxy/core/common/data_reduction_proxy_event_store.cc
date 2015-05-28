@@ -15,7 +15,8 @@
 #include "base/time/time.h"
 #include "base/values.h"
 #include "net/base/host_port_pair.h"
-#include "net/base/net_log.h"
+#include "net/log/net_log.h"
+#include "net/proxy/proxy_server.h"
 #include "url/gurl.h"
 
 namespace {
@@ -58,18 +59,12 @@ int64 GetExpirationTicks(int bypass_seconds) {
 // The following method creates a string resembling the output of
 // net::ProxyServer::ToURI().
 std::string GetNormalizedProxyString(const std::string& proxy_origin) {
-  GURL proxy_url(proxy_origin);
-  if (proxy_url.is_valid()) {
-    net::HostPortPair proxy_host_port_pair =
-        net::HostPortPair::FromURL(proxy_url);
-    if (proxy_url.SchemeIs(url::kHttpScheme))
-      return proxy_host_port_pair.ToString();
-
-    return std::string(proxy_url.scheme()) + url::kStandardSchemeSeparator +
-        proxy_host_port_pair.ToString();
-  } else {
+  net::ProxyServer proxy_server = net::ProxyServer::FromURI(
+    proxy_origin, net::ProxyServer::SCHEME_HTTP);
+  if (proxy_server.is_valid())
+    return proxy_origin;
+  else
     return std::string();
-  }
 }
 
 // The following callbacks create a base::Value which contains information
@@ -149,7 +144,7 @@ DataReductionProxyEventStore::DataReductionProxyEventStore(
     const scoped_refptr<base::SingleThreadTaskRunner>& ui_task_runner)
     : ui_task_runner_(ui_task_runner),
       enabled_(false),
-      probe_state_(PROBE_UNKNOWN),
+      secure_proxy_check_state_(CHECK_UNKNOWN),
       expiration_ticks_(0) {
 }
 
@@ -218,30 +213,30 @@ void DataReductionProxyEventStore::AddBypassTypeEvent(
       parameters_callback);
 }
 
-void DataReductionProxyEventStore::BeginCanaryRequest(
+void DataReductionProxyEventStore::BeginSecureProxyCheck(
     const net::BoundNetLog& net_log,
     const GURL& url) {
   // This callback must be invoked synchronously
   const net::NetLog::ParametersCallback& parameters_callback =
       net::NetLog::StringCallback("url", &url.spec());
-  PostBoundNetLogProbeEvent(
+  PostBoundNetLogSecureProxyCheckEvent(
       net_log,
       net::NetLog::TYPE_DATA_REDUCTION_PROXY_CANARY_REQUEST,
       net::NetLog::PHASE_BEGIN,
-      PROBE_PENDING,
+      CHECK_PENDING,
       parameters_callback);
 }
 
-void DataReductionProxyEventStore::EndCanaryRequest(
+void DataReductionProxyEventStore::EndSecureProxyCheck(
     const net::BoundNetLog& net_log,
     int net_error) {
   const net::NetLog::ParametersCallback& parameters_callback =
       net::NetLog::IntegerCallback("net_error", net_error);
-  PostBoundNetLogProbeEvent(
+  PostBoundNetLogSecureProxyCheckEvent(
       net_log,
       net::NetLog::TYPE_DATA_REDUCTION_PROXY_CANARY_REQUEST,
       net::NetLog::PHASE_END,
-      net_error == 0 ? PROBE_SUCCESS : PROBE_FAILED,
+      net_error == 0 ? CHECK_SUCCESS : CHECK_FAILED,
       parameters_callback);
 }
 
@@ -286,11 +281,11 @@ void DataReductionProxyEventStore::PostBoundNetLogBypassEvent(
   net_log.AddEntry(type, phase, callback);
 }
 
-void DataReductionProxyEventStore::PostBoundNetLogProbeEvent(
+void DataReductionProxyEventStore::PostBoundNetLogSecureProxyCheckEvent(
     const net::BoundNetLog& net_log,
     net::NetLog::EventType type,
     net::NetLog::EventPhase phase,
-    DataReductionProxyProbeState state,
+    SecureProxyCheckState state,
     const net::NetLog::ParametersCallback& callback) {
   scoped_ptr<base::Value> event(
       BuildDataReductionProxyEvent(type, net_log.source(), phase, callback));
@@ -298,7 +293,8 @@ void DataReductionProxyEventStore::PostBoundNetLogProbeEvent(
     ui_task_runner_->PostTask(
         FROM_HERE,
         base::Bind(
-            &DataReductionProxyEventStore::AddEventAndProbeStateOnUIThread,
+            &DataReductionProxyEventStore::
+                AddEventAndSecureProxyCheckStateOnUIThread,
             base::Unretained(this),
             base::Passed(&event),
             state));
@@ -319,17 +315,17 @@ base::Value* DataReductionProxyEventStore::GetSummaryValue() const {
                                      current_configuration->DeepCopy());
   }
 
-  switch (probe_state_) {
-    case PROBE_PENDING:
+  switch (secure_proxy_check_state_) {
+    case CHECK_PENDING:
       data_reduction_proxy_values->SetString("probe", "Pending");
       break;
-    case PROBE_SUCCESS:
+    case CHECK_SUCCESS:
       data_reduction_proxy_values->SetString("probe", "Success");
       break;
-    case PROBE_FAILED:
+    case CHECK_FAILED:
       data_reduction_proxy_values->SetString("probe", "Failed");
       break;
-    case PROBE_UNKNOWN:
+    case CHECK_UNKNOWN:
       break;
     default:
       NOTREACHED();
@@ -379,11 +375,11 @@ void DataReductionProxyEventStore::AddEnabledEventOnUIThread(
   AddEventOnUIThread(entry.Pass());
 }
 
-void DataReductionProxyEventStore::AddEventAndProbeStateOnUIThread(
+void DataReductionProxyEventStore::AddEventAndSecureProxyCheckStateOnUIThread(
     scoped_ptr<base::Value> entry,
-    DataReductionProxyProbeState state) {
+    SecureProxyCheckState state) {
   DCHECK(ui_task_runner_->BelongsToCurrentThread());
-  probe_state_ = state;
+  secure_proxy_check_state_ = state;
   AddEventOnUIThread(entry.Pass());
 }
 

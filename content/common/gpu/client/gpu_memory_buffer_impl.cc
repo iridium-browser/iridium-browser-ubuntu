@@ -5,6 +5,7 @@
 #include "content/common/gpu/client/gpu_memory_buffer_impl.h"
 
 #include "base/logging.h"
+#include "base/numerics/safe_math.h"
 #include "content/common/gpu/client/gpu_memory_buffer_impl_shared_memory.h"
 #include "ui/gl/gl_bindings.h"
 
@@ -76,16 +77,57 @@ GpuMemoryBufferImpl* GpuMemoryBufferImpl::FromClientBuffer(
 }
 
 // static
-size_t GpuMemoryBufferImpl::BytesPerPixel(Format format) {
+bool GpuMemoryBufferImpl::StrideInBytes(size_t width,
+                                        Format format,
+                                        size_t* stride_in_bytes) {
+  base::CheckedNumeric<size_t> s = width;
   switch (format) {
+    case ATCIA:
+    case DXT5:
+      *stride_in_bytes = width;
+      return true;
+    case ATC:
+    case DXT1:
+    case ETC1:
+      DCHECK_EQ(width % 2, 0U);
+      s /= 2;
+      if (!s.IsValid())
+        return false;
+
+      *stride_in_bytes = s.ValueOrDie();
+      return true;
     case RGBA_8888:
     case RGBX_8888:
     case BGRA_8888:
-      return 4;
+      s *= 4;
+      if (!s.IsValid())
+        return false;
+
+      *stride_in_bytes = s.ValueOrDie();
+      return true;
   }
 
   NOTREACHED();
-  return 0;
+  return false;
+}
+
+// static
+size_t GpuMemoryBufferImpl::NumberOfPlanesForGpuMemoryBufferFormat(
+    gfx::GpuMemoryBuffer::Format format) {
+  switch (format) {
+    case gfx::GpuMemoryBuffer::Format::ATC:
+    case gfx::GpuMemoryBuffer::Format::ATCIA:
+    case gfx::GpuMemoryBuffer::Format::DXT1:
+    case gfx::GpuMemoryBuffer::Format::DXT5:
+    case gfx::GpuMemoryBuffer::Format::ETC1:
+    case gfx::GpuMemoryBuffer::Format::RGBA_8888:
+    case gfx::GpuMemoryBuffer::Format::RGBX_8888:
+    case gfx::GpuMemoryBuffer::Format::BGRA_8888:
+      return 1;
+    default:
+      NOTREACHED();
+      return 0;
+  }
 }
 
 gfx::GpuMemoryBuffer::Format GpuMemoryBufferImpl::GetFormat() const {

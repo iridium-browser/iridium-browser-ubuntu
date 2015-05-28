@@ -53,10 +53,6 @@ static int CallFtruncate(PlatformFile file, int64 length) {
   return HANDLE_EINTR(ftruncate(file, length));
 }
 
-static int CallFsync(PlatformFile file) {
-  return HANDLE_EINTR(fsync(file));
-}
-
 static int CallFutimes(PlatformFile file, const struct timeval times[2]) {
 #ifdef __USE_XOPEN2K8
   // futimens should be available, but futimes might not be
@@ -95,11 +91,6 @@ static bool IsOpenAppend(PlatformFile file) {
 
 static int CallFtruncate(PlatformFile file, int64 length) {
   NOTIMPLEMENTED();  // NaCl doesn't implement ftruncate.
-  return 0;
-}
-
-static int CallFsync(PlatformFile file) {
-  NOTIMPLEMENTED();  // NaCl doesn't implement fsync.
   return 0;
 }
 
@@ -427,12 +418,6 @@ bool File::SetLength(int64 length) {
   return !CallFtruncate(file_.get(), length);
 }
 
-bool File::Flush() {
-  base::ThreadRestrictions::AssertIOAllowed();
-  DCHECK(IsValid());
-  return !CallFsync(file_.get());
-}
-
 bool File::SetTimes(Time last_access_time, Time last_modified_time) {
   base::ThreadRestrictions::AssertIOAllowed();
   DCHECK(IsValid());
@@ -463,6 +448,20 @@ File::Error File::Unlock() {
   return CallFctnlFlock(file_.get(), false);
 }
 
+File File::Duplicate() {
+  if (!IsValid())
+    return File();
+
+  PlatformFile other_fd = dup(GetPlatformFile());
+  if (other_fd == -1)
+    return File(OSErrorToFileError(errno));
+
+  File other(other_fd);
+  if (async())
+    other.async_ = true;
+  return other.Pass();
+}
+
 // Static.
 File::Error File::OSErrorToFileError(int saved_errno) {
   switch (saved_errno) {
@@ -471,12 +470,15 @@ File::Error File::OSErrorToFileError(int saved_errno) {
     case EROFS:
     case EPERM:
       return FILE_ERROR_ACCESS_DENIED;
+    case EBUSY:
 #if !defined(OS_NACL)  // ETXTBSY not defined by NaCl.
     case ETXTBSY:
-      return FILE_ERROR_IN_USE;
 #endif
+      return FILE_ERROR_IN_USE;
     case EEXIST:
       return FILE_ERROR_EXISTS;
+    case EIO:
+      return FILE_ERROR_IO;
     case ENOENT:
       return FILE_ERROR_NOT_FOUND;
     case EMFILE:
@@ -537,6 +539,19 @@ void File::MemoryCheckingScopedFD::Check() const {
 
 void File::MemoryCheckingScopedFD::UpdateChecksum() {
   ComputeMemoryChecksum(&file_memory_checksum_);
+}
+
+bool File::DoFlush() {
+  base::ThreadRestrictions::AssertIOAllowed();
+  DCHECK(IsValid());
+#if defined(OS_NACL)
+  NOTIMPLEMENTED();  // NaCl doesn't implement fsync.
+  return true;
+#elif defined(OS_LINUX) || defined(OS_ANDROID)
+  return !HANDLE_EINTR(fdatasync(file_.get()));
+#else
+  return !HANDLE_EINTR(fsync(file_.get()));
+#endif
 }
 
 void File::SetPlatformFile(PlatformFile file) {

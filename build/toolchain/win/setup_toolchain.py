@@ -1,22 +1,20 @@
 # Copyright (c) 2013 The Chromium Authors. All rights reserved.
 # Use of this source code is governed by a BSD-style license that can be
 # found in the LICENSE file.
+#
+# Copies the given "win tool" (which the toolchain uses to wrap compiler
+# invocations) and the environment blocks for the 32-bit and 64-bit builds on
+# Windows to the build directory.
+#
+# The arguments are the visual studio install location and the location of the
+# win tool. The script assumes that the root build directory is the current dir
+# and the files will be written to the current directory.
 
 import errno
 import os
 import re
 import subprocess
 import sys
-
-"""
-Copies the given "win tool" (which the toolchain uses to wrap compiler
-invocations) and the environment blocks for the 32-bit and 64-bit builds on
-Windows to the build directory.
-
-The arguments are the visual studio install location and the location of the
-win tool. The script assumes that the root build directory is the current dir
-and the files will be written to the current directory.
-"""
 
 
 def _ExtractImportantEnvironment(output_of_set):
@@ -53,23 +51,23 @@ def _ExtractImportantEnvironment(output_of_set):
   return env
 
 
-def _SetupScript(target_arch, sdk_dir):
+def _SetupScript(target_cpu, sdk_dir):
   """Returns a command (with arguments) to be used to set up the
   environment."""
   # Check if we are running in the SDK command line environment and use
-  # the setup script from the SDK if so. |target_arch| should be either
+  # the setup script from the SDK if so. |target_cpu| should be either
   # 'x86' or 'x64'.
-  assert target_arch in ('x86', 'x64')
+  assert target_cpu in ('x86', 'x64')
   if bool(int(os.environ.get('DEPOT_TOOLS_WIN_TOOLCHAIN', 1))) and sdk_dir:
     return [os.path.normpath(os.path.join(sdk_dir, 'Bin/SetEnv.Cmd')),
-            '/' + target_arch]
+            '/' + target_cpu]
   else:
     # We only support x64-hosted tools.
     # TODO(scottmg|dpranke): Non-depot_tools toolchain: need to get Visual
     # Studio install location from registry.
     return [os.path.normpath(os.path.join(os.environ['GYP_MSVS_OVERRIDE_PATH'],
                                           'VC/vcvarsall.bat')),
-            'amd64_x86' if target_arch == 'x86' else 'amd64']
+            'amd64_x86' if target_cpu == 'x86' else 'amd64']
 
 
 def _FormatAsEnvironmentBlock(envvar_dict):
@@ -102,26 +100,25 @@ def main():
   if len(sys.argv) != 6:
     print('Usage setup_toolchain.py '
           '<visual studio path> <win tool path> <win sdk path> '
-          '<runtime dirs> <cpu_arch>')
+          '<runtime dirs> <target_cpu>')
     sys.exit(2)
-  vs_path = sys.argv[1]
   tool_source = sys.argv[2]
   win_sdk_path = sys.argv[3]
   runtime_dirs = sys.argv[4]
-  cpu_arch = sys.argv[5]
+  target_cpu = sys.argv[5]
 
   _CopyTool(tool_source)
 
-  archs = ('x86', 'x64')
-  assert cpu_arch in archs
+  cpus = ('x86', 'x64')
+  assert target_cpu in cpus
   vc_bin_dir = ''
 
   # TODO(scottmg|goma): Do we need an equivalent of
   # ninja_use_custom_environment_files?
 
-  for arch in archs:
+  for cpu in cpus:
     # Extract environment variables for subprocesses.
-    args = _SetupScript(arch, win_sdk_path)
+    args = _SetupScript(cpu, win_sdk_path)
     args.extend(('&&', 'set'))
     popen = subprocess.Popen(
         args, shell=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
@@ -129,7 +126,7 @@ def main():
     env = _ExtractImportantEnvironment(variables)
     env['PATH'] = runtime_dirs + ';' + env['PATH']
 
-    if arch == cpu_arch:
+    if cpu == target_cpu:
       for path in env['PATH'].split(os.pathsep):
         if os.path.exists(os.path.join(path, 'cl.exe')):
           vc_bin_dir = os.path.realpath(path)
@@ -146,7 +143,7 @@ def main():
                                   sdk_dir=win_sdk_path)
       env['INCLUDE'] = additional_includes + env['INCLUDE']
     env_block = _FormatAsEnvironmentBlock(env)
-    with open('environment.' + arch, 'wb') as f:
+    with open('environment.' + cpu, 'wb') as f:
       f.write(env_block)
 
   assert vc_bin_dir

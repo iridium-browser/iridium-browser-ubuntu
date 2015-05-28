@@ -13,12 +13,15 @@
 #include <set>
 #include <vector>
 
+#include "base/files/file.h"
+#include "base/lazy_instance.h"
 #include "base/memory/ref_counted.h"
 #include "base/synchronization/lock.h"
 #include "content/common/content_export.h"
 #include "content/common/gpu/media/va_surface.h"
 #include "media/base/video_decoder_config.h"
 #include "media/base/video_frame.h"
+#include "media/video/video_encode_accelerator.h"
 #include "third_party/libva/va/va.h"
 #include "third_party/libva/va/va_vpp.h"
 #include "ui/gfx/geometry/size.h"
@@ -43,18 +46,29 @@ class CONTENT_EXPORT VaapiWrapper {
   enum CodecMode {
     kDecode,
     kEncode,
+    kCodecModeMax,
   };
 
+  // Return an instance of VaapiWrapper initialized for |va_profile| and
+  // |mode|. |report_error_to_uma_cb| will be called independently from
+  // reporting errors to clients via method return values.
+  static scoped_ptr<VaapiWrapper> Create(
+      CodecMode mode,
+      VAProfile va_profile,
+      const base::Closure& report_error_to_uma_cb);
+
+  // Create VaapiWrapper for VideoCodecProfile. It maps VideoCodecProfile
+  // |profile| to VAProfile.
   // |report_error_to_uma_cb| will be called independently from reporting
   // errors to clients via method return values.
-  static scoped_ptr<VaapiWrapper> Create(
+  static scoped_ptr<VaapiWrapper> CreateForVideoCodec(
       CodecMode mode,
       media::VideoCodecProfile profile,
       const base::Closure& report_error_to_uma_cb);
 
   // Return the supported encode profiles.
-  static std::vector<media::VideoCodecProfile> GetSupportedEncodeProfiles(
-      const base::Closure& report_error_to_uma_cb);
+  static std::vector<media::VideoEncodeAccelerator::SupportedProfile>
+      GetSupportedEncodeProfiles();
 
   ~VaapiWrapper();
 
@@ -118,16 +132,29 @@ class CONTENT_EXPORT VaapiWrapper {
   // Returns true if the VAAPI version is less than the specified version.
   bool VAAPIVersionLessThan(int major, int minor);
 
-  // Get a VAImage from a VASurface and map it into memory. The VAImage should
-  // be released using the ReturnVaImage function. Returns true when successful.
-  // This is intended for testing only.
-  bool GetVaImageForTesting(VASurfaceID va_surface_id,
-                            VAImage* image,
-                            void** mem);
+  // Get a VAImage from a VASurface and map it into memory. The size and format
+  // are derived from the surface. Use GetVaImage() instead if |format| or
+  // |size| are different from surface internal representation. The VAImage
+  // should be released using the ReturnVaImage function. Returns true when
+  // successful.
+  bool GetDerivedVaImage(VASurfaceID va_surface_id, VAImage* image, void** mem);
+
+  // Get a VAImage from a VASurface |va_surface_id| and map it into memory with
+  // given |format| and |size|. The output is |image| and the mapped memory is
+  // |mem|. If |format| doesn't equal to the internal format, the underlying
+  // implementation will do format conversion if supported. |size| should be
+  // smaller than or equal to the surface. If |size| is smaller, the image will
+  // be cropped. The VAImage should be released using the ReturnVaImage
+  // function. Returns true when successful.
+  bool GetVaImage(VASurfaceID va_surface_id,
+                  VAImageFormat* format,
+                  const gfx::Size& size,
+                  VAImage* image,
+                  void** mem);
 
   // Release the VAImage (and the associated memory mapping) obtained from
-  // GetVaImage(). This is intended for testing only.
-  void ReturnVaImageForTesting(VAImage* image);
+  // GetVaImage() or GetDerivedVaImage().
+  void ReturnVaImage(VAImage* image);
 
   // Upload contents of |frame| into |va_surface_id| for encode.
   bool UploadVideoFrameToSurface(const scoped_refptr<media::VideoFrame>& frame,
@@ -160,18 +187,50 @@ class CONTENT_EXPORT VaapiWrapper {
                    const gfx::Size& dest_size);
 
  private:
+  struct ProfileInfo {
+    VAProfile va_profile;
+    gfx::Size max_resolution;
+  };
+
+  class LazyProfileInfos {
+   public:
+    LazyProfileInfos();
+    ~LazyProfileInfos();
+    std::vector<ProfileInfo> GetSupportedProfileInfosForCodecMode(
+        CodecMode mode);
+    bool IsProfileSupported(CodecMode mode, VAProfile va_profile);
+
+   private:
+    std::vector<ProfileInfo> supported_profiles_[kCodecModeMax];
+  };
+
   VaapiWrapper();
 
-  bool Initialize(CodecMode mode,
-                  media::VideoCodecProfile profile,
-                  const base::Closure& report_error__to_uma_cb);
+  bool Initialize(CodecMode mode, VAProfile va_profile);
   void Deinitialize();
   bool VaInitialize(const base::Closure& report_error_to_uma_cb);
   bool GetSupportedVaProfiles(std::vector<VAProfile>* profiles);
-  bool IsEntrypointSupported(VAProfile va_profile, VAEntrypoint entrypoint);
-  bool AreAttribsSupported(VAProfile va_profile,
-                           VAEntrypoint entrypoint,
-                           const std::vector<VAConfigAttrib>& required_attribs);
+
+  // Check if |va_profile| supports |entrypoint| or not. |va_lock_| must be
+  // held on entry.
+  bool IsEntrypointSupported_Locked(VAProfile va_profile,
+                                    VAEntrypoint entrypoint);
+
+  // Return true if |va_profile| for |entrypoint| with |required_attribs| is
+  // supported. |va_lock_| must be held on entry.
+  bool AreAttribsSupported_Locked(
+      VAProfile va_profile,
+      VAEntrypoint entrypoint,
+      const std::vector<VAConfigAttrib>& required_attribs);
+
+  // Get maximum resolution for |va_profile| and |entrypoint| with
+  // |required_attribs|. If return value is true, |resolution| is the maximum
+  // resolution. |va_lock_| must be held on entry.
+  bool GetMaxResolution_Locked(
+      VAProfile va_profile,
+      VAEntrypoint entrypoint,
+      std::vector<VAConfigAttrib>& required_attribs,
+      gfx::Size* resolution);
 
   // Destroys a |va_surface| created using CreateUnownedSurface.
   void DestroyUnownedSurface(VASurfaceID va_surface_id);
@@ -191,9 +250,19 @@ class CONTENT_EXPORT VaapiWrapper {
   // Attempt to set render mode to "render to texture.". Failure is non-fatal.
   void TryToSetVADisplayAttributeToLocalGPU();
 
+  // Get supported profile infos for |mode|.
+  std::vector<ProfileInfo> GetSupportedProfileInfosForCodecModeInternal(
+      CodecMode mode);
+
   // Lazily initialize static data after sandbox is enabled.  Return false on
   // init failure.
   static bool PostSandboxInitialization();
+
+  // Map VideoCodecProfile enum values to VaProfile values. This function
+  // includes a workaround for crbug.com/345569. If va_profile is h264 baseline
+  // and it is not supported, we try constrained baseline.
+  static VAProfile ProfileToVAProfile(media::VideoCodecProfile profile,
+                                      CodecMode mode);
 
   // Libva is not thread safe, so we have to do locking for it ourselves.
   // This lock is to be taken for the duration of all VA-API calls and for
@@ -233,6 +302,15 @@ class CONTENT_EXPORT VaapiWrapper {
   VAConfigID va_vpp_config_id_;
   VAContextID va_vpp_context_id_;
   VABufferID va_vpp_buffer_id_;
+
+#if defined(USE_OZONE)
+  // Drm file used to obtain access to the driver interface by VA.
+  base::File drm_file_;
+#endif  // USE_OZONE
+
+  // Singleton variable to store supported profile information for encode and
+  // decode.
+  static base::LazyInstance<LazyProfileInfos> profile_infos_;
 
   DISALLOW_COPY_AND_ASSIGN(VaapiWrapper);
 };

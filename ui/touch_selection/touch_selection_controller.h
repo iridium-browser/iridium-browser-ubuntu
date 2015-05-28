@@ -10,6 +10,7 @@
 #include "ui/gfx/geometry/rect_f.h"
 #include "ui/touch_selection/selection_event_type.h"
 #include "ui/touch_selection/touch_handle.h"
+#include "ui/touch_selection/touch_handle_orientation.h"
 #include "ui/touch_selection/ui_touch_selection_export.h"
 
 namespace ui {
@@ -38,7 +39,8 @@ class UI_TOUCH_SELECTION_EXPORT TouchSelectionController
  public:
   TouchSelectionController(TouchSelectionControllerClient* client,
                            base::TimeDelta tap_timeout,
-                           float tap_slop);
+                           float tap_slop,
+                           bool show_on_tap_for_empty_editable);
   ~TouchSelectionController() override;
 
   // To be called when the selection bounds have changed.
@@ -115,9 +117,15 @@ class UI_TOUCH_SELECTION_EXPORT TouchSelectionController
   bool GetEndVisible() const;
   TouchHandle::AnimationStyle GetAnimationStyle(bool was_active) const;
 
+  void LogSelectionEnd();
+
   TouchSelectionControllerClient* const client_;
   const base::TimeDelta tap_timeout_;
   const float tap_slop_;
+
+  // Controls whether an insertion handle is shown on a tap for an empty
+  // editable text.
+  bool show_on_tap_for_empty_editable_;
 
   InputEventType response_pending_input_event_;
 
@@ -139,6 +147,11 @@ class UI_TOUCH_SELECTION_EXPORT TouchSelectionController
   bool selection_editable_;
 
   bool temporarily_hidden_;
+
+  base::TimeTicks selection_start_time_;
+  // Whether a selection handle was dragged during the current 'selection
+  // session' - i.e. since the current selection has been activated.
+  bool selection_handle_dragged_;
 
   DISALLOW_COPY_AND_ASSIGN(TouchSelectionController);
 };

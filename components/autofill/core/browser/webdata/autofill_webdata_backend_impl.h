@@ -22,7 +22,7 @@ namespace base {
 class MessageLoopProxy;
 }
 
-class WebDataServiceBackend;
+class WebDatabaseBackend;
 
 namespace autofill {
 
@@ -47,7 +47,7 @@ class AutofillWebDataBackendImpl
   // thread of changes initiated by Sync (this callback may be called multiple
   // times).
   AutofillWebDataBackendImpl(
-      scoped_refptr<WebDataServiceBackend> web_database_backend,
+      scoped_refptr<WebDatabaseBackend> web_database_backend,
       scoped_refptr<base::MessageLoopProxy> ui_thread,
       scoped_refptr<base::MessageLoopProxy> db_thread,
       const base::Closure& on_changed_callback);
@@ -112,7 +112,7 @@ class AutofillWebDataBackendImpl
 
   // Returns the local/server Autofill profiles from the web database.
   scoped_ptr<WDTypedResult> GetAutofillProfiles(WebDatabase* db);
-  scoped_ptr<WDTypedResult> GetAutofillServerProfiles(WebDatabase* db);
+  scoped_ptr<WDTypedResult> GetServerProfiles(WebDatabase* db);
 
   // Updates Autofill entries in the web database.
   WebDatabase::State UpdateAutofillEntries(
@@ -142,6 +142,12 @@ class AutofillWebDataBackendImpl
                                             WebDatabase* db);
   WebDatabase::State MaskServerCreditCard(const std::string& id,
                                           WebDatabase* db);
+
+  WebDatabase::State UpdateUnmaskedCardUsageStats(
+      const CreditCard& credit_card,
+      WebDatabase* db);
+
+  WebDatabase::State ClearAllServerData(WebDatabase* db);
 
   // Removes Autofill records from the database. Valid only for local
   // cards/profiles.
@@ -197,9 +203,9 @@ class AutofillWebDataBackendImpl
 
   ObserverList<AutofillWebDataServiceObserverOnDBThread> db_observer_list_;
 
-  // WebDataServiceBackend allows direct access to DB.
+  // WebDatabaseBackend allows direct access to DB.
   // TODO(caitkp): Make it so nobody but us needs direct DB access anymore.
-  scoped_refptr<WebDataServiceBackend> web_database_backend_;
+  scoped_refptr<WebDatabaseBackend> web_database_backend_;
 
   base::Closure on_changed_callback_;
 

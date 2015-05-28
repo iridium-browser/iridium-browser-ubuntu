@@ -57,18 +57,18 @@ protected:
 #endif
 
     virtual bool computeAccessibilityIsIgnored() const override;
+    virtual bool computeHasInheritedPresentationalRole() const override;
     virtual AccessibilityRole determineAccessibilityRole();
     AccessibilityRole determineAccessibilityRoleUtil();
-    String accessibilityDescriptionForElements(WillBeHeapVector<RawPtrWillBeMember<Element> > &elements) const;
+    String accessibilityDescriptionForElements(WillBeHeapVector<RawPtrWillBeMember<Element>> &elements) const;
     void alterSliderValue(bool increase);
     String ariaAccessibilityDescription() const;
     String ariaAutoComplete() const;
-    void ariaLabeledByElements(WillBeHeapVector<RawPtrWillBeMember<Element> >& elements) const;
+    void ariaLabeledByElements(WillBeHeapVector<RawPtrWillBeMember<Element>>& elements) const;
     void changeValueByStep(bool increase);
     AccessibilityRole determineAriaRoleAttribute() const;
-    void elementsFromAttribute(WillBeHeapVector<RawPtrWillBeMember<Element> >& elements, const QualifiedName&) const;
+    void elementsFromAttribute(WillBeHeapVector<RawPtrWillBeMember<Element>>& elements, const QualifiedName&) const;
     bool hasContentEditableAttributeSet() const;
-    bool isDescendantOfBarrenParent() const;
     // This returns true if it's focusable but it's not content editable and it's not a control or ARIA control.
     bool isGenericFocusableElement() const;
     HTMLLabelElement* labelForElement(Element*) const;
@@ -151,14 +151,15 @@ protected:
 
     // ARIA attributes.
     virtual String ariaDescribedByAttribute() const override final;
+    virtual const AtomicString& ariaDropEffect() const override final;
     virtual String ariaLabeledByAttribute() const override final;
     virtual AccessibilityRole ariaRoleAttribute() const override final;
     virtual AccessibilityOptionalBool isAriaGrabbed() const override final;
 
     // Accessibility Text.
-    virtual String textUnderElement() const override;
+    virtual String textUnderElement(TextUnderElementMode) const override;
     virtual String accessibilityDescription() const override;
-    virtual String title() const override;
+    virtual String title(TextUnderElementMode) const override;
     virtual String helpText() const override;
     virtual String computedName() const override;
 

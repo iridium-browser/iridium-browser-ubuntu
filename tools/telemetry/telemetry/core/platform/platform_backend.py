@@ -4,8 +4,8 @@
 
 import weakref
 
+from telemetry.core.forwarders import do_nothing_forwarder
 from telemetry.core.platform import network_controller_backend
-from telemetry.core.platform import profiling_controller_backend
 from telemetry.core.platform import tracing_controller_backend
 
 
@@ -60,12 +60,15 @@ class PlatformBackend(object):
       raise ValueError('Unsupported device: %s' % device.name)
     self._platform = None
     self._running_browser_backends = weakref.WeakSet()
+    self._network_controller_backend = None
+    self._tracing_controller_backend = None
+    self._forwarder_factory = None
+
+  def InitPlatformBackend(self):
     self._network_controller_backend = (
         network_controller_backend.NetworkControllerBackend(self))
     self._tracing_controller_backend = (
         tracing_controller_backend.TracingControllerBackend(self))
-    self._profiling_controller_backend = (
-        profiling_controller_backend.ProfilingControllerBackend(self))
 
   @classmethod
   def IsPlatformBackendForHost(cls):
@@ -80,7 +83,7 @@ class PlatformBackend(object):
     return False
 
   @classmethod
-  def CreatePlatformForDevice(cls, device):
+  def CreatePlatformForDevice(cls, device, finder_options):
     raise NotImplementedError
 
   def SetPlatform(self, platform):
@@ -108,8 +111,13 @@ class PlatformBackend(object):
     return self._tracing_controller_backend
 
   @property
-  def profiling_controller_backend(self):
-    return self._profiling_controller_backend
+  def forwarder_factory(self):
+    if not self._forwarder_factory:
+      self._forwarder_factory = do_nothing_forwarder.DoNothingForwarderFactory()
+    return self._forwarder_factory
+
+  def GetRemotePort(self, port):
+    return port
 
   def DidCreateBrowser(self, browser, browser_backend):
     self.SetFullPerformanceModeEnabled(True)
@@ -121,14 +129,8 @@ class PlatformBackend(object):
   def DidStartBrowser(self, browser, browser_backend):
     assert browser not in self._running_browser_backends
     self._running_browser_backends.add(browser_backend)
-    self._tracing_controller_backend.DidStartBrowser(
-        browser, browser_backend)
 
   def WillCloseBrowser(self, browser, browser_backend):
-    self._tracing_controller_backend.WillCloseBrowser(
-        browser, browser_backend)
-    self._profiling_controller_backend.WillCloseBrowser(
-        browser_backend)
     # TODO(slamm): Move this call when replay's life cycle is no longer
     # tied to the browser. https://crbug.com/424777
     self._network_controller_backend.StopReplay()

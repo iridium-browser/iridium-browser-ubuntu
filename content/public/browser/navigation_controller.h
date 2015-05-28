@@ -46,6 +46,11 @@ class NavigationController {
   };
 
   // Load type used in LoadURLParams.
+  //
+  // A Java counterpart will be generated for this enum.
+  // GENERATED_JAVA_ENUM_PACKAGE: (
+  //   org.chromium.content_public.browser.navigation_controller)
+  // GENERATED_JAVA_PREFIX_TO_STRIP: LOAD_TYPE_
   enum LoadURLType {
     // For loads that do not fall into any types below.
     LOAD_TYPE_DEFAULT,
@@ -64,6 +69,11 @@ class NavigationController {
   };
 
   // User agent override type used in LoadURLParams.
+  //
+  // A Java counterpart will be generated for this enum.
+  // GENERATED_JAVA_ENUM_PACKAGE: (
+  //   org.chromium.content_public.browser.navigation_controller)
+  // GENERATED_JAVA_PREFIX_TO_STRIP: UA_OVERRIDE_
   enum UserAgentOverrideOption {
     // Use the override value from the previous NavigationEntry in the
     // NavigationController.
@@ -196,10 +206,10 @@ class NavigationController {
   virtual ~NavigationController() {}
 
   // Returns the web contents associated with this controller. It can never be
-  // NULL.
+  // nullptr.
   virtual WebContents* GetWebContents() const = 0;
 
-  // Get/set the browser context for this controller. It can never be NULL.
+  // Get/set the browser context for this controller. It can never be nullptr.
   virtual BrowserContext* GetBrowserContext() const = 0;
   virtual void SetBrowserContext(BrowserContext* browser_context) = 0;
 
@@ -231,14 +241,14 @@ class NavigationController {
   //
   // Returns the active entry, which is the transient entry if any, the pending
   // entry if a navigation is in progress or the last committed entry otherwise.
-  // NOTE: This can be NULL!!
+  // NOTE: This can be nullptr!!
   virtual NavigationEntry* GetActiveEntry() const = 0;
 
   // Returns the entry that should be displayed to the user in the address bar.
   // This is the transient entry if any, the pending entry if a navigation is
   // in progress *and* is safe to display to the user (see below), or the last
   // committed entry otherwise.
-  // NOTE: This can be NULL if no entry has committed!
+  // NOTE: This can be nullptr if no entry has committed!
   //
   // A pending entry is safe to display if it started in the browser process or
   // if it's a renderer-initiated navigation in a new tab which hasn't been
@@ -269,7 +279,7 @@ class NavigationController {
 
   virtual NavigationEntry* GetEntryAtIndex(int index) const = 0;
 
-  // Returns the entry at the specified offset from current.  Returns NULL
+  // Returns the entry at the specified offset from current.  Returns nullptr
   // if out of bounds.
   virtual NavigationEntry* GetEntryAtOffset(int offset) const = 0;
 

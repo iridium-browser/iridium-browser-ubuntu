@@ -46,6 +46,7 @@ namespace webrtc {
 enum { kDefaultStartBitrateKbps = 300 };
 
 enum VCMVideoProtection {
+  kProtectionNone,
   kProtectionNack,                // Both send-side and receive-side
   kProtectionNackSender,          // Send-side only
   kProtectionNackReceiver,        // Receive-side only
@@ -53,7 +54,6 @@ enum VCMVideoProtection {
   kProtectionNackFEC,
   kProtectionKeyOnLoss,
   kProtectionKeyOnKeyLoss,
-  kProtectionPeriodicKeyFrames
 };
 
 enum VCMTemporalDecimation {
@@ -146,6 +146,12 @@ class VCMProtectionCallback {
  protected:
   virtual ~VCMProtectionCallback() {
   }
+};
+
+class VideoEncoderRateObserver {
+ public:
+  virtual ~VideoEncoderRateObserver() {}
+  virtual void OnSetRates(uint32_t bitrate_bps, int framerate) = 0;
 };
 
 // Callback class used for telling the user about what frame type needed to continue decoding.

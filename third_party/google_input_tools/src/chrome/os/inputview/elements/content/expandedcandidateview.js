@@ -56,9 +56,9 @@ i18n.input.chrome.inputview.elements.content.ExpandedCandidateView = function(
   /**
    * The functional keys at the right.
    *
-   * @private {!Array.<FunctionalKey>}
+   * @private {!Object.<ElementType, FunctionalKey>}
    */
-  this.keys_ = [];
+  this.keys_ = {};
 
   /**
    * Key: page index.
@@ -200,7 +200,7 @@ ExpandedCandidateView.prototype.createKey_ = function(type, iconCss) {
   var key = new FunctionalKey('', type, '', iconCss, this);
   key.render(this.getElement());
   goog.dom.classlist.add(key.getElement(), Css.INLINE_DIV);
-  this.keys_.push(key);
+  this.keys_[type] = key;
   return key;
 };
 
@@ -257,50 +257,72 @@ ExpandedCandidateView.prototype.showCandidates = function(candidates,
   this.candidates_ = candidates;
   var lineIndex = 0;
   var line = this.lines_[lineIndex];
-  var cellsInLine = ExpandedCandidateView.CELLS_PER_LINE_;
+  var cellsLeftInLine = ExpandedCandidateView.CELLS_PER_LINE_;
   var previousCandidate = null;
   var previousCandidateWidth = 0;
   var i;
   for (i = start; i < candidates.length; i++) {
     var candidate = candidates[i];
     var candidateElem = new Candidate(String(i), candidate, Type.CANDIDATE,
-        this.heightPerCell_, false, false, undefined, this);
+        this.heightPerCell_, false, undefined, this);
     candidateElem.render(line);
     var size = goog.style.getSize(candidateElem.getElement());
-    var cells = Math.ceil(size.width / this.widthPerCell_);
-    if (cellsInLine < cells) {
+    var cellsOfCandidate = Math.ceil(size.width / this.widthPerCell_);
+    if (cellsLeftInLine < cellsOfCandidate && previousCandidate) {
       // If there is not enough cells, just put this candidate to a new line
       // and give the rest cells to the last candidate.
       line.removeChild(candidateElem.getElement());
-      goog.style.setSize(previousCandidate.getElement(), cellsInLine *
-          this.widthPerCell_ + previousCandidateWidth, this.heightPerCell_);
-      lineIndex++;
-      if (lineIndex == ExpandedCandidateView.LINES_) {
-        break;
-      }
-      cellsInLine = ExpandedCandidateView.CELLS_PER_LINE_ - cells;
-      line = this.lines_[lineIndex];
-      dom.appendChild(line, candidateElem.getElement());
+      // Will start new lines and set previous element as null,
+      // then won't hit this code in next loop.
+      i--;
+      previousCandidate.setSize(
+          cellsLeftInLine * this.widthPerCell_ + previousCandidateWidth,
+          this.heightPerCell_);
+      cellsLeftInLine = 0;
+    } else if ((cellsLeftInLine < cellsOfCandidate && !previousCandidate) ||
+        cellsLeftInLine == cellsOfCandidate) {
+      // If there is not enough space and not any candidate is inserted in this
+      // line, or after inert this candidate, there is 0 space left, then just
+      // set the size of the current candidate.
+      candidateElem.setSize(cellsLeftInLine * this.widthPerCell_,
+          this.heightPerCell_);
+      cellsLeftInLine = 0;
     } else {
-      cellsInLine -= cells;
+      cellsLeftInLine -= cellsOfCandidate;
+      candidateElem.setSize(cellsOfCandidate * this.widthPerCell_,
+          this.heightPerCell_);
     }
-    var width = cells * this.widthPerCell_;
-    goog.style.setSize(candidateElem.getElement(), width, this.heightPerCell_);
 
-    if (cellsInLine == 0) {
+
+    if (cellsLeftInLine == 0) {
+      // Changes to new line if there is no space left.
       lineIndex++;
       if (lineIndex == ExpandedCandidateView.LINES_) {
         break;
       }
-      cellsInLine = ExpandedCandidateView.CELLS_PER_LINE_;
+      cellsLeftInLine = ExpandedCandidateView.CELLS_PER_LINE_;
       line = this.lines_[lineIndex];
+      previousCandidateWidth = 0;
+      previousCandidate = null;
+    } else {
+      previousCandidateWidth = size.width;
+      previousCandidate = candidateElem;
     }
-
-    candidateElem.setVisible(true);
-    previousCandidateWidth = width;
-    previousCandidate = candidateElem;
   }
   this.candidateStartIndex_ = i;
+  var pageDownKey = this.keys_[ElementType.CANDIDATES_PAGE_DOWN].getElement();
+  var pageUpKey = this.keys_[ElementType.CANDIDATES_PAGE_UP].getElement();
+  if (i >= candidates.length) {
+    goog.dom.classlist.add(pageDownKey, Css.PAGE_NAVI_INACTIVE);
+  } else {
+    goog.dom.classlist.remove(pageDownKey, Css.PAGE_NAVI_INACTIVE);
+  }
+
+  if (this.pageIndex_ > 0) {
+    goog.dom.classlist.remove(pageUpKey, Css.PAGE_NAVI_INACTIVE);
+  } else {
+    goog.dom.classlist.add(pageUpKey, Css.PAGE_NAVI_INACTIVE);
+  }
 };
 
 
@@ -317,8 +339,9 @@ ExpandedCandidateView.prototype.resize = function(width, height) {
     goog.style.setSize(line, Math.floor(width -
         ExpandedCandidateView.RIGHT_KEY_WIDTH_), this.heightPerCell_);
   }
-  for (var i = 0; i < this.keys_.length; i++) {
-    var key = this.keys_[i];
+  for (var type in this.keys_) {
+    type = /** @type {ElementType} */ (Number(type));
+    var key = this.keys_[type];
     key.resize(ExpandedCandidateView.RIGHT_KEY_WIDTH_, this.heightPerCell_);
   }
 };

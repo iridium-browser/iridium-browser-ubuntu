@@ -11,10 +11,13 @@
 #include "ui/app_list/search_result.h"
 
 class AppListControllerDelegate;
-class FaviconService;
 class GURL;
 class Profile;
 class SkBitmap;
+
+namespace favicon {
+class FaviconService;
+}  // namespace favicon
 
 namespace favicon_base {
 struct FaviconRawBitmapResult;
@@ -32,14 +35,14 @@ class URLSuggestionResult : public SearchResult {
   // is expected to live longer that |suggestion|.
   URLSuggestionResult(Profile* profile,
                       AppListControllerDelegate* list_controller,
-                      FaviconService* favicon_service,
+                      favicon::FaviconService* favicon_service,
                       suggestions::SuggestionsService* suggestions_service,
                       const suggestions::ChromeSuggestion& suggestion);
   ~URLSuggestionResult() override;
 
   // SearchResult overrides:
   void Open(int event_flags) override;
-  scoped_ptr<SearchResult> Duplicate() override;
+  scoped_ptr<SearchResult> Duplicate() const override;
 
   // Refer to SearchResult::set_relevance for documentation.
   using SearchResult::set_relevance;
@@ -52,7 +55,7 @@ class URLSuggestionResult : public SearchResult {
 
   Profile* profile_;
   AppListControllerDelegate* list_controller_;
-  FaviconService* favicon_service_;
+  favicon::FaviconService* favicon_service_;
   suggestions::SuggestionsService* suggestions_service_;
   suggestions::ChromeSuggestion suggestion_;
   scoped_ptr<base::CancelableTaskTracker> cancelable_task_tracker_;

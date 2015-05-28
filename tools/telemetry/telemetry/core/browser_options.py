@@ -7,15 +7,17 @@ import logging
 import optparse
 import os
 import shlex
+import socket
 import sys
 
 from telemetry.core import browser_finder
 from telemetry.core import browser_finder_exceptions
+from telemetry.core import device_finder
 from telemetry.core import platform
+from telemetry.core.platform.profiler import profiler_finder
 from telemetry.core import profile_types
 from telemetry.core import util
 from telemetry.core import wpr_modes
-from telemetry.core.platform.profiler import profiler_finder
 
 util.AddDirToPythonPath(
     util.GetChromiumSrcDir(), 'third_party', 'webpagereplay')
@@ -31,7 +33,7 @@ class BrowserFinderOptions(optparse.Values):
     self.browser_type = browser_type
     self.browser_executable = None
     self.chrome_root = None
-    self.android_device = None
+    self.device = None
     self.cros_ssh_identity = None
 
     self.extensions_to_load = []
@@ -75,9 +77,10 @@ class BrowserFinderOptions(optparse.Values):
         help='Where to look for chrome builds.'
              'Defaults to searching parent dirs by default.')
     group.add_option('--device',
-        dest='android_device',
-        help='The android device ID to use'
-             'If not specified, only 0 or 1 connected devices are supported.')
+        dest='device',
+        help='The device ID to use.'
+             'If not specified, only 0 or 1 connected devices are supported. If'
+             'specified as "android", all available Android devices are used.')
     group.add_option('--target-arch',
         dest='target_arch',
         help='The target architecture of the browser. Options available are: '
@@ -86,7 +89,13 @@ class BrowserFinderOptions(optparse.Values):
     group.add_option(
         '--remote',
         dest='cros_remote',
-        help='The IP address of a remote ChromeOS device to use.')
+        help='The hostname of a remote ChromeOS device to use.')
+    group.add_option(
+        '--remote-ssh-port',
+        type=int,
+        default=socket.getservbyname('ssh'),
+        dest='cros_remote_ssh_port',
+        help='The SSH port of the remote ChromeOS device (requires --remote).')
     identity = None
     testing_rsa = os.path.join(
         util.GetChromiumSrcDir(),
@@ -152,16 +161,36 @@ class BrowserFinderOptions(optparse.Values):
       else:
         logging.getLogger().setLevel(logging.WARNING)
 
+      if self.device == 'list':
+        devices = device_finder.GetDevicesMatchingOptions(self)
+        print 'Available devices:'
+        for device in devices:
+          print ' ', device.name
+        sys.exit(0)
+
       if self.browser_executable and not self.browser_type:
         self.browser_type = 'exact'
       if self.browser_type == 'list':
-        try:
-          types = browser_finder.GetAllAvailableBrowserTypes(self)
-        except browser_finder_exceptions.BrowserFinderException, ex:
-          sys.stderr.write('ERROR: ' + str(ex))
-          sys.exit(1)
-        sys.stdout.write('Available browsers:\n')
-        sys.stdout.write('  %s\n' % '\n  '.join(types))
+        devices = device_finder.GetDevicesMatchingOptions(self)
+        if not devices:
+          sys.exit(0)
+        browser_types = {}
+        for device in devices:
+          try:
+            possible_browsers = browser_finder.GetAllAvailableBrowsers(self,
+                                                                       device)
+            browser_types[device.name] = sorted(
+              [browser.browser_type for browser in possible_browsers])
+          except browser_finder_exceptions.BrowserFinderException as ex:
+            print >> sys.stderr, 'ERROR: ', ex
+            sys.exit(1)
+        print 'Available browsers:'
+        if len(browser_types) == 0:
+          print '  No devices were found.'
+        for device_name in sorted(browser_types.keys()):
+          print '  ', device_name
+          for browser_type in browser_types[device_name]:
+            print '    ', browser_type
         sys.exit(0)
 
       # Parse browser options.

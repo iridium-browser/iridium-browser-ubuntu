@@ -11,28 +11,27 @@
     'libjingle_additional_deps%': [],
     'libjingle_peerconnection_additional_deps%': [],
     'libjingle_source%': "source",
-    'libpeer_target_type%': 'static_library',
-    'libpeer_allocator_shim%': 0,
     'webrtc_p2p': "../webrtc/p2p",
     'webrtc_xmpp': "../webrtc/libjingle/xmpp",
   },
   # Most of these settings have been split according to their scope into
-  # :jingle_unexported_configs, :jingle_direct_dependent_configs,
+  # :jingle_unexported_configs, :jingle_public_configs,
   # :jingle_all_dependent_configs in the GN build.
   'target_defaults': {
     'defines': [
+      'ENABLE_EXTERNAL_AUTH',
       'EXPAT_RELATIVE_PATH',
       'FEATURE_ENABLE_SSL',
       'GTEST_RELATIVE_PATH',
       'HAVE_SRTP',
       'HAVE_WEBRTC_VIDEO',
       'HAVE_WEBRTC_VOICE',
+      'LIBPEERCONNECTION_LIB=1',
       'LOGGING_INSIDE_WEBRTC',
       'NO_MAIN_THREAD_WRAPPING',
       'NO_SOUND_SYSTEM',
       'SRTP_RELATIVE_PATH',
       'USE_WEBRTC_DEV_BRANCH',
-      'ENABLE_EXTERNAL_AUTH',
       'WEBRTC_CHROMIUM_BUILD',
     ],
     'configurations': {
@@ -175,9 +174,6 @@
       ],
     },
     'conditions': [
-      ['"<(libpeer_target_type)"=="static_library"', {
-        'defines': [ 'LIBPEERCONNECTION_LIB=1' ],
-      }],
       ['use_openssl==1', {
         'defines': [
           'SSL_USE_OPENSSL',
@@ -278,7 +274,7 @@
         '<(webrtc_p2p)/base/constants.h',
       ],
       'dependencies': [
-        '<(DEPTH)/third_party/webrtc/base/base.gyp:webrtc_base',
+        '<(DEPTH)/third_party/webrtc/base/base.gyp:rtc_base',
         '<(DEPTH)/third_party/webrtc/libjingle/xmllite/xmllite.gyp:rtc_xmllite',
         'libjingle_p2p_constants',
         '<@(libjingle_additional_deps)',
@@ -332,11 +328,7 @@
           'target_name': 'libjingle_webrtc_common',
           'type': 'static_library',
           'all_dependent_settings': {
-            'conditions': [
-              ['"<(libpeer_target_type)"=="static_library"', {
-                'defines': [ 'LIBPEERCONNECTION_LIB=1' ],
-              }],
-            ],
+            'defines': [ 'LIBPEERCONNECTION_LIB=1' ],
           },
           'sources': [
             'overrides/talk/media/webrtc/webrtcexport.h',
@@ -347,6 +339,10 @@
             '<(libjingle_source)/talk/app/webrtc/audiotrackrenderer.h',
             '<(libjingle_source)/talk/app/webrtc/datachannel.cc',
             '<(libjingle_source)/talk/app/webrtc/datachannel.h',
+            '<(libjingle_source)/talk/app/webrtc/dtlsidentityservice.cc',
+            '<(libjingle_source)/talk/app/webrtc/dtlsidentityservice.h',
+            '<(libjingle_source)/talk/app/webrtc/dtlsidentitystore.cc',
+            '<(libjingle_source)/talk/app/webrtc/dtlsidentitystore.h',
             '<(libjingle_source)/talk/app/webrtc/dtmfsender.cc',
             '<(libjingle_source)/talk/app/webrtc/dtmfsender.h',
             '<(libjingle_source)/talk/app/webrtc/jsep.h',
@@ -444,8 +440,6 @@
             '<(libjingle_source)/talk/media/webrtc/webrtccommon.h',
             '<(libjingle_source)/talk/media/webrtc/webrtcpassthroughrender.cc',
             '<(libjingle_source)/talk/media/webrtc/webrtcpassthroughrender.h',
-            '<(libjingle_source)/talk/media/webrtc/webrtctexturevideoframe.cc',
-            '<(libjingle_source)/talk/media/webrtc/webrtctexturevideoframe.h',
             '<(libjingle_source)/talk/media/webrtc/webrtcvideocapturer.cc',
             '<(libjingle_source)/talk/media/webrtc/webrtcvideocapturer.h',
             '<(libjingle_source)/talk/media/webrtc/webrtcvideoframe.cc',
@@ -482,13 +476,6 @@
             '<(libjingle_source)/talk/session/media/voicechannel.h',
           ],
           'conditions': [
-            ['libpeer_allocator_shim==1 and '
-             'libpeer_target_type!="static_library" and OS!="mac"', {
-              'sources': [
-                'overrides/allocator_shim/allocator_stub.cc',
-                'overrides/allocator_shim/allocator_stub.h',
-              ],
-            }],
             # TODO(mallinath) - Enable SCTP for iOS.
             ['OS!="ios"', {
               'defines': [
@@ -551,8 +538,8 @@
           'dependencies': [
             '<(DEPTH)/third_party/libsrtp/libsrtp.gyp:libsrtp',
             '<(DEPTH)/third_party/webrtc/modules/modules.gyp:media_file',
-            '<(DEPTH)/third_party/webrtc/modules/modules.gyp:video_capture_module_impl',
-            '<(DEPTH)/third_party/webrtc/modules/modules.gyp:video_render_module_impl',
+            '<(DEPTH)/third_party/webrtc/modules/modules.gyp:video_capture',
+            '<(DEPTH)/third_party/webrtc/modules/modules.gyp:video_render',
             'libjingle',
           ],
         },  # target libjingle_webrtc_common
@@ -565,20 +552,14 @@
             'overrides/init_webrtc.h',
           ],
           'dependencies': [
+            '<(DEPTH)/third_party/webrtc/modules/modules.gyp:audio_processing',
             'libjingle_webrtc_common',
-          ],
-          'conditions': [
-            ['libpeer_target_type=="static_library"', {
-              'dependencies': [
-                '<(DEPTH)/third_party/webrtc/modules/modules.gyp:audio_processing',
-              ],
-            }],
           ],
         },
         {
           # GN version: //third_party/libjingle:libpeerconnection
           'target_name': 'libpeerconnection',
-          'type': '<(libpeer_target_type)',
+          'type': 'static_library',
           'sources': [
             # Note: sources list duplicated in GN build.
             '<(libjingle_source)/talk/media/webrtc/simulcast.cc',
@@ -593,90 +574,17 @@
             '<(libjingle_source)/talk/media/webrtc/webrtcvoiceengine.h',
           ],
           'dependencies': [
-            '<(DEPTH)/third_party/webrtc/system_wrappers/source/system_wrappers.gyp:system_wrappers',
             '<(DEPTH)/third_party/webrtc/voice_engine/voice_engine.gyp:voice_engine',
             '<(DEPTH)/third_party/webrtc/webrtc.gyp:webrtc',
             '<@(libjingle_peerconnection_additional_deps)',
             'libjingle_webrtc_common',
           ],
           'conditions': [
-            ['libpeer_target_type!="static_library"', {
-              'sources': [
-                'overrides/initialize_module.cc',
-              ],
-              'conditions': [
-                ['OS!="mac" and OS!="android"', {
-                  'sources': [
-                    'overrides/allocator_shim/allocator_proxy.cc',
-                  ],
-                }],
-              ],
-            }],
-            ['"<(libpeer_target_type)"!="static_library"', {
-              # Used to control symbol export/import.
-              'defines': [ 'LIBPEERCONNECTION_IMPLEMENTATION=1' ],
-            }],
-            ['OS=="win" and "<(libpeer_target_type)"!="static_library"', {
-              'link_settings': {
-                'libraries': [
-                  '-lsecur32.lib',
-                  '-lcrypt32.lib',
-                  '-liphlpapi.lib',
-                ],
-              },
-            }],
-            ['OS!="win" and "<(libpeer_target_type)"!="static_library"', {
-              'cflags': [
-                # For compatibility with how we export symbols from this
-                # target on Windows.  This also prevents the linker from
-                # picking up symbols from this target that should be linked
-                # in from other libjingle libs.
-                '-fvisibility=hidden',
-              ],
-            }],
-            ['OS=="mac" and libpeer_target_type!="static_library"', {
-              'product_name': 'libpeerconnection',
-            }],
-            ['OS=="android" and "<(libpeer_target_type)"=="static_library"', {
+            ['OS=="android"', {
               'standalone_static_library': 1,
-            }],
-            ['OS=="linux" and libpeer_target_type!="static_library"', {
-              # The installer and various tools depend on finding the .so
-              # in this directory and not lib.target as will otherwise be
-              # the case with make builds.
-              'product_dir': '<(PRODUCT_DIR)/lib',
             }],
           ],
         },  # target libpeerconnection
-      ],
-    }],
-    ['enable_webrtc==1 and OS=="android" and "<(libpeer_target_type)"=="static_library"', {
-      'targets': [
-        {
-          # GN version: //third_party/libjingle:libjingle_peerconnection_so
-          'target_name': 'libjingle_peerconnection_so',
-          'type': 'shared_library',
-          'dependencies': [
-            '<(DEPTH)/third_party/icu/icu.gyp:icuuc',
-            'libjingle_webrtc',
-            'libpeerconnection',
-          ],
-          'sources': [
-            '<(libjingle_source)/talk/app/webrtc/java/jni/peerconnection_jni.cc',
-          ],
-        },
-        {
-          # GN version: //third_party/libjingle:libjingle_peerconnection_java
-          'target_name': 'libjingle_peerconnection_javalib',
-          'type': 'none',
-          'variables': {
-            'java_in_dir': '<(libjingle_source)/talk/app/webrtc/java',
-          },
-          'dependencies': [
-            'libjingle_peerconnection_so',
-          ],
-          'includes': [ '../../build/java.gypi' ],
-        },
       ],
     }],
   ],

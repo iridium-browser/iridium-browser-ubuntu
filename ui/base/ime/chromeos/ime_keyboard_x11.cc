@@ -84,12 +84,11 @@ unsigned int ImeKeyboardX11::GetNumLockMask() {
     const std::string string_to_find(kNumLockVirtualModifierString);
     for (size_t i = 0; i < XkbNumVirtualMods; ++i) {
       const unsigned int virtual_mod_mask = 1U << i;
-      char* virtual_mod_str_raw_ptr =
-          XGetAtomName(xkb_desc->dpy, xkb_desc->names->vmods[i]);
+      gfx::XScopedPtr<char> virtual_mod_str_raw_ptr(
+          XGetAtomName(xkb_desc->dpy, xkb_desc->names->vmods[i]));
       if (!virtual_mod_str_raw_ptr)
         continue;
-      const std::string virtual_mod_str = virtual_mod_str_raw_ptr;
-      XFree(virtual_mod_str_raw_ptr);
+      const std::string virtual_mod_str = virtual_mod_str_raw_ptr.get();
 
       if (string_to_find == virtual_mod_str) {
         if (!XkbVirtualModsToReal(xkb_desc, virtual_mod_mask, &real_mask)) {
@@ -157,23 +156,23 @@ void ImeKeyboardX11::MaybeExecuteSetLayoutCommand() {
   const std::string layout_to_set = execute_queue_.front();
 
   std::vector<std::string> argv;
-  base::ProcessHandle handle = base::kNullProcessHandle;
 
   argv.push_back(kSetxkbmapCommand);
   argv.push_back("-layout");
   argv.push_back(layout_to_set);
   argv.push_back("-synch");
 
-  if (!base::LaunchProcess(argv, base::LaunchOptions(), &handle)) {
+  base::Process process = base::LaunchProcess(argv, base::LaunchOptions());
+  if (!process.IsValid()) {
     DVLOG(1) << "Failed to execute setxkbmap: " << layout_to_set;
     execute_queue_ = std::queue<std::string>();  // clear the queue.
     return;
   }
 
-  PollUntilChildFinish(handle);
+  PollUntilChildFinish(process.Handle());
 
   DVLOG(1) << "ExecuteSetLayoutCommand: " << layout_to_set
-           << ": pid=" << base::GetProcId(handle);
+           << ": pid=" << process.Pid();
 }
 
 // Delay and loop until child process finishes and call the callback.

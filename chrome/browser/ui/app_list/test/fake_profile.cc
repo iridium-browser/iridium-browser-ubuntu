@@ -13,7 +13,7 @@ FakeProfile::FakeProfile(const std::string& name, const base::FilePath& path)
       path_(path) {
 }
 
-std::string FakeProfile::GetProfileName() {
+std::string FakeProfile::GetProfileUserName() const {
   return name_;
 }
 
@@ -34,51 +34,54 @@ bool FakeProfile::IsOffTheRecord() const {
   return false;
 }
 
-content::DownloadManagerDelegate*
-FakeProfile::GetDownloadManagerDelegate() {
-  return NULL;
+content::DownloadManagerDelegate* FakeProfile::GetDownloadManagerDelegate() {
+  return nullptr;
 }
 
 net::URLRequestContextGetter* FakeProfile::GetRequestContextForRenderProcess(
     int renderer_child_id) {
-  return NULL;
+  return nullptr;
 }
 
 net::URLRequestContextGetter* FakeProfile::GetMediaRequestContext() {
-  return NULL;
+  return nullptr;
 }
 
 net::URLRequestContextGetter*
 FakeProfile::GetMediaRequestContextForRenderProcess(
     int renderer_child_id) {
-  return NULL;
+  return nullptr;
 }
 
 net::URLRequestContextGetter*
 FakeProfile::GetMediaRequestContextForStoragePartition(
         const base::FilePath& partition_path,
         bool in_memory) {
-  return NULL;
+  return nullptr;
 }
 
 content::ResourceContext* FakeProfile::GetResourceContext() {
-  return NULL;
+  return nullptr;
 }
 
 content::BrowserPluginGuestManager* FakeProfile::GetGuestManager() {
-  return NULL;
+  return nullptr;
 }
 
 storage::SpecialStoragePolicy* FakeProfile::GetSpecialStoragePolicy() {
-  return NULL;
+  return nullptr;
 }
 
 content::PushMessagingService* FakeProfile::GetPushMessagingService() {
-  return NULL;
+  return nullptr;
 }
 
 content::SSLHostStateDelegate* FakeProfile::GetSSLHostStateDelegate() {
-  return NULL;
+  return nullptr;
+}
+
+content::PermissionManager* FakeProfile::GetPermissionManager() {
+  return nullptr;
 }
 
 scoped_refptr<base::SequencedTaskRunner>
@@ -87,7 +90,7 @@ FakeProfile::GetIOTaskRunner() {
 }
 
 Profile* FakeProfile::GetOffTheRecordProfile() {
-  return NULL;
+  return nullptr;
 }
 
 void FakeProfile::DestroyOffTheRecordProfile() {}
@@ -112,40 +115,36 @@ bool FakeProfile::IsLegacySupervised() {
   return false;
 }
 
-history::TopSites* FakeProfile::GetTopSites() {
-  return NULL;
-}
-
-history::TopSites* FakeProfile::GetTopSitesWithoutCreating() {
-  return NULL;
-}
-
 ExtensionSpecialStoragePolicy* FakeProfile::GetExtensionSpecialStoragePolicy() {
-  return NULL;
+  return nullptr;
 }
 
 PrefService* FakeProfile::GetPrefs() {
-  return NULL;
+  return nullptr;
+}
+
+const PrefService* FakeProfile::GetPrefs() const {
+  return nullptr;
 }
 
 PrefService* FakeProfile::GetOffTheRecordPrefs() {
-  return NULL;
+  return nullptr;
 }
 
 net::URLRequestContextGetter* FakeProfile::GetRequestContext() {
-  return NULL;
+  return nullptr;
 }
 
 net::URLRequestContextGetter* FakeProfile::GetRequestContextForExtensions() {
-  return NULL;
+  return nullptr;
 }
 
 net::SSLConfigService* FakeProfile::GetSSLConfigService() {
-  return NULL;
+  return nullptr;
 }
 
 HostContentSettingsMap* FakeProfile::GetHostContentSettingsMap() {
-  return NULL;
+  return nullptr;
 }
 
 bool FakeProfile::IsSameProfile(Profile* profile) {
@@ -159,7 +158,7 @@ base::Time FakeProfile::GetStartTime() const {
 net::URLRequestContextGetter* FakeProfile::CreateRequestContext(
     content::ProtocolHandlerMap* protocol_handlers,
     content::URLRequestInterceptorScopedVector request_interceptors) {
-  return NULL;
+  return nullptr;
 }
 
 net::URLRequestContextGetter*
@@ -168,7 +167,7 @@ FakeProfile::CreateRequestContextForStoragePartition(
     bool in_memory,
     content::ProtocolHandlerMap* protocol_handlers,
     content::URLRequestInterceptorScopedVector request_interceptors) {
-  return NULL;
+  return nullptr;
 }
 
 base::FilePath FakeProfile::last_selected_directory() {
@@ -185,15 +184,15 @@ void FakeProfile::InitChromeOSPreferences() {}
 #endif  // defined(OS_CHROMEOS)
 
 PrefProxyConfigTracker* FakeProfile::GetProxyConfigTracker() {
-  return NULL;
+  return nullptr;
 }
 
 chrome_browser_net::Predictor* FakeProfile::GetNetworkPredictor() {
-  return NULL;
+  return nullptr;
 }
 
 DevToolsNetworkController* FakeProfile::GetDevToolsNetworkController() {
-  return NULL;
+  return nullptr;
 }
 
 void FakeProfile::ClearNetworkingHistorySince(

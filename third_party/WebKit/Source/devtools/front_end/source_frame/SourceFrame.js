@@ -61,47 +61,6 @@ WebInspector.SourceFrame = function(contentProvider)
     this._errorPopoverHelper.setTimeout(100, 100);
 }
 
-/**
- * @param {string} query
- * @param {string=} modifiers
- * @return {!RegExp}
- */
-WebInspector.SourceFrame.createSearchRegex = function(query, modifiers)
-{
-    var regex;
-    modifiers = modifiers || "";
-
-    // First try creating regex if user knows the / / hint.
-    try {
-        if (/^\/.+\/$/.test(query)) {
-            regex = new RegExp(query.substring(1, query.length - 1), modifiers);
-            regex.__fromRegExpQuery = true;
-        }
-    } catch (e) {
-        // Silent catch.
-    }
-
-    // Otherwise just do a plain text search.
-    if (!regex)
-        regex = createPlainTextSearchRegex(query, modifiers);
-
-    return regex;
-}
-
-/**
- * @param {!WebInspector.SearchableView.SearchConfig} searchConfig
- * @param {boolean=} global
- * @return {!RegExp}
- */
-WebInspector.SourceFrame._createSearchRegexForConfig = function(searchConfig, global)
-{
-    var modifiers = searchConfig.caseSensitive ? "" : "i";
-    if (global)
-        modifiers += "g";
-    var query = searchConfig.isRegex ? "/" + searchConfig.query + "/" : searchConfig.query;
-    return WebInspector.SourceFrame.createSearchRegex(query, modifiers);
-}
-
 WebInspector.SourceFrame.Events = {
     ScrollChanged: "ScrollChanged",
     SelectionChanged: "SelectionChanged",
@@ -215,6 +174,7 @@ WebInspector.SourceFrame.prototype = {
         }
 
         this._rowMessageBuckets = {};
+        this._errorPopoverHelper.hidePopover();
     },
 
     /**
@@ -317,6 +277,11 @@ WebInspector.SourceFrame.prototype = {
         this.clearMessages();
     },
 
+    /**
+     * @param {string} content
+     * @param {string} mimeType
+     * @return {string}
+     */
     _simplifyMimeType: function(content, mimeType)
     {
         if (!mimeType)
@@ -401,7 +366,7 @@ WebInspector.SourceFrame.prototype = {
         this._currentSearchResultIndex = -1;
         this._searchResults = [];
 
-        var regex = WebInspector.SourceFrame._createSearchRegexForConfig(searchConfig);
+        var regex = searchConfig.toSearchRegex();
         this._searchRegex = regex;
         this._searchResults = this._collectRegexMatches(regex);
         searchFinishedCallback(this, this._searchResults.length);
@@ -496,7 +461,7 @@ WebInspector.SourceFrame.prototype = {
      */
     _searchResultIndexForCurrentSelection: function()
     {
-        return insertionIndexForObjectInListSortedByFunction(this._textEditor.selection(), this._searchResults, WebInspector.TextRange.comparator);
+        return insertionIndexForObjectInListSortedByFunction(this._textEditor.selection().collapseToEnd(), this._searchResults, WebInspector.TextRange.comparator);
     },
 
     jumpToNextSearchResult: function()
@@ -540,7 +505,7 @@ WebInspector.SourceFrame.prototype = {
         this._textEditor.highlightSearchResults(this._searchRegex, null);
 
         var oldText = this._textEditor.copyRange(range);
-        var regex = WebInspector.SourceFrame._createSearchRegexForConfig(searchConfig);
+        var regex = searchConfig.toSearchRegex();
         var text;
         if (regex.__fromRegExpQuery)
             text = oldText.replace(regex, replacement);
@@ -563,7 +528,7 @@ WebInspector.SourceFrame.prototype = {
         var text = this._textEditor.text();
         var range = this._textEditor.range();
 
-        var regex = WebInspector.SourceFrame._createSearchRegexForConfig(searchConfig, true);
+        var regex = searchConfig.toSearchRegex(true);
         if (regex.__fromRegExpQuery)
             text = text.replace(regex, replacement);
         else
@@ -665,11 +630,6 @@ WebInspector.SourceFrame.prototype = {
             from: from,
             to: to
         });
-    },
-
-    inheritScrollPositions: function(sourceFrame)
-    {
-        this._textEditor.inheritScrollPositions(sourceFrame._textEditor);
     },
 
     /**
@@ -811,8 +771,8 @@ WebInspector.SourceFrameMessage.prototype = {
 }
 
 WebInspector.SourceFrame._iconClassPerLevel = {};
-WebInspector.SourceFrame._iconClassPerLevel[WebInspector.SourceFrameMessage.Level.Error] = "error-icon-small";
-WebInspector.SourceFrame._iconClassPerLevel[WebInspector.SourceFrameMessage.Level.Warning] = "warning-icon-small";
+WebInspector.SourceFrame._iconClassPerLevel[WebInspector.SourceFrameMessage.Level.Error] = "error-icon";
+WebInspector.SourceFrame._iconClassPerLevel[WebInspector.SourceFrameMessage.Level.Warning] = "warning-icon";
 
 WebInspector.SourceFrame._lineClassPerLevel = {};
 WebInspector.SourceFrame._lineClassPerLevel[WebInspector.SourceFrameMessage.Level.Error] = "text-editor-line-with-error";
@@ -827,8 +787,8 @@ WebInspector.SourceFrame.RowMessage = function(message)
     this._message = message;
     this._repeatCount = 1;
     this.element = createElementWithClass("div", "text-editor-row-message");
-    this._icon = this.element.createChild("span", "text-editor-row-message-icon");
-    this._icon.classList.add(WebInspector.SourceFrame._iconClassPerLevel[message.level()]);
+    this._icon = this.element.createChild("label", "", "dt-icon-label");
+    this._icon.type = WebInspector.SourceFrame._iconClassPerLevel[message.level()];
     this._repeatCountElement = this.element.createChild("span", "bubble-repeat-count hidden error");
     var linesContainer = this.element.createChild("div", "text-editor-row-message-lines");
     var lines = this._message.messageText().split("\n");
@@ -875,7 +835,7 @@ WebInspector.SourceFrame.RowMessage.prototype = {
 /**
  * @constructor
  * @param {!WebInspector.SourceFrame} sourceFrame
- * @param {!WebInspector.TextEditor} textEditor
+ * @param {!WebInspector.CodeMirrorTextEditor} textEditor
  * @param {number} lineNumber
  */
 WebInspector.SourceFrame.RowMessageBucket = function(sourceFrame, textEditor, lineNumber)
@@ -886,7 +846,7 @@ WebInspector.SourceFrame.RowMessageBucket = function(sourceFrame, textEditor, li
     this._decoration = createElementWithClass("div", "text-editor-line-decoration");
     this._decoration._messageBucket = this;
     this._wave = this._decoration.createChild("div", "text-editor-line-decoration-wave");
-    this._icon = this._wave.createChild("div", "text-editor-line-decoration-icon");
+    this._icon = this._wave.createChild("label", "text-editor-line-decoration-icon", "dt-icon-label");
 
     this._textEditor.addDecoration(lineNumber, this._decoration);
 
@@ -1003,13 +963,13 @@ WebInspector.SourceFrame.RowMessageBucket.prototype = {
 
         if (this._level) {
             this._textEditor.toggleLineClass(lineNumber, WebInspector.SourceFrame._lineClassPerLevel[this._level], false);
-            this._icon.classList.toggle(WebInspector.SourceFrame._iconClassPerLevel[this._level], false);
+            this._icon.type = "";
         }
         this._level = maxMessage.level();
         if (!this._level)
             return;
         this._textEditor.toggleLineClass(lineNumber, WebInspector.SourceFrame._lineClassPerLevel[this._level], true);
-        this._icon.classList.toggle(WebInspector.SourceFrame._iconClassPerLevel[this._level], true);
+        this._icon.type = WebInspector.SourceFrame._iconClassPerLevel[this._level];
     }
 }
 

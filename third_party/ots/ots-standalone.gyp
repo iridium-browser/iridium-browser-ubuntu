@@ -8,7 +8,7 @@
       '-ggdb',
       '-W',
       '-Wall',
-      '-Werror',
+      '-Wshadow',
       '-Wno-unused-parameter',
       '-fPIE',
       '-fstack-protector',
@@ -24,10 +24,15 @@
     'ots-common.gypi',
   ],
   'target_defaults': {
+    'include_dirs': [
+      '.',
+      'third_party/brotli/dec',
+    ],
     'conditions': [
       ['OS=="linux"', {
         'cflags': [
           '<@(gcc_cflags)',
+          '-O',
         ],
         'ldflags': [
           '<@(gcc_ldflags)',
@@ -67,7 +72,7 @@
           },
         },
         'include_dirs': [
-          'third_party/zlib'
+          'third_party/zlib',
         ],
         'defines': [
           'NOMINMAX', # To suppress max/min macro definition.
@@ -83,11 +88,8 @@
       'sources': [
         '<@(ots_sources)',
       ],
-      'defines': [
-        'OTS_DEBUG',
-      ],
       'dependencies': [
-        'third_party/lzma_sdk/lzma_sdk.gyp:ots_lzma_sdk',
+        'third_party/brotli.gyp:brotli',
       ],
       'include_dirs': [
         '<@(ots_include_dirs)',
@@ -180,6 +182,57 @@
           ],
           'dependencies': [
             'ots',
+          ],
+        },
+        {
+          'target_name': 'cff_type2_charstring_test',
+          'type': 'executable',
+          'sources': [
+            'test/cff_type2_charstring_test.cc',
+          ],
+          'dependencies': [
+            'ots',
+          ],
+          'libraries': [
+            '-lgtest',
+            '-lgtest_main',
+          ],
+          'include_dirs': [
+            'src',
+          ],
+        },
+        {
+          'target_name': 'layout_common_table_test',
+          'type': 'executable',
+          'sources': [
+            'test/layout_common_table_test.cc',
+          ],
+          'dependencies': [
+            'ots',
+          ],
+          'libraries': [
+            '-lgtest',
+            '-lgtest_main',
+          ],
+          'include_dirs': [
+            'src',
+          ],
+        },
+        {
+          'target_name': 'table_dependencies_test',
+          'type': 'executable',
+          'sources': [
+            'test/table_dependencies_test.cc',
+          ],
+          'dependencies': [
+            'ots',
+          ],
+          'libraries': [
+            '-lgtest',
+            '-lgtest_main',
+          ],
+          'include_dirs': [
+            'src',
           ],
         },
       ],

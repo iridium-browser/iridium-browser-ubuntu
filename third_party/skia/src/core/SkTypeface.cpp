@@ -29,36 +29,36 @@ public:
 protected:
     SkEmptyTypeface() : SkTypeface(SkFontStyle(), 0, true) { }
 
-    virtual SkStream* onOpenStream(int* ttcIndex) const SK_OVERRIDE { return NULL; }
-    virtual SkScalerContext* onCreateScalerContext(const SkDescriptor*) const SK_OVERRIDE {
+    SkStreamAsset* onOpenStream(int* ttcIndex) const override { return NULL; }
+    SkScalerContext* onCreateScalerContext(const SkDescriptor*) const override {
         return NULL;
     }
-    virtual void onFilterRec(SkScalerContextRec*) const SK_OVERRIDE { }
+    void onFilterRec(SkScalerContextRec*) const override { }
     virtual SkAdvancedTypefaceMetrics* onGetAdvancedTypefaceMetrics(
                                 SkAdvancedTypefaceMetrics::PerGlyphInfo,
-                                const uint32_t*, uint32_t) const SK_OVERRIDE { return NULL; }
-    virtual void onGetFontDescriptor(SkFontDescriptor*, bool*) const SK_OVERRIDE { }
+                                const uint32_t*, uint32_t) const override { return NULL; }
+    void onGetFontDescriptor(SkFontDescriptor*, bool*) const override { }
     virtual int onCharsToGlyphs(const void* chars, Encoding encoding,
-                                uint16_t glyphs[], int glyphCount) const SK_OVERRIDE {
+                                uint16_t glyphs[], int glyphCount) const override {
         if (glyphs && glyphCount > 0) {
             sk_bzero(glyphs, glyphCount * sizeof(glyphs[0]));
         }
         return 0;
     }
-    virtual int onCountGlyphs() const SK_OVERRIDE { return 0; };
-    virtual int onGetUPEM() const SK_OVERRIDE { return 0; };
+    int onCountGlyphs() const override { return 0; };
+    int onGetUPEM() const override { return 0; };
     class EmptyLocalizedStrings : public SkTypeface::LocalizedStrings {
     public:
-        virtual bool next(SkTypeface::LocalizedString*) SK_OVERRIDE { return false; }
+        bool next(SkTypeface::LocalizedString*) override { return false; }
     };
-    virtual void onGetFamilyName(SkString* familyName) const SK_OVERRIDE {
+    void onGetFamilyName(SkString* familyName) const override {
         familyName->reset();
     }
-    virtual SkTypeface::LocalizedStrings* onCreateFamilyNameIterator() const SK_OVERRIDE {
+    SkTypeface::LocalizedStrings* onCreateFamilyNameIterator() const override {
         return SkNEW(EmptyLocalizedStrings);
     };
-    virtual int onGetTableTags(SkFontTableTag tags[]) const SK_OVERRIDE { return 0; }
-    virtual size_t onGetTableData(SkFontTableTag, size_t, size_t, void*) const SK_OVERRIDE {
+    int onGetTableTags(SkFontTableTag tags[]) const override { return 0; }
+    size_t onGetTableData(SkFontTableTag, size_t, size_t, void*) const override {
         return 0;
     }
 };
@@ -69,7 +69,7 @@ SK_DECLARE_STATIC_MUTEX(gCreateDefaultMutex);
 
 // As a template arguments, these must have external linkage.
 SkTypeface* sk_create_default_typeface(int style) {
-    // If backed by fontconfig, it's not safe to call SkFontHost::CreateTypeface concurrently.
+    // It is not safe to call FontConfigTypeface::LegacyCreateTypeface concurrently.
     // To be safe, we serialize here with a mutex so only one call to
     // CreateTypeface is happening at any given time.
     // TODO(bungeman, mtklein): This is sad.  Make our fontconfig code safe?
@@ -138,7 +138,7 @@ SkTypeface* SkTypeface::CreateFromTypeface(const SkTypeface* family, Style s) {
     return fm->matchFaceStyle(family, newStyle);
 }
 
-SkTypeface* SkTypeface::CreateFromStream(SkStream* stream, int index) {
+SkTypeface* SkTypeface::CreateFromStream(SkStreamAsset* stream, int index) {
     SkAutoTUnref<SkFontMgr> fm(SkFontMgr::RefDefault());
     return fm->createFromStream(stream, index);
 }
@@ -156,7 +156,7 @@ void SkTypeface::serialize(SkWStream* wstream) const {
     this->onGetFontDescriptor(&desc, &isLocal);
 
     // Embed font data if it's a local font.
-    if (isLocal && NULL == desc.getFontData()) {
+    if (isLocal && !desc.hasFontData()) {
         int ttcIndex;
         desc.setFontData(this->onOpenStream(&ttcIndex));
         desc.setFontIndex(ttcIndex);
@@ -170,7 +170,7 @@ void SkTypeface::serializeForcingEmbedding(SkWStream* wstream) const {
     this->onGetFontDescriptor(&desc, &ignoredIsLocal);
 
     // Always embed font data.
-    if (NULL == desc.getFontData()) {
+    if (!desc.hasFontData()) {
         int ttcIndex;
         desc.setFontData(this->onOpenStream(&ttcIndex));
         desc.setFontIndex(ttcIndex);
@@ -180,7 +180,7 @@ void SkTypeface::serializeForcingEmbedding(SkWStream* wstream) const {
 
 SkTypeface* SkTypeface::Deserialize(SkStream* stream) {
     SkFontDescriptor desc(stream);
-    SkStream* data = desc.getFontData();
+    SkStreamAsset* data = desc.transferFontData();
     if (data) {
         SkTypeface* typeface = SkTypeface::CreateFromStream(data, desc.getFontIndex());
         if (typeface) {
@@ -209,7 +209,7 @@ size_t SkTypeface::getTableData(SkFontTableTag tag, size_t offset, size_t length
     return this->onGetTableData(tag, offset, length, data);
 }
 
-SkStream* SkTypeface::openStream(int* ttcIndex) const {
+SkStreamAsset* SkTypeface::openStream(int* ttcIndex) const {
     int ttcIndexStorage;
     if (NULL == ttcIndex) {
         // So our subclasses don't need to check for null param

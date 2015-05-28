@@ -23,7 +23,7 @@ RequestInit::RequestInit(ExecutionContext* context, const Dictionary& options, E
     DictionaryHelper::get(options, "method", method);
     DictionaryHelper::get(options, "headers", headers);
     if (!headers) {
-        Vector<Vector<String> > headersVector;
+        Vector<Vector<String>> headersVector;
         if (DictionaryHelper::get(options, "headers", headersVector, exceptionState))
             headers = Headers::create(headersVector, exceptionState);
         else
@@ -77,7 +77,7 @@ RequestInit::RequestInit(ExecutionContext* context, const Dictionary& options, E
         }
         blobData->setContentType(AtomicString("multipart/form-data; boundary=", AtomicString::ConstructFromLiteral) + httpBody->boundary().data());
     } else if (body->IsString()) {
-        String stringValue(toUSVString(body, exceptionState));
+        String stringValue(toUSVString(isolate, body, exceptionState));
         blobData->appendText(stringValue, false);
         blobData->setContentType("text/plain;charset=UTF-8");
     } else {

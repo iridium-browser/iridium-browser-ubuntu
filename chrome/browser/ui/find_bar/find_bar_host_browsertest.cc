@@ -9,7 +9,6 @@
 #include "base/strings/string_util.h"
 #include "base/strings/utf_string_conversions.h"
 #include "chrome/app/chrome_command_ids.h"
-#include "chrome/browser/history/history_service.h"
 #include "chrome/browser/history/history_service_factory.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/browser.h"
@@ -29,6 +28,7 @@
 #include "chrome/test/base/find_in_page_observer.h"
 #include "chrome/test/base/in_process_browser_test.h"
 #include "chrome/test/base/ui_test_utils.h"
+#include "components/history/core/browser/history_service.h"
 #include "content/public/browser/download_manager.h"
 #include "content/public/browser/notification_service.h"
 #include "content/public/browser/notification_types.h"
@@ -187,10 +187,11 @@ class FindInPageControllerTest : public InProcessBrowserTest {
   }
 
   void FlushHistoryService() {
-    HistoryServiceFactory::GetForProfile(
-        browser()->profile(), Profile::IMPLICIT_ACCESS)->FlushForTest(
-        base::Bind(&base::MessageLoop::Quit,
-                   base::Unretained(base::MessageLoop::current()->current())));
+    HistoryServiceFactory::GetForProfile(browser()->profile(),
+                                         ServiceAccessType::IMPLICIT_ACCESS)
+        ->FlushForTest(base::Bind(
+            &base::MessageLoop::Quit,
+            base::Unretained(base::MessageLoop::current()->current())));
     content::RunMessageLoop();
   }
 };

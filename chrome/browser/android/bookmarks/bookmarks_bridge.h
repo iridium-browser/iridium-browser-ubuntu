@@ -62,6 +62,9 @@ class BookmarksBridge : public bookmarks::BaseBookmarkModelObserver,
                                jobject j_folders_obj,
                                jobject j_depths_obj);
 
+  base::android::ScopedJavaLocalRef<jobject> GetRootFolderId(JNIEnv* env,
+                                                             jobject obj);
+
   base::android::ScopedJavaLocalRef<jobject> GetMobileFolderId(JNIEnv* env,
                                                                jobject obj);
 
@@ -149,27 +152,28 @@ class BookmarksBridge : public bookmarks::BaseBookmarkModelObserver,
 
   void EndGroupingUndos(JNIEnv* env, jobject obj);
 
-  base::string16 GetTitle(const BookmarkNode* node) const;
+  base::string16 GetTitle(const bookmarks::BookmarkNode* node) const;
 
  private:
-  virtual ~BookmarksBridge();
+  ~BookmarksBridge() override;
 
   base::android::ScopedJavaLocalRef<jobject> CreateJavaBookmark(
-      const BookmarkNode* node);
-  void ExtractBookmarkNodeInformation(
-      const BookmarkNode* node,
-      jobject j_result_obj);
-  const BookmarkNode* GetNodeByID(long node_id, int type);
-  const BookmarkNode* GetFolderWithFallback(long folder_id, int type);
+      const bookmarks::BookmarkNode* node);
+  void ExtractBookmarkNodeInformation(const bookmarks::BookmarkNode* node,
+                                      jobject j_result_obj);
+  const bookmarks::BookmarkNode* GetNodeByID(long node_id, int type);
+  const bookmarks::BookmarkNode* GetFolderWithFallback(long folder_id,
+                                                       int type);
   // Returns whether |node| can be modified by the user.
-  bool IsEditable(const BookmarkNode* node) const;
+  bool IsEditable(const bookmarks::BookmarkNode* node) const;
   // Returns whether |node| is a managed bookmark.
-  bool IsManaged(const BookmarkNode* node) const;
-  const BookmarkNode* GetParentNode(const BookmarkNode* node);
-  int GetBookmarkType(const BookmarkNode* node);
-  bool IsReachable(const BookmarkNode* node) const;
+  bool IsManaged(const bookmarks::BookmarkNode* node) const;
+  const bookmarks::BookmarkNode* GetParentNode(
+      const bookmarks::BookmarkNode* node);
+  int GetBookmarkType(const bookmarks::BookmarkNode* node);
+  bool IsReachable(const bookmarks::BookmarkNode* node) const;
   bool IsLoaded() const;
-  bool IsFolderAvailable(const BookmarkNode* folder) const;
+  bool IsFolderAvailable(const bookmarks::BookmarkNode* folder) const;
   void NotifyIfDoneLoading();
 
   // Override bookmarks::BaseBookmarkModelObserver.
@@ -177,29 +181,32 @@ class BookmarksBridge : public bookmarks::BaseBookmarkModelObserver,
   // any of the other callback methods. For example, this is called when
   // partner bookmarks change.
   void BookmarkModelChanged() override;
-  void BookmarkModelLoaded(BookmarkModel* model, bool ids_reassigned) override;
-  void BookmarkModelBeingDeleted(BookmarkModel* model) override;
-  void BookmarkNodeMoved(BookmarkModel* model,
-                         const BookmarkNode* old_parent,
+  void BookmarkModelLoaded(bookmarks::BookmarkModel* model,
+                           bool ids_reassigned) override;
+  void BookmarkModelBeingDeleted(bookmarks::BookmarkModel* model) override;
+  void BookmarkNodeMoved(bookmarks::BookmarkModel* model,
+                         const bookmarks::BookmarkNode* old_parent,
                          int old_index,
-                         const BookmarkNode* new_parent,
+                         const bookmarks::BookmarkNode* new_parent,
                          int new_index) override;
-  void BookmarkNodeAdded(BookmarkModel* model,
-                         const BookmarkNode* parent,
+  void BookmarkNodeAdded(bookmarks::BookmarkModel* model,
+                         const bookmarks::BookmarkNode* parent,
                          int index) override;
-  void BookmarkNodeRemoved(BookmarkModel* model,
-                           const BookmarkNode* parent,
+  void BookmarkNodeRemoved(bookmarks::BookmarkModel* model,
+                           const bookmarks::BookmarkNode* parent,
                            int old_index,
-                           const BookmarkNode* node,
+                           const bookmarks::BookmarkNode* node,
                            const std::set<GURL>& removed_urls) override;
-  void BookmarkAllUserNodesRemoved(BookmarkModel* model,
+  void BookmarkAllUserNodesRemoved(bookmarks::BookmarkModel* model,
                                    const std::set<GURL>& removed_urls) override;
-  void BookmarkNodeChanged(BookmarkModel* model,
-                           const BookmarkNode* node) override;
-  void BookmarkNodeChildrenReordered(BookmarkModel* model,
-                                     const BookmarkNode* node) override;
-  void ExtensiveBookmarkChangesBeginning(BookmarkModel* model) override;
-  void ExtensiveBookmarkChangesEnded(BookmarkModel* model) override;
+  void BookmarkNodeChanged(bookmarks::BookmarkModel* model,
+                           const bookmarks::BookmarkNode* node) override;
+  void BookmarkNodeChildrenReordered(
+      bookmarks::BookmarkModel* model,
+      const bookmarks::BookmarkNode* node) override;
+  void ExtensiveBookmarkChangesBeginning(
+      bookmarks::BookmarkModel* model) override;
+  void ExtensiveBookmarkChangesEnded(bookmarks::BookmarkModel* model) override;
 
   // Override PartnerBookmarksShim::Observer
   void PartnerShimChanged(PartnerBookmarksShim* shim) override;
@@ -208,7 +215,7 @@ class BookmarksBridge : public bookmarks::BaseBookmarkModelObserver,
 
   Profile* profile_;
   JavaObjectWeakGlobalRef weak_java_ref_;
-  BookmarkModel* bookmark_model_;  // weak
+  bookmarks::BookmarkModel* bookmark_model_;  // weak
   ChromeBookmarkClient* client_;   // weak
   scoped_ptr<bookmarks::ScopedGroupBookmarkActions> grouped_bookmark_actions_;
 

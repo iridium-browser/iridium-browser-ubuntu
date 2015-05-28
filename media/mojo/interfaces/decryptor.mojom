@@ -13,7 +13,6 @@ struct VideoFrame {};
 
 // Interface for decrypting (and decoding) encrypted streams.
 // See media/base/decryptor.h for details.
-[Client=DecryptorClient]
 interface Decryptor {
   // Status of a decrypt or decrypt-and-decode operation. The returned
   // buffer/frame of such an operation is NOT null iff the status is SUCCESS.

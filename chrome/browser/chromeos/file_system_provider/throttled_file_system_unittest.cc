@@ -42,9 +42,9 @@ void LogOpen(OpenLog* log, int handle, base::File::Error result) {
 class FileSystemProviderThrottledFileSystemTest : public testing::Test {
  protected:
   FileSystemProviderThrottledFileSystemTest() {}
-  virtual ~FileSystemProviderThrottledFileSystemTest() {}
+  ~FileSystemProviderThrottledFileSystemTest() override {}
 
-  virtual void SetUp() override {}
+  void SetUp() override {}
 
   // Initializes the throttled file system with |limit| number of opened files
   // at once. If 0, then no limit.
@@ -67,13 +67,11 @@ TEST_F(FileSystemProviderThrottledFileSystemTest, OpenFile_LimitedToOneAtOnce) {
   SetUpFileSystem(1);
 
   OpenLog first_open_log;
-  file_system_->OpenFile(base::FilePath(kFakeFilePath),
-                         ThrottledFileSystem::OPEN_FILE_MODE_READ,
+  file_system_->OpenFile(base::FilePath(kFakeFilePath), OPEN_FILE_MODE_READ,
                          base::Bind(&LogOpen, &first_open_log));
 
   OpenLog second_open_log;
-  file_system_->OpenFile(base::FilePath(kFakeFilePath),
-                         ThrottledFileSystem::OPEN_FILE_MODE_READ,
+  file_system_->OpenFile(base::FilePath(kFakeFilePath), OPEN_FILE_MODE_READ,
                          base::Bind(&LogOpen, &second_open_log));
 
   base::RunLoop().RunUntilIdle();
@@ -102,13 +100,11 @@ TEST_F(FileSystemProviderThrottledFileSystemTest, OpenFile_NoLimit) {
   SetUpFileSystem(0);  // No limit.
 
   OpenLog first_open_log;
-  file_system_->OpenFile(base::FilePath(kFakeFilePath),
-                         ThrottledFileSystem::OPEN_FILE_MODE_READ,
+  file_system_->OpenFile(base::FilePath(kFakeFilePath), OPEN_FILE_MODE_READ,
                          base::Bind(&LogOpen, &first_open_log));
 
   OpenLog second_open_log;
-  file_system_->OpenFile(base::FilePath(kFakeFilePath),
-                         ThrottledFileSystem::OPEN_FILE_MODE_READ,
+  file_system_->OpenFile(base::FilePath(kFakeFilePath), OPEN_FILE_MODE_READ,
                          base::Bind(&LogOpen, &second_open_log));
 
   base::RunLoop().RunUntilIdle();
@@ -142,13 +138,12 @@ TEST_F(FileSystemProviderThrottledFileSystemTest, AbortAfterRun) {
   SetUpFileSystem(1);
 
   OpenLog first_open_log;
-  AbortCallback abort_callback = file_system_->OpenFile(
-      base::FilePath(kFakeFilePath), ThrottledFileSystem::OPEN_FILE_MODE_READ,
-      base::Bind(&LogOpen, &first_open_log));
+  AbortCallback abort_callback =
+      file_system_->OpenFile(base::FilePath(kFakeFilePath), OPEN_FILE_MODE_READ,
+                             base::Bind(&LogOpen, &first_open_log));
 
   OpenLog second_open_log;
-  file_system_->OpenFile(base::FilePath(kFakeFilePath),
-                         ThrottledFileSystem::OPEN_FILE_MODE_READ,
+  file_system_->OpenFile(base::FilePath(kFakeFilePath), OPEN_FILE_MODE_READ,
                          base::Bind(&LogOpen, &second_open_log));
 
   base::RunLoop().RunUntilIdle();
@@ -156,21 +151,7 @@ TEST_F(FileSystemProviderThrottledFileSystemTest, AbortAfterRun) {
   ASSERT_EQ(1u, first_open_log.size());
   EXPECT_EQ(base::File::FILE_OK, first_open_log[0].second);
   EXPECT_EQ(0u, second_open_log.size());
-
-  // The first file is opened, so the opening operation has completed, then
-  // aborting it should result in an error. This is tested, as from the queue
-  // point of view, the opening task stays in the queue until closing the file.
-  StatusLog abort_log;
-  abort_callback.Run(base::Bind(&LogStatus, &abort_log));
-  base::RunLoop().RunUntilIdle();
-
-  ASSERT_EQ(1u, abort_log.size());
-  EXPECT_EQ(base::File::FILE_ERROR_INVALID_OPERATION, abort_log[0]);
-
-  // Confirm, that the second task is not executed after a invalid abort of the
-  // first one.
-  EXPECT_EQ(1u, first_open_log.size());
-  EXPECT_EQ(0u, second_open_log.size());
 }
+
 }  // namespace file_system_provider
 }  // namespace chromeos

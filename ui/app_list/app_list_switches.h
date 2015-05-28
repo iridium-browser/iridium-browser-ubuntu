@@ -5,6 +5,7 @@
 #ifndef UI_APP_LIST_APP_LIST_SWITCHES_H_
 #define UI_APP_LIST_APP_LIST_SWITCHES_H_
 
+#include "build/build_config.h"
 #include "ui/app_list/app_list_export.h"
 
 namespace app_list {
@@ -12,23 +13,24 @@ namespace switches {
 
 // Please keep these flags sorted.
 APP_LIST_EXPORT extern const char kCustomLauncherPage[];
-APP_LIST_EXPORT extern const char kDisableAppInfo[];
 APP_LIST_EXPORT extern const char kDisableAppListDismissOnBlur[];
 APP_LIST_EXPORT extern const char kDisableDriveAppsInAppList[];
 APP_LIST_EXPORT extern const char kDisableSyncAppList[];
 APP_LIST_EXPORT extern const char kEnableCenteredAppList[];
 APP_LIST_EXPORT extern const char kEnableExperimentalAppList[];
 APP_LIST_EXPORT extern const char kDisableExperimentalAppList[];
-APP_LIST_EXPORT extern const char kEnableHotwordAlwaysOn[];
 APP_LIST_EXPORT extern const char kEnableSyncAppList[];
+APP_LIST_EXPORT extern const char kEnableLauncherSearchProviderApi[];
+
+#if defined(OS_MACOSX)
+APP_LIST_EXPORT extern const char kEnableMacViewsAppList[];
+#endif
 
 bool APP_LIST_EXPORT IsAppListSyncEnabled();
 
 bool APP_LIST_EXPORT IsFolderUIEnabled();
 
 bool APP_LIST_EXPORT IsVoiceSearchEnabled();
-
-bool APP_LIST_EXPORT IsAppInfoEnabled();
 
 bool APP_LIST_EXPORT IsExperimentalAppListEnabled();
 
@@ -42,6 +44,12 @@ bool APP_LIST_EXPORT IsCenteredAppListEnabled();
 bool APP_LIST_EXPORT ShouldNotDismissOnBlur();
 
 bool APP_LIST_EXPORT IsDriveAppsInAppListEnabled();
+
+bool APP_LIST_EXPORT IsLauncherSearchProviderApiEnabled();
+
+#if defined(OS_MACOSX)
+bool APP_LIST_EXPORT IsMacViewsAppListListEnabled();
+#endif
 
 }  // namespace switches
 }  // namespace app_list

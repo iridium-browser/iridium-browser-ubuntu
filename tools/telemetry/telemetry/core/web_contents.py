@@ -4,6 +4,7 @@
 
 import os
 
+from telemetry.core import exceptions
 from telemetry.core import util
 
 DEFAULT_WEB_CONTENTS_TIMEOUT = 90
@@ -26,33 +27,61 @@ class WebContents(object):
 
   def WaitForDocumentReadyStateToBeComplete(self,
       timeout=DEFAULT_WEB_CONTENTS_TIMEOUT):
+    """Waits for the document to finish loading.
+
+    Raises:
+      exceptions.Error: See WaitForJavaScriptExpression() for a detailed list
+      of possible exceptions.
+    """
+
     self.WaitForJavaScriptExpression(
         'document.readyState == "complete"', timeout)
 
   def WaitForDocumentReadyStateToBeInteractiveOrBetter(self,
       timeout=DEFAULT_WEB_CONTENTS_TIMEOUT):
+    """Waits for the document to be interactive.
+
+    Raises:
+      exceptions.Error: See WaitForJavaScriptExpression() for a detailed list
+      of possible exceptions.
+    """
     self.WaitForJavaScriptExpression(
         'document.readyState == "interactive" || '
         'document.readyState == "complete"', timeout)
 
-  def WaitForJavaScriptExpression(self, expr, timeout):
+  def WaitForJavaScriptExpression(self, expr, timeout,
+                                  dump_page_state_on_timeout=True):
     """Waits for the given JavaScript expression to be True.
 
     This method is robust against any given Evaluation timing out.
+
+    Args:
+      expr: The expression to evaluate.
+      timeout: The number of seconds to wait for the expression to be True.
+      dump_page_state_on_timeout: Whether to provide additional information on
+          the page state if a TimeoutException is thrown.
+
+    Raises:
+      exceptions.TimeoutException: On a timeout.
+      exceptions.Error: See EvaluateJavaScript() for a detailed list of
+      possible exceptions.
     """
     def IsJavaScriptExpressionTrue():
       try:
         return bool(self.EvaluateJavaScript(expr))
-      except util.TimeoutException:
+      except exceptions.TimeoutException:
         # If the main thread is busy for longer than Evaluate's timeout, we
         # may time out here early. Instead, we want to wait for the full
         # timeout of this method.
         return False
     try:
       util.WaitFor(IsJavaScriptExpressionTrue, timeout)
-    except util.TimeoutException as e:
+    except exceptions.TimeoutException as e:
+      if not dump_page_state_on_timeout:
+        raise
+
       # Try to make timeouts a little more actionable by dumping |this|.
-      raise util.TimeoutException(e.message + self.EvaluateJavaScript("""
+      raise exceptions.TimeoutException(e.message + self.EvaluateJavaScript("""
         (function() {
           var error = '\\n\\nJavaScript |this|:\\n';
           for (name in this) {
@@ -81,7 +110,11 @@ class WebContents(object):
 
     Returns:
       True if 2 seconds have passed since last resource received, false
-      otherwise."""
+      otherwise.
+    Raises:
+      exceptions.Error: See EvaluateJavaScript() for a detailed list of
+      possible exceptions.
+    """
 
     # Inclusion of the script that provides
     # window.__telemetry_testHasReachedNetworkQuiescence()
@@ -96,6 +129,10 @@ class WebContents(object):
     """Executes statement in JavaScript. Does not return the result.
 
     If the statement failed to evaluate, EvaluateException will be raised.
+
+    Raises:
+      exceptions.Error: See ExecuteJavaScriptInContext() for a detailed list of
+      possible exceptions.
     """
     return self.ExecuteJavaScriptInContext(
         statement, context_id=None, timeout=timeout)
@@ -111,6 +148,10 @@ class WebContents(object):
 
     If the result of the evaluation cannot be JSONized, then an
     EvaluationException will be raised.
+
+    Raises:
+      exceptions.Error: See EvaluateJavaScriptInContext() for a detailed list
+      of possible exceptions.
     """
     return self.EvaluateJavaScriptInContext(
         expr, context_id=None, timeout=timeout)
@@ -119,6 +160,12 @@ class WebContents(object):
                                  timeout=DEFAULT_WEB_CONTENTS_TIMEOUT):
     """Similar to ExecuteJavaScript, except context_id can refer to an iframe.
     The main page has context_id=1, the first iframe context_id=2, etc.
+
+    Raises:
+      exceptions.EvaluateException
+      exceptions.WebSocketDisconnected
+      exceptions.TimeoutException
+      exceptions.DevtoolsTargetCrashException
     """
     return self._inspector_backend.ExecuteJavaScript(
         expr, context_id=context_id, timeout=timeout)
@@ -127,12 +174,23 @@ class WebContents(object):
                                   timeout=DEFAULT_WEB_CONTENTS_TIMEOUT):
     """Similar to ExecuteJavaScript, except context_id can refer to an iframe.
     The main page has context_id=1, the first iframe context_id=2, etc.
+
+    Raises:
+      exceptions.EvaluateException
+      exceptions.WebSocketDisconnected
+      exceptions.TimeoutException
+      exceptions.DevtoolsTargetCrashException
     """
     return self._inspector_backend.EvaluateJavaScript(
         expr, context_id=context_id, timeout=timeout)
 
   def EnableAllContexts(self):
     """Enable all contexts in a page. Returns the number of available contexts.
+
+    Raises:
+      exceptions.WebSocketDisconnected
+      exceptions.TimeoutException
+      exceptions.DevtoolsTargetCrashException
     """
     return self._inspector_backend.EnableAllContexts()
 
@@ -142,6 +200,10 @@ class WebContents(object):
     The current page is expect to be in a navigation.
     This function returns when the navigation is complete or when
     the timeout has been exceeded.
+
+    Raises:
+      exceptions.TimeoutException
+      exceptions.DevtoolsTargetCrashException
     """
     self._inspector_backend.WaitForNavigate(timeout)
 
@@ -152,6 +214,10 @@ class WebContents(object):
     If |script_to_evaluate_on_commit| is given, the script source string will be
     evaluated when the navigation is committed. This is after the context of
     the page exists, but before any script on the page itself has executed.
+
+    Raises:
+      exceptions.TimeoutException
+      exceptions.DevtoolsTargetCrashException
     """
     self._inspector_backend.Navigate(url, script_to_evaluate_on_commit, timeout)
 
@@ -167,15 +233,43 @@ class WebContents(object):
   def timeline_model(self):
     return self._inspector_backend.timeline_model
 
-  def StartTimelineRecording(self, options=None):
-    self._inspector_backend.StartTimelineRecording(options)
+  def StartTimelineRecording(self):
+    """Starts timeline recording.
 
-  @property
-  def is_timeline_recording_running(self):
-    return self._inspector_backend.is_timeline_recording_running
+    Raises:
+      exceptions.TimeoutException
+      exceptions.DevtoolsTargetCrashException
+    """
+    self._inspector_backend.StartTimelineRecording()
 
   def StopTimelineRecording(self):
+    """Stops timeline recording.
+
+    Raises:
+      exceptions.TimeoutException
+      exceptions.DevtoolsTargetCrashException
+    """
     self._inspector_backend.StopTimelineRecording()
 
-  def TakeJSHeapSnapshot(self, timeout=120):
-    return self._inspector_backend.TakeJSHeapSnapshot(timeout)
+  def IsAlive(self):
+    """Whether the WebContents is still operating normally.
+
+    Since WebContents function asynchronously, this method does not guarantee
+    that the WebContents will still be alive at any point in the future.
+
+    Returns:
+      A boolean indicating whether the WebContents is opearting normally.
+    """
+    return self._inspector_backend.IsInspectable()
+
+  def CloseConnections(self):
+    """Closes all TCP sockets held open by the browser.
+
+    Raises:
+      exceptions.DevtoolsTargetCrashException if the tab is not alive.
+    """
+    if not self.IsAlive():
+      raise exceptions.DevtoolsTargetCrashException
+    self.ExecuteJavaScript('window.chrome && chrome.benchmarking &&'
+                           'chrome.benchmarking.closeConnections()')
+

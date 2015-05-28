@@ -16,10 +16,10 @@ class SkSet : public SkAnimate {
     DECLARE_MEMBER_INFO(Set);
     SkSet();
 #ifdef SK_DUMP_ENABLED
-    virtual void dump(SkAnimateMaker* ) SK_OVERRIDE;
+    void dump(SkAnimateMaker* ) override;
 #endif
-    virtual void onEndElement(SkAnimateMaker& ) SK_OVERRIDE;
-    virtual void refresh(SkAnimateMaker& ) SK_OVERRIDE;
+    void onEndElement(SkAnimateMaker& ) override;
+    void refresh(SkAnimateMaker& ) override;
 private:
     typedef SkAnimate INHERITED;
 };

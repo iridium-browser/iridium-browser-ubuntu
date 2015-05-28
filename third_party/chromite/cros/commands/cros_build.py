@@ -10,9 +10,9 @@ import os
 import logging
 
 from chromite.cbuildbot import constants
-from chromite.lib import commandline
 from chromite.lib import cros_build_lib
 from chromite.lib import parallel
+from chromite.lib import project
 from chromite.scripts import cros_list_modified_packages as workon
 from chromite.scripts import cros_setup_toolchains as toolchain
 from chromite import cros
@@ -46,16 +46,17 @@ To just build a single package:
     self.chroot_update = options.chroot_update and options.deps
     if options.chroot_update and not options.deps:
       cros_build_lib.Debug('Skipping chroot update due to --nodeps')
-
+    self.build_pkgs = None
+    self.host = self.options.host
+    self.board = self.options.board or self.curr_project_name
+    self.project = project.FindProjectByName(self.board)
 
   @classmethod
   def AddParser(cls, parser):
     super(cls, BuildCommand).AddParser(parser)
-    default_board = cros_build_lib.GetDefaultBoard()
-    board = parser.add_mutually_exclusive_group(
-        required=(default_board is None))
-    board.add_argument('--board', help='The board to build packages for',
-                       default=default_board)
+    board = parser.add_mutually_exclusive_group()
+    board.add_argument('--board', '--project',
+                       help='The board or project to build packages for')
     board.add_argument('--host', help='Build packages for the chroot itself',
                        default=False, action='store_true')
     parser.add_argument('--no-binary', help="Don't use binary packages",
@@ -68,7 +69,10 @@ To just build a single package:
                       default=True, dest='deps', action='store_false')
     deps.add_argument('--rebuild-deps', default=False, action='store_true',
                       help='Automatically rebuild dependencies')
-    parser.add_argument('packages', help='Packages to build', nargs='+')
+    parser.add_argument('packages',
+                        help='Packages to build. If no packages listed, uses '
+                        'the current project main package.',
+                        nargs='*')
 
     # Advanced options.
     advanced = parser.add_argument_group('Advanced options')
@@ -91,18 +95,15 @@ To just build a single package:
 
     Only print the output if this step fails or if we're in debug mode.
     """
-    if self.options.deps and not self.options.host:
-      cmd = self._GetEmergeCommand(self.options.board)
-      cmd += ['-pe', '--backtrack=0'] + self.options.packages
+    if self.options.deps and not self.host:
+      cmd = self._GetEmergeCommand(self.board)
+      cmd += ['-pe', '--backtrack=0'] + self.build_pkgs
       try:
         cros_build_lib.RunCommand(cmd, combine_stdout_stderr=True,
                                   debug_level=logging.DEBUG)
       except cros_build_lib.RunCommandError as ex:
         ex.msg += self._BAD_DEPEND_MSG
         raise
-
-  def _ListModifiedPackages(self, board):
-    return list(workon.ListModifiedWorkonPackages(board, board is None))
 
   def _GetEmergeCommand(self, board):
     if self.options.fast:
@@ -120,7 +121,8 @@ To just build a single package:
       packages: Packages to emerge.
       board: Board to emerge to. If None, emerge to host.
     """
-    modified_packages = self._ListModifiedPackages(board)
+    modified_packages = list(workon.ListModifiedWorkonPackages(board,
+                                                               board is None))
     cmd = self._GetEmergeCommand(board) + [
         '-uNv',
         '--reinstall-atoms=%s' % ' '.join(modified_packages),
@@ -166,24 +168,37 @@ To just build a single package:
   def _Build(self):
     """Update the chroot, then merge the requested packages."""
     self._UpdateChroot()
-    board = None if self.options.host else self.options.board
-    self._Emerge(self.options.packages, board)
+    self._Emerge(self.build_pkgs, None if self.host else self.board)
 
   def _SetupBoardIfNeeded(self):
     """Create the board if it's missing."""
-    board = self.options.board
-    if not self.options.host:
+    if not self.host:
+      self.project.GeneratePortageConfig()
+
       self._UpdateChroot()
       cmd = [os.path.join(constants.CROSUTILS_DIR, 'setup_board'),
              '--skip_toolchain_update', '--skip_chroot_upgrade']
-      cmd.append('--board=%s' % board)
+      cmd.append('--board=%s' % self.board)
       if not self.options.binary:
         cmd.append('--nousepkg')
       cros_build_lib.RunCommand(cmd)
 
   def Run(self):
     """Run cros build."""
-    if not cros_build_lib.IsInsideChroot():
-      raise commandline.ChrootRequiredError()
+    if not self.host:
+      if not self.board:
+        cros_build_lib.Die('You did not specify a board/project to build for. '
+                           'You need to be in a project directory or set '
+                           '--board/--project')
+      if not self.project:
+        cros_build_lib.Die('Could not find project for %s' % self.board)
+
+    self.RunInsideChroot(auto_detect_project=True)
+
+    self.build_pkgs = self.options.packages or (self.project and
+                                                self.project.MainPackages())
+    if not self.build_pkgs:
+      cros_build_lib.Die('No packages found, nothing to build.')
+
     self._SetupBoardIfNeeded()
     parallel.RunParallelSteps([self._CheckDependencies, self._Build])

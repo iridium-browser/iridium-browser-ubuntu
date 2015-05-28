@@ -395,11 +395,9 @@ HttpProxyClientSocketPool::
 HttpProxyConnectJobFactory::HttpProxyConnectJobFactory(
     TransportClientSocketPool* transport_pool,
     SSLClientSocketPool* ssl_pool,
-    HostResolver* host_resolver,
     NetLog* net_log)
     : transport_pool_(transport_pool),
       ssl_pool_(ssl_pool),
-      host_resolver_(host_resolver),
       net_log_(net_log) {
   base::TimeDelta max_pool_timeout = base::TimeDelta();
 
@@ -442,20 +440,17 @@ HttpProxyClientSocketPool::HttpProxyConnectJobFactory::ConnectionTimeout(
 HttpProxyClientSocketPool::HttpProxyClientSocketPool(
     int max_sockets,
     int max_sockets_per_group,
-    ClientSocketPoolHistograms* histograms,
-    HostResolver* host_resolver,
     TransportClientSocketPool* transport_pool,
     SSLClientSocketPool* ssl_pool,
     NetLog* net_log)
     : transport_pool_(transport_pool),
       ssl_pool_(ssl_pool),
-      base_(this, max_sockets, max_sockets_per_group, histograms,
+      base_(this,
+            max_sockets,
+            max_sockets_per_group,
             ClientSocketPool::unused_idle_socket_timeout(),
             ClientSocketPool::used_idle_socket_timeout(),
-            new HttpProxyConnectJobFactory(transport_pool,
-                                           ssl_pool,
-                                           host_resolver,
-                                           net_log)) {
+            new HttpProxyConnectJobFactory(transport_pool, ssl_pool, net_log)) {
   // We should always have a |transport_pool_| except in unit tests.
   if (transport_pool_)
     base_.AddLowerLayeredPool(transport_pool_);
@@ -546,10 +541,6 @@ base::DictionaryValue* HttpProxyClientSocketPool::GetInfoAsValue(
 
 base::TimeDelta HttpProxyClientSocketPool::ConnectionTimeout() const {
   return base_.ConnectionTimeout();
-}
-
-ClientSocketPoolHistograms* HttpProxyClientSocketPool::histograms() const {
-  return base_.histograms();
 }
 
 bool HttpProxyClientSocketPool::IsStalled() const {

@@ -102,6 +102,17 @@ IPC_ENUM_TRAITS_MAX_VALUE(
     blink::WebFormElement::AutocompleteResult,
     blink::WebFormElement::AutocompleteResultErrorInvalid)
 
+// Singly-included section for type definitions.
+#ifndef COMPONENTS_AUTOFILL_CONTENT_COMMON_AUTOFILL_MESSAGES_H_
+#define COMPONENTS_AUTOFILL_CONTENT_COMMON_AUTOFILL_MESSAGES_H_
+
+// IPC_MESSAGE macros fail on the std::map, when expanding. We need to define
+// a type to avoid that.
+using FormDataFieldDataMap =
+    std::map<autofill::FormData, autofill::FormFieldData>;
+
+#endif  // COMPONENTS_AUTOFILL_CONTENT_COMMON_AUTOFILL_MESSAGES_H_
+
 // Autofill messages sent from the browser to the renderer.
 
 // Tells the render frame that a user gesture was observed somewhere in the tab
@@ -195,6 +206,12 @@ IPC_MESSAGE_ROUTED3(AutofillMsg_RequestAutocompleteResult,
 IPC_MESSAGE_ROUTED1(AutofillMsg_AccountCreationFormsDetected,
                     std::vector<autofill::FormData> /* forms */)
 
+// Sent when Autofill manager gets the query response from the Autofill server
+// which contains information about username fields for some forms.
+// |predictions| maps forms to their username fields.
+IPC_MESSAGE_ROUTED1(AutofillMsg_AutofillUsernameDataReceived,
+                    FormDataFieldDataMap /* predictions */)
+
 // Autofill messages sent from the renderer to the browser.
 
 // TODO(creis): check in the browser that the renderer actually has permission
@@ -242,10 +259,14 @@ IPC_MESSAGE_ROUTED1(AutofillHostMsg_InPageNavigation,
 IPC_MESSAGE_ROUTED1(AutofillHostMsg_RecordSavePasswordProgress,
                     std::string /* log */)
 
-// Notification that a form has been submitted.  The user hit the button.
-IPC_MESSAGE_ROUTED2(AutofillHostMsg_FormSubmitted,
+// Notification that a form is about to be submitted. The user hit the button.
+IPC_MESSAGE_ROUTED2(AutofillHostMsg_WillSubmitForm,
                     autofill::FormData /* form */,
                     base::TimeTicks /* timestamp */)
+
+// Notification that a form has been submitted.
+IPC_MESSAGE_ROUTED1(AutofillHostMsg_FormSubmitted,
+                    autofill::FormData /* form */)
 
 // Notification that a form field's value has changed.
 IPC_MESSAGE_ROUTED3(AutofillHostMsg_TextFieldDidChange,

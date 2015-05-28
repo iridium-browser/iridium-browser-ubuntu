@@ -254,9 +254,8 @@ bool ChildProcessHostImpl::OnMessageReceived(const IPC::Message& msg) {
                           OnShutdownRequest)
       IPC_MESSAGE_HANDLER(ChildProcessHostMsg_SyncAllocateSharedMemory,
                           OnAllocateSharedMemory)
-      IPC_MESSAGE_HANDLER_DELAY_REPLY(
-          ChildProcessHostMsg_SyncAllocateGpuMemoryBuffer,
-          OnAllocateGpuMemoryBuffer)
+      IPC_MESSAGE_HANDLER(ChildProcessHostMsg_SyncAllocateGpuMemoryBuffer,
+                          OnAllocateGpuMemoryBuffer)
       IPC_MESSAGE_HANDLER(ChildProcessHostMsg_DeletedGpuMemoryBuffer,
                           OnDeletedGpuMemoryBuffer)
       IPC_MESSAGE_UNHANDLED(handled = false)
@@ -275,16 +274,9 @@ bool ChildProcessHostImpl::OnMessageReceived(const IPC::Message& msg) {
 
 void ChildProcessHostImpl::OnChannelConnected(int32 peer_pid) {
   if (!peer_process_.IsValid()) {
-    base::ProcessHandle peer_handle_;
-    if (base::OpenPrivilegedProcessHandle(peer_pid, &peer_handle_)) {
-      // TODO(rvargas) crbug.com/417532: don't go through a ProcessHandle.
-      if (peer_handle_ == base::GetCurrentProcessHandle())
-        peer_process_ = base::Process::Current();
-      else
-        peer_process_ = base::Process(peer_handle_);
-    } else {
-      peer_process_ = delegate_->GetProcess().Duplicate();
-    }
+    peer_process_ = base::Process::OpenWithExtraPrivileges(peer_pid);
+    if (!peer_process_.IsValid())
+       peer_process_ = delegate_->GetProcess().Duplicate();
     DCHECK(peer_process_.IsValid());
   }
   opening_channel_ = false;
@@ -324,25 +316,20 @@ void ChildProcessHostImpl::OnAllocateGpuMemoryBuffer(
     uint32 height,
     gfx::GpuMemoryBuffer::Format format,
     gfx::GpuMemoryBuffer::Usage usage,
-    IPC::Message* reply) {
+    gfx::GpuMemoryBufferHandle* handle) {
   // TODO(reveman): Add support for other types of GpuMemoryBuffers.
 
-  gfx::GpuMemoryBufferHandle handle;
   // AllocateForChildProcess() will check if |width| and |height| are valid
   // and handle failure in a controlled way when not. We just need to make
   // sure |format| and |usage| are supported here.
   if (GpuMemoryBufferImplSharedMemory::IsFormatSupported(format) &&
       usage == gfx::GpuMemoryBuffer::MAP) {
-    handle = GpuMemoryBufferImplSharedMemory::AllocateForChildProcess(
+    *handle = GpuMemoryBufferImplSharedMemory::AllocateForChildProcess(
         g_next_gpu_memory_buffer_id.GetNext(),
         gfx::Size(width, height),
         format,
         peer_process_.Handle());
   }
-
-  ChildProcessHostMsg_SyncAllocateGpuMemoryBuffer::WriteReplyParams(reply,
-                                                                    handle);
-  Send(reply);
 }
 
 void ChildProcessHostImpl::OnDeletedGpuMemoryBuffer(

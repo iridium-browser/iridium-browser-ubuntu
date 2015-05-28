@@ -96,19 +96,35 @@ class ExtensionContentSettingsApiTest : public ExtensionApiTest {
                                      example_url,
                                      CONTENT_SETTINGS_TYPE_POPUPS,
                                      std::string()));
-#if 0
-    // TODO(bauerb): Enable once geolocation settings are integrated into the
-    // HostContentSettingsMap.
-    EXPECT_EQ(CONTENT_SETTING_ALLOW,
+    EXPECT_EQ(CONTENT_SETTING_ASK,
               map->GetContentSetting(example_url,
                                      example_url,
                                      CONTENT_SETTINGS_TYPE_GEOLOCATION,
                                      std::string()));
-#endif
     EXPECT_EQ(CONTENT_SETTING_ASK,
               map->GetContentSetting(example_url,
                                      example_url,
                                      CONTENT_SETTINGS_TYPE_NOTIFICATIONS,
+                                     std::string()));
+    EXPECT_EQ(CONTENT_SETTING_ASK,
+              map->GetContentSetting(example_url,
+                                     example_url,
+                                     CONTENT_SETTINGS_TYPE_FULLSCREEN,
+                                     std::string()));
+    EXPECT_EQ(CONTENT_SETTING_ASK,
+              map->GetContentSetting(example_url,
+                                     example_url,
+                                     CONTENT_SETTINGS_TYPE_MOUSELOCK,
+                                     std::string()));
+    EXPECT_EQ(CONTENT_SETTING_ASK,
+              map->GetContentSetting(example_url,
+                                     example_url,
+                                     CONTENT_SETTINGS_TYPE_PPAPI_BROKER,
+                                     std::string()));
+    EXPECT_EQ(CONTENT_SETTING_ASK,
+              map->GetContentSetting(example_url,
+                                     example_url,
+                                     CONTENT_SETTINGS_TYPE_AUTOMATIC_DOWNLOADS,
                                      std::string()));
 
     // Check content settings for www.google.com
@@ -126,15 +142,26 @@ class ExtensionContentSettingsApiTest : public ExtensionApiTest {
     EXPECT_EQ(CONTENT_SETTING_ALLOW,
               map->GetContentSetting(
                   url, url, CONTENT_SETTINGS_TYPE_POPUPS, std::string()));
-#if 0
     EXPECT_EQ(CONTENT_SETTING_BLOCK,
               map->GetContentSetting(
                   url, url, CONTENT_SETTINGS_TYPE_GEOLOCATION, std::string()));
-#endif
     EXPECT_EQ(
         CONTENT_SETTING_BLOCK,
         map->GetContentSetting(
             url, url, CONTENT_SETTINGS_TYPE_NOTIFICATIONS, std::string()));
+    EXPECT_EQ(CONTENT_SETTING_ALLOW,
+        map->GetContentSetting(
+            url, url, CONTENT_SETTINGS_TYPE_FULLSCREEN, std::string()));
+    EXPECT_EQ(CONTENT_SETTING_BLOCK,
+        map->GetContentSetting(
+            url, url, CONTENT_SETTINGS_TYPE_MOUSELOCK, std::string()));
+    EXPECT_EQ(CONTENT_SETTING_BLOCK,
+        map->GetContentSetting(
+            url, url, CONTENT_SETTINGS_TYPE_PPAPI_BROKER, std::string()));
+    EXPECT_EQ(CONTENT_SETTING_BLOCK,
+        map->GetContentSetting(
+            url, url, CONTENT_SETTINGS_TYPE_AUTOMATIC_DOWNLOADS,
+            std::string()));
   }
 
   void CheckContentSettingsDefault() {
@@ -160,17 +187,26 @@ class ExtensionContentSettingsApiTest : public ExtensionApiTest {
     EXPECT_EQ(CONTENT_SETTING_BLOCK,
               map->GetContentSetting(
                   url, url, CONTENT_SETTINGS_TYPE_POPUPS, std::string()));
-#if 0
-    // TODO(bauerb): Enable once geolocation settings are integrated into the
-    // HostContentSettingsMap.
-    EXPECT_EQ(CONTENT_SETTING_ALLOW,
+    EXPECT_EQ(CONTENT_SETTING_ASK,
               map->GetContentSetting(
                   url, url, CONTENT_SETTINGS_TYPE_GEOLOCATION, std::string()));
-#endif
     EXPECT_EQ(
         CONTENT_SETTING_ASK,
         map->GetContentSetting(
             url, url, CONTENT_SETTINGS_TYPE_NOTIFICATIONS, std::string()));
+    EXPECT_EQ(CONTENT_SETTING_ASK,
+        map->GetContentSetting(
+            url, url, CONTENT_SETTINGS_TYPE_FULLSCREEN, std::string()));
+    EXPECT_EQ(CONTENT_SETTING_ASK,
+        map->GetContentSetting(
+            url, url, CONTENT_SETTINGS_TYPE_MOUSELOCK, std::string()));
+    EXPECT_EQ(CONTENT_SETTING_ASK,
+        map->GetContentSetting(
+            url, url, CONTENT_SETTINGS_TYPE_PPAPI_BROKER, std::string()));
+    EXPECT_EQ(CONTENT_SETTING_ASK,
+        map->GetContentSetting(
+            url, url, CONTENT_SETTINGS_TYPE_AUTOMATIC_DOWNLOADS,
+            std::string()));
   }
 
  private:

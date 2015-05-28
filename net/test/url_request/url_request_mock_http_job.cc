@@ -96,45 +96,47 @@ std::string DoFileIO(const base::FilePath& file_path) {
   return raw_headers;
 }
 
-}  // namespace
-
-// static
-void URLRequestMockHTTPJob::AddUrlHandler(
-    const base::FilePath& base_path,
-    const scoped_refptr<base::SequencedWorkerPool>& worker_pool) {
-  // Add kMockHostname to net::URLRequestFilter.
-  net::URLRequestFilter* filter = net::URLRequestFilter::GetInstance();
-  filter->AddHostnameInterceptor(
-      "http", kMockHostname, CreateInterceptor(base_path, worker_pool));
-}
-
-// static
-void URLRequestMockHTTPJob::AddHostnameToFileHandler(
-    const std::string& hostname,
-    const base::FilePath& file,
-    const scoped_refptr<base::SequencedWorkerPool>& worker_pool) {
-  net::URLRequestFilter* filter = net::URLRequestFilter::GetInstance();
-  filter->AddHostnameInterceptor(
-      "http", hostname, CreateInterceptorForSingleFile(file, worker_pool));
-}
-
-// static
-GURL URLRequestMockHTTPJob::GetMockUrl(const base::FilePath& path) {
-  std::string url = "http://";
-  url.append(kMockHostname);
-  url.append("/");
+// For a given file |path| and |scheme|, return the URL served by the
+// URlRequestMockHTTPJob.
+GURL GetMockUrlForScheme(const base::FilePath& path,
+                         const std::string& scheme) {
+  std::string url = scheme + "://" + kMockHostname + "/";
   std::string path_str = path.MaybeAsASCII();
   DCHECK(!path_str.empty());  // We only expect ASCII paths in tests.
   url.append(path_str);
   return GURL(url);
 }
 
+}  // namespace
+
+// static
+void URLRequestMockHTTPJob::AddUrlHandlers(
+    const base::FilePath& base_path,
+    const scoped_refptr<base::SequencedWorkerPool>& worker_pool) {
+  // Add kMockHostname to net::URLRequestFilter, for both HTTP and HTTPS.
+  net::URLRequestFilter* filter = net::URLRequestFilter::GetInstance();
+  filter->AddHostnameInterceptor(
+      "http", kMockHostname, CreateInterceptor(base_path, worker_pool));
+  filter->AddHostnameInterceptor("https", kMockHostname,
+                                 CreateInterceptor(base_path, worker_pool));
+}
+
+// static
+GURL URLRequestMockHTTPJob::GetMockUrl(const base::FilePath& path) {
+  return GetMockUrlForScheme(path, "http");
+}
+
+// static
+GURL URLRequestMockHTTPJob::GetMockHttpsUrl(const base::FilePath& path) {
+  return GetMockUrlForScheme(path, "https");
+}
+
 // static
 GURL URLRequestMockHTTPJob::GetMockUrlWithFailure(const base::FilePath& path,
                                                   FailurePhase phase,
                                                   int net_error) {
-  COMPILE_ASSERT(arraysize(kFailurePhase) == MAX_FAILURE_PHASE,
-                 kFailurePhase_must_match_FailurePhase_enum);
+  static_assert(arraysize(kFailurePhase) == MAX_FAILURE_PHASE,
+                "kFailurePhase must match FailurePhase enum");
   DCHECK_GE(phase, START);
   DCHECK_LE(phase, READ_SYNC);
   std::string url(GetMockUrl(path).spec());

@@ -125,7 +125,7 @@ void AwWebContentsDelegate::RunFileChooser(WebContents* web_contents,
 void AwWebContentsDelegate::AddNewContents(WebContents* source,
                                            WebContents* new_contents,
                                            WindowOpenDisposition disposition,
-                                           const gfx::Rect& initial_pos,
+                                           const gfx::Rect& initial_rect,
                                            bool user_gesture,
                                            bool* was_blocked) {
   JNIEnv* env = AttachCurrentThread();
@@ -163,6 +163,18 @@ void AwWebContentsDelegate::AddNewContents(WebContents* source,
   }
 }
 
+void AwWebContentsDelegate::NavigationStateChanged(
+    content::WebContents* source,
+    content::InvalidateTypes changed_flags) {
+  JNIEnv* env = AttachCurrentThread();
+
+  ScopedJavaLocalRef<jobject> java_delegate = GetJavaDelegate(env);
+  if (java_delegate.obj()) {
+    Java_AwWebContentsDelegate_navigationStateChanged(env, java_delegate.obj(),
+                                                      changed_flags);
+  }
+}
+
 // Notifies the delegate about the creation of a new WebContents. This
 // typically happens when popups are created.
 void AwWebContentsDelegate::WebContentsCreated(
@@ -192,6 +204,18 @@ void AwWebContentsDelegate::ActivateContents(WebContents* contents) {
   }
 }
 
+void AwWebContentsDelegate::LoadingStateChanged(WebContents* source,
+                                                bool to_different_document) {
+  // Page title may have changed, need to inform the embedder.
+  // |source| may be null if loading has started.
+  JNIEnv* env = AttachCurrentThread();
+
+  ScopedJavaLocalRef<jobject> java_delegate = GetJavaDelegate(env);
+  if (java_delegate.obj()) {
+    Java_AwWebContentsDelegate_loadingStateChanged(env, java_delegate.obj());
+  }
+}
+
 void AwWebContentsDelegate::RequestMediaAccessPermission(
     WebContents* web_contents,
     const content::MediaStreamRequest& request,
@@ -208,16 +232,17 @@ void AwWebContentsDelegate::RequestMediaAccessPermission(
           new MediaAccessPermissionRequest(request, callback)));
 }
 
-void AwWebContentsDelegate::ToggleFullscreenModeForTab(
-    content::WebContents* web_contents, bool enter_fullscreen) {
-  JNIEnv* env = AttachCurrentThread();
+void AwWebContentsDelegate::EnterFullscreenModeForTab(
+    content::WebContents* web_contents, const GURL& origin) {
+  WebContentsDelegateAndroid::EnterFullscreenModeForTab(web_contents, origin);
+  is_fullscreen_ = true;
+  web_contents->GetRenderViewHost()->WasResized();
+}
 
-  ScopedJavaLocalRef<jobject> java_delegate = GetJavaDelegate(env);
-  if (java_delegate.obj()) {
-    Java_AwWebContentsDelegate_toggleFullscreenModeForTab(
-        env, java_delegate.obj(), enter_fullscreen);
-  }
-  is_fullscreen_ = enter_fullscreen;
+void AwWebContentsDelegate::ExitFullscreenModeForTab(
+    content::WebContents* web_contents) {
+  WebContentsDelegateAndroid::ExitFullscreenModeForTab(web_contents);
+  is_fullscreen_ = false;
   web_contents->GetRenderViewHost()->WasResized();
 }
 

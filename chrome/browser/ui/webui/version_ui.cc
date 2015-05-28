@@ -6,7 +6,6 @@
 
 #include "base/command_line.h"
 #include "base/strings/string_number_conversions.h"
-#include "base/strings/utf_string_conversions.h"
 #include "chrome/browser/profiles/profile.h"
 #include "chrome/browser/ui/webui/version_handler.h"
 #include "chrome/common/chrome_content_client.h"
@@ -83,6 +82,11 @@ WebUIDataSource* CreateVersionUIDataSource() {
   html_source->AddLocalizedString("official",
       version_info.IsOfficialBuild() ? IDS_ABOUT_VERSION_OFFICIAL :
                                        IDS_ABOUT_VERSION_UNOFFICIAL);
+#if defined(ARCH_CPU_64_BITS)
+  html_source->AddLocalizedString("version_bitsize", IDS_ABOUT_VERSION_64BIT);
+#else
+  html_source->AddLocalizedString("version_bitsize", IDS_ABOUT_VERSION_32BIT);
+#endif
   html_source->AddLocalizedString("user_agent_name",
                                   IDS_ABOUT_VERSION_USER_AGENT);
   html_source->AddString("useragent", GetUserAgent());
@@ -92,8 +96,7 @@ WebUIDataSource* CreateVersionUIDataSource() {
 #if defined(OS_WIN)
   html_source->AddString(
       "command_line",
-      base::WideToUTF16(
-          base::CommandLine::ForCurrentProcess()->GetCommandLineString()));
+      base::CommandLine::ForCurrentProcess()->GetCommandLineString());
 #elif defined(OS_POSIX)
   std::string command_line;
   typedef std::vector<std::string> ArgvList;

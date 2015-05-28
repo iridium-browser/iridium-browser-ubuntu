@@ -20,24 +20,16 @@ SUCCESS_INDICATOR = 'SUCCESS: all tests passed.'
 NATIVE_MESSAGING_DIR = 'NativeMessagingHosts'
 CRD_ID = 'chrome-remote-desktop'  # Used in a few file/folder names
 CHROMOTING_HOST_PATH = '/opt/google/chrome-remote-desktop/chrome-remote-desktop'
+TEST_FAILURE = False
 
 
 def LaunchBTCommand(command):
-  results, error = RunCommandInSubProcess(command)
+  global TEST_FAILURE
+  results = RunCommandInSubProcess(command)
 
   # Check that the test passed.
   if SUCCESS_INDICATOR not in results:
-    # Obtain contents of Chromoting host logs.
-    log_contents = ''
-    # There should be only 1 log file, as we delete logs on test completion.
-    # Loop through matching files, just in case there are more.
-    for log_file in glob.glob('/tmp/chrome_remote_desktop_*'):
-      with open(log_file, 'r') as log:
-        log_contents += '\nHOST LOG %s CONTENTS:\n%s' % (log_file, log.read())
-    print log_contents
-    raise Exception(
-        'Test failed. Command:%s\nResults:%s\nError:%s\n' %
-        (command, results, error))
+    TEST_FAILURE = True
 
 
 def RunCommandInSubProcess(command):
@@ -47,7 +39,6 @@ def RunCommandInSubProcess(command):
     command: The text of command to be executed.
   Returns:
     results: stdout contents of executing the command.
-    error: stderr contents.
   """
 
   cmd_line = [command]
@@ -59,7 +50,7 @@ def RunCommandInSubProcess(command):
                     (e, command, error))
   else:
     print results
-  return results, error
+  return results
 
 
 def TestCleanUp(user_profile_dir):
@@ -80,30 +71,16 @@ def TestCleanUp(user_profile_dir):
     shutil.rmtree(user_profile_dir)
 
 
-def InitialiseTestMachineForLinux(cfg_file, manifest_file, user_profile_dir):
+def InitialiseTestMachineForLinux(cfg_file):
   """Sets up a Linux machine for connect-to-host browser-tests.
 
-  Copy over me2me host-config and manifest files to expected locations.
+  Copy over me2me host-config to expected locations.
   By default, the Linux me2me host expects the host-config file to be under
   $HOME/.config/chrome-remote-desktop
   Its name is expected to have a hash that is specific to a machine.
 
-  When a user launches the remoting web-app, the native-message host process is
-  started. For this to work, the manifest file for me2me host is expected to be
-  in a specific folder under the user-profile dir.
-
-  This function performs both the above tasks.
-
-  TODO(anandc):
-  Once we have Linux machines in the swarming lab already installed with the
-  me2me host, this function should also perform the step of starting the host.
-  That is gated on this CL: https://chromereviews.googleplex.com/123957013/, and
-  then having base images in the chrome-labs be updated with it.
-
   Args:
     cfg_file: location of test account's host-config file.
-    manifest_file: location of me2me host manifest file.
-    user_profile_dir: user-profile-dir to be used by the connect-to-host tests.
   """
 
   # First get home directory on current machine.
@@ -121,24 +98,72 @@ def InitialiseTestMachineForLinux(cfg_file, manifest_file, user_profile_dir):
       config_file_src,
       os.path.join(default_config_file_location, default_config_file_name))
 
-  # Next, create a user-profile dir, and place the me2me manifest.json file in
-  # the expected location for native-messating-host to work properly.
+  # Finally, start chromoting host.
+  RunCommandInSubProcess(CHROMOTING_HOST_PATH + ' --start')
+
+
+def SetupUserProfileDir(me2me_manifest_file, it2me_manifest_file,
+                        user_profile_dir):
+  """Sets up the Google Chrome user profile directory.
+
+  Delete the previous user profile directory if exists and create a new one.
+  This invalidates any state changes by the previous test so each test can start
+  with the same environment.
+
+  When a user launches the remoting web-app, the native messaging host process
+  is started. For this to work, this function places the me2me and it2me native
+  messaging host manifest files in a specific folder under the user-profile dir.
+
+  Args:
+    me2me_manifest_file: location of me2me native messaging host manifest file.
+    it2me_manifest_file: location of it2me native messaging host manifest file.
+    user_profile_dir: Chrome user-profile-directory.
+  """
   native_messaging_folder = os.path.join(user_profile_dir, NATIVE_MESSAGING_DIR)
 
   if os.path.exists(user_profile_dir):
     shutil.rmtree(user_profile_dir)
   os.makedirs(native_messaging_folder)
 
-  manifest_file_src = os.path.join(os.getcwd(), manifest_file)
-  manifest_file_dest = (
-      os.path.join(native_messaging_folder, os.path.basename(manifest_file)))
-  shutil.copyfile(manifest_file_src, manifest_file_dest)
+  manifest_files = [me2me_manifest_file, it2me_manifest_file]
+  for manifest_file in manifest_files:
+    manifest_file_src = os.path.join(os.getcwd(), manifest_file)
+    manifest_file_dest = (
+        os.path.join(native_messaging_folder, os.path.basename(manifest_file)))
+    shutil.copyfile(manifest_file_src, manifest_file_dest)
 
-  # Finally, start chromoting host.
-  RunCommandInSubProcess(CHROMOTING_HOST_PATH + ' --start')
 
+def main(args):
 
-def main():
+  InitialiseTestMachineForLinux(args.cfg_file)
+
+  with open(args.commands_file) as f:
+    for line in f:
+      # Reset the user profile directory to start each test with a clean slate.
+      SetupUserProfileDir(args.me2me_manifest_file, args.it2me_manifest_file,
+                          args.user_profile_dir)
+
+      # Replace the PROD_DIR value in the command-line with
+      # the passed in value.
+      line = line.replace(PROD_DIR_ID, args.prod_dir)
+      LaunchBTCommand(line)
+
+  # All tests completed. Include host-logs in the test results.
+  host_log_contents = ''
+  # There should be only 1 log file, as we delete logs on test completion.
+  # Loop through matching files, just in case there are more.
+  for log_file in glob.glob('/tmp/chrome_remote_desktop_*'):
+    with open(log_file, 'r') as log:
+      host_log_contents += '\nHOST LOG %s\n CONTENTS:\n%s' % (
+          log_file, log.read())
+  print host_log_contents
+
+  # Was there any test failure?
+  if TEST_FAILURE:
+    raise Exception('At least one test failed.')
+
+if __name__ == '__main__':
+
   parser = argparse.ArgumentParser()
   parser.add_argument('-f', '--commands_file',
                       help='path to file listing commands to be launched.')
@@ -146,26 +171,17 @@ def main():
                       help='path to folder having product and test binaries.')
   parser.add_argument('-c', '--cfg_file',
                       help='path to test host config file.')
-  parser.add_argument('-m', '--manifest_file',
+  parser.add_argument('--me2me_manifest_file',
                       help='path to me2me host manifest file.')
+  parser.add_argument('--it2me_manifest_file',
+                      help='path to it2me host manifest file.')
   parser.add_argument(
       '-u', '--user_profile_dir',
       help='path to user-profile-dir, used by connect-to-host tests.')
+  command_line_args = parser.parse_args()
+  try:
+    main(command_line_args)
+  finally:
+    # Stop host and cleanup user-profile-dir.
+    TestCleanUp(command_line_args.user_profile_dir)
 
-  args = parser.parse_args()
-
-  InitialiseTestMachineForLinux(args.cfg_file, args.manifest_file,
-                                args.user_profile_dir)
-
-  with open(args.commands_file) as f:
-    for line in f:
-      # Replace the PROD_DIR value in the command-line with
-      # the passed in value.
-      line = line.replace(PROD_DIR_ID, args.prod_dir)
-      LaunchBTCommand(line)
-
-  # Now, stop host, and cleanup user-profile-dir
-  TestCleanUp(args.user_profile_dir)
-
-if __name__ == '__main__':
-  main()

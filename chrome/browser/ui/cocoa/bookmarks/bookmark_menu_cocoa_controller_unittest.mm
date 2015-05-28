@@ -13,6 +13,9 @@
 #include "components/bookmarks/browser/bookmark_utils.h"
 #include "testing/gtest/include/gtest/gtest.h"
 
+using bookmarks::BookmarkModel;
+using bookmarks::BookmarkNode;
+
 @interface FakeBookmarkMenuController : BookmarkMenuCocoaController {
  @public
   const BookmarkNode* nodes_[2];

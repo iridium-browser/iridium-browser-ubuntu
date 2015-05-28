@@ -4,8 +4,6 @@
 
 """Cros unit test library, with utility functions."""
 
-# pylint: disable=bad-continuation
-
 from __future__ import print_function
 
 import collections
@@ -18,6 +16,7 @@ import functools
 import hashlib
 import json
 import logging
+import mock
 import mox
 import netrc
 import os
@@ -25,12 +24,14 @@ import re
 import socket
 import stat
 import sys
+import tempfile
 import time
 import unittest
 import urllib
 
 from chromite.cbuildbot import constants
 from chromite.lib import cidb
+from chromite.lib import commandline
 from chromite.lib import git
 import cros_build_lib
 import gob_util
@@ -42,18 +43,6 @@ import timeout_util
 # of the cidb. This call ensures that they will not accidentally
 # do so through the normal cidb SetUp / GetConnectionForBuilder factory.
 cidb.CIDBConnectionFactory.SetupMockCidb()
-
-if 'chromite' not in sys.modules:
-  # TODO(build): Finish test wrapper (http://crosbug.com/37517).
-  # Until then, we detect the chromite manipulation not yet having
-  # occurred, and inject it ourselves.
-  # We cannot just import chromite since this module is still accessed
-  # from non chromite.lib.cros_test_lib pathways (which will be resolved
-  # implicitly via 37517).
-  sys.path.insert(0, os.path.join(
-      os.path.dirname(os.path.abspath(__file__)), '../third_party'))
-
-import mock
 
 
 Directory = collections.namedtuple('Directory', ['name', 'contents'])
@@ -275,7 +264,7 @@ class StackedSetup(type):
     exc_info = None
     for target in StackedSetup._walk_mro_stacking(obj, '__raw_tearDown__',
                                                   True):
-      #pylint: disable=W0702
+      # pylint: disable=bare-except
       try:
         target(obj)
       except:
@@ -324,6 +313,7 @@ class TruthTable(object):
 
   class TruthTableInputIterator(object):
     """Class to support iteration over inputs of a TruthTable."""
+
     def __init__(self, truth_table):
       self.truth_table = truth_table
       self.next_line = 0
@@ -467,8 +457,10 @@ class LogFilter(logging.Filter):
 class LoggingCapturer(object):
   """Captures all messages emitted by the logging module."""
 
-  def __init__(self, logger_name=''):
+  def __init__(self, logger_name='', log_level=logging.DEBUG):
     self._log_filter = LogFilter()
+    self._old_level = None
+    self._log_level = log_level
     self.logger_name = logger_name
 
   def __enter__(self):
@@ -480,12 +472,16 @@ class LoggingCapturer(object):
 
   def StartCapturing(self):
     """Begin capturing logging messages."""
-    logging.getLogger(self.logger_name).addFilter(self._log_filter)
-
+    logger = logging.getLogger(self.logger_name)
+    self._old_level = logger.getEffectiveLevel()
+    logger.setLevel(self._log_level)
+    logger.addFilter(self._log_filter)
 
   def StopCapturing(self):
     """Stop capturing logging messages."""
-    logging.getLogger(self.logger_name).removeFilter(self._log_filter)
+    logger = logging.getLogger(self.logger_name)
+    logger.setLevel(self._old_level)
+    logger.removeFilter(self._log_filter)
 
   @property
   def messages(self):
@@ -501,8 +497,74 @@ class LoggingCapturer(object):
     return self.LogsMatch(re.escape(msg))
 
 
+class _FdCapturer(object):
+  """Helper class to capture output at the file descriptor level.
+
+  This is meant to be used with sys.stdout or sys.stderr. By capturing
+  file descriptors, this will also intercept subprocess output, which
+  reassigning sys.stdout or sys.stderr will not do.
+
+  Output will only be captured, it will no longer be printed while
+  the capturer is active.
+  """
+
+  def __init__(self, source):
+    """Construct the _FdCapturer object.
+
+    Does not start capturing until Start() is called.
+
+    Args:
+      source: A file object to capture. Typically sys.stdout or
+        sys.stderr, but will work with anything that implements flush()
+        and fileno().
+    """
+    self._source = source
+    self._captured = ''
+    self._saved_fd = None
+    self._tempfile = None
+    self._tempfile_reader = None
+
+  def Start(self):
+    """Begin capturing output."""
+    self._tempfile = tempfile.NamedTemporaryFile(delete=False)
+    self._tempfile_reader = open(self._tempfile.name)
+    os.unlink(self._tempfile.name)
+    # Save the original fd so we can revert in Stop().
+    self._saved_fd = os.dup(self._source.fileno())
+    os.dup2(self._tempfile.file.fileno(), self._source.fileno())
+
+  def Stop(self):
+    """Stop capturing output."""
+    self.GetCaptured()
+    if self._saved_fd is not None:
+      os.dup2(self._saved_fd, self._source.fileno())
+      os.close(self._saved_fd)
+      self._saved_fd = None
+    if self._tempfile_reader is not None:
+      self._tempfile_reader.close()
+      self._tempfile_reader = None
+    if self._tempfile is not None:
+      self._tempfile.close()
+      self._tempfile = None
+
+  def GetCaptured(self):
+    """Return all output captured up to this point.
+
+    Can be used while capturing or after Stop() has been called.
+    """
+    self._source.flush()
+    if self._tempfile_reader is not None:
+      self._captured += self._tempfile_reader.read()
+    return self._captured
+
+  def ClearCaptured(self):
+    """Erase all captured output."""
+    self.GetCaptured()
+    self._captured = ''
+
+
 class OutputCapturer(object):
-  """Class with limited support for capturing test stdout/stderr output.
+  """Class for capturing test stdout/stderr output.
 
   Class is designed as a 'ContextManager'.  Example usage in a test method
   of an object of TestCase:
@@ -527,12 +589,11 @@ class OutputCapturer(object):
   WARNING_MSG_RE = re.compile(r'^\033\[1;%dm(.+?)(?:\033\[0m)+$' %
                               (30 + terminal.Color.YELLOW,), re.DOTALL)
 
-  __slots__ = ['_stderr', '_stderr_cap', '_stdout', '_stdout_cap']
+  __slots__ = ['_stdout_capturer', '_stderr_capturer']
 
   def __init__(self):
-    self._stdout = mock.patch('sys.stdout', new_callable=cStringIO.StringIO)
-    self._stderr = mock.patch('sys.stderr', new_callable=cStringIO.StringIO)
-    self._stderr_cap = self._stdout_cap = None
+    self._stdout_capturer = _FdCapturer(sys.stdout)
+    self._stderr_capturer = _FdCapturer(sys.stderr)
 
   def __enter__(self):
     # This method is called with entering 'with' block.
@@ -558,26 +619,26 @@ class OutputCapturer(object):
 
   def StartCapturing(self):
     """Begin capturing stdout and stderr."""
-    self._stdout_cap = self._stdout.start()
-    self._stderr_cap = self._stderr.start()
+    self._stdout_capturer.Start()
+    self._stderr_capturer.Start()
 
   def StopCapturing(self):
     """Stop capturing stdout and stderr."""
-    self._stdout.stop()
-    self._stderr.stop()
+    self._stdout_capturer.Stop()
+    self._stderr_capturer.Stop()
 
   def ClearCaptured(self):
     """Clear any captured stdout/stderr content."""
-    self._stdout_cap = None
-    self._stderr_cap = None
+    self._stdout_capturer.ClearCaptured()
+    self._stderr_capturer.ClearCaptured()
 
   def GetStdout(self):
     """Return captured stdout so far."""
-    return self._stdout_cap.getvalue()
+    return self._stdout_capturer.GetCaptured()
 
   def GetStderr(self):
     """Return captured stderr so far."""
-    return self._stderr_cap.getvalue()
+    return self._stderr_capturer.GetCaptured()
 
   def _GetOutputLines(self, output, include_empties):
     """Split |output| into lines, optionally |include_empties|.
@@ -640,6 +701,14 @@ class TestCase(unittest.TestCase):
     os.chdir(self.__saved_cwd__)
     os.umask(self.__saved_umask__)
 
+  def id(self):
+    """Return a name that can be passed in via the command line."""
+    return '%s.%s' % (self.__class__.__name__, self._testMethodName)
+
+  def __str__(self):
+    """Return a pretty name that can be passed in via the command line."""
+    return '[%s] %s' % (self.__module__, self.id())
+
   def assertRaises2(self, exception, functor, *args, **kwargs):
     """Like assertRaises, just with checking of the exception.
 
@@ -661,10 +730,10 @@ class TestCase(unittest.TestCase):
         If not given, a suitable one is defaulted to.
       returns: The exception object.
     """
-    exact_kls = kwargs.pop("exact_kls", None)
-    check_attrs = kwargs.pop("check_attrs", {})
-    ex_msg = kwargs.pop("ex_msg", None)
-    msg = kwargs.pop("msg", None)
+    exact_kls = kwargs.pop('exact_kls', None)
+    check_attrs = kwargs.pop('check_attrs', {})
+    ex_msg = kwargs.pop('ex_msg', None)
+    msg = kwargs.pop('msg', None)
     if msg is None:
       msg = ("%s(*%r, **%r) didn't throw an exception"
              % (functor.__name__, args, kwargs))
@@ -679,13 +748,13 @@ class TestCase(unittest.TestCase):
       bad = []
       for attr, required in check_attrs.iteritems():
         self.assertTrue(hasattr(e, attr),
-                        msg="%s lacks attr %s" % (e, attr))
+                        msg='%s lacks attr %s' % (e, attr))
         value = getattr(e, attr)
         if value != required:
-          bad.append("%s attr is %s, needed to be %s"
+          bad.append('%s attr is %s, needed to be %s'
                      % (attr, value, required))
       if bad:
-        raise AssertionError("\n".join(bad))
+        raise AssertionError('\n'.join(bad))
       return e
 
   def assertExists(self, path):
@@ -829,7 +898,7 @@ class OutputTestCase(TestCase):
     If |regexp| is non-null, then the error line must also match it.
     If |invert| is true, then assert the line is NOT found.
 
-    Raises RuntimeError if output capturing was never one for this test.
+    Raises RuntimeError if output capturing was never on for this test.
     """
     check_msg_func = self._GenCheckMsgFunc(OutputCapturer.ERROR_MSG_RE, regexp)
     return self._AssertOutputContainsMsg(check_msg_func, invert,
@@ -842,7 +911,7 @@ class OutputTestCase(TestCase):
     If |regexp| is non-null, then the warning line must also match it.
     If |invert| is true, then assert the line is NOT found.
 
-    Raises RuntimeError if output capturing was never one for this test.
+    Raises RuntimeError if output capturing was never on for this test.
     """
     check_msg_func = self._GenCheckMsgFunc(OutputCapturer.WARNING_MSG_RE,
                                            regexp)
@@ -855,7 +924,7 @@ class OutputTestCase(TestCase):
 
     If |invert| is true, then assert the line is NOT found.
 
-    Raises RuntimeError if output capturing was never one for this test.
+    Raises RuntimeError if output capturing was never on for this test.
     """
     check_msg_func = self._GenCheckMsgFunc(None, regexp)
     return self._AssertOutputContainsMsg(check_msg_func, invert,
@@ -891,7 +960,7 @@ class OutputTestCase(TestCase):
 
     If |regexp| is non-null, then the error line must also match it.
 
-    Raises RuntimeError if output capturing was never one for this test.
+    Raises RuntimeError if output capturing was never on for this test.
     """
     check_msg_func = self._GenCheckMsgFunc(OutputCapturer.ERROR_MSG_RE, regexp)
     return self._AssertOutputEndsInMsg(check_msg_func,
@@ -903,7 +972,7 @@ class OutputTestCase(TestCase):
 
     If |regexp| is non-null, then the warning line must also match it.
 
-    Raises RuntimeError if output capturing was never one for this test.
+    Raises RuntimeError if output capturing was never on for this test.
     """
     check_msg_func = self._GenCheckMsgFunc(OutputCapturer.WARNING_MSG_RE,
                                            regexp)
@@ -914,7 +983,7 @@ class OutputTestCase(TestCase):
                              check_stdout=True, check_stderr=False):
     """Assert requested output ends in line matching |regexp|.
 
-    Raises RuntimeError if output capturing was never one for this test.
+    Raises RuntimeError if output capturing was never on for this test.
     """
     check_msg_func = self._GenCheckMsgFunc(None, regexp)
     return self._AssertOutputEndsInMsg(check_msg_func,
@@ -939,11 +1008,11 @@ class OutputTestCase(TestCase):
     If the func does not raise a SystemExit with exit code 0 then assert.
     """
     exit_code = self.FuncCatchSystemExit(func, *args, **kwargs)[1]
-    self.assertFalse(exit_code is None,
-                      msg='Expected system exit code 0, but caught none')
-    self.assertTrue(exit_code == 0,
-                    msg='Expected system exit code 0, but caught %d' %
-                    exit_code)
+    self.assertIsNot(exit_code, None,
+                     msg='Expected system exit code 0, but caught none')
+    self.assertEqual(exit_code, 0,
+                     msg=('Expected system exit code 0, but caught %d' %
+                          exit_code))
 
   def AssertFuncSystemExitNonZero(self, func, *args, **kwargs):
     """Run |func| with |args| and |kwargs| catching exceptions.SystemExit.
@@ -951,17 +1020,17 @@ class OutputTestCase(TestCase):
     If the func does not raise a non-zero SystemExit code then assert.
     """
     exit_code = self.FuncCatchSystemExit(func, *args, **kwargs)[1]
-    self.assertFalse(exit_code is None,
-                      msg='Expected non-zero system exit code, but caught none')
-    self.assertFalse(exit_code == 0,
-                     msg='Expected non-zero system exit code, but caught %d' %
-                     exit_code)
+    self.assertIsNot(exit_code, None,
+                     msg='Expected non-zero system exit code, but caught none')
+    self.assertNotEqual(exit_code, 0,
+                        msg=('Expected non-zero system exit code, but caught %d'
+                             % exit_code))
 
   def AssertRaisesAndReturn(self, error, func, *args, **kwargs):
     """Like assertRaises, but return exception raised."""
     try:
       func(*args, **kwargs)
-      self.assertTrue(False, msg='Expected %s but got none' % error)
+      self.fail(msg='Expected %s but got none' % error)
     except error as ex:
       return ex
 
@@ -989,6 +1058,7 @@ class TempDirTestCase(TestCase):
 
 class MockTestCase(TestCase):
   """Python-mock based test case; compatible with StackedSetup"""
+
   def setUp(self):
     self._patchers = []
 
@@ -1105,7 +1175,8 @@ class GerritTestCase(MockTempDirTestCase):
     with open(self.gerrit_instance.netrc_file, 'w') as out:
       for n in needed:
         cs = candidates[n]
-        self.assertTrue(len(cs) > 0, 'missing password in ~/.netrc for %s' % n)
+        self.assertGreater(len(cs), 0,
+                           msg='missing password in ~/.netrc for %s' % n)
         cs.sort()
         _, login, password = cs[0]
         out.write('machine %s login %s password %s\n' % (n, login, password))
@@ -1128,7 +1199,6 @@ class GerritTestCase(MockTempDirTestCase):
       cros_build_lib.RunCommand(
           ['git', 'config', '--global', 'http.cookiefile', gi.cookies_path],
           quiet=True)
-
 
     # Set cookie file for http authentication
     if gi.cookies_path:
@@ -1157,11 +1227,11 @@ class GerritTestCase(MockTempDirTestCase):
     self.PatchObject(constants, 'MANIFEST_INT_URL', '%s/%s' % (
         gi.git_url, constants.MANIFEST_INT_PROJECT))
     self.PatchObject(constants, 'GIT_REMOTES', {
-            constants.EXTERNAL_REMOTE: gi.gerrit_url,
-            constants.INTERNAL_REMOTE: gi.gerrit_url,
-            constants.CHROMIUM_REMOTE: gi.gerrit_url,
-            constants.CHROME_REMOTE: gi.gerrit_url,
-        })
+        constants.EXTERNAL_REMOTE: gi.gerrit_url,
+        constants.INTERNAL_REMOTE: gi.gerrit_url,
+        constants.CHROMIUM_REMOTE: gi.gerrit_url,
+        constants.CHROME_REMOTE: gi.gerrit_url,
+    })
 
   def createProject(self, suffix, description='Test project', owners=None,
                     submit_type='CHERRY_PICK'):
@@ -1363,8 +1433,8 @@ class _LessAnnoyingMox(mox.Mox):
 
   mock_classes = {}.fromkeys(
       ['chromite.lib.cros_build_lib.%s' % x
-       for x in dir(cros_build_lib) if "RunCommand" in x],
-       _RunCommandMock)
+       for x in dir(cros_build_lib) if 'RunCommand' in x],
+      _RunCommandMock)
 
   @staticmethod
   def _GetNamespace(obj):
@@ -1453,23 +1523,89 @@ def SetTimeZone(tz):
     time.tzset()
 
 
-def FindTests(directory, module_namespace=''):
-  """Find all *_unittest.py, and return their python namespaces.
+class ListTestSuite(unittest.BaseTestSuite):
+  """Stub test suite to list all possible tests"""
 
-  Args:
-    directory: The directory to scan for tests.
-    module_namespace: What namespace to prefix all found tests with.
+  # We hack in |top| for local recursive usage.
+  # pylint: disable=arguments-differ
+  def run(self, result, _debug=False, top=True):
+    """List all the tests this suite would have run."""
+    # Recursively build a list of all the tests and the descriptions.
+    # We do this so we can align the output when printing.
+    tests = []
+    # Walk all the tests that this suite itself holds.
+    for test in self:
+      if isinstance(test, type(self)):
+        tests += test(result, top=False)
+      else:
+        desc = test.shortDescription()
+        if desc is None:
+          desc = ''
+        tests.append((test.id(), desc))
 
-  Returns:
-    A list of python unittests in python namespace form.
+    if top:
+      if tests:
+        # Now that we have all the tests, print them in lined up columns.
+        maxlen = max(len(x[0]) for x in tests)
+        for test, desc in tests:
+          print('%-*s  %s' % (maxlen, test, desc))
+      return result
+    else:
+      return tests
+
+
+class ListTestLoader(unittest.TestLoader):
+  """Stub test loader to list all possible tests"""
+
+  suiteClass = ListTestSuite
+
+
+class ListTestRunner(object):
+  """Stub test runner to list all possible tests"""
+
+  def run(self, test):
+    result = unittest.TestResult()
+    test(result)
+    return result
+
+
+class TraceTestRunner(unittest.TextTestRunner):
+  """Test runner that traces the test code as it runs
+
+  We insert tracing at the test runner level rather than test suite or test
+  case because both of those can execute code we've written (e.g. setUpClass
+  and setUp), and we want to trace that code too.
   """
-  results = cros_build_lib.RunCommand(
-      ['find', '.', '-name', '*_unittest.py', '-printf', '%P\n'],
-      cwd=directory, print_cmd=False, capture_output=True).output.splitlines()
-  # Drop the trailing .py, inject in the name if one was given.
-  if module_namespace:
-    module_namespace += '.'
-  return [module_namespace + x[:-3].replace('/', '.') for x in results]
+
+  TRACE_KWARGS = {}
+
+  def run(self, test):
+    import trace
+    tracer = trace.Trace(**self.TRACE_KWARGS)
+    return tracer.runfunc(unittest.TextTestRunner.run, self, test)
+
+
+class ProfileTestRunner(unittest.TextTestRunner):
+  """Test runner that profiles the test code as it runs
+
+  We insert profiling at the test runner level rather than test suite or test
+  case because both of those can execute code we've written (e.g. setUpClass
+  and setUp), and we want to profile that code too.  It might be unexpectedly
+  heavy by invoking expensive setup logic.
+  """
+
+  PROFILE_KWARGS = {}
+  SORT_STATS_KEYS = ()
+
+  def run(self, test):
+    import cProfile
+    profiler = cProfile.Profile(**self.PROFILE_KWARGS)
+    ret = profiler.runcall(unittest.TextTestRunner.run, self, test)
+
+    import pstats
+    stats = pstats.Stats(profiler, stream=sys.stderr)
+    stats.strip_dirs().sort_stats(*self.SORT_STATS_KEYS).print_stats()
+    return ret
 
 
 class TestProgram(unittest.TestProgram):
@@ -1479,23 +1615,8 @@ class TestProgram(unittest.TestProgram):
   can inject custom argv for example (to limit what tests run).
   """
 
-  USAGE = unittest.main.USAGE + """
-Chromite Options:
-  -d, --debug      Set logging level to debug
-      --network    Include network based tests (default: skip network tests)
-"""
-
   def __init__(self, **kwargs):
-    if '--network' in sys.argv:
-      sys.argv.remove('--network')
-      GlobalTestConfig.RUN_NETWORK_TESTS = True
-
-    level = kwargs.pop('level', logging.CRITICAL)
-    for flag in ('-d', '--debug'):
-      if flag in sys.argv:
-        sys.argv.remove(flag)
-        level = logging.DEBUG
-    cros_build_lib.SetupBasicLogging(level)
+    self.default_log_level = kwargs.pop('level', 'critical')
 
     try:
       super(TestProgram, self).__init__(**kwargs)
@@ -1503,6 +1624,125 @@ Chromite Options:
       if GlobalTestConfig.NETWORK_TESTS_SKIPPED:
         print('Note: %i network test(s) skipped; use --network to run them.' %
               GlobalTestConfig.NETWORK_TESTS_SKIPPED)
+
+  def parseArgs(self, argv):
+    """Parse the command line for the test"""
+    description = """Examples:
+  %(prog)s                            - run default set of tests
+  %(prog)s MyTestSuite                - run suite MyTestSuite
+  %(prog)s MyTestCase.testSomething   - run MyTestCase.testSomething
+  %(prog)s MyTestCase                 - run all MyTestCase.test* methods
+"""
+    parser = commandline.ArgumentParser(
+        description=description, default_log_level=self.default_log_level)
+
+    # These are options the standard unittest.TestProgram supports.
+    parser.add_argument('-v', '--verbose', default=False, action='store_true',
+                        help='Verbose output')
+    parser.add_argument('-q', '--quiet', default=False, action='store_true',
+                        help='Minimal output')
+    parser.add_argument('-f', '--failfast', default=False, action='store_true',
+                        help='Stop on first failure')
+    parser.add_argument('tests', nargs='*',
+                        help='specific test classes or methods to run')
+
+    # These are custom options we added.
+    parser.add_argument('-l', '--list', default=False, action='store_true',
+                        help='List all the available tests')
+    parser.add_argument('--network', default=False, action='store_true',
+                        help='Run tests that depend on good network '
+                             'connectivity')
+
+    # Note: The tracer module includes coverage options ...
+    group = parser.add_argument_group('Tracing options')
+    group.add_argument('--trace', default=False, action='store_true',
+                       help='Trace test execution')
+    group.add_argument('--ignore-module', default='',
+                       help='Ignore the specified modules (comma delimited)')
+    group.add_argument('--ignore-dir', default='',
+                       help='Ignore modules/packages in the specified dirs '
+                            '(comma delimited)')
+    group.add_argument('--no-ignore-system', default=True, action='store_false',
+                       dest='ignore_system',
+                       help='Do not ignore sys paths automatically')
+
+    group = parser.add_argument_group('Profiling options')
+    group.add_argument('--profile', default=False, action='store_true',
+                       help='Profile test execution')
+    group.add_argument('--profile-sort-keys', default='time',
+                       help='Keys to sort stats by (comma delimited)')
+    group.add_argument('--no-profile-builtins', default=True,
+                       action='store_false', dest='profile_builtins',
+                       help='Do not profile builtin functions')
+
+    opts = parser.parse_args(argv[1:])
+    opts.Freeze()
+
+    # Process the common options first.
+    if opts.verbose:
+      self.verbosity = 2
+
+    if opts.quiet:
+      self.verbosity = 0
+
+    if opts.failfast:
+      self.failfast = True
+
+    # Then handle the chromite extensions.
+    if opts.network:
+      GlobalTestConfig.RUN_NETWORK_TESTS = True
+
+    # We allow --list because it's nice to be able to throw --list onto an
+    # existing command line to quickly get the output.  It's clear to users
+    # that it does nothing else.
+    if sum((opts.trace, opts.profile)) > 1:
+      parser.error('--trace/--profile are exclusive')
+
+    if opts.list:
+      self.testRunner = ListTestRunner
+      self.testLoader = ListTestLoader()
+    elif opts.trace:
+      self.testRunner = TraceTestRunner
+
+      # Create the automatic ignore list based on sys.path.  We need to filter
+      # out chromite paths though as we might have automatic local paths in it.
+      auto_ignore = set()
+      if opts.ignore_system:
+        auto_ignore.add(os.path.join(constants.CHROMITE_DIR, 'third_party'))
+        for path in sys.path:
+          path = os.path.realpath(path)
+          if path.startswith(constants.CHROMITE_DIR):
+            continue
+          auto_ignore.add(path)
+
+      TraceTestRunner.TRACE_KWARGS = {
+          # Disable counting as it only applies to coverage collection.
+          'count': False,
+          # Enable tracing support since that's what we want w/--trace.
+          'trace': True,
+          # Enable relative timestamps before each traced line.
+          'timing': True,
+          'ignoremods': opts.ignore_module.split(','),
+          'ignoredirs': set(opts.ignore_dir.split(',')) | auto_ignore,
+      }
+    elif opts.profile:
+      self.testRunner = ProfileTestRunner
+
+      ProfileTestRunner.PROFILE_KWARGS = {
+          'subcalls': True,
+          'builtins': opts.profile_builtins,
+      }
+
+      ProfileTestRunner.SORT_STATS_KEYS = opts.profile_sort_keys.split(',')
+
+    # Figure out which tests the user/unittest wants to run.
+    if len(opts.tests) == 0 and self.defaultTest is None:
+      self.testNames = None
+    elif len(opts.tests) > 0:
+      self.testNames = opts.tests
+    else:
+      self.testNames = (self.defaultTest,)
+    self.createTests()
 
 
 class main(TestProgram):

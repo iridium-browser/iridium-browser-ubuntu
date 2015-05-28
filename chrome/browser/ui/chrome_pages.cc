@@ -334,35 +334,46 @@ void ShowBrowserSignin(Browser* browser, signin_metrics::Source source) {
   SigninManagerBase* manager =
       SigninManagerFactory::GetForProfile(original_profile);
   DCHECK(manager->IsSigninAllowed());
-  // If we're signed in, just show settings.
-  if (manager->IsAuthenticated()) {
-    ShowSettings(browser);
-  } else {
-    // If the browser's profile is an incognito profile, make sure to use
-    // a browser window from the original profile.  The user cannot sign in
-    // from an incognito window.
-    scoped_ptr<ScopedTabbedBrowserDisplayer> displayer;
-    if (browser->profile()->IsOffTheRecord()) {
-      displayer.reset(new ScopedTabbedBrowserDisplayer(
-          original_profile, chrome::HOST_DESKTOP_TYPE_NATIVE));
-      browser = displayer->browser();
-    }
-
-    signin_metrics::LogSigninSource(source);
-
-    // Since the app launcher is a separate application, it might steal focus
-    // away from Chrome, and accidentally close the avatar bubble. In this case,
-    // fallback to the full-tab signin page.
-    if (switches::IsNewAvatarMenu() &&
-        source != signin_metrics::SOURCE_APP_LAUNCHER) {
-      browser->window()->ShowAvatarBubbleFromAvatarButton(
-          BrowserWindow::AVATAR_BUBBLE_MODE_SIGNIN,
-          signin::ManageAccountsParams());
-    } else {
-      NavigateToSingletonTab(browser, GURL(signin::GetPromoURL(source, false)));
-      DCHECK_GT(browser->tab_strip_model()->count(), 0);
-    }
+  // If the browser's profile is an incognito profile, make sure to use
+  // a browser window from the original profile.  The user cannot sign in
+  // from an incognito window.
+  bool switched_browser = false;
+  scoped_ptr<ScopedTabbedBrowserDisplayer> displayer;
+  if (browser->profile()->IsOffTheRecord()) {
+    switched_browser = true;
+    displayer.reset(new ScopedTabbedBrowserDisplayer(
+        original_profile, chrome::HOST_DESKTOP_TYPE_NATIVE));
+    browser = displayer->browser();
   }
+
+  signin_metrics::LogSigninSource(source);
+
+  // Since the app launcher is a separate application, it might steal focus
+  // away from Chrome, and accidentally close the avatar bubble. The same will
+  // happen if we had to switch browser windows to show the sign in page. In
+  // this case, fallback to the full-tab signin page.
+  if (switches::IsNewAvatarMenu() &&
+      source != signin_metrics::SOURCE_APP_LAUNCHER && !switched_browser) {
+    browser->window()->ShowAvatarBubbleFromAvatarButton(
+        BrowserWindow::AVATAR_BUBBLE_MODE_SIGNIN,
+        signin::ManageAccountsParams());
+  } else {
+    NavigateToSingletonTab(browser, GURL(signin::GetPromoURL(source, false)));
+    DCHECK_GT(browser->tab_strip_model()->count(), 0);
+  }
+}
+
+void ShowBrowserSigninOrSettings(
+    Browser* browser,
+    signin_metrics::Source source) {
+  Profile* original_profile = browser->profile()->GetOriginalProfile();
+  SigninManagerBase* manager =
+      SigninManagerFactory::GetForProfile(original_profile);
+  DCHECK(manager->IsSigninAllowed());
+  if (manager->IsAuthenticated())
+    ShowSettings(browser);
+  else
+    ShowBrowserSignin(browser, source);
 }
 #endif
 

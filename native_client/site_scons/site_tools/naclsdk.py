@@ -55,7 +55,8 @@ def _StubOutEnvToolsForBuiltElsewhere(env):
   assert(env.Bit('built_elsewhere'))
   env.Replace(CC='true', CXX='true', LINK='true', AR='true',
               RANLIB='true', AS='true', ASPP='true', LD='true',
-              STRIP='true', PNACLOPT='true', PNACLFINALIZE='true')
+              STRIP='true', OBJDUMP='true', OBJCOPY='true',
+              PNACLOPT='true', PNACLFINALIZE='true')
 
 
 def _SetEnvForNativeSdk(env, sdk_path):
@@ -115,6 +116,7 @@ def _SetEnvForNativeSdk(env, sdk_path):
               AR=os.path.join(bin_path, '%s-ar' % tool_prefix),
               AS=os.path.join(bin_path, '%s-as' % tool_prefix),
               ASPP=os.path.join(bin_path, '%s-%s' % (tool_prefix, cc)),
+              FILECHECK=os.path.join(bin_path, 'FileCheck'),
               GDB=os.path.join(bin_path, '%s-gdb' % tool_prefix),
               # NOTE: use g++ for linking so we can handle C AND C++.
               LINK=os.path.join(bin_path, '%s-%s' % (tool_prefix, cxx)),
@@ -123,6 +125,7 @@ def _SetEnvForNativeSdk(env, sdk_path):
               RANLIB=os.path.join(bin_path, '%s-ranlib' % tool_prefix),
               NM=os.path.join(bin_path, '%s-nm' % tool_prefix),
               OBJDUMP=os.path.join(bin_path, '%s-objdump' % tool_prefix),
+              OBJCOPY=os.path.join(bin_path, '%s-objcopy' % tool_prefix),
               STRIP=os.path.join(bin_path, '%s-strip' % tool_prefix),
               ADDR2LINE=os.path.join(bin_path, '%s-addr2line' % tool_prefix),
               BASE_LINKFLAGS=[cc_mode_flag],
@@ -191,7 +194,8 @@ def _SetEnvForPnacl(env, root):
 
   translator_root = os.path.join(os.path.dirname(root), 'pnacl_translator')
 
-  binprefix = os.path.join(root, 'bin', 'pnacl-')
+  binroot = os.path.join(root, 'bin')
+  binprefix = os.path.join(binroot, 'pnacl-')
   binext = ''
   if env.Bit('host_windows'):
     binext = '.bat'
@@ -212,6 +216,7 @@ def _SetEnvForPnacl(env, root):
 
   pnacl_ld = binprefix + 'ld' + binext
   pnacl_disass = binprefix + 'dis' + binext
+  pnacl_filecheck = os.path.join(binroot, 'FileCheck')
   pnacl_finalize = binprefix + 'finalize' + binext
   pnacl_opt = binprefix + 'opt' + binext
   pnacl_strip = binprefix + 'strip' + binext
@@ -287,6 +292,7 @@ def _SetEnvForPnacl(env, root):
               AR=pnacl_ar,
               AS=pnacl_as + ld_arch_flag,
               RANLIB=pnacl_ranlib,
+              FILECHECK=pnacl_filecheck,
               DISASS=pnacl_disass,
               OBJDUMP=pnacl_disass,
               STRIP=pnacl_strip,
@@ -679,7 +685,10 @@ def generate(env):
   if env.Bit('bitcode'):
     _SetEnvForPnacl(env, root)
   elif env.Bit('built_elsewhere'):
+    def FakeInstall(dest, source, env):
+      print 'Not installing', dest
     _StubOutEnvToolsForBuiltElsewhere(env)
+    env.Replace(INSTALL=FakeInstall)
   else:
     _SetEnvForNativeSdk(env, root)
 

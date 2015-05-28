@@ -9,12 +9,12 @@
 #include "base/memory/scoped_ptr.h"
 #include "base/memory/weak_ptr.h"
 #include "net/base/completion_callback.h"
-#include "net/base/net_log.h"
 #include "net/base/request_priority.h"
 #include "net/http/http_auth.h"
 #include "net/http/http_auth_controller.h"
 #include "net/http/http_request_info.h"
 #include "net/http/http_stream_factory_impl.h"
+#include "net/log/net_log.h"
 #include "net/proxy/proxy_service.h"
 #include "net/quic/quic_stream_factory.h"
 #include "net/socket/client_socket_handle.h"
@@ -55,12 +55,9 @@ class HttpStreamFactoryImpl::Job {
   int RestartTunnelWithProxyAuth(const AuthCredentials& credentials);
   LoadState GetLoadState() const;
 
-  // Marks this Job as the "alternate" job, from Alternate-Protocol. Tracks the
-  // original url so we can mark the Alternate-Protocol as broken if
-  // we fail to connect.  |alternate| specifies the alternate protocol to use
-  // and alternate port to connect to.
-  void MarkAsAlternate(const GURL& original_url,
-                       AlternateProtocolInfo alternate);
+  // Marks this Job as the "alternate" job, from Alternate-Protocol or Alt-Svc
+  // using the specified alternate service.
+  void MarkAsAlternate(AlternativeService alternative_service);
 
   // Tells |this| to wait for |job| to resume it.
   void WaitFor(Job* job);
@@ -93,7 +90,7 @@ class HttpStreamFactoryImpl::Job {
 
   // Called to indicate that this job succeeded, and some other jobs
   // will be orphaned.
-  void ReportJobSuccededForRequest();
+  void ReportJobSucceededForRequest();
 
   // Marks that the other |job| has completed.
   void MarkOtherJobComplete(const Job& job);
@@ -188,10 +185,13 @@ class HttpStreamFactoryImpl::Job {
   void SetSocketMotivation();
 
   bool IsHttpsProxyAndHttpUrl() const;
+  // Returns true iff this Job is an alternate, that is, iff MarkAsAlternate has
+  // been called.
+  bool IsAlternate() const;
 
-  // Sets several fields of ssl_config for the given origin_server based on the
-  // proxy info and other factors.
-  void InitSSLConfig(const HostPortPair& origin_server,
+  // Sets several fields of |ssl_config| for |server| based on the proxy info
+  // and other factors.
+  void InitSSLConfig(const HostPortPair& server,
                      SSLConfig* ssl_config,
                      bool is_proxy) const;
 
@@ -233,7 +233,7 @@ class HttpStreamFactoryImpl::Job {
   // Should we force QUIC for this stream request.
   bool ShouldForceQuic() const;
 
-  void MaybeMarkAlternateProtocolBroken();
+  void MaybeMarkAlternativeServiceBroken();
 
   // Record histograms of latency until Connect() completes.
   static void LogHttpConnectedMetrics(const ClientSocketHandle& handle);
@@ -264,16 +264,25 @@ class HttpStreamFactoryImpl::Job {
   ProxyService::PacRequest* pac_request_;
   SSLInfo ssl_info_;
 
-  // The origin server we're trying to reach.
-  HostPortPair origin_;
+  // The server we are trying to reach, could be that of the origin or of the
+  // alternative service.
+  HostPortPair server_;
 
   // The origin url we're trying to reach. This url may be different from the
   // original request when host mapping rules are set-up.
   GURL origin_url_;
 
-  // If this is a Job for an "Alternate-Protocol", then this will be non-NULL
-  // and will specify the original URL.
-  scoped_ptr<GURL> original_url_;
+  // AlternateProtocol for this job if this is an alternate job.
+  AlternativeService alternative_service_;
+
+  // The URL to be used for proxy resolution and socket pools. If the alternate
+  // service is SPDY, the URL will containg the host:port from
+  // |alternate_service_| and "https://" scheme. Otherwise, this will be the
+  // same as |origin_url_|.
+  GURL alternative_service_url_;
+
+  // AlternateProtocol for the other job if this is not an alternate job.
+  AlternativeService other_job_alternative_service_;
 
   // This is the Job we're dependent on. It will notify us if/when it's OK to
   // proceed.

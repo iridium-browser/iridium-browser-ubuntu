@@ -7,11 +7,11 @@
 #include <algorithm>
 
 #include "base/bind.h"
-#include "base/debug/trace_event.h"
 #include "base/message_loop/message_loop.h"
 #include "base/message_loop/message_loop_proxy.h"
 #include "base/posix/eintr_wrapper.h"
 #include "base/threading/thread_restrictions.h"
+#include "base/trace_event/trace_event.h"
 #include "content/common/gpu/client/command_buffer_proxy_impl.h"
 #include "content/common/gpu/gpu_messages.h"
 #include "ipc/ipc_sync_message_filter.h"
@@ -29,6 +29,16 @@ namespace content {
 GpuListenerInfo::GpuListenerInfo() {}
 
 GpuListenerInfo::~GpuListenerInfo() {}
+
+ProxyFlushInfo::ProxyFlushInfo()
+    : flush_pending(false),
+      route_id(MSG_ROUTING_NONE),
+      put_offset(0),
+      flush_count(0) {
+}
+
+ProxyFlushInfo::~ProxyFlushInfo() {
+}
 
 // static
 scoped_refptr<GpuChannelHost> GpuChannelHost::Create(
@@ -102,14 +112,43 @@ bool GpuChannelHost::Send(IPC::Message* msg) {
     if (!result)
       DVLOG(1) << "GpuChannelHost::Send failed: Channel::Send failed";
     return result;
-  } else if (base::MessageLoop::current()) {
-    bool result = sync_filter_->Send(message.release());
-    if (!result)
-      DVLOG(1) << "GpuChannelHost::Send failed: SyncMessageFilter::Send failed";
-    return result;
   }
 
-  return false;
+  bool result = sync_filter_->Send(message.release());
+  return result;
+}
+
+void GpuChannelHost::OrderingBarrier(
+    int route_id,
+    int32 put_offset,
+    unsigned int flush_count,
+    const std::vector<ui::LatencyInfo>& latency_info,
+    bool put_offset_changed,
+    bool do_flush) {
+  AutoLock lock(context_lock_);
+  if (flush_info_.flush_pending && flush_info_.route_id != route_id)
+    InternalFlush();
+
+  if (put_offset_changed) {
+    flush_info_.flush_pending = true;
+    flush_info_.route_id = route_id;
+    flush_info_.put_offset = put_offset;
+    flush_info_.flush_count = flush_count;
+    flush_info_.latency_info.insert(flush_info_.latency_info.end(),
+                                    latency_info.begin(), latency_info.end());
+
+    if (do_flush)
+      InternalFlush();
+  }
+}
+
+void GpuChannelHost::InternalFlush() {
+  DCHECK(flush_info_.flush_pending);
+  Send(new GpuCommandBufferMsg_AsyncFlush(
+      flush_info_.route_id, flush_info_.put_offset, flush_info_.flush_count,
+      flush_info_.latency_info));
+  flush_info_.latency_info.clear();
+  flush_info_.flush_pending = false;
 }
 
 CommandBufferProxyImpl* GpuChannelHost::CreateViewCommandBuffer(
@@ -178,10 +217,8 @@ CommandBufferProxyImpl* GpuChannelHost::CreateOffscreenCommandBuffer(
   init_params.gpu_preference = gpu_preference;
   int32 route_id = GenerateRouteID();
   bool succeeded = false;
-  if (!Send(new GpuChannelMsg_CreateOffscreenCommandBuffer(size,
-                                                           init_params,
-                                                           route_id,
-                                                           &succeeded))) {
+  if (!Send(new GpuChannelMsg_CreateOffscreenCommandBuffer(
+          size, init_params, route_id, &succeeded))) {
     LOG(ERROR) << "Failed to send GpuChannelMsg_CreateOffscreenCommandBuffer.";
     return NULL;
   }
@@ -229,6 +266,9 @@ void GpuChannelHost::DestroyCommandBuffer(
 
   AutoLock lock(context_lock_);
   proxies_.erase(route_id);
+  if (flush_info_.flush_pending && flush_info_.route_id == route_id)
+    flush_info_.flush_pending = false;
+
   delete command_buffer;
 }
 

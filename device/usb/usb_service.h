@@ -35,6 +35,9 @@ class UsbService : public base::NonThreadSafe {
     // was created.
     virtual void OnDeviceAdded(scoped_refptr<UsbDevice> device);
     virtual void OnDeviceRemoved(scoped_refptr<UsbDevice> device);
+    // For observers that need to process device removal after others have run.
+    // Should not depend on any other service's knowledge of connected devices.
+    virtual void OnDeviceRemovedCleanup(scoped_refptr<UsbDevice> device);
   };
 
   // The UI task runner reference is used to talk to the PermissionBrokerClient
@@ -55,8 +58,6 @@ class UsbService : public base::NonThreadSafe {
   void RemoveObserver(Observer* observer);
 
  protected:
-  friend struct base::DefaultDeleter<UsbService>;
-
   UsbService();
   virtual ~UsbService();
 
@@ -64,6 +65,9 @@ class UsbService : public base::NonThreadSafe {
   void NotifyDeviceRemoved(scoped_refptr<UsbDevice> device);
 
   ObserverList<Observer, true> observer_list_;
+
+ private:
+  class Destroyer;
 
   DISALLOW_COPY_AND_ASSIGN(UsbService);
 };

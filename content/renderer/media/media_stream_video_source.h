@@ -16,8 +16,8 @@
 #include "content/common/media/video_capture.h"
 #include "content/public/renderer/media_stream_video_sink.h"
 #include "content/renderer/media/media_stream_source.h"
+#include "media/base/video_capture_types.h"
 #include "media/base/video_frame.h"
-#include "media/video/capture/video_capture_types.h"
 #include "third_party/WebKit/public/platform/WebMediaConstraints.h"
 #include "third_party/WebKit/public/platform/WebMediaStreamSource.h"
 #include "third_party/WebKit/public/platform/WebMediaStreamTrack.h"
@@ -76,12 +76,15 @@ class CONTENT_EXPORT MediaStreamVideoSource
   static const char kMaxFrameRate[];  // maxFrameRate
   static const char kMinFrameRate[];  // minFrameRate
 
-  // Default resolution. If no constraints are specified and the delegate
-  // support it, this is the resolution that will be used.
-  static const int kDefaultWidth;
-  static const int kDefaultHeight;
-  static const int kDefaultFrameRate;
-  static const int kUnknownFrameRate;
+  enum {
+    // Default resolution. If no constraints are specified and the delegate
+    // support it, this is the resolution that will be used.
+    kDefaultWidth = 640,
+    kDefaultHeight = 480,
+
+    kDefaultFrameRate = 30,
+    kUnknownFrameRate = 0,
+  };
 
  protected:
   void DoStopSource() override;
@@ -167,7 +170,7 @@ class CONTENT_EXPORT MediaStreamVideoSource
   media::VideoCaptureFormats supported_formats_;
 
   // |track_adapter_| delivers video frames to the tracks on the IO-thread.
-  scoped_refptr<VideoTrackAdapter> track_adapter_;
+  const scoped_refptr<VideoTrackAdapter> track_adapter_;
 
   // Tracks that currently are connected to this source.
   std::vector<MediaStreamVideoTrack*> tracks_;

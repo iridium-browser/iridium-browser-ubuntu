@@ -5,25 +5,25 @@
 #ifndef TableCellPainter_h
 #define TableCellPainter_h
 
-#include "core/rendering/style/CollapsedBorderValue.h"
+#include "core/style/CollapsedBorderValue.h"
 
 namespace blink {
 
 struct PaintInfo;
 class LayoutPoint;
 class LayoutRect;
-class RenderObject;
-class RenderStyle;
-class RenderTableCell;
+class LayoutTableCell;
+class LayoutObject;
+class ComputedStyle;
 
 class TableCellPainter {
 public:
-    TableCellPainter(RenderTableCell& renderTableCell) : m_renderTableCell(renderTableCell) { }
+    TableCellPainter(LayoutTableCell& layoutTableCell) : m_layoutTableCell(layoutTableCell) { }
 
     void paint(const PaintInfo&, const LayoutPoint&);
 
     void paintCollapsedBorders(const PaintInfo&, const LayoutPoint&);
-    void paintBackgroundsBehindCell(const PaintInfo&, const LayoutPoint&, RenderObject* backgroundObject);
+    void paintBackgroundsBehindCell(const PaintInfo&, const LayoutPoint&, LayoutObject* backgroundObject);
     void paintBoxDecorationBackground(const PaintInfo&, const LayoutPoint& paintOffset);
     void paintMask(const PaintInfo&, const LayoutPoint& paintOffset);
 
@@ -33,12 +33,12 @@ public:
     LayoutRect paintBounds(const LayoutPoint& paintOffset, PaintBoundOffsetBehavior);
 
 private:
-    CollapsedBorderValue cachedCollapsedLeftBorder(const RenderStyle*) const;
-    CollapsedBorderValue cachedCollapsedRightBorder(const RenderStyle*) const;
-    CollapsedBorderValue cachedCollapsedTopBorder(const RenderStyle*) const;
-    CollapsedBorderValue cachedCollapsedBottomBorder(const RenderStyle*) const;
+    CollapsedBorderValue cachedCollapsedLeftBorder(const ComputedStyle&) const;
+    CollapsedBorderValue cachedCollapsedRightBorder(const ComputedStyle&) const;
+    CollapsedBorderValue cachedCollapsedTopBorder(const ComputedStyle&) const;
+    CollapsedBorderValue cachedCollapsedBottomBorder(const ComputedStyle&) const;
 
-    RenderTableCell& m_renderTableCell;
+    LayoutTableCell& m_layoutTableCell;
 };
 
 } // namespace blink

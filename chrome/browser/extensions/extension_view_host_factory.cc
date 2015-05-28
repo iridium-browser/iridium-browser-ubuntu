@@ -14,10 +14,6 @@
 #include "extensions/common/manifest_handlers/incognito_info.h"
 #include "extensions/common/view_type.h"
 
-#if defined(OS_MACOSX)
-#include "chrome/browser/extensions/extension_view_host_mac.h"
-#endif
-
 namespace extensions {
 
 namespace {
@@ -33,14 +29,10 @@ ExtensionViewHost* CreateViewHostForExtension(const Extension* extension,
   DCHECK(profile);
   // A NULL browser may only be given for dialogs.
   DCHECK(browser || view_type == VIEW_TYPE_EXTENSION_DIALOG);
-  content::SiteInstance* site_instance =
+  scoped_refptr<content::SiteInstance> site_instance =
       ProcessManager::Get(profile)->GetSiteInstanceForURL(url);
   ExtensionViewHost* host =
-#if defined(OS_MACOSX)
-      new ExtensionViewHostMac(extension, site_instance, url, view_type);
-#else
-      new ExtensionViewHost(extension, site_instance, url, view_type);
-#endif
+      new ExtensionViewHost(extension, site_instance.get(), url, view_type);
   host->CreateView(browser);
   return host;
 }
@@ -111,15 +103,6 @@ ExtensionViewHost* ExtensionViewHostFactory::CreatePopupHost(const GURL& url,
   DCHECK(browser);
   return CreateViewHost(
       url, browser->profile(), browser, VIEW_TYPE_EXTENSION_POPUP);
-}
-
-// static
-ExtensionViewHost* ExtensionViewHostFactory::CreateInfobarHost(
-    const GURL& url,
-    Browser* browser) {
-  DCHECK(browser);
-  return CreateViewHost(
-      url, browser->profile(), browser, VIEW_TYPE_EXTENSION_INFOBAR);
 }
 
 // static

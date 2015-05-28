@@ -4,13 +4,15 @@
 
 {
   'variables': {
+    'daemon_controller_guid': '655bd819-c08c-4b04-80c2-f160739ff6ef',
+    'rdp_desktop_session_guid': '6a7699f0-ee43-43e7-aa30-a6738f9bd470',
     'remoting_base_sources': [
-      'base/auth_token_util.cc',
-      'base/auth_token_util.h',
       'base/auto_thread.cc',
       'base/auto_thread.h',
       'base/auto_thread_task_runner.cc',
       'base/auto_thread_task_runner.h',
+      'base/buffered_socket_writer.cc',
+      'base/buffered_socket_writer.h',
       'base/capabilities.cc',
       'base/capabilities.h',
       'base/compound_buffer.cc',
@@ -41,6 +43,8 @@
       'base/util.h',
       'base/vlog_net_log.cc',
       'base/vlog_net_log.h',
+    ],
+    'remoting_codec_sources': [
       'codec/audio_decoder.cc',
       'codec/audio_decoder.h',
       'codec/audio_decoder_opus.cc',
@@ -80,8 +84,6 @@
       'protocol/authentication_method.h',
       'protocol/authenticator.cc',
       'protocol/authenticator.h',
-      'protocol/buffered_socket_writer.cc',
-      'protocol/buffered_socket_writer.h',
       'protocol/channel_authenticator.h',
       'protocol/channel_dispatcher_base.cc',
       'protocol/channel_dispatcher_base.h',
@@ -107,8 +109,9 @@
       'protocol/clipboard_thread_proxy.h',
       'protocol/connection_to_client.cc',
       'protocol/connection_to_client.h',
-      'protocol/connection_to_host.cc',
       'protocol/connection_to_host.h',
+      'protocol/connection_to_host_impl.cc',
+      'protocol/connection_to_host_impl.h',
       'protocol/content_description.cc',
       'protocol/content_description.h',
       'protocol/datagram_channel_factory.h',
@@ -154,7 +157,6 @@
       'protocol/negotiating_client_authenticator.h',
       'protocol/negotiating_host_authenticator.cc',
       'protocol/negotiating_host_authenticator.h',
-      'protocol/network_settings.cc',
       'protocol/network_settings.h',
       'protocol/pairing_authenticator_base.cc',
       'protocol/pairing_authenticator_base.h',
@@ -164,6 +166,8 @@
       'protocol/pairing_host_authenticator.h',
       'protocol/pairing_registry.cc',
       'protocol/pairing_registry.h',
+      'protocol/port_range.cc',
+      'protocol/port_range.h',
       'protocol/pseudotcp_channel_factory.cc',
       'protocol/pseudotcp_channel_factory.h',
       'protocol/secure_channel_factory.cc',
@@ -191,6 +195,8 @@
       'protocol/video_stub.h',
       'signaling/iq_sender.cc',
       'signaling/iq_sender.h',
+      'signaling/jid_util.cc',
+      'signaling/jid_util.h',
       'signaling/jingle_info_request.cc',
       'signaling/jingle_info_request.h',
       'signaling/log_to_server.cc',
@@ -200,6 +206,10 @@
       'signaling/signal_strategy.h',
       'signaling/xmpp_signal_strategy.cc',
       'signaling/xmpp_signal_strategy.h',
+      'signaling/xmpp_stream_parser.cc',
+      'signaling/xmpp_stream_parser.h',
+      'signaling/xmpp_login_handler.cc',
+      'signaling/xmpp_login_handler.h',
     ],
 
     'remoting_client_sources': [
@@ -267,6 +277,8 @@
       'client/plugin/pepper_video_renderer_2d.h',
       'client/plugin/pepper_video_renderer_3d.cc',
       'client/plugin/pepper_video_renderer_3d.h',
+      'client/plugin/touch_input_scaler.cc',
+      'client/plugin/touch_input_scaler.h',
     ],
   }
 }

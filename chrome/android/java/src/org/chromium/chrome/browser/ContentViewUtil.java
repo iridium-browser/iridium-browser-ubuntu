@@ -17,34 +17,19 @@ public abstract class ContentViewUtil {
     }
 
     /**
-     * @return pointer to native WebContents instance, suitable for using with a
-     *         (java) ContentViewCore instance.
+     * A factory method to build a {@link WebContents} object.
+     * @param incognito       Whether or not the {@link WebContents} should be built with an
+     *                        incognito profile or not.
+     * @param initiallyHidden Whether or not the {@link WebContents} should be initially hidden.
+     * @return                A newly created {@link WebContents} object.
      */
-    public static long createNativeWebContents(boolean incognito) {
-        return nativeCreateNativeWebContents(incognito, false);
-    }
-
-    /**
-     * @return pointer to native WebContents instance, suitable for using with a
-     *         (java) ContentViewCore instance.
-     */
-    public static long createNativeWebContents(boolean incognito, boolean initiallyHidden) {
-        return nativeCreateNativeWebContents(incognito, initiallyHidden);
-    }
-
-    /**
-     * @return pointer to native WebContents instance, suitable for using with a
-     *         (java) ContentViewCore instance.
-     */
-    public static long createNativeWebContentsWithSharedSiteInstance(
-            ContentViewCore contentViewCore) {
-        return nativeCreateNativeWebContentsWithSharedSiteInstance(contentViewCore);
+    public static WebContents createWebContents(boolean incognito, boolean initiallyHidden) {
+        return nativeCreateWebContents(incognito, initiallyHidden);
     }
 
     /**
      * TODO(dtrainor): Remove when this is no longer used.
-     * Helper method for getting a {@link WebContents} from a
-     * native WebContents pointer.
+     * Helper method for getting a {@link WebContents} from a native WebContents pointer.
      * @param webContentsPtr A native WebContents pointer.
      * @return               A {@link WebContents} object that is linked to {@code webContentsPtr}.
      */
@@ -53,16 +38,28 @@ public abstract class ContentViewUtil {
     }
 
     /**
-     * @param webContentsPtr The WebContents reference to be deleted.
+     * TODO(dtrainor): Remove when this is no longer used.
+     * Helper method for getting a native WebContents pointer from a {@link WebContents} object.
+     * @param webContents A {@link WebContents} object.
+     * @return            A native WebContents poniter that is linked to {@code webContents}.
      */
-    public static void destroyNativeWebContents(long webContentsPtr) {
-        nativeDestroyNativeWebContents(webContentsPtr);
+    public static long getNativeWebContentsFromWebContents(WebContents webContents) {
+        return nativeGetNativeWebContentsPtr(webContents);
     }
 
-    private static native long nativeCreateNativeWebContents(boolean incognito,
+    /**
+     * @return pointer to native WebContents instance, suitable for using with a
+     *         (java) ContentViewCore instance.
+     */
+    public static WebContents createWebContentsWithSharedSiteInstance(
+            ContentViewCore contentViewCore) {
+        return nativeCreateWebContentsWithSharedSiteInstance(contentViewCore);
+    }
+
+    private static native WebContents nativeCreateWebContents(boolean incognito,
             boolean initiallyHidden);
-    private static native long nativeCreateNativeWebContentsWithSharedSiteInstance(
+    private static native WebContents nativeCreateWebContentsWithSharedSiteInstance(
             ContentViewCore contentViewCore);
-    private static native void nativeDestroyNativeWebContents(long webContentsPtr);
     private static native WebContents nativeGetWebContentsFromNative(long webContentsPtr);
+    private static native long nativeGetNativeWebContentsPtr(WebContents webContents);
 }

@@ -9,6 +9,7 @@
 
 #include "base/message_loop/message_loop.h"
 #include "ui/events/event.h"
+#include "ui/events/ozone/evdev/device_event_dispatcher_evdev.h"
 
 namespace ui {
 
@@ -17,14 +18,18 @@ TabletEventConverterEvdev::TabletEventConverterEvdev(
     base::FilePath path,
     int id,
     InputDeviceType type,
-    EventModifiersEvdev* modifiers,
     CursorDelegateEvdev* cursor,
     const EventDeviceInfo& info,
-    const EventDispatchCallback& callback)
-    : EventConverterEvdev(fd, path, id, type),
+    DeviceEventDispatcherEvdev* dispatcher)
+    : EventConverterEvdev(fd,
+                          path,
+                          id,
+                          type,
+                          info.name(),
+                          info.vendor_id(),
+                          info.product_id()),
       cursor_(cursor),
-      modifiers_(modifiers),
-      callback_(callback),
+      dispatcher_(dispatcher),
       stylus_(0),
       abs_value_dirty_(false) {
   x_abs_min_ = info.GetAbsMinimum(ABS_X);
@@ -50,6 +55,9 @@ void TabletEventConverterEvdev::OnFileCanReadWithoutBlocking(int fd) {
     return;
   }
 
+  if (ignore_events_)
+    return;
+
   DCHECK_EQ(read_size % sizeof(*inputs), 0u);
   ProcessEvents(inputs, read_size / sizeof(*inputs));
 }
@@ -66,7 +74,7 @@ void TabletEventConverterEvdev::ProcessEvents(const input_event* inputs,
         ConvertAbsEvent(input);
         break;
       case EV_SYN:
-        FlushEvents();
+        FlushEvents(input);
         break;
     }
   }
@@ -124,14 +132,14 @@ void TabletEventConverterEvdev::DispatchMouseButton(const input_event& input) {
   if (!cursor_)
     return;
 
-  unsigned int modifier;
+  unsigned int button;
   // These are the same as X11 behaviour
   if (input.code == BTN_TOUCH)
-    modifier = EVDEV_MODIFIER_LEFT_MOUSE_BUTTON;
+    button = BTN_LEFT;
   else if (input.code == BTN_STYLUS2)
-    modifier = EVDEV_MODIFIER_RIGHT_MOUSE_BUTTON;
+    button = BTN_RIGHT;
   else if (input.code == BTN_STYLUS)
-    modifier = EVDEV_MODIFIER_MIDDLE_MOUSE_BUTTON;
+    button = BTN_MIDDLE;
   else
     return;
 
@@ -140,15 +148,14 @@ void TabletEventConverterEvdev::DispatchMouseButton(const input_event& input) {
     abs_value_dirty_ = false;
   }
 
-  int flag = modifiers_->GetEventFlagFromModifier(modifier);
-  modifiers_->UpdateModifier(modifier, input.value);
-  callback_.Run(make_scoped_ptr(
-      new MouseEvent(input.value ? ET_MOUSE_PRESSED : ET_MOUSE_RELEASED,
-                     cursor_->GetLocation(), cursor_->GetLocation(),
-                     modifiers_->GetModifierFlags() | flag, flag)));
+  bool down = input.value;
+
+  dispatcher_->DispatchMouseButtonEvent(MouseButtonEventParams(
+      input_device_.id, cursor_->GetLocation(), button, down,
+      false /* allow_remap */, TimeDeltaFromInputEvent(input)));
 }
 
-void TabletEventConverterEvdev::FlushEvents() {
+void TabletEventConverterEvdev::FlushEvents(const input_event& input) {
   if (!cursor_)
     return;
 
@@ -163,10 +170,9 @@ void TabletEventConverterEvdev::FlushEvents() {
 
   UpdateCursor();
 
-  callback_.Run(make_scoped_ptr(
-      new MouseEvent(ui::ET_MOUSE_MOVED, cursor_->GetLocation(),
-                     cursor_->GetLocation(), modifiers_->GetModifierFlags(),
-                     /* changed_button_flags */ 0)));
+  dispatcher_->DispatchMouseMoveEvent(
+      MouseMoveEventParams(input_device_.id, cursor_->GetLocation(),
+                           TimeDeltaFromInputEvent(input)));
 
   abs_value_dirty_ = false;
 }
